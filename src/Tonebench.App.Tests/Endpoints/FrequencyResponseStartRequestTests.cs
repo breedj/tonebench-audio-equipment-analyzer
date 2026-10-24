@@ -31,10 +31,15 @@ public class FrequencyResponseStartRequestTests
             LoadOhms: 4.0,
             BandwidthReference: "Peak",
             BandwidthReferenceLowHz: 300.0,
-            BandwidthReferenceHighHz: 3_000.0);
+            BandwidthReferenceHighHz: 3_000.0,
+            Stimulus: "WhiteNoise",
+            NoiseCutoffHz: 37.0);
 
         var measurement = wire.ToMeasurement(
-            ThdSweepLevelMode.GeneratorVoltage, ThdSweepLevelUnit.Dbv, BandwidthReferenceMode.Peak);
+            ThdSweepLevelMode.GeneratorVoltage,
+            ThdSweepLevelUnit.Dbv,
+            BandwidthReferenceMode.Peak,
+            ResponseStimulus.WhiteNoise);
 
         Assert.Equal(48_000.0, measurement.FrequencySpanHz);
         Assert.Equal(4, measurement.ResolutionMultiplier);
@@ -50,6 +55,8 @@ public class FrequencyResponseStartRequestTests
         Assert.Equal(BandwidthReferenceMode.Peak, measurement.BandwidthReference);
         Assert.Equal(300.0, measurement.BandwidthReferenceLowHz);
         Assert.Equal(3_000.0, measurement.BandwidthReferenceHighHz);
+        Assert.Equal(ResponseStimulus.WhiteNoise, measurement.Stimulus);
+        Assert.Equal(37.0, measurement.NoiseCutoffHz);
     }
 
     /// <summary>
@@ -60,8 +67,8 @@ public class FrequencyResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(14, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
-        Assert.Equal(14, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
+        Assert.Equal(16, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
+        Assert.Equal(16, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
     }
 
     private static int ConstructorParameterCount(Type type) =>

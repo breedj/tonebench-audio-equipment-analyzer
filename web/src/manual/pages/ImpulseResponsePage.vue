@@ -80,6 +80,11 @@ const { showPage } = useManual()
 
     <h2>Harmonic distortion</h2>
     <p>
+      <strong>Only a sweep can measure this</strong>, and the Harmonics section is not offered for
+      any of the PN signals: noise excites every bin at once, so its distortion comes back spread
+      evenly over the record as a raised floor rather than as packets at known places.
+    </p>
+    <p>
       The distortion packets the gate discards are a measurement in their own right, and reading them
       costs nothing extra — the sweep is already made. Each curve shows one harmonic order against
       the <strong>fundamental</strong> that produced it, in dB relative to the response at that same
@@ -192,6 +197,15 @@ const { showPage } = useManual()
       <strong>Rise time</strong> sets how long each taper lasts. A plain Hann window is an ordinary
       short-time transform, centred on its own slice time — it reads a resonance building up as well
       as dying away, at the cost of smearing the impulse across half a window.
+    </p>
+    <p>
+      <strong>Signal</strong> picks what is played: the sweep, or one of five periodic-noise
+      sequences — ARTA's own list, and the same one the frequency-response screen offers. See that
+      page's settings table for what each of them is for. The one thing to know here is that a noise
+      measurement has no harmonic curves and no sweep gate: there are no distortion packets to read
+      or to delete, so the whole record is kept, which costs none of the resolution gating a sweep
+      costs. <strong>Chirp start</strong> is replaced by <strong>Noise cut-off</strong> for the pink
+      and speech signals, and neither is shown for White PN.
     </p>
     <p>
       <strong>Comparing with ARTA.</strong> The window is ARTA's, to the letter, so the same

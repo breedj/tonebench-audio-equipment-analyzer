@@ -958,7 +958,7 @@ public sealed class ImpulseResponseRunner(
             impulses.Add(BuildImpulseTrace(request, FrequencyResponseTraceKind.Gain, gainImpulse));
 
         var harmonics = new List<HarmonicCurve>();
-        if (request.ExtractHarmonics)
+        if (request.ExtractsHarmonics)
         {
             var extractor = new HarmonicPacketExtractor(
                 request.FftSize, request.SampleRateHz, request.ChirpStartHz, request.ChirpEndHz, _packetFft);

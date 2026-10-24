@@ -159,9 +159,9 @@ public sealed record ImpedanceStartRequest(
     double SteppedSampleRateHz = SteppedResponseRequest.DefaultSampleRateHz,
     /// <summary>
     /// Where the periodic pink stimulus stops being pink: flat below, −3 dB per octave above. Read
-    /// only by a noise run — see <c>Tonebench.Device.PeriodicPinkNoise</c>.
+    /// only by a noise run — see <c>Tonebench.Device.PeriodicNoise</c>.
     /// </summary>
-    double NoiseCutoffHz = PeriodicPinkNoise.DefaultCutoffHz)
+    double NoiseCutoffHz = PeriodicNoise.DefaultCutoffHz)
 {
     /// <summary>
     /// The measurement this request asks for.

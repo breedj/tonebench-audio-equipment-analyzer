@@ -9,6 +9,7 @@ import {
   type ImpulseReferenceModeName,
   type ImpulseResponseParameters,
   type ImpulseResponseStartRequest,
+  type ResponseStimulusName,
   type SweepLevelMode,
   type SweepLevelUnit,
   type WindowType,
@@ -26,6 +27,14 @@ import {
   setLevelValue,
 } from '../measurements/levelMode'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
+import {
+  RESPONSE_STIMULI,
+  extractsHarmonics,
+  readStimulus,
+  stimulusNotice,
+  usesChirpStart,
+  usesNoiseCutoff,
+} from '../measurements/responseStimulus'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -74,7 +83,13 @@ const form = reactive({
   extractHarmonics: true,
   maxHarmonicOrder: 5,
   chirpStartHz: 2,
+  /** What to play. The sweep by default, and the only one whose harmonics can be read. */
+  stimulus: 'Chirp' as ResponseStimulusName,
+  noiseCutoffHz: 5,
 })
+
+/** The one line under the stimulus dropdown, naming what the choice costs. See responseStimulus.ts. */
+const stimulusHint = computed(() => stimulusNotice(form.stimulus))
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
@@ -108,6 +123,9 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.extractHarmonics === 'boolean') form.extractHarmonics = stored.extractHarmonics
   if (typeof stored.maxHarmonicOrder === 'number') form.maxHarmonicOrder = stored.maxHarmonicOrder
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz
+  // Absent on a type saved before the stimulus was a choice, where the sweep is what it played.
+  form.stimulus = readStimulus(stored.stimulus)
+  if (typeof stored.noiseCutoffHz === 'number') form.noiseCutoffHz = stored.noiseCutoffHz
   if (typeof stored.loadOhms === 'number' && stored.loadOhms > 0) loadOhms.value = stored.loadOhms
 
   void nextTick(() => {
@@ -275,6 +293,8 @@ function buildParamsJson(): string {
     extractHarmonics: form.extractHarmonics,
     maxHarmonicOrder: form.maxHarmonicOrder,
     chirpStartHz: form.chirpStartHz,
+    stimulus: form.stimulus,
+    noiseCutoffHz: form.noiseCutoffHz,
     loadOhms: loadOhms.value,
     generatorAmpDbv: null,
   }
@@ -297,9 +317,13 @@ function buildRequest(continuous: boolean): ImpulseResponseStartRequest | null {
     gatePreMs: form.gatePreMs,
     gatePostMs: form.gatePostMs,
     gateWindow: form.gateWindow,
-    extractHarmonics: form.extractHarmonics,
+    // Only the sweep can be asked for harmonic curves -- see responseStimulus.ts. Sent as false
+    // rather than refused, so switching the stimulus cannot produce a request the server rejects.
+    extractHarmonics: form.extractHarmonics && extractsHarmonics(form.stimulus),
     maxHarmonicOrder: form.maxHarmonicOrder,
     chirpStartHz: form.chirpStartHz,
+    stimulus: form.stimulus,
+    noiseCutoffHz: form.noiseCutoffHz,
     loadOhms: loadOhms.value,
     continuous,
   }
@@ -410,7 +434,24 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       </select>
     </label>
 
-    <label class="tb-field" title="Where the sweep starts. The reported band starts 25% above this value.">
+    <label
+      class="tb-field"
+      title="What to play. The sweep is the only one that separates the DUT's distortion out, which is what the harmonic curves below are read from; the PN sequences are periodic noise over exactly one record, and are ARTA's own."
+    >
+      Signal
+      <select v-model="form.stimulus" :disabled="running" class="tb-input">
+        <option v-for="option in RESPONSE_STIMULI" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+      <span v-if="stimulusHint" class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ stimulusHint }}</span>
+    </label>
+
+    <label
+      v-if="usesChirpStart(form.stimulus)"
+      class="tb-field"
+      title="Where the sweep starts. The reported band starts 25% above this value."
+    >
       Chirp start (Hz)
       <input
         v-model.number="form.chirpStartHz"
@@ -418,6 +459,23 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         min="0.5"
         max="1000"
         step="0.5"
+        :disabled="running"
+        class="tb-input"
+      />
+    </label>
+
+    <label
+      v-else-if="usesNoiseCutoff(form.stimulus)"
+      class="tb-field"
+      title="Where the sequence stops rising towards DC: flat below, its own slope above. Pure 1/f keeps climbing all the way down, which is spent DAC headroom and DC into whatever is being driven."
+    >
+      Noise cut-off (Hz)
+      <input
+        v-model.number="form.noiseCutoffHz"
+        type="number"
+        min="1"
+        max="1000"
+        step="1"
         :disabled="running"
         class="tb-input"
       />
@@ -580,7 +638,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
     </p>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Harmonics">
+  <CollapsibleSection v-if="extractsHarmonics(form.stimulus)" title="Harmonics">
     <label
       class="tb-check-row"
       title="Deconvolving a sweep recovers the DUT's harmonic distortion as separate packets ahead of the impulse. Reading them costs nothing extra — the measurement is already made."

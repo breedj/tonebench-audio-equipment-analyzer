@@ -921,6 +921,20 @@ export interface ImpedanceStarted {
   estimatedSeconds: number | null
 }
 
+/**
+ * What a response measurement plays — ARTA's own list. `Chirp` is the default and the only one that
+ * separates the DUT's distortion into harmonic packets; the rest are periodic noise sequences over
+ * exactly one analysis record, which the same deconvolution reads because the reference carries
+ * whatever shape the stimulus has.
+ */
+export type ResponseStimulusName =
+  | 'Chirp'
+  | 'PinkNoise'
+  | 'WhiteNoise'
+  | 'SpeechMale2011'
+  | 'SpeechFemale2011'
+  | 'SpeechMale2020'
+
 export interface FrequencyResponseStartRequest {
   frequencySpanHz: number
   resolutionMultiplier: number
@@ -951,6 +965,9 @@ export interface FrequencyResponseStartRequest {
   bandwidthReferenceHighHz: number
   /** RUN sets this and keeps measuring until stopped; SINGLE leaves it false. */
   continuous: boolean
+  stimulus: ResponseStimulusName
+  /** Where a pink or speech sequence stops rising towards DC. Read by neither the chirp nor the white sequence. */
+  noiseCutoffHz: number
 }
 
 /**
@@ -974,6 +991,9 @@ export interface FrequencyResponseParameters {
   averageCount: number
   /** Absent on a type saved before the chirp start was configurable. */
   chirpStartHz?: number
+  /** Absent on a type saved before the stimulus was a choice, where the sweep is all there was. */
+  stimulus?: ResponseStimulusName | null
+  noiseCutoffHz?: number | null
   /** The load an OutputPower level was defined against. Absent on a type saved before that mode existed. */
   loadOhms?: number | null
   generatorAmpDbv?: number | null
@@ -1561,6 +1581,8 @@ export interface ImpulseResponseStartRequest {
   continuous: boolean
   chirpStartHz: number
   loadOhms: number
+  stimulus: ResponseStimulusName
+  noiseCutoffHz: number
 }
 
 export interface ImpulseResponseStarted {
@@ -1674,6 +1696,9 @@ export interface ImpulseResponseParameters {
   generatorAmpDbv?: number | null
   chirpStartHz: number
   loadOhms: number
+  /** Absent on a type saved before the stimulus was a choice, where the sweep is all there was. */
+  stimulus?: ResponseStimulusName | null
+  noiseCutoffHz?: number | null
   chartView?: ImpulseView | null
   /** The impulse view drawn as dB below its own peak rather than volts. */
   chartNormalisedImpulse?: boolean | null

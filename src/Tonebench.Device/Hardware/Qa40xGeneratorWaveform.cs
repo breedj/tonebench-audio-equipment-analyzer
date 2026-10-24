@@ -125,7 +125,7 @@ internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
         // below is recursive and therefore cannot do either on its own -- it relies on being called
         // once per frame in order.
         if (settings.PeriodFrames > 1)
-            return sigma * PeriodicPinkNoise.For(settings.PeriodFrames, sampleRateHz, settings.CutoffHz).Sample(frameIndex);
+            return sigma * PeriodicNoise.For(settings.PeriodFrames, sampleRateHz, settings.CutoffHz, settings.Shape).Sample(frameIndex);
 
         var shaper = _pink[Math.Clamp(channelIndex, 0, _pink.Length - 1)];
         return sigma * shaper.NextStimulus(PinkNoiseShaper.WhiteAt(frameIndex));

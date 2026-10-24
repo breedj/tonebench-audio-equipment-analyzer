@@ -178,7 +178,7 @@ public sealed record ImpedanceRequest(
     double CalibrationLevelValue = 0.0,
     /// <summary>
     /// Where the periodic pink stimulus stops being pink: flat below, &#8722;3 dB per octave above.
-    /// Read only by a noise run — see <see cref="PeriodicPinkNoise"/>, whose default this is.
+    /// Read only by a noise run — see <see cref="PeriodicNoise"/>, whose default this is.
     /// </summary>
     double NoiseCutoffHz = 5.0)
 {
@@ -479,12 +479,12 @@ public sealed record ImpedanceRequest(
 
         // Only where a run would read it, the same rule the two settings groups follow: an untouched
         // default must not block a measurement that never looks at it.
-        if (IsNoise && !(NoiseCutoffHz >= PeriodicPinkNoise.MinCutoffHz && NoiseCutoffHz <= PeriodicPinkNoise.MaxCutoffHz))
+        if (IsNoise && !(NoiseCutoffHz >= PeriodicNoise.MinCutoffHz && NoiseCutoffHz <= PeriodicNoise.MaxCutoffHz))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(NoiseCutoffHz), NoiseCutoffHz,
-                $"The pink noise cut-off must be between {PeriodicPinkNoise.MinCutoffHz:0.#} and "
-                    + $"{PeriodicPinkNoise.MaxCutoffHz:0.#} Hz.");
+                $"The pink noise cut-off must be between {PeriodicNoise.MinCutoffHz:0.#} and "
+                    + $"{PeriodicNoise.MaxCutoffHz:0.#} Hz.");
         }
 
         if (AverageCount is < FrequencyResponseRequest.MinAverageCount or > MaxAverageCount)

@@ -6,6 +6,7 @@ import {
   RESPONSE_SPANS_HZ,
   type FrequencyResponseParameters,
   type FrequencyResponseStartRequest,
+  type ResponseStimulusName,
   type SweepLevelMode,
   type SweepLevelUnit,
 } from '../api/client'
@@ -24,6 +25,13 @@ import {
 import { useBandwidthReference } from '../composables/useBandwidthReference'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
+import {
+  RESPONSE_STIMULI,
+  readStimulus,
+  stimulusNotice,
+  usesChirpStart,
+  usesNoiseCutoff,
+} from '../measurements/responseStimulus'
 import { stimulusFloorNotice } from '../stimulusFloor'
 import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -87,12 +95,20 @@ const form = reactive({
   smoothingDenominator: 24,
   averageCount: 1,
   chirpStartHz: 2,
+  /** What to play. The sweep by default, which is the only one that separates the DUT's distortion. */
+  stimulus: 'Chirp' as ResponseStimulusName,
+  noiseCutoffHz: 5,
 })
 
 // Edited in the Measurements panel next to the corners they define, saved and sent from here —
 // see useBandwidthReference. Watched with the form below, since they are part of the stored type.
 /** Warns before the run that the sweep will start higher than asked. See stimulusFloor.ts. */
-const floorNotice = computed(() => stimulusFloorNotice(form.chirpStartHz, props.minStimulusFrequencyHz))
+const floorNotice = computed(() =>
+  usesChirpStart(form.stimulus) ? stimulusFloorNotice(form.chirpStartHz, props.minStimulusFrequencyHz) : null,
+)
+
+/** The one line under the dropdown, naming what the choice costs. See responseStimulus.ts. */
+const stimulusHint = computed(() => stimulusNotice(form.stimulus))
 
 /** Only the spans this analyzer can actually run — a span implies a sample rate. See supportedSpans.ts. */
 const availableSpans = computed(() => supportedSpans(RESPONSE_SPANS_HZ, props.sampleRatesHz))
@@ -136,6 +152,9 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   // Absent on a type saved before the chirp start was configurable, which then keeps the default.
   if (typeof stored.chirpStartHz === 'number') form.chirpStartHz = stored.chirpStartHz
+  // Absent on a type saved before the stimulus was a choice, where the sweep is what it played.
+  form.stimulus = readStimulus(stored.stimulus)
+  if (typeof stored.noiseCutoffHz === 'number') form.noiseCutoffHz = stored.noiseCutoffHz
   // Absent on a type saved before the reference was configurable. Those runs were peak-referenced,
   // but the default here is the passband median on purpose: the stored value describes how the type
   // was last configured, not a promise to keep reproducing a reference that was wrong for it.
@@ -251,10 +270,16 @@ const invalid = computed<string | null>(() => {
   if (levelProblem) return levelProblem
   const averages = averageCountError(form.averageCount)
   if (averages) return averages
-  if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
-    return 'Chirp start must be between 0.5 and 1000 Hz.'
-  if (form.chirpStartHz >= (form.frequencySpanHz * 0.98) / 10)
-    return 'Chirp start must be at least a decade below the span.'
+  // Both only where the sweep is what is played: a start frequency left over from a sweep must not
+  // refuse a noise run that never reads it.
+  if (usesChirpStart(form.stimulus)) {
+    if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
+      return 'Chirp start must be between 0.5 and 1000 Hz.'
+    if (form.chirpStartHz >= (form.frequencySpanHz * 0.98) / 10)
+      return 'Chirp start must be at least a decade below the span.'
+  }
+  if (usesNoiseCutoff(form.stimulus) && (!Number.isFinite(form.noiseCutoffHz) || form.noiseCutoffHz < 1 || form.noiseCutoffHz > 1000))
+    return 'The noise cut-off must be between 1 and 1000 Hz.'
   // Checked only when a run would read it — an untouched default must never block a measurement
   // that never looks at it, the rule the impedance panel's two stimulus groups already follow.
   if (usesReferenceBand.value) {
@@ -292,6 +317,8 @@ function buildParamsJson(): string {
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
     chirpStartHz: form.chirpStartHz,
+    stimulus: form.stimulus,
+    noiseCutoffHz: form.noiseCutoffHz,
     loadOhms: loadOhms.value,
     bandwidthReference: bandwidthReference.value,
     bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
@@ -321,6 +348,8 @@ function buildRequest(continuous: boolean): FrequencyResponseStartRequest | null
     smoothingDenominator: form.smoothingDenominator,
     averageCount: form.averageCount,
     chirpStartHz: form.chirpStartHz,
+    stimulus: form.stimulus,
+    noiseCutoffHz: form.noiseCutoffHz,
     bandwidthReference: bandwidthReference.value,
     bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
     bandwidthReferenceHighHz: bandwidthReferenceHighHz.value,
@@ -392,7 +421,20 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       {{ floorNotice }}
     </p>
 
-    <div class="tb-rule"><span class="tb-group">Chirp</span></div>
+    <div class="tb-rule"><span class="tb-group">Stimulus</span></div>
+
+    <label
+      class="tb-field"
+      title="What to play. The sweep is the only one that separates the DUT's distortion out of the measurement; the PN sequences are periodic noise over exactly one record, and are ARTA's own — a measurement here with the same name is comparable with one there."
+    >
+      Signal
+      <select v-model="form.stimulus" :disabled="running" class="tb-input">
+        <option v-for="option in RESPONSE_STIMULI" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+      <span v-if="stimulusHint" class="text-[10px] text-neutral-500 dark:text-neutral-400">{{ stimulusHint }}</span>
+    </label>
 
     <div class="grid grid-cols-2 gap-2.5">
       <label
@@ -405,6 +447,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         </select>
       </label>
       <label
+        v-if="usesChirpStart(form.stimulus)"
         class="tb-field"
         title="Where the sweep starts. Below about 10 Hz a transformer-coupled DUT sees several times the core flux it does in the band you read, because flux goes as V/f — so the bottom of the sweep can disturb the measurement above it. Raising this is how you find out. The reported band starts 25% above this value."
       >
@@ -415,6 +458,22 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
           min="0.5"
           max="1000"
           step="0.5"
+          :disabled="running"
+          class="tb-input"
+        />
+      </label>
+      <label
+        v-else-if="usesNoiseCutoff(form.stimulus)"
+        class="tb-field"
+        title="Where the sequence stops rising towards DC: flat below, its own slope above. Pure 1/f keeps climbing all the way down, which is spent DAC headroom and DC into whatever is being driven — set it near the bottom of the band you care about."
+      >
+        Cut-off (Hz)
+        <input
+          v-model.number="form.noiseCutoffHz"
+          type="number"
+          min="1"
+          max="1000"
+          step="1"
           :disabled="running"
           class="tb-input"
         />

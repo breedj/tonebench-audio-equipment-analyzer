@@ -38,13 +38,16 @@ public class ImpulseResponseStartRequestTests
             MaxHarmonicOrder: 3,
             Continuous: true,
             ChirpStartHz: 8.0,
-            LoadOhms: 4.0);
+            LoadOhms: 4.0,
+            Stimulus: "SpeechFemale2011",
+            NoiseCutoffHz: 37.0);
 
         var measurement = wire.ToMeasurement(
             ThdSweepLevelMode.GeneratorVoltage,
             ThdSweepLevelUnit.Dbv,
             ImpulseReferenceMode.StoredLoopback,
-            WindowType.BlackmanHarris);
+            WindowType.BlackmanHarris,
+            ResponseStimulus.SpeechFemale2011);
 
         Assert.Equal(48_000.0, measurement.FrequencySpanHz);
         Assert.Equal(4, measurement.ResolutionMultiplier);
@@ -63,6 +66,12 @@ public class ImpulseResponseStartRequestTests
         Assert.True(measurement.Continuous);
         Assert.Equal(8.0, measurement.ChirpStartHz);
         Assert.Equal(4.0, measurement.LoadOhms);
+        Assert.Equal(ResponseStimulus.SpeechFemale2011, measurement.Stimulus);
+        Assert.Equal(37.0, measurement.NoiseCutoffHz);
+
+        // And through to the acquisition half, which is where the runner reads them.
+        Assert.Equal(ResponseStimulus.SpeechFemale2011, measurement.AsAcquisition().Stimulus);
+        Assert.Equal(37.0, measurement.AsAcquisition().NoiseCutoffHz);
     }
 
     /// <summary>
@@ -73,8 +82,8 @@ public class ImpulseResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(17, ConstructorParameterCount(typeof(ImpulseResponseStartRequest)));
-        Assert.Equal(17, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
+        Assert.Equal(19, ConstructorParameterCount(typeof(ImpulseResponseStartRequest)));
+        Assert.Equal(19, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
     }
 
     /// <summary>

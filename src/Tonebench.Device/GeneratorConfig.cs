@@ -106,7 +106,7 @@ public sealed record WhiteNoiseSettings
 
     /// <summary>
     /// Makes the pink stimulus <b>periodic</b> over this many frames instead of a continuous random
-    /// stream — see <see cref="PeriodicPinkNoise"/>. Zero, the default, keeps the filtered-white
+    /// stream — see <see cref="PeriodicNoise"/>. Zero, the default, keeps the filtered-white
     /// noise the generator screen plays.
     ///
     /// <para>Set to the analysis record length by a measurement that wants one whole period per
@@ -121,9 +121,23 @@ public sealed record WhiteNoiseSettings
 
     /// <summary>
     /// Where a periodic pink sequence stops being pink, in Hz: flat below, &#8722;3 dB per octave
-    /// above. Ignored unless <see cref="PeriodFrames"/> is set.
+    /// above. Ignored unless <see cref="PeriodFrames"/> is set, and meaningless to
+    /// <see cref="PeriodicNoiseShape.White"/>, which has no slope for it to start.
     /// </summary>
-    public double CutoffHz { get; init; } = PeriodicPinkNoise.DefaultCutoffHz;
+    public double CutoffHz { get; init; } = PeriodicNoise.DefaultCutoffHz;
+
+    /// <summary>
+    /// The spectral shape of a <b>periodic</b> sequence, and read only when
+    /// <see cref="PeriodFrames"/> is set: the continuous forms take their shape from
+    /// <see cref="ChannelGeneratorConfig.Kind"/> instead, which is why a periodic white sequence is
+    /// still asked for as <see cref="GeneratorKind.PinkNoise"/> with this set to
+    /// <see cref="PeriodicNoiseShape.White"/> rather than as the white kind — one place decides the
+    /// spectrum of a periodic sequence, and it is this field.
+    ///
+    /// <para>Pink by default, so an impedance run, which asked for periodic noise before any of the
+    /// other shapes existed, plays exactly the sequence it always did.</para>
+    /// </summary>
+    public PeriodicNoiseShape Shape { get; init; } = PeriodicNoiseShape.Pink;
 }
 
 /// <summary>

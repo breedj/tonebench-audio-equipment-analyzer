@@ -439,6 +439,8 @@ describe('useFrequencyResponse', () => {
       bandwidthReferenceLowHz: 200,
       bandwidthReferenceHighHz: 2000,
       continuous: false,
+      stimulus: 'Chirp',
+      noiseCutoffHz: 5,
     })
 
     expect(response.phaseKind.value).toBe('PerTrace')

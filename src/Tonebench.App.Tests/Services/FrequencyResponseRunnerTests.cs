@@ -29,9 +29,12 @@ public class FrequencyResponseRunnerTests
         double loadOhms = 8.0,
         BandwidthReferenceMode bandwidthReference = BandwidthReferenceMode.BandMedian,
         double bandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
-        double bandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz) =>
+        double bandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
+        ResponseStimulus stimulus = ResponseStimulus.Chirp,
+        double noiseCutoffHz = 5.0) =>
         new(spanHz, resolutionMultiplier, levelMode, levelValue, levelUnit, rightIsReference, smoothing, averages,
-            continuous, chirpStartHz, loadOhms, bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz);
+            continuous, chirpStartHz, loadOhms, bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz,
+            stimulus, noiseCutoffHz);
 
     private sealed record Harness(FrequencyResponseRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
@@ -168,6 +171,40 @@ public class FrequencyResponseRunnerTests
         var harness = await CreateAsync();
 
         await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+
+        AssertFinished(status);
+        var gain = Trace(status, FrequencyResponseTraceKind.Gain);
+
+        foreach (int i in MidBandColumns(gain))
+        {
+            Assert.InRange(gain.MagnitudeMaxDb[i], -0.5, 0.5);
+            Assert.InRange(gain.MagnitudeMinDb[i], -0.5, 0.5);
+        }
+    }
+
+    /// <summary>
+    /// The whole point of offering anything but the sweep: a measurement is a measurement whatever
+    /// excited it. Every one of these plays a different spectrum — white is flat, pink falls 3 dB an
+    /// octave, and the speech shapes are 25 dB down at the top of the band against their own peak —
+    /// and all five have to deconvolve to the same straight wire, because the reference carries
+    /// whatever shape the stimulus has.
+    ///
+    /// <para>It is also the test that would catch the reference and the generator disagreeing, which
+    /// is the failure this measurement has no other defence against: a stimulus divided by the wrong
+    /// reference is reported as DUT response and nothing complains.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ResponseStimulus.PinkNoise)]
+    [InlineData(ResponseStimulus.WhiteNoise)]
+    [InlineData(ResponseStimulus.SpeechMale2011)]
+    [InlineData(ResponseStimulus.SpeechFemale2011)]
+    [InlineData(ResponseStimulus.SpeechMale2020)]
+    public async Task Measurement_WithANoiseStimulus_ReadsTheSameUnityGainTheChirpDoes(ResponseStimulus stimulus)
+    {
+        var harness = await CreateAsync();
+
+        await harness.Runner.StartAsync(Request(stimulus: stimulus), CancellationToken.None);
         var status = await AwaitCompletionAsync(harness.Runner);
 
         AssertFinished(status);

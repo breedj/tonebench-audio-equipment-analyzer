@@ -34,7 +34,7 @@ public static class OutputRangeSelector
     /// <para><b>A periodic pink sequence is not covered by this and must not be.</b> That sequence is
     /// deterministic, so its crest is a measured property of the table rather than an allowance about
     /// a distribution — and it is not 12 dB: measured across every period from 8192 to 524288, all
-    /// three sample rates and the whole cut-off range, <see cref="PeriodicPinkNoise.CrestFactorDb"/>
+    /// three sample rates and the whole cut-off range, <see cref="PeriodicNoise.CrestFactorDb"/>
     /// runs from <b>11.37 to 14.49 dB</b>, rising with the period because more components make a
     /// longer tail. At the impedance screen's own record lengths it is 12.2–13.1 dB, so this constant
     /// under-read the peak by up to a decibel there and by 2.5 dB at the extreme — a quarter of a
@@ -157,7 +157,7 @@ public static class OutputRangeSelector
     /// where it can be built, and <see cref="NoiseCrestFactorDb"/>'s allowance otherwise.
     ///
     /// <para>Never throws and never lets the table's construction decide a range: a cut-off outside
-    /// <see cref="PeriodicPinkNoise.MinCutoffHz"/>..<see cref="PeriodicPinkNoise.MaxCutoffHz"/>, a
+    /// <see cref="PeriodicNoise.MinCutoffHz"/>..<see cref="PeriodicNoise.MaxCutoffHz"/>, a
     /// period that is not a power of two, or anything else the table refuses, falls back to the
     /// allowance — a range chosen from a 12 dB guess is a measurement that may clip, while an
     /// exception here is an acquisition that will not start at all.</para>
@@ -169,7 +169,7 @@ public static class OutputRangeSelector
 
         try
         {
-            return PeriodicPinkNoise.For(noise.PeriodFrames, sampleRateHz, noise.CutoffHz).CrestFactorDb;
+            return PeriodicNoise.For(noise.PeriodFrames, sampleRateHz, noise.CutoffHz, noise.Shape).CrestFactorDb;
         }
         catch (ArgumentException)
         {

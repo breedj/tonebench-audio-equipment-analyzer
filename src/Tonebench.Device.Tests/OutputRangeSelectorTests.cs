@@ -125,7 +125,7 @@ public class OutputRangeSelectorTests
     /// and clip a stimulus that nothing then reported.</para>
     /// </summary>
     [Fact]
-    public void RequiredPeakVolts_PeriodicPinkNoise_AsksTheSequenceForItsOwnCrestFactor()
+    public void RequiredPeakVolts_PeriodicNoise_AsksTheSequenceForItsOwnCrestFactor()
     {
         var channel = new ChannelGeneratorConfig(true, [])
         {
@@ -134,11 +134,11 @@ public class OutputRangeSelectorTests
             {
                 LevelDbv = -20.0,
                 PeriodFrames = 65536,
-                CutoffHz = PeriodicPinkNoise.DefaultCutoffHz,
+                CutoffHz = PeriodicNoise.DefaultCutoffHz,
             },
         };
 
-        double crestDb = PeriodicPinkNoise.For(65536, 48000.0, PeriodicPinkNoise.DefaultCutoffHz).CrestFactorDb;
+        double crestDb = PeriodicNoise.For(65536, 48000.0, PeriodicNoise.DefaultCutoffHz).CrestFactorDb;
         Assert.Equal(
             Math.Pow(10.0, (-20.0 + crestDb) / 20.0),
             OutputRangeSelector.RequiredPeakVolts(channel, 48000.0),
@@ -161,7 +161,7 @@ public class OutputRangeSelectorTests
     /// guess may clip, where an exception here is an acquisition that will not start at all.
     /// </summary>
     [Fact]
-    public void RequiredPeakVolts_PeriodicPinkNoise_WithSettingsNoSequenceCanBeBuiltFrom_FallsBackToTheAllowance()
+    public void RequiredPeakVolts_PeriodicNoise_WithSettingsNoSequenceCanBeBuiltFrom_FallsBackToTheAllowance()
     {
         var channel = new ChannelGeneratorConfig(true, [])
         {

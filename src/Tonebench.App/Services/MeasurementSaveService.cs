@@ -266,7 +266,9 @@ public sealed class MeasurementSaveService(
             LoadOhms: 8.0,
             BandwidthReference: nameof(BandwidthReferenceMode.BandMedian),
             BandwidthReferenceLowHz: BandwidthReferenceSpec.DefaultLowHz,
-            BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz), SerializerOptions);
+            BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz,
+            Stimulus: nameof(ResponseStimulus.Chirp),
+            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz), SerializerOptions);
 
     /// <summary>
     /// A brand-new impulse-response type's <c>params_json</c>, on the same terms as
@@ -293,7 +295,9 @@ public sealed class MeasurementSaveService(
             ExtractHarmonics: true,
             MaxHarmonicOrder: ImpulseResponseRequest.DefaultMaxHarmonicOrder,
             ChirpStartHz: FrequencyResponseRequest.DefaultChirpStartHz,
-            LoadOhms: 8.0), SerializerOptions);
+            LoadOhms: 8.0,
+            Stimulus: nameof(ResponseStimulus.Chirp),
+            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz), SerializerOptions);
 
     /// <summary>
     /// A brand-new stepped-sine response type's <c>params_json</c>, on the same terms as
@@ -450,7 +454,7 @@ public sealed class MeasurementSaveService(
             UseGlobalFixture: useGlobalFixture)
         {
             ByStimulus = ImpedanceStimulusDefaults.All,
-            NoiseCutoffHz = PeriodicPinkNoise.DefaultCutoffHz,
+            NoiseCutoffHz = PeriodicNoise.DefaultCutoffHz,
 
             // **Stated rather than left null**, which is the only way a new measurement reliably
             // opens on +/-90. An absent display field keeps whatever is on screen -- App.vue
@@ -909,6 +913,8 @@ public sealed class MeasurementSaveService(
                 BandwidthReference: request.BandwidthReference.ToString(),
                 BandwidthReferenceLowHz: request.BandwidthReferenceLowHz,
                 BandwidthReferenceHighHz: request.BandwidthReferenceHighHz,
+                Stimulus: request.Stimulus.ToString(),
+                NoiseCutoffHz: request.UsesNoise ? request.NoiseCutoffHz : null,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
@@ -1155,6 +1161,8 @@ public sealed class MeasurementSaveService(
                 request.GatePreMs, request.GatePostMs, request.GateWindow.ToString(),
                 request.ExtractHarmonics, request.MaxHarmonicOrder,
                 status.GeneratorAmpDbv, request.ChirpStartHz, request.LoadOhms,
+                Stimulus: request.Stimulus.ToString(),
+                NoiseCutoffHz: request.Stimulus == ResponseStimulus.Chirp ? null : request.NoiseCutoffHz,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,

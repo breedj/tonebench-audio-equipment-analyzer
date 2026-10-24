@@ -211,13 +211,19 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
-    /// The chirp on both channels. Both, always: with the right input as the reference it needs the
-    /// same stimulus fed straight back to it, and without it the right channel is a trace of its own.
+    /// The stimulus on both channels. Both, always: with the right input as the reference it needs
+    /// the same stimulus fed straight back to it, and without it the right channel is a trace of its
+    /// own.
     /// </summary>
     public static GeneratorConfig BuildGenerator(
-        FrequencyResponseRequest request, double amplitudeDbv, int? repeatFrames = null) =>
-        BuildChirpGenerator(
-            amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, repeatFrames ?? request.FftSize);
+        FrequencyResponseRequest request, double amplitudeDbv, int? repeatFrames = null)
+    {
+        int period = repeatFrames ?? request.FftSize;
+
+        return request.UsesNoise
+            ? BuildNoiseGenerator(amplitudeDbv, period, request.NoiseCutoffHz, request.NoiseShape)
+            : BuildChirpGenerator(amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, period);
+    }
 
     /// <summary>
     /// The same chirp stated in its own terms rather than a frequency-response request's, so the
@@ -266,7 +272,16 @@ internal static class ResponseCaptureSupport
     /// </summary>
     /// <param name="periodFrames">The analysis record length, so the record holds exactly one period.</param>
     /// <param name="cutoffHz">Where the sequence stops being pink: flat below, −3 dB per octave above.</param>
-    public static GeneratorConfig BuildPinkNoiseGenerator(double levelDbv, int periodFrames, double cutoffHz)
+    public static GeneratorConfig BuildPinkNoiseGenerator(double levelDbv, int periodFrames, double cutoffHz) =>
+        BuildNoiseGenerator(levelDbv, periodFrames, cutoffHz, PeriodicNoiseShape.Pink);
+
+    /// <summary>
+    /// The same sequence at any of its shapes — ARTA's PN list. See
+    /// <see cref="BuildPinkNoiseGenerator"/> for why it is periodic over the record, which is the
+    /// half that matters and is true of every shape alike.
+    /// </summary>
+    public static GeneratorConfig BuildNoiseGenerator(
+        double levelDbv, int periodFrames, double cutoffHz, PeriodicNoiseShape shape)
     {
         var channel = new ChannelGeneratorConfig(Enabled: true, Tones: [])
         {
@@ -276,6 +291,7 @@ internal static class ResponseCaptureSupport
                 LevelDbv = levelDbv,
                 PeriodFrames = periodFrames,
                 CutoffHz = cutoffHz,
+                Shape = shape,
             },
         };
 
@@ -284,13 +300,21 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
-    /// The stimulus spectrum the response is divided by: one period of the same sweep the DAC is
-    /// playing, transformed the same way the capture is.
+    /// The stimulus spectrum the response is divided by: one period of whatever the DAC is playing,
+    /// transformed the same way the capture is.
     ///
-    /// <para>Generated from <see cref="ExponentialChirp"/>, which
-    /// <c>Tonebench.Device.Tests.ChirpFormulaAgreementTests</c> pins to the generator's own copy sample
-    /// for sample. A drift between the two would be reported as DUT response and nothing would
-    /// complain.</para>
+    /// <para>Every stimulus here is a pure function of the frame index with a period of exactly one
+    /// record, which is what makes this possible at all — the sweep comes from
+    /// <see cref="ExponentialChirp"/> and the noises from <see cref="PeriodicNoise"/>, and in both
+    /// cases <c>Tonebench.Device</c> builds the played audio from the same code. A drift between the
+    /// two would be reported as DUT response and nothing would complain, which is why
+    /// <c>ChirpFormulaAgreementTests</c> pins the sweep sample for sample and why the noise is read
+    /// from <see cref="PeriodicNoise"/> here rather than rebuilt.</para>
+    ///
+    /// <para>Note the two amplitude conventions, which are the generator's own: the sweep's level is
+    /// a <i>peak</i> and a noise's is a broadband <i>RMS</i>. Both arrive here as the dBV figure the
+    /// generator was configured with, so the reference carries the same scale as the stimulus either
+    /// way — and the level probe measures the DUT rather than trusting either number.</para>
     /// </summary>
     public static Complex[] BuildReferenceSpectrum(
         IFftBackend fft, FrequencyResponseRequest request, double amplitudeDbv, int? fftSize = null)
@@ -298,12 +322,22 @@ internal static class ResponseCaptureSupport
         int size = fftSize ?? request.FftSize;
 
         var period = new double[size];
-        ExponentialChirp.Fill(
-            period,
-            request.ChirpStartHz,
-            request.ChirpEndHz,
-            request.SampleRateHz,
-            ExponentialChirp.PeakVoltsFromDbv(amplitudeDbv));
+        if (request.UsesNoise)
+        {
+            var noise = PeriodicNoise.For(size, request.SampleRateHz, request.NoiseCutoffHz, request.NoiseShape);
+            double rms = Math.Pow(10.0, amplitudeDbv / 20.0);
+            for (int i = 0; i < size; i++)
+                period[i] = rms * noise.Sample(i);
+        }
+        else
+        {
+            ExponentialChirp.Fill(
+                period,
+                request.ChirpStartHz,
+                request.ChirpEndHz,
+                request.SampleRateHz,
+                ExponentialChirp.PeakVoltsFromDbv(amplitudeDbv));
+        }
 
         var spectrum = new Complex[(size / 2) + 1];
         fft.Forward(period, spectrum);

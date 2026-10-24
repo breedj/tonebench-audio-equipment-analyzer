@@ -29,7 +29,13 @@ public static class ImpulseResponseEndpoints
             if (!EnumParsing.TryParse(request.GateWindow, WindowType.Hann, out WindowType gateWindow, out var windowError))
                 return Results.BadRequest(windowError);
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit, referenceMode, gateWindow);
+            if (!EnumParsing.TryParse(
+                    request.Stimulus, ResponseStimulus.Chirp, out ResponseStimulus stimulus, out var stimulusError))
+            {
+                return Results.BadRequest(stimulusError);
+            }
+
+            var measurement = request.ToMeasurement(levelMode, levelUnit, referenceMode, gateWindow, stimulus);
 
             try
             {
@@ -320,6 +326,18 @@ public sealed record ImpulseResponseStartRequest(
     /// <summary>RUN sets this and keeps measuring until stopped; SINGLE leaves it false.</summary>
     bool Continuous = false,
     double ChirpStartHz = FrequencyResponseRequest.DefaultChirpStartHz,
+    /// <summary>
+    /// What to play -- "Chirp" (the default, and what every build before this could play) or one of
+    /// the periodic-noise kinds: "PinkNoise", "WhiteNoise", "SpeechMale2011", "SpeechFemale2011",
+    /// "SpeechMale2020". Parsed by the endpoint, which answers a name it does not know rather than
+    /// quietly sweeping instead.
+    /// </summary>
+    string? Stimulus = null,
+    /// <summary>
+    /// Where a pink or speech sequence stops rising towards DC, in Hz. Read by neither the chirp nor
+    /// the white sequence, which has no slope for a corner to start.
+    /// </summary>
+    double NoiseCutoffHz = 5.0,
     /// <summary>The load a watts target is defined against, in ohms. Only read by the OutputPower mode.</summary>
     double LoadOhms = 8.0)
 {
@@ -340,7 +358,8 @@ public sealed record ImpulseResponseStartRequest(
         ThdSweepLevelMode levelMode,
         ThdSweepLevelUnit levelUnit,
         ImpulseReferenceMode referenceMode,
-        WindowType gateWindow) =>
+        WindowType gateWindow,
+        ResponseStimulus stimulus) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -357,7 +376,9 @@ public sealed record ImpulseResponseStartRequest(
             MaxHarmonicOrder,
             Continuous,
             ChirpStartHz,
-            LoadOhms);
+            LoadOhms,
+            stimulus,
+            NoiseCutoffHz);
 }
 
 /// <summary>

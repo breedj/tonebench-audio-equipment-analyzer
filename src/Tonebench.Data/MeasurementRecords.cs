@@ -1623,6 +1623,17 @@ public sealed record FrequencyResponseParameters(
     /// </summary>
     double? LoadOhms = null,
     /// <summary>
+    /// What the run played: null or "Chirp" for the sweep, else one of the periodic-noise kinds
+    /// (<c>PinkNoise</c>, <c>WhiteNoise</c>, <c>SpeechMale2011</c>, <c>SpeechFemale2011</c>,
+    /// <c>SpeechMale2020</c>). Null on a type saved before the stimulus was a choice, which is the
+    /// sweep -- the only thing those builds could play. A string rather than the enum for the reason
+    /// <c>ImpedanceParameters.Stimulus</c> is one: <c>Tonebench.Data</c> cannot see the App layer's
+    /// types, and a number stored here would be a number nobody reading the JSON could decode.
+    /// </summary>
+    string? Stimulus = null,
+    /// <summary>Where a pink or speech sequence stops rising towards DC, in Hz. Null for a sweep, and for a run saved before this existed.</summary>
+    double? NoiseCutoffHz = null,
+    /// <summary>
     /// The FR (dBV) view's own y window, independent of <see cref="ChartYTopDb"/>/<see
     /// cref="ChartYBottomDb"/> which (despite the name) is now the Gain (dB) view's window only --
     /// null on a type saved before the two views had separate ranges, in which case the client
@@ -2237,6 +2248,17 @@ public sealed record ImpulseResponseParameters(
     double? GeneratorAmpDbv = null,
     double ChirpStartHz = 2.0,
     double LoadOhms = 8.0,
+    /// <summary>
+    /// What the run played: null or "Chirp" for the sweep, else one of the periodic-noise kinds
+    /// (<c>PinkNoise</c>, <c>WhiteNoise</c>, <c>SpeechMale2011</c>, <c>SpeechFemale2011</c>,
+    /// <c>SpeechMale2020</c>). Null on a type saved before the stimulus was a choice, which is the
+    /// sweep -- the only thing those builds could play. A string rather than the enum for the reason
+    /// <c>ImpedanceParameters.Stimulus</c> is one: <c>Tonebench.Data</c> cannot see the App layer's
+    /// types, and a number stored here would be a number nobody reading the JSON could decode.
+    /// </summary>
+    string? Stimulus = null,
+    /// <summary>Where a pink or speech sequence stops rising towards DC, in Hz. Null for a sweep, and for a run saved before this existed.</summary>
+    double? NoiseCutoffHz = null,
     string? ChartView = null,
     bool? ChartNormalisedImpulse = null,
     bool? ChartShowPhase = null,

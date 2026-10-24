@@ -113,6 +113,27 @@ public readonly record struct ImpulseGate(int PreSamples, int PostSamples, int T
 
         return new ImpulseGate(pre, fftSize / 2, Math.Max(1, pre / 2));
     }
+
+    /// <summary>
+    /// The gate for a <b>periodic noise</b> stimulus occupying one whole <paramref name="fftSize"/>-sample
+    /// period: the entire record, tapered at the far edge.
+    ///
+    /// <para>There is nothing here for a gate to delete. A sweep's distortion arrives as discrete
+    /// packets at a known place, which is the whole reason <see cref="ForSweep"/> throws a stretch
+    /// of record away; noise excites every bin at once, so its distortion comes back spread evenly
+    /// over the record as a raised floor and no window can separate it from the response. Keeping
+    /// the whole period is therefore both the best available answer and the cheapest one — it costs
+    /// none of the factor two in resolution that gating a sweep costs. The taper is only there so
+    /// the cut at the far side of the circle does not ring across the spectrum, and the pre is one
+    /// sample short of half the period because the gate must span at most the record it is cut
+    /// from.</para>
+    /// </summary>
+    public static ImpulseGate ForNoise(int fftSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fftSize);
+
+        return new ImpulseGate((fftSize / 2) - 1, fftSize / 2, Math.Max(1, fftSize / 16));
+    }
 }
 
 /// <summary>

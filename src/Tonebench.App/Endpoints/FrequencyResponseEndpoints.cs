@@ -27,7 +27,13 @@ public static class FrequencyResponseEndpoints
                 return Results.BadRequest(referenceError);
             }
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit, bandwidthReference);
+            if (!EnumParsing.TryParse(
+                    request.Stimulus, ResponseStimulus.Chirp, out ResponseStimulus stimulus, out var stimulusError))
+            {
+                return Results.BadRequest(stimulusError);
+            }
+
+            var measurement = request.ToMeasurement(levelMode, levelUnit, bandwidthReference, stimulus);
 
             try
             {
@@ -181,7 +187,19 @@ public sealed record FrequencyResponseStartRequest(
     /// </summary>
     string? BandwidthReference = null,
     double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
-    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
+    /// <summary>
+    /// What to play -- "Chirp" (the default, and what every build before this could play) or one of
+    /// the periodic-noise kinds: "PinkNoise", "WhiteNoise", "SpeechMale2011", "SpeechFemale2011",
+    /// "SpeechMale2020". Parsed by the endpoint, which answers a name it does not know rather than
+    /// quietly sweeping instead.
+    /// </summary>
+    string? Stimulus = null,
+    /// <summary>
+    /// Where a pink or speech sequence stops rising towards DC, in Hz. Read by neither the chirp nor
+    /// the white sequence, which has no slope for a corner to start.
+    /// </summary>
+    double NoiseCutoffHz = 5.0)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -192,7 +210,10 @@ public sealed record FrequencyResponseStartRequest(
     /// reading the generator below the supposed start frequency gave it away.
     /// </summary>
     public FrequencyResponseRequest ToMeasurement(
-        ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, BandwidthReferenceMode bandwidthReference) =>
+        ThdSweepLevelMode levelMode,
+        ThdSweepLevelUnit levelUnit,
+        BandwidthReferenceMode bandwidthReference,
+        ResponseStimulus stimulus) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -206,7 +227,9 @@ public sealed record FrequencyResponseStartRequest(
             LoadOhms,
             bandwidthReference,
             BandwidthReferenceLowHz,
-            BandwidthReferenceHighHz);
+            BandwidthReferenceHighHz,
+            stimulus,
+            NoiseCutoffHz);
 }
 
 /// <param name="ChartAnnotations">

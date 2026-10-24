@@ -109,7 +109,9 @@ public sealed record ImpulseResponseRequest(
     int MaxHarmonicOrder = 5,
     bool Continuous = false,
     double ChirpStartHz = 2.0,
-    double LoadOhms = 8.0)
+    double LoadOhms = 8.0,
+    ResponseStimulus Stimulus = ResponseStimulus.Chirp,
+    double NoiseCutoffHz = 5.0)
 {
     public const double DefaultGatePreMs = 1.0;
 
@@ -152,7 +154,9 @@ public sealed record ImpulseResponseRequest(
             AverageCount,
             Continuous,
             ChirpStartHz,
-            LoadOhms);
+            LoadOhms,
+            Stimulus: Stimulus,
+            NoiseCutoffHz: NoiseCutoffHz);
 
     public double SampleRateHz => AsAcquisition().SampleRateHz;
 
@@ -175,7 +179,18 @@ public sealed record ImpulseResponseRequest(
     /// the same thing as <see cref="GatePreMs"/>/<see cref="GatePostMs"/>. See
     /// <see cref="ImpulseWindow"/>, which explains why confusing the two is worth a paragraph.
     /// </summary>
-    public ImpulseGate SweepGate => ImpulseGate.ForSweep(FftSize, ChirpStartHz, ChirpEndHz);
+    public ImpulseGate SweepGate => Stimulus == ResponseStimulus.Chirp
+        ? ImpulseGate.ForSweep(FftSize, ChirpStartHz, ChirpEndHz)
+        : ImpulseGate.ForNoise(FftSize);
+
+    /// <summary>
+    /// Whether this run can draw harmonic curves — which only a sweep can, its distortion arriving
+    /// as packets at known places. Read in place of <see cref="ExtractHarmonics"/> by everything
+    /// that acts on it, so that switching the stimulus cannot produce a request that is refused:
+    /// the box is simply not offered against a noise stimulus, and a stored measurement that has it
+    /// set reads as off rather than as an error.
+    /// </summary>
+    public bool ExtractsHarmonics => ExtractHarmonics && Stimulus == ResponseStimulus.Chirp;
 
     /// <summary>What the display gate's length implies about the lowest frequency the gated magnitude can describe.</summary>
     public double GateResolutionHz => 1000.0 / (GatePreMs + GatePostMs);

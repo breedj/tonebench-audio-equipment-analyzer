@@ -738,11 +738,13 @@ public sealed class FrequencyResponseRunner(
         bool generatorAlreadyConfigured,
         CancellationToken ct)
     {
-        // Gated, because the stimulus is a sweep: deconvolving one recovers the DUT's harmonic
+        // Gated, where the stimulus is a sweep: deconvolving one recovers the DUT's harmonic
         // packets alongside its impulse response, and left in they comb the magnitude over whatever
-        // part of the band the DUT distorts in. See ImpulseGate.
-        var gate = ImpulseGate.ForSweep(
-            request.FftSize, request.ChirpStartHz, request.ChirpEndHz);
+        // part of the band the DUT distorts in. A noise stimulus has no packets to delete and keeps
+        // its whole period instead -- see ImpulseGate.ForNoise.
+        var gate = request.UsesNoise
+            ? ImpulseGate.ForNoise(request.FftSize)
+            : ImpulseGate.ForSweep(request.FftSize, request.ChirpStartHz, request.ChirpEndHz);
 
         var left = new FrequencyResponseEstimator(request.FftSize, _fft, gate);
         var right = new FrequencyResponseEstimator(request.FftSize, _fft, gate);

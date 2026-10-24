@@ -1,4 +1,5 @@
 ﻿using Tonebench.App.Streaming;
+using Tonebench.Device;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
@@ -218,6 +219,44 @@ public sealed record FrequencyResponseTrace(
 /// The level probe is deliberately <b>not</b> repeated per pass: it is slow, and re-solving it every
 /// second would make the trace jump whenever the DUT drifted rather than showing the drift.
 /// </param>
+/// <summary>
+/// What a response measurement plays. ARTA's own list, since the point of offering anything but the
+/// sweep is that a measurement here is comparable with one there.
+///
+/// <para><b>Every one of the noise kinds is periodic over the analysis record</b>, exactly as the
+/// chirp is — see <see cref="Tonebench.Device.PeriodicNoise"/>. That is what lets the same
+/// deconvolution serve all of them: the reference is a known, deterministic spectrum either way,
+/// and the analysis window stays Rectangular because a whole period transforms exactly.</para>
+///
+/// <para><b>What changes with the stimulus is distortion, not the response.</b> A sweep separates
+/// the DUT's harmonics into packets at known places, which is what lets the impulse screen draw
+/// them and the gate delete them. Noise excites every bin at once, so its distortion comes back
+/// spread over the whole record as a raised floor: there is nothing to draw and nothing to gate,
+/// and a noise-measured impulse response is the honest sum of the linear response and whatever the
+/// DUT's distortion contributes. Against a linear DUT the two agree; against a distorting one the
+/// sweep is the better measurement, which is why it stays the default.</para>
+/// </summary>
+public enum ResponseStimulus
+{
+    /// <summary>The periodic exponential sweep. The default, and the only one that separates distortion.</summary>
+    Chirp = 0,
+
+    /// <summary>ARTA's "PN Pink": equal power per constant-percentage band. The best signal-to-noise at the bottom of the band, which is why ARTA recommends it for acoustic work.</summary>
+    PinkNoise = 1,
+
+    /// <summary>ARTA's "PN White": equal power per bin, which is what ARTA recommends for electronic systems — a bin at the top of the band is measured as well as one at the bottom.</summary>
+    WhiteNoise = 2,
+
+    /// <summary>ARTA's "Male PN[2011]" — the male speech spectrum of IEC 60268-16:2011.</summary>
+    SpeechMale2011 = 3,
+
+    /// <summary>ARTA's "Female PN[2011]" — the female spectrum of the same edition.</summary>
+    SpeechFemale2011 = 4,
+
+    /// <summary>ARTA's "Male PN[2020]" — the male spectrum as revised for Edition 5.</summary>
+    SpeechMale2020 = 5,
+}
+
 public sealed record FrequencyResponseRequest(
     double FrequencySpanHz,
     int ResolutionMultiplier,
@@ -245,8 +284,36 @@ public sealed record FrequencyResponseRequest(
     /// </summary>
     BandwidthReferenceMode BandwidthReference = BandwidthReferenceMode.BandMedian,
     double BandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
-    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz)
+    double BandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
+    /// <summary>
+    /// What to play. <see cref="ResponseStimulus.Chirp"/> by default, so every caller that predates
+    /// this measures exactly what it did.
+    /// </summary>
+    ResponseStimulus Stimulus = ResponseStimulus.Chirp,
+    /// <summary>
+    /// Where a pink or speech sequence stops rising towards DC, in Hz. The literal rather than
+    /// <see cref="Tonebench.Device.PeriodicNoise.DefaultCutoffHz"/> for the reason
+    /// <see cref="ChirpStartHz"/> gives; kept equal to it by a test.
+    /// </summary>
+    double NoiseCutoffHz = 5.0)
 {
+    /// <summary>Whether the stimulus is one of the periodic-noise kinds rather than the sweep.</summary>
+    public bool UsesNoise => Stimulus != ResponseStimulus.Chirp;
+
+    /// <summary>
+    /// The sequence shape a noise stimulus asks <see cref="Tonebench.Device.PeriodicNoise"/> for.
+    /// Throws for the chirp, which has no sequence — callers ask <see cref="UsesNoise"/> first.
+    /// </summary>
+    public PeriodicNoiseShape NoiseShape => Stimulus switch
+    {
+        ResponseStimulus.PinkNoise => PeriodicNoiseShape.Pink,
+        ResponseStimulus.WhiteNoise => PeriodicNoiseShape.White,
+        ResponseStimulus.SpeechMale2011 => PeriodicNoiseShape.SpeechMale2011,
+        ResponseStimulus.SpeechFemale2011 => PeriodicNoiseShape.SpeechFemale2011,
+        ResponseStimulus.SpeechMale2020 => PeriodicNoiseShape.SpeechMale2020,
+        _ => throw new InvalidOperationException($"{Stimulus} is not a noise stimulus."),
+    };
+
     /// <summary>
     /// Spans the UI offers, in Hz. These are <b>Nyquist</b> values — the label the old app showed —
     /// so the sample rate is twice each one, which is also why they are exactly the QA403's three
@@ -346,6 +413,16 @@ public sealed record FrequencyResponseRequest(
 
     public void Validate()
     {
+        // Only where something reads it: a cut-off left at any value by a chirp run must not refuse
+        // that run, and the white sequence has no slope for a corner to start.
+        if (UsesNoise && Stimulus != ResponseStimulus.WhiteNoise
+            && (double.IsNaN(NoiseCutoffHz) || NoiseCutoffHz < PeriodicNoise.MinCutoffHz || NoiseCutoffHz > PeriodicNoise.MaxCutoffHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(NoiseCutoffHz), NoiseCutoffHz,
+                $"The noise cut-off runs from {PeriodicNoise.MinCutoffHz:0.#} to {PeriodicNoise.MaxCutoffHz:0.#} Hz.");
+        }
+
         if (!SupportedSpansHz.Contains(FrequencySpanHz))
         {
             throw new ArgumentOutOfRangeException(

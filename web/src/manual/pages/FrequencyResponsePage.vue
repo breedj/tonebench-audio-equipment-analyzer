@@ -127,12 +127,39 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>Signal</td>
+          <td>
+            What to play. <strong>Sweep (chirp)</strong> is the default and the only one that
+            separates the DUT's own distortion out of the measurement — deconvolving a sweep puts
+            the harmonics in packets at known places, which the gate then deletes. The five
+            <strong>PN</strong> entries are periodic noise sequences lasting exactly one analysis
+            record, and are ARTA's own list, so a measurement here under the same name is comparable
+            with one there. <strong>Pink PN</strong> has equal energy per octave and the best
+            signal-to-noise at the bottom of the band; <strong>White PN</strong> has equal energy
+            per bin, which is what ARTA recommends for electronic systems; the three speech shapes
+            follow IEC 60268-16 and are for speech-intelligibility work. Against a linear DUT every
+            one of them measures the same response. Against a distorting one the sweep is the better
+            measurement: noise spreads its distortion evenly over the record as a raised floor, and
+            nothing can separate that from the response.
+          </td>
+        </tr>
+        <tr>
           <td>Chirp start (Hz)</td>
           <td>
             Where the sweep begins. Below about 10 Hz a transformer-coupled DUT sees several times
             the core flux it does in the band you actually read, because flux goes as V/f — so the
             bottom of the sweep can disturb the measurement above it. Raising this is how you find
-            out whether it did. The reported band starts 25% above this value.
+            out whether it did. The reported band starts 25% above this value. Only shown for the
+            sweep.
+          </td>
+        </tr>
+        <tr>
+          <td>Cut-off (Hz)</td>
+          <td>
+            Where a pink or speech sequence stops rising towards DC: flat below it, its own slope
+            above. Pure 1/f keeps climbing all the way down, which is spent DAC headroom and DC into
+            whatever is being driven. Replaces the chirp start when a noise signal is selected, and
+            is not shown for White PN, which has no slope for a corner to start.
           </td>
         </tr>
         <tr>

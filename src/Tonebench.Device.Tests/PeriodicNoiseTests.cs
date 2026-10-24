@@ -122,16 +122,65 @@ public class PeriodicNoiseTests
     }
 
     [Fact]
-    public void TheCrestFactorIsTheOneArtaDescribes()
+    public void TheCrestFactorIsTheOneArtaImplements()
     {
-        // ARTA's manual puts pink PN "slightly above 12 dB", which is what random phases give. This
-        // is the number OutputRangeSelector.NoiseCrestFactorDb has to cover, so it is pinned here
-        // rather than left to vary with the phase hash.
+        // ARTA's manual says both things in one paragraph: random phases give 12-13 dB, and "in
+        // ARTA, the periodic noise generation is implemented with a crest factor lower than 10 dB".
+        // We matched the definition and not the implementation until 2026-10-24, which cost about
+        // 4 dB of drive at the same peak. Under 10 is the claim; the optimiser lands on 8.50.
         foreach (int period in new[] { 1024, 8192, 32768 })
         {
             var noise = PeriodicNoise.For(period, SampleRateHz, PeriodicNoise.DefaultCutoffHz);
-            Assert.InRange(noise.CrestFactorDb, 9.0, 14.5);
+            Assert.InRange(noise.CrestFactorDb, 8.0, 10.0);
         }
+    }
+
+    /// <summary>
+    /// The optimisation moves phases and nothing else, which is what makes it safe to apply to a
+    /// shape anyone is going to measure against. Stated here as well as implied by the shape tests
+    /// above, because it is the invariant that a cheaper crest-reduction scheme would break.
+    /// </summary>
+    [Fact]
+    public void TheCrestOptimisation_LeavesTheSpectrumExactlyWhereItWas()
+    {
+        var noise = PeriodicNoise.For(Period, SampleRateHz, cutoffHz: 20.0);
+
+        // Pink to the third decimal across seven octaves, after sixteen clip-and-restore passes.
+        foreach (int bin in new[] { 32, 64, 128, 256, 512, 1024 })
+        {
+            double perOctaveDb = 20.0 * Math.Log10(BinMagnitude(noise, bin * 2, Period) / BinMagnitude(noise, bin, Period));
+            Assert.Equal(-3.0103, perOctaveDb, 3);
+        }
+    }
+
+    /// <summary>
+    /// And it leaves the waveform noise-like. ARTA describes its PN as having a normal distribution
+    /// *and* a crest factor under 10 dB, and both halves have to hold: clipping hard enough would
+    /// buy the crest factor by flat-topping the signal, which is a different stimulus. Measured
+    /// kurtosis runs 2.82 to 3.31 against a Gaussian's 3, with around 1 % of samples within a
+    /// hundredth of the peak.
+    /// </summary>
+    [Fact]
+    public void TheCrestOptimisation_LeavesTheAmplitudesNearlyGaussian()
+    {
+        var noise = PeriodicNoise.For(Period, SampleRateHz, PeriodicNoise.DefaultCutoffHz);
+
+        double fourth = 0.0;
+        int atRail = 0;
+        double peak = 0.0;
+        for (long i = 0; i < Period; i++)
+            peak = Math.Max(peak, Math.Abs(noise.Sample(i)));
+
+        for (long i = 0; i < Period; i++)
+        {
+            double v = noise.Sample(i);
+            fourth += v * v * v * v;
+            if (Math.Abs(v) > peak * 0.99) atRail++;
+        }
+
+        // Unit RMS, so the fourth moment is the kurtosis.
+        Assert.InRange(fourth / Period, 2.5, 3.6);
+        Assert.InRange(100.0 * atRail / Period, 0.0, 5.0);
     }
 
     [Fact]
@@ -279,7 +328,7 @@ public class PeriodicNoiseTests
             }
 
             Assert.Equal(1.0, Math.Sqrt(sum / Period), 9);
-            Assert.InRange(noise.CrestFactorDb, 9.0, 16.0);
+            Assert.InRange(noise.CrestFactorDb, 8.0, 10.0);
         }
     }
 }

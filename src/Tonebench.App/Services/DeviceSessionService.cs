@@ -1475,6 +1475,45 @@ public sealed class DeviceSessionService(
         }
     }
 
+    /// <summary>
+    /// Builds the periodic-noise table this config asks for, here on the caller's thread, so that
+    /// the transfer thread finds it cached.
+    ///
+    /// <para><b>It is the crest-factor optimisation that makes this necessary.</b> The table used to
+    /// be one inverse transform; it is now that plus up to sixteen clip-and-restore passes, which
+    /// measures <b>~950 ms at a 524288-sample period</b> against ~30 ms before. The generator
+    /// synthesizers call <see cref="PeriodicNoise.For"/> per frame and would pay that on the first
+    /// frame after a stimulus change — on the transfer thread, against a TX queue holding 128 ms.
+    /// That is a DAC starvation gap by arithmetic, and the impedance measurement is the one that
+    /// would hit it, since unlike the response runners it never builds a reference of its own and
+    /// so has nothing else that touches the table first.</para>
+    ///
+    /// <para>Never throws: a sequence that cannot be built is one the synthesizer will refuse in its
+    /// own way, and a stimulus change is not the place to find out.</para>
+    /// </summary>
+    private static void WarmPeriodicNoise(GeneratorConfig config, double sampleRateHz)
+    {
+        if (!(sampleRateHz > 0.0)) return;
+
+        foreach (var channel in new[] { config.Left, config.Right })
+        {
+            if (!channel.Enabled || channel.Kind != GeneratorKind.PinkNoise) continue;
+
+            var noise = channel.Noise;
+            if (noise is null || noise.PeriodFrames <= 1) continue;
+
+            try
+            {
+                PeriodicNoise.For(noise.PeriodFrames, sampleRateHz, noise.CutoffHz, noise.Shape);
+            }
+            catch (ArgumentException)
+            {
+                // A period or a rate the sequence refuses. Left to the synthesizer, which is where
+                // the decision about what to play with it belongs.
+            }
+        }
+    }
+
     private async Task ConfigureGeneratorCoreAsync(GeneratorConfig config, CancellationToken ct, AcquisitionConfig? streamConfigHint = null)
     {
         _lastSampleRateHz = streamConfigHint?.SampleRateHz ?? _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
@@ -1493,6 +1532,7 @@ public sealed class DeviceSessionService(
         config = ResolveWaves(config);
         config = SnapTones(config);
         SetMultitoneSpec(config);
+        WarmPeriodicNoise(config, _lastSampleRateHz);
 
         // Silencing a generator there is no device to silence is a success, not a 409: deviceControl's
         // stopRun (Stop, and every measurement switch) disables both channels unconditionally, and

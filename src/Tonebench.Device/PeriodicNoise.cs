@@ -221,6 +221,7 @@ public sealed class PeriodicNoise
         }
 
         InverseTransform(real, imaginary);
+        ReduceCrestFactor(real, imaginary, magnitudes);
 
         double sum = 0.0;
         double peak = 0.0;
@@ -360,6 +361,123 @@ public sealed class PeriodicNoise
     }
 
     /// <summary>
+    /// The crest factor the sequence is pushed towards, in dB, and how many passes it gets.
+    ///
+    /// <para><b>Why this exists.</b> ARTA's manual says both things in one paragraph: a random-phase
+    /// multisine has a crest factor of 12&#8211;13 dB, <i>and</i> "in ARTA, the periodic noise
+    /// generation is implemented with a crest factor lower than 10 dB". So ARTA optimises the phases
+    /// and we were matching its definition rather than its implementation &#8212; which costs about
+    /// 2.5 dB of drive at the same peak, and the peak is what the output range is set from.</para>
+    ///
+    /// <para><b>What it buys is headroom rather than a different answer.</b> An impedance is a ratio
+    /// of two channels from one record, so the stimulus cancels out of it: measured on a ~1 ohm
+    /// fixture the median read 1.023&#8211;1.028 ohm from &#8722;20 dBV all the way to +18, flat
+    /// across 38 dB of drive. What more power does is lift every bin further above the analyzer's
+    /// own floor, and noise on H does <i>not</i> average out of <c>R*H/(1-H)</c> &#8212; it inflates
+    /// it, which is why the same fixture read 1.074 ohm at &#8722;30 dBV. The other half is that
+    /// clipping starts at <c>21.01 - crest</c> dBV, so taking the crest from 12.5 dB to under 10
+    /// moves the onset from about 8.5 dBV to about 11 and roughly doubles the room above the
+    /// 6 dBV default.</para>
+    ///
+    /// <para><b>The method is iterative clipping with the spectrum restored each pass</b> (Van der
+    /// Ouderaa and Schoukens): clip the waveform to the target crest, transform, put the asked-for
+    /// magnitudes back while keeping the clipped signal's phases, transform back. The restoration is
+    /// what makes this safe here &#8212; the spectrum that comes out is <i>exactly</i> the shape that
+    /// went in, to rounding, so a pink sequence is still pink and a speech one still carries its own
+    /// octave-band levels. Only the phases move, and they stay disordered: this is a phase-optimised
+    /// noise, not a swept signal like a Schroeder-phase multisine, which is the distinction ARTA's
+    /// own text draws.</para>
+    ///
+    /// <para>A pass costs two transforms, which is why the count is modest and the table is cached.
+    /// The last pass restores the spectrum and does not clip again, so the result rebounds slightly
+    /// above the target &#8212; the figure that matters is the measured <see cref="CrestFactorDb"/>,
+    /// not this constant.</para>
+    /// </summary>
+    private const double TargetCrestFactorDb = 8.5;
+
+    private const int CrestFactorPasses = 16;
+
+    /// <summary>
+    /// Pushes the waveform's peak down towards <see cref="TargetCrestFactorDb"/> without moving its
+    /// spectrum. In place; <paramref name="imaginary"/> is scratch, and
+    /// <paramref name="magnitudes"/> is the shape to restore each pass.
+    /// </summary>
+    private static void ReduceCrestFactor(double[] real, double[] imaginary, double[] magnitudes)
+    {
+        int n = real.Length;
+        double target = Math.Pow(10.0, TargetCrestFactorDb / 20.0);
+
+        for (int pass = 0; pass < CrestFactorPasses; pass++)
+        {
+            double sum = 0.0;
+            for (int i = 0; i < n; i++)
+                sum += real[i] * real[i];
+
+            double rms = Math.Sqrt(sum / n);
+            if (!(rms > 0.0)) return;
+
+            double limit = target * rms;
+            bool clipped = false;
+            for (int i = 0; i < n; i++)
+            {
+                if (real[i] > limit)
+                {
+                    real[i] = limit;
+                    clipped = true;
+                }
+                else if (real[i] < -limit)
+                {
+                    real[i] = -limit;
+                    clipped = true;
+                }
+            }
+
+            // Already inside the target: nothing to trade, and another pass would only move phases.
+            if (!clipped) return;
+
+            Array.Clear(imaginary);
+            ForwardTransform(real, imaginary);
+
+            // Keep the clipped waveform's phases, put the asked-for magnitudes back. Scaling by
+            // magnitude/|X| rather than taking an angle: same thing, two multiplies instead of a
+            // trig pair, and a bin the clipping emptied keeps whatever phase it had rather than
+            // becoming a NaN.
+            real[0] = 0.0;
+            imaginary[0] = 0.0;
+
+            for (int k = 1; k < n - k; k++)
+            {
+                double length = Math.Sqrt((real[k] * real[k]) + (imaginary[k] * imaginary[k]));
+                double scale = length > 0.0 ? magnitudes[k] / length : 0.0;
+
+                real[k] *= scale;
+                imaginary[k] *= scale;
+
+                // Conjugate symmetry, which is what makes the inverse transform real again.
+                real[n - k] = real[k];
+                imaginary[n - k] = -imaginary[k];
+            }
+
+            // Nyquist carries no component, exactly as it does in the sequence this started from.
+            if (n % 2 == 0)
+            {
+                real[n / 2] = 0.0;
+                imaginary[n / 2] = 0.0;
+            }
+
+            InverseTransform(real, imaginary);
+        }
+    }
+
+    /// <summary>
+    /// In-place forward DFT, radix-2, of the real signal in <paramref name="real"/> with
+    /// <paramref name="imaginary"/> zeroed. Shares <see cref="Transform"/> with the inverse, so the
+    /// two cannot disagree about anything but the sign of the twiddle and the 1/N.
+    /// </summary>
+    private static void ForwardTransform(double[] real, double[] imaginary) =>
+        Transform(real, imaginary, inverse: false);
+
+    /// <summary>
     /// In-place inverse DFT of a conjugate-symmetric spectrum, radix-2, leaving the real signal in
     /// <paramref name="real"/>.
     ///
@@ -368,7 +486,10 @@ public sealed class PeriodicNoise
     /// runs once per table rather than per record, so none of the backend work that file documents
     /// is worth importing for it.</para>
     /// </summary>
-    private static void InverseTransform(double[] real, double[] imaginary)
+    private static void InverseTransform(double[] real, double[] imaginary) =>
+        Transform(real, imaginary, inverse: true);
+
+    private static void Transform(double[] real, double[] imaginary, bool inverse)
     {
         int n = real.Length;
         if ((n & (n - 1)) != 0)
@@ -389,10 +510,11 @@ public sealed class PeriodicNoise
             }
         }
 
-        // Cooley-Tukey butterflies, with +i in the twiddle: the inverse transform's sign.
+        // Cooley-Tukey butterflies. The only thing that separates the two directions is the sign
+        // of the twiddle here and the 1/N at the end.
         for (int length = 2; length <= n; length <<= 1)
         {
-            double angle = 2.0 * Math.PI / length;
+            double angle = (inverse ? 2.0 : -2.0) * Math.PI / length;
             double wReal = Math.Cos(angle);
             double wImaginary = Math.Sin(angle);
 
@@ -421,8 +543,11 @@ public sealed class PeriodicNoise
             }
         }
 
-        // The 1/N the inverse transform owes; the caller normalises to unit RMS afterwards anyway,
-        // so this is for the sake of the arithmetic meaning what it says rather than for the result.
+        // The 1/N the inverse transform owes. It matters here rather than only being tidy: the
+        // crest-factor passes go forward and back repeatedly, so a scaling that did not cancel would
+        // compound. The forward direction owes nothing.
+        if (!inverse) return;
+
         for (int i = 0; i < n; i++)
         {
             real[i] /= n;

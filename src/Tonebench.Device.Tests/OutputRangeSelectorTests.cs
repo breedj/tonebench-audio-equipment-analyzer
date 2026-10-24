@@ -117,12 +117,11 @@ public class OutputRangeSelectorTests
     /// Gaussian 12 dB.
     ///
     /// <para>It is deterministic, so its peak is a measured property of the table and not a
-    /// probability — and it is not 12 dB. Measured across every period from 8192 to 524288, all three
-    /// sample rates and the whole cut-off range, it runs from <b>11.37 to 14.49 dB</b>, rising with
-    /// the period because more components make a longer tail; 13.05 dB at 65536 points and 48 kHz,
-    /// which is the impedance screen's own territory. The allowance therefore under-read the peak by
-    /// up to 2.5 dB — a quarter of a 10 dB range step and more, enough to park the DAC a rung too low
-    /// and clip a stimulus that nothing then reported.</para>
+    /// probability — and it is not 12 dB. It was 11.37 to 14.49 dB when the phases were simply
+    /// random, which under-read the peak and could park the DAC a rung too low; since the sequence
+    /// has its crest factor optimised it measures <b>8.50 dB</b> at every period, rate and shape,
+    /// which over-reads it by the same kind of margin in the other direction. Either way the
+    /// allowance is the wrong number and the sequence is the right one.</para>
     /// </summary>
     [Fact]
     public void RequiredPeakVolts_PeriodicNoise_AsksTheSequenceForItsOwnCrestFactor()
@@ -144,9 +143,9 @@ public class OutputRangeSelectorTests
             OutputRangeSelector.RequiredPeakVolts(channel, 48000.0),
             precision: 10);
 
-        // The figure this replaced, so the test fails if it goes back to the allowance: the sequence
-        // really does peak above 12 dB, by about a decibel at this length.
-        Assert.True(crestDb > OutputRangeSelector.NoiseCrestFactorDb + 0.5, $"crest was {crestDb}");
+        // The figure this replaced, so the test fails if it goes back to the allowance. The sign of
+        // the difference is not the point — only that the two are far enough apart to matter.
+        Assert.True(Math.Abs(crestDb - OutputRangeSelector.NoiseCrestFactorDb) > 0.5, $"crest was {crestDb}");
 
         // No rate, no table: a caller that cannot know what it will be played at gets the allowance
         // rather than a wrong answer.

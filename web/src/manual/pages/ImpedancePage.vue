@@ -80,8 +80,9 @@ const { showPage } = useManual()
       where a continuous random noise's bins vary record to record and one in ten lands 9 dB down by
       luck. Raise the cut-off to stop the bottom of the band eating the generator's headroom — LIMP
       suggests putting it near the impedance maximum, 20 to 100 Hz for a loudspeaker. It is still
-      noise: the crest factor is about 12 dB and the distribution close to normal, so it buys
-      steadiness rather than level</p>
+      noise: the distribution is close to normal, and its phases are optimised to bring the crest
+      factor down to 8.5 dB &mdash; which is what ARTA does too, and is worth about 4 dB of drive at
+      the same peak.</p>
     <p>
       Pink rather than white because the divider this measurement inverts is noise-limited at the
       bottom of the band, which is exactly where a white stimulus puts the least energy per octave.
@@ -405,14 +406,14 @@ const { showPage } = useManual()
       Two limits are worth knowing, in both directions. Too <em>little</em> drive does not merely
       add scatter, it reads <strong>high</strong>: the same fixture measured 1.07 &Omega; at
       −30 dBV against a settled 1.02 from −20 dBV upward, because noise on the measured ratio
-      inflates the impedance it is inverted into. And pink noise cannot be driven as hard as a
-      chirp: its crest factor is 12.5 dB against the chirp's 3 dB, so it clips the generator about
-      9 dB lower — above roughly <strong>8.5 dBV</strong> at the default span, where a chirp is
-      clean all the way to the 18 dBV maximum. At 12 dBV the recorded stimulus comes back with its
-      crest collapsed to 10.5 dB and a tenth of a percent of its samples pinned at the rail, while
-      the <em>coherence still reads 0.996</em> — so nothing about the measurement itself says the
-      stimulus was clipped, which is why 6 dBV is the default and why the status bar says
-      <strong>generator clipped</strong> when it happens. A loudspeaker is the case for turning all
+      inflates the impedance it is inverted into. And pink noise still cannot be driven quite as
+      hard as a chirp: its crest factor is 8.5 dB against the chirp's 3 dB, so it clips the generator
+      about 5 dB lower — above roughly <strong>12.5 dBV</strong> at the default span, where a chirp
+      is clean all the way to the 18 dBV maximum. (It was 8.5 dBV until the phases were optimised.)
+      What makes that worth watching is that a clipped stimulus leaves no mark on the measurement:
+      driven into the rail the <em>coherence still reads 0.996</em>, so nothing but the status bar's
+      <strong>generator clipped</strong> badge says anything is wrong. The 6 dBV default now sits
+      6 dB clear of it. A loudspeaker is the case for turning all
       of this down: use the stepped sine, and remember that Thiele-Small parameters are
       small-signal figures.
     </p>

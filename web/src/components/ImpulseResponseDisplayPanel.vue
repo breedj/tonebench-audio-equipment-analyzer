@@ -502,7 +502,7 @@ const referenceLabel = computed(() => {
           <select
             v-model="csdWindowMode"
             class="tb-input"
-            title="The classical cumulative-spectral-decay window has a short rise and a long fall, so the front slice reads the impulse at full weight. A Hann window is an ordinary short-time transform, centred on its own slice time — it reads a resonance building up as well as dying away, and smears the impulse across half a window."
+            title="The cumulative-spectral-decay window is ARTA's: a rectangle tapered at both ends, so every sample from the slice's own time to the end of the block counts at full weight — which is what a cumulative spectrum integrates. A Hann window is an ordinary short-time transform, centred on its own slice time — it reads a resonance building up as well as dying away, and smears the impulse across half a window."
           >
             <option v-for="option in CSD_WINDOW_MODES" :key="option.value" :value="option.value">
               {{ option.label }}
@@ -556,7 +556,7 @@ const referenceLabel = computed(() => {
             max="1"
             step="0.02"
             class="tb-input"
-            title="How long the window takes to open. Short keeps the leading edge sharp; too short and the edge itself is a step, whose leakage buries the decay being looked for."
+            title="How long the window takes to open, and to close again at the far end of the block — a Blackman4 taper over each. Short keeps the leading edge sharp; too short and the edge itself is a step, whose leakage buries the decay being looked for."
           />
         </label>
       </template>

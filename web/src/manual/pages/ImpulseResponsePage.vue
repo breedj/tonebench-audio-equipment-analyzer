@@ -185,12 +185,24 @@ const { showPage } = useManual()
       decays perfectly.
     </p>
     <p>
-      <strong>Analysis</strong> picks the window. The classical CSD window has a short rise and a
-      long fall, so the front slice reads the impulse at full weight; the rise stops the leading edge
-      being a step, whose leakage would bury the decay being looked for. <strong>Rise time</strong>
-      sets how long it takes to open. A plain Hann window is an ordinary short-time transform,
-      centred on its own slice time — it reads a resonance building up as well as dying away, at the
-      cost of smearing the impulse across half a window.
+      <strong>Analysis</strong> picks the window. The CSD window is a rectangle with a short taper
+      at each end: everything from the slice's own time to the end of the block counts at full
+      weight, which is what a cumulative spectrum is the transform of, and the tapers are only there
+      to stop either edge being a step, whose leakage would bury the decay being looked for.
+      <strong>Rise time</strong> sets how long each taper lasts. A plain Hann window is an ordinary
+      short-time transform, centred on its own slice time — it reads a resonance building up as well
+      as dying away, at the cost of smearing the impulse across half a window.
+    </p>
+    <p>
+      <strong>Comparing with ARTA.</strong> The window is ARTA's, to the letter, so the same
+      settings mean the same thing — but <strong>FFT length</strong> and <strong>Block shift</strong>
+      are in <em>samples</em> in both programs, and a sample is four times shorter at 192 kHz than at
+      the 48 kHz a sound card usually runs at. ARTA's 256 and 2 are a 5.3 ms window resolving 187 Hz
+      and 2.46 ms of decay; typed in here at 192 kHz they are a 1.3 ms window resolving 750 Hz and
+      0.61 ms of decay, which is a quarter of the picture at the wrong end of the band. Multiply both
+      by four. The other difference is where time zero is: ours is the impulse peak, always, while
+      ARTA's is the cursor, which its manual has you set some way before the peak — so the flat
+      stretch at the back of an ARTA surface is largely the run-up to the impulse rather than decay.
     </p>
 
     <h3>Burst decay</h3>

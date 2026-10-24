@@ -7,11 +7,21 @@ namespace Tonebench.Dsp;
 public enum CsdWindowMode
 {
     /// <summary>
-    /// A short rise and a long fall — the classical cumulative-spectral-decay window. The rise is
-    /// what keeps the leading edge from being a step (a step transforms into a wall of leakage that
-    /// buries the very decay being looked for); the long fall is what stops the far end of the
-    /// block ringing. Its peak sits at the slice's own time, so the front slice reads the impulse at
-    /// full weight.
+    /// ARTA's window, and deliberately its shape rather than one of our own: a <b>rectangle</b>
+    /// carrying a Blackman4 taper over its first and last <c>RiseTimeMs</c>, flat at one in
+    /// between. The flat middle is what makes this Bunton and Small's unit step — every sample from
+    /// the slice's own time to the end of the block counts at full weight, which is what a
+    /// cumulative spectrum integrates — and the tapers are only there to keep each edge from being
+    /// a step, whose leakage would bury the decay being looked for.
+    ///
+    /// <para>It was a short rise and a long cosine fall until 2026-10-24, which is a different
+    /// window and reads a different surface: the sample half way along the block was already 6 dB
+    /// down and the last one was zero, so the window discarded most of the tail the measurement
+    /// exists to show and the direct sound fell away as it slid through the window's own shape. The
+    /// decay <i>rate</i> was unaffected, since that bias is the same in every slice — which is why
+    /// the simulator's bandpass still reads its 1.36 dB per millisecond — but the dynamic range and
+    /// the height of every ridge against the direct sound were the window's as much as the
+    /// DUT's.</para>
     /// </summary>
     Apodizing = 0,
 
@@ -211,9 +221,12 @@ public static class CumulativeSpectralDecay
     }
 
     /// <summary>
-    /// The sliding window, and where its peak sits inside it — which is what a slice's time label
-    /// means. Both modes label a slice by the sample its window weights most, so "3 ms" is the
-    /// spectrum of the response 3 ms after the impulse in either of them.
+    /// The sliding window, and where the sample a slice is labelled with sits inside it.
+    /// <see cref="CsdWindowMode.Apodizing"/> labels a slice by the <b>first sample it weights
+    /// fully</b> — the lower limit of the integral, everything after it counting too — while
+    /// <see cref="CsdWindowMode.Hann"/> labels one by the sample it weights most, its centre. So
+    /// "3 ms" is the spectrum of the response from 3 ms after the impulse in the one, and of the
+    /// response around 3 ms after it in the other.
     /// </summary>
     public static double[] BuildWindow(CsdSettings settings, double sampleRateHz, out int peakOffset)
     {
@@ -227,19 +240,39 @@ public static class CumulativeSpectralDecay
             return window;
         }
 
-        // Rise then fall, both raised cosines, meeting at 1.0. At least one sample of rise and at
-        // most half the block: a rise longer than the fall would be a window that looks further
-        // backwards than forwards, which is the opposite of what a decay analysis is for.
+        // A rectangle with a Blackman4 taper over each end, which is ARTA's apodizing window to the
+        // letter. At least one sample of taper and at most half the block each side: at exactly
+        // half there is no flat part left and the window is a plain Blackman-Harris, which is the
+        // sensible end of the range rather than a special case.
         int rise = Math.Clamp((int)Math.Round(settings.RiseTimeMs * sampleRateHz / 1000.0), 1, length / 2);
 
-        for (int i = 0; i < rise; i++)
-            window[i] = 0.5 * (1.0 - Math.Cos(Math.PI * i / rise));
+        for (int i = 0; i < length; i++)
+            window[i] = 1.0;
 
-        int fall = length - rise;
-        for (int i = rise; i < length; i++)
-            window[i] = 0.5 * (1.0 + Math.Cos(Math.PI * (i - rise) / fall));
+        // The rising half of a (2*rise + 1)-point symmetric Blackman-Harris, so it reaches exactly
+        // one at the first flat sample; mirrored onto the last `rise` samples. The two ranges
+        // cannot overlap, since rise is at most half the block.
+        for (int i = 0; i < rise; i++)
+        {
+            double taper = Blackman4At(i / (2.0 * rise));
+            window[i] = taper;
+            window[length - 1 - i] = taper;
+        }
 
         peakOffset = rise;
         return window;
+    }
+
+    /// <summary>
+    /// The minimum four-term Blackman-Harris at <paramref name="x"/> over [0, 1] — ARTA's
+    /// "Blackman4", the taper its apodizing window applies to each end of the rectangle. Exactly
+    /// 1.0 at the middle, and 6e-5 rather than zero at the ends, which is this window's own
+    /// definition and not a rounding error.
+    /// </summary>
+    private static double Blackman4At(double x)
+    {
+        const double A0 = 0.35875, A1 = 0.48829, A2 = 0.14128, A3 = 0.01168;
+        double t = 2.0 * Math.PI * x;
+        return A0 - (A1 * Math.Cos(t)) + (A2 * Math.Cos(2.0 * t)) - (A3 * Math.Cos(3.0 * t));
     }
 }

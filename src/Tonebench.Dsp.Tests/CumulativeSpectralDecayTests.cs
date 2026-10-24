@@ -38,7 +38,8 @@ public class CumulativeSpectralDecayTests
         var front = surface.Slices[0].LevelDb;
         Assert.All(front, level => Assert.InRange(level, -0.01, 0.01));
 
-        // One block shift past the impulse the apodizing window's rise no longer covers it at all.
+        // The window's leading edge has long since passed the impulse, so the last slice holds
+        // nothing whatever — which is the cliff, and is what a delta has instead of a decay.
         Assert.All(surface.Slices[^1].LevelDb, level => Assert.True(level < -40.0, $"{level} dB"));
     }
 
@@ -152,21 +153,62 @@ public class CumulativeSpectralDecayTests
     }
 
     /// <summary>
-    /// The apodizing window rises to exactly one at the sample the slice is labelled with, and falls
-    /// from there. That equality is what makes the front slice read the impulse at full weight
-    /// rather than at whatever the rise happened to reach.
+    /// ARTA's apodizing window, which is a rectangle with a Blackman4 taper over each end — and the
+    /// flat middle is the whole of it. The window this replaced fell as a raised cosine from the
+    /// slice's own time to zero at the end of the block, so the second half of every block was
+    /// thrown away; a cumulative spectrum is the transform of the response <i>from</i> the slice's
+    /// time onwards, and that is what a flat top integrates.
     /// </summary>
     [Fact]
-    public void BuildWindow_Apodizing_PeaksAtTheSliceTime()
+    public void BuildWindow_Apodizing_IsARectangleTaperedAtBothEnds()
     {
+        const int length = 1024;
         var window = CumulativeSpectralDecay.BuildWindow(
-            Settings(fftLength: 1024, riseMs: 0.5), SampleRateHz, out int peakOffset);
+            Settings(fftLength: length, riseMs: 0.5), SampleRateHz, out int peakOffset);
 
+        // 0.5 ms at 48 kHz, and the slice is labelled by the first sample it weights fully.
         Assert.Equal(24, peakOffset);
         Assert.Equal(1.0, window[peakOffset], 12);
-        Assert.Equal(0.0, window[0], 12);
-        Assert.True(window[peakOffset + 1] < 1.0);
-        Assert.Equal(window.Max(), window[peakOffset], 12);
+        Assert.Equal(1.0, window.Max(), 12);
+
+        // Flat from there to the trailing taper. The regression this is here for is a window that
+        // starts falling at `peakOffset` instead.
+        for (int i = peakOffset; i < length - peakOffset; i++)
+            Assert.Equal(1.0, window[i], 12);
+
+        // Blackman4 ends at 6e-5 rather than at zero, and the two tapers mirror each other.
+        Assert.InRange(window[0], 0.0, 1e-4);
+        for (int i = 0; i < peakOffset; i++)
+            Assert.Equal(window[i], window[length - 1 - i], 12);
+
+        Assert.True(window[1] > window[0], "the taper rises");
+    }
+
+    /// <summary>
+    /// An echo half a block after the impulse is weighted exactly as much as the impulse, because
+    /// the window between its tapers is flat — so the two interfere to a comb with true nulls. It
+    /// is the plainest statement of what the flat top buys: under the decaying window this
+    /// replaced, that echo arrived at 0.52 of its real size and the deepest null in the front slice
+    /// was 10 dB rather than nothing at all.
+    /// </summary>
+    [Fact]
+    public void Compute_WeighsAnEchoInsideTheBlockAsMuchAsTheImpulseItself()
+    {
+        const int peak = 4000;
+        const int fftLength = 512;
+
+        // Half the transform apart, so every odd bin of the comb is an exact null and every even
+        // one is twice the impulse. Both samples land in the flat part of the window.
+        var ir = new double[RecordLength];
+        ir[peak] = 1.0;
+        ir[peak + (fftLength / 2)] = 1.0;
+
+        var surface = CumulativeSpectralDecay.Compute(
+            ir, peak, SampleRateHz, RecordLength / 4, Settings(fftLength: fftLength), Fft);
+
+        var front = surface.Slices[0].LevelDb;
+        Assert.Equal(0.0, front.Max(), 3);
+        Assert.True(front.Min() < -60.0, $"deepest null read {front.Min()} dB");
     }
 
     /// <summary>A Hann slice is centred on its own time, so its peak is half a block in.</summary>

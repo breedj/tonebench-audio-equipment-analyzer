@@ -329,9 +329,12 @@ export interface CsdSlice {
 
 /**
  * A few slices of the cumulative spectral decay the screen draws as a waterfall: the apodizing
- * window of `CumulativeSpectralDecay.BuildWindow` (a `riseMs` raised-cosine rise, then a fall over
- * the rest of `fftLength`) slid to each time in `timesMs`, each slice's spectrum in dB relative to
- * the loudest point of the front slice.
+ * window of `CumulativeSpectralDecay.BuildWindow` — ARTA's, a rectangle carrying a Blackman4 taper
+ * over its first and last `riseMs` — slid to each time in `timesMs`, each slice's spectrum in dB
+ * relative to the loudest point of the front slice.
+ *
+ * <p>The window has to be the server's one sample at a time, or these pages predict a surface the
+ * app does not draw. It was a rise then a long cosine fall in both places until 2026-10-24.</p>
  */
 export function csdSlices(
   dut: Cascade,
@@ -344,10 +347,13 @@ export function csdSlices(
 ): CsdSlice[] {
   const fs = dut.sampleRateHz
   const rise = Math.min(Math.max(Math.round((riseMs * fs) / 1000), 1), fftLength / 2)
-  const window = new Float64Array(fftLength)
-  for (let i = 0; i < rise; i++) window[i] = 0.5 * (1 - Math.cos((Math.PI * i) / rise))
-  const fall = fftLength - rise
-  for (let i = rise; i < fftLength; i++) window[i] = 0.5 * (1 + Math.cos((Math.PI * (i - rise)) / fall))
+  const window = new Float64Array(fftLength).fill(1)
+  for (let i = 0; i < rise; i++) {
+    const x = (Math.PI * i) / rise
+    const taper = 0.35875 - 0.48829 * Math.cos(x) + 0.14128 * Math.cos(2 * x) - 0.01168 * Math.cos(3 * x)
+    window[i] = taper
+    window[fftLength - 1 - i] = taper
+  }
 
   const lastStart = Math.round((Math.max(...timesMs) * fs) / 1000) - rise + fftLength
   const h = dut.impulse(lastStart + 1)

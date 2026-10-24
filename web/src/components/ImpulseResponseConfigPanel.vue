@@ -70,14 +70,15 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
 /**
  * Kept in step with `MeasurementSaveService.DefaultImpulseResponseParametersJson`.
  *
- * <p><b>These are ARTA's, asked for in those terms</b> (Joost, 2026-10-24): Pink PN at a 24 kHz
- * span, four averages. The span is the load-bearing one — it sets the sample rate to 48 kHz, which
- * is where `DEFAULT_CSD_ANALYSIS`'s 256 / 2 / 60 mean exactly what the same four numbers mean in
- * ARTA. Opening wider would leave the decay charts resolving 750 Hz instead of 187.</p>
+ * <p><b>Asked for in these numbers</b> (Joost, 2026-10-24): Pink PN, the widest span, 0.73 Hz bins
+ * and four averages. Note what the span costs the decay charts, which is not visible from here:
+ * every CSD setting is in <em>samples</em>, so at 96 kHz — i.e. a 192 kHz rate — the 256-point
+ * transform `DEFAULT_CSD_ANALYSIS` opens on is a 1.33 ms window resolving 750 Hz, where at 48 kHz
+ * the same number is 5.33 ms and 188 Hz. The panel prints both figures beside the field.</p>
  */
 const form = reactive({
-  frequencySpanHz: 24000 as number,
-  resolutionMultiplier: 1,
+  frequencySpanHz: 96000 as number,
+  resolutionMultiplier: 2,
   /** The level mode and the figure each mode was last set to — see measurements/levelMode.ts. */
   level: createLevelForm({ mode: 'OutputVoltage' }),
   smoothingDenominator: 24,

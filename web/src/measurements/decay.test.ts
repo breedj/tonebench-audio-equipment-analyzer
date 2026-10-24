@@ -14,6 +14,8 @@ import {
   levelTicks,
   levelY,
   linearTicks,
+  csdAchievedSpanMs,
+  csdBlockShiftSamples,
   wallGradientStops,
   logTicks,
   lutColor,
@@ -157,13 +159,26 @@ describe('paletteLut', () => {
     expect([...paletteLut('Jet', true)]).toEqual([...paletteLut('Jet', false)])
   })
 
-  it('maps the top of the range to the top of the table and the bottom to the bottom', () => {
+  /**
+   * The foot of the level scale is held a quarter of the way up the palette — see
+   * PALETTE_FLOOR_FRACTION — so the quiet end of a surface is a readable blue rather than Jet's
+   * near-black navy. The top of the scale is still the top of the palette.
+   */
+  it('maps the top of the range to the top of the table and the bottom to the palette floor', () => {
     expect(levelIndex(0, 0, -40)).toBe(255)
-    expect(levelIndex(-40, 0, -40)).toBe(0)
-    expect(levelIndex(-20, 0, -40)).toBe(128)
+    expect(levelIndex(-40, 0, -40)).toBe(64)
+    expect(levelIndex(-20, 0, -40)).toBe(159)
     // And anything past either end saturates rather than wrapping.
-    expect(levelIndex(-300, 0, -40)).toBe(0)
+    expect(levelIndex(-300, 0, -40)).toBe(64)
     expect(levelIndex(10, 0, -40)).toBe(255)
+  })
+
+  /**
+   * Stated the way it was asked for: on a 0 to -20 dB scale, the foot now reads what -15 dB used to.
+   */
+  it('gives the foot of the scale the colour that sat three quarters of the way down it', () => {
+    const wasAtMinus15 = Math.round(((-15 - -20) / 20) * 255)
+    expect(levelIndex(-20, 0, -20)).toBe(wasAtMinus15)
   })
 })
 
@@ -180,7 +195,7 @@ describe('wallGradientStops', () => {
     expect(stops[0].offset).toBe(0)
     expect(stops[0].index).toBe(255)
     expect(stops[stops.length - 1].offset).toBe(1)
-    expect(stops[stops.length - 1].index).toBe(0)
+    expect(stops[stops.length - 1].index).toBe(levelIndex(-30, 0, -30))
   })
 
   it('is the same ramp the curves and the key are coloured from', () => {
@@ -199,33 +214,59 @@ describe('wallGradientStops', () => {
       expect(stops[i].offset).toBeGreaterThan(stops[i - 1].offset)
       expect(stops[i].index).toBeLessThan(stops[i - 1].index)
     }
+    // And it never reaches the quarter of the palette the body fill keeps for itself.
+    expect(stops[stops.length - 1].index).toBeGreaterThan(0)
+  })
+})
+
+describe('csdBlockShiftSamples', () => {
+  /**
+   * The point of saying the span in milliseconds: the same setting is the same measurement at every
+   * rate, where ARTA's "shift 2" is 2.46 ms off a 48 kHz sound card and 0.61 ms at 192.
+   */
+  it('buys the same span at every sample rate', () => {
+    for (const rate of [48000, 96000, 192000]) {
+      const shift = csdBlockShiftSamples(2.5, 60, rate)
+      expect(csdSpanMs(shift, 60, rate)).toBeCloseTo(2.46, 1)
+    }
+  })
+
+  it("lands on ARTA's own shift at ARTA's own rate", () => {
+    expect(csdBlockShiftSamples(2.5, 60, 48000)).toBe(2)
+    expect(csdBlockShiftSamples(2.5, 60, 192000)).toBe(8)
+  })
+
+  it('steps across the span rather than past it, and never stops', () => {
+    // Sixty slices are fifty-nine steps: the first sits at the impulse, which is time zero.
+    expect(csdBlockShiftSamples(59 / 48, 60, 48000)).toBe(1)
+    // A span too short to buy even one sample still advances, or every slice would be the same one.
+    expect(csdBlockShiftSamples(0, 60, 48000)).toBe(1)
+    expect(csdBlockShiftSamples(2.5, 60, 0)).toBe(1)
   })
 })
 
 describe('DEFAULT_CSD_ANALYSIS', () => {
-  it("is ARTA's own four numbers", () => {
+  it("is ARTA's analysis, in units that do not move with the sample rate", () => {
     expect(DEFAULT_CSD_ANALYSIS).toEqual({
-      fftLength: 256,
-      blockShiftSamples: 2,
-      blockCount: 60,
+      fftLength: 1024,
+      spanMs: 2.5,
+      slices: 60,
       windowMode: 'Apodizing',
       riseTimeMs: 0.2,
     })
   })
 
   /**
-   * What makes those numbers the right ones to write down: the impulse screen opens at a 24 kHz
-   * span, so they mean at 48 kHz exactly what they mean in ARTA — a 5.33 ms window resolving
-   * 187.5 Hz, over 2.46 ms of decay. The span default is the other half of this and lives in
-   * `ImpulseResponseConfigPanel`.
+   * ARTA's defaults off a 48 kHz sound card are a 5.33 ms window resolving 187.5 Hz over 2.46 ms of
+   * decay. A new impulse measurement here opens at a 96 kHz span — a 192 kHz rate — and reads the
+   * same three figures, which is the whole reason the span is written down in milliseconds and the
+   * transform length is 1024 rather than ARTA's 256.
    */
-  it('is ARTA at the sample rate a new measurement opens on', () => {
-    const rate = 48000
+  it('reads like ARTA at the rate a new measurement opens on', () => {
+    const rate = 192000
     expect((DEFAULT_CSD_ANALYSIS.fftLength / rate) * 1000).toBeCloseTo(5.33, 2)
     expect(rate / DEFAULT_CSD_ANALYSIS.fftLength).toBeCloseTo(187.5, 1)
-    expect(
-      csdSpanMs(DEFAULT_CSD_ANALYSIS.blockShiftSamples, DEFAULT_CSD_ANALYSIS.blockCount, rate),
-    ).toBeCloseTo(2.46, 2)
+    expect(csdAchievedSpanMs(DEFAULT_CSD_ANALYSIS, rate)).toBeCloseTo(2.46, 2)
   })
 })
 

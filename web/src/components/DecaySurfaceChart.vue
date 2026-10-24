@@ -25,6 +25,7 @@ import {
   orientSurface,
   paletteLut,
   pickSurfacePoint,
+  paletteIndex,
   sliceOrigin,
   wallGradientStops,
 } from '../measurements/decay'
@@ -630,7 +631,7 @@ function drawLevelAxis(
   const lut = paletteLut(props.palette, paintDark)
   const rows = Math.max(1, Math.round(height))
   for (let row = 0; row < rows; row++) {
-    ctx.fillStyle = lutColor(lut, Math.round(((rows - 1 - row) / (rows - 1 || 1)) * 255))
+    ctx.fillStyle = lutColor(lut, paletteIndex((rows - 1 - row) / (rows - 1 || 1)))
     ctx.fillRect(keyRight - keyWidth, top + row, keyWidth, 1)
   }
   ctx.strokeStyle = colors.grid

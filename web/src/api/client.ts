@@ -1730,6 +1730,9 @@ export interface ImpulseResponseParameters {
   chartDecayRangeDb?: number | null
   /** The cumulative spectral decay's analysis. Display settings, but a surface is unreadable without them. */
   chartCsdFftLength?: number | null
+  /** How far past the impulse the surface reaches, in ms, and how many slices it is cut into. */
+  chartCsdSpanMs?: number | null
+  chartCsdSlices?: number | null
   chartCsdBlockShiftSamples?: number | null
   chartCsdBlockCount?: number | null
   chartCsdWindowMode?: CsdWindowModeName | null

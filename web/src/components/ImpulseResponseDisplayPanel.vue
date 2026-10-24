@@ -14,7 +14,14 @@ import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useMeasurements } from '../composables/useMeasurements'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
-import { CSD_FFT_LENGTHS, csdSpanMs, describeCsdFftLength, PALETTE_NAMES } from '../measurements/decay'
+import {
+  CSD_FFT_LENGTHS,
+  DEFAULT_CSD_ANALYSIS,
+  csdAchievedSpanMs,
+  csdBlockShiftSamples,
+  describeCsdFftLength,
+  PALETTE_NAMES,
+} from '../measurements/decay'
 import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -61,8 +68,8 @@ const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true 
 const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
-const csdBlockShiftSamples = defineModel<number>('csdBlockShiftSamples', { required: true })
-const csdBlockCount = defineModel<number>('csdBlockCount', { required: true })
+const csdSpanMs = defineModel<number>('csdSpanMs', { required: true })
+const csdSlices = defineModel<number>('csdSlices', { required: true })
 const csdWindowMode = defineModel<CsdWindowModeName>('csdWindowMode', { required: true })
 const csdRiseTimeMs = defineModel<number>('csdRiseTimeMs', { required: true })
 const burstMaxPeriods = defineModel<number>('burstMaxPeriods', { required: true })
@@ -121,10 +128,18 @@ const sampleRateHz = computed(() => status.value?.sampleRateHz ?? 0)
 /** What the transform length means here — the two numbers the setting is actually about. */
 const csdWindowLabel = computed(() => describeCsdFftLength(csdFftLength.value, sampleRateHz.value))
 
-/** How far past the impulse the slices reach. The one number that decides whether the run is refused. */
-const csdSpanLabel = computed(() =>
-  `${csdSpanMs(csdBlockShiftSamples.value, csdBlockCount.value, sampleRateHz.value).toFixed(2)} ms of decay`,
-)
+/**
+ * What the span asked for really comes to, and the shift it took to get there. The shift is a whole
+ * number of samples, so 2.5 ms at 192 kHz is 8 samples and really 2.46 ms — printing the figure the
+ * chart will actually draw is the same courtesy the transform length gets beside it.
+ */
+const csdSpanLabel = computed(() => {
+  const rate = sampleRateHz.value
+  if (!(rate > 0)) return `${csdSlices.value} slices`
+
+  const shift = csdBlockShiftSamples(csdSpanMs.value, csdSlices.value, rate)
+  return `${csdAchievedSpanMs({ ...DEFAULT_CSD_ANALYSIS, spanMs: csdSpanMs.value, slices: csdSlices.value }, rate).toFixed(2)} ms, ${shift} ${shift === 1 ? 'sample' : 'samples'} per slice`
+})
 
 /**
  * Fits the time axis to the gate that was actually measured, not to the panel's current form — the
@@ -523,25 +538,27 @@ const referenceLabel = computed(() => {
 
         <div class="grid grid-cols-2 gap-2.5">
           <label class="tb-field">
-            Block shift
+            Decay span (ms)
             <input
-              v-model.number="csdBlockShiftSamples"
+              v-model.number="csdSpanMs"
               type="number"
-              min="1"
-              step="1"
+              min="0.05"
+              max="500"
+              step="0.5"
               class="tb-input"
-              title="Samples between one slice and the next — the surface's time step."
+              title="How far past the impulse the surface reaches. In milliseconds rather than in samples, so it means the same measurement at every sample rate — the step between slices is worked out from it and printed below."
             />
           </label>
           <label class="tb-field">
-            Max blocks
+            Slices
             <input
-              v-model.number="csdBlockCount"
+              v-model.number="csdSlices"
               type="number"
               min="2"
               max="200"
               step="1"
               class="tb-input"
+              title="How many spectra to cut that span into. More is a finer picture of the decay and a denser chart; ARTA's own advice is that too coarse a step obscures high-frequency resonances."
             />
           </label>
         </div>

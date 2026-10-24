@@ -162,6 +162,7 @@ import {
   BURST_FREQUENCY_COLUMNS,
   DECAY_DISPLAY_COLUMNS,
   DEFAULT_CSD_ANALYSIS,
+  csdBlockShiftSamples,
 } from './measurements/decay'
 import { SWEEP_POINTS_KEY, useSweep } from './composables/useSweep'
 import { useImdSweep } from './composables/useImdSweep'
@@ -3422,8 +3423,10 @@ const impulseDelayTopUs = ref(DEFAULT_IMPULSE_DISPLAY.delayTopUs)
 const impulseDelayBottomUs = ref(DEFAULT_IMPULSE_DISPLAY.delayBottomUs)
 const impulseTimeFromMs = ref(-1)
 const impulseTimeToMs = ref(20)
-const impulseFreqFromHz = ref(20)
-const impulseFreqToHz = ref(20000)
+// The decay charts' own frequency window, and the one place it starts from — kept in step with
+// DEFAULT_IMPULSE_DISPLAY, which is what a stored measurement falls back to.
+const impulseFreqFromHz = ref(DEFAULT_IMPULSE_DISPLAY.freqFromHz)
+const impulseFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.freqToHz)
 
 // The two decay surfaces. How they are drawn is shared between them; what is analysed is not.
 const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
@@ -3433,8 +3436,8 @@ const impulseDecayRangeDb = ref(30)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
 const impulseCsdFftLength = ref(initialCsd.fftLength)
-const impulseCsdBlockShiftSamples = ref(initialCsd.blockShiftSamples)
-const impulseCsdBlockCount = ref(initialCsd.blockCount)
+const impulseCsdSpanMs = ref(initialCsd.spanMs)
+const impulseCsdSlices = ref(initialCsd.slices)
 const impulseCsdWindowMode = ref<import('./api/client').CsdWindowModeName>(initialCsd.windowMode)
 const impulseCsdRiseTimeMs = ref(initialCsd.riseTimeMs)
 
@@ -3499,8 +3502,8 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
       fftLength: impulseCsdFftLength.value,
-      blockShiftSamples: impulseCsdBlockShiftSamples.value,
-      blockCount: impulseCsdBlockCount.value,
+      spanMs: impulseCsdSpanMs.value,
+      slices: impulseCsdSlices.value,
       windowMode: impulseCsdWindowMode.value,
       riseTimeMs: impulseCsdRiseTimeMs.value,
     },
@@ -3553,11 +3556,9 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayPalette.value = display.decayPalette
   impulseDecayColoredCurves.value = display.decayColoredCurves
   impulseDecayRangeDb.value = display.decayRangeDb
-  // A stored analysis is a deliberate choice, so it also stops the sample-rate watcher above from
-  // replacing it: the values no longer match the previous rate's defaults.
   impulseCsdFftLength.value = display.csd.fftLength
-  impulseCsdBlockShiftSamples.value = display.csd.blockShiftSamples
-  impulseCsdBlockCount.value = display.csd.blockCount
+  impulseCsdSpanMs.value = display.csd.spanMs
+  impulseCsdSlices.value = display.csd.slices
   impulseCsdWindowMode.value = display.csd.windowMode
   impulseCsdRiseTimeMs.value = display.csd.riseTimeMs
   impulseBurstMaxPeriods.value = display.burstMaxPeriods
@@ -3587,7 +3588,7 @@ watch(
     impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayRangeDb,
-    impulseCsdFftLength, impulseCsdBlockShiftSamples, impulseCsdBlockCount, impulseCsdWindowMode,
+    impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
   () => {
@@ -3626,10 +3627,16 @@ function requestImpulseDecay() {
   impulseDecayTimer = setTimeout(() => {
     impulseDecayTimer = null
     if (isCsd) {
+      // The server still takes a shift in samples, which is what the transform needs; the span in
+      // milliseconds is what the user turns. See csdBlockShiftSamples.
       const csdRequest = {
         fftLength: impulseCsdFftLength.value,
-        blockShiftSamples: impulseCsdBlockShiftSamples.value,
-        blockCount: impulseCsdBlockCount.value,
+        blockShiftSamples: csdBlockShiftSamples(
+          impulseCsdSpanMs.value,
+          impulseCsdSlices.value,
+          impulseStatus.value?.sampleRateHz ?? 0,
+        ),
+        blockCount: impulseCsdSlices.value,
         windowMode: impulseCsdWindowMode.value,
         riseTimeMs: impulseCsdRiseTimeMs.value,
         lowHz: impulseFreqFromHz.value,
@@ -3662,8 +3669,8 @@ watch(
     impulseFreqFromHz.value,
     impulseFreqToHz.value,
     impulseCsdFftLength.value,
-    impulseCsdBlockShiftSamples.value,
-    impulseCsdBlockCount.value,
+    impulseCsdSpanMs.value,
+    impulseCsdSlices.value,
     impulseCsdWindowMode.value,
     impulseCsdRiseTimeMs.value,
     impulseBurstMaxPeriods.value,
@@ -3765,8 +3772,8 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayColoredCurves: impulseDecayColoredCurves.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
-      chartCsdBlockShiftSamples: impulseCsdBlockShiftSamples.value,
-      chartCsdBlockCount: impulseCsdBlockCount.value,
+      chartCsdSpanMs: impulseCsdSpanMs.value,
+      chartCsdSlices: impulseCsdSlices.value,
       chartCsdWindowMode: impulseCsdWindowMode.value,
       chartCsdRiseTimeMs: impulseCsdRiseTimeMs.value,
       chartBurstMaxPeriods: impulseBurstMaxPeriods.value,
@@ -4647,8 +4654,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-colored-curves="impulseDecayColoredCurves"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"
-                  v-model:csd-block-shift-samples="impulseCsdBlockShiftSamples"
-                  v-model:csd-block-count="impulseCsdBlockCount"
+                  v-model:csd-span-ms="impulseCsdSpanMs"
+                  v-model:csd-slices="impulseCsdSlices"
                   v-model:csd-window-mode="impulseCsdWindowMode"
                   v-model:csd-rise-time-ms="impulseCsdRiseTimeMs"
                   v-model:burst-max-periods="impulseBurstMaxPeriods"

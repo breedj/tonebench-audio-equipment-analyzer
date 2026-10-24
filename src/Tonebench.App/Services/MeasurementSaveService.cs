@@ -280,11 +280,11 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public string DefaultImpulseResponseParametersJson() =>
         JsonSerializer.Serialize(new ImpulseResponseParameters(
-            // ARTA's: pink noise at a 24 kHz span and four averages. The span is the one that
-            // matters beyond taste — it puts the sample rate at 48 kHz, where the decay charts'
-            // own defaults (256 / 2 / 60) are ARTA's numbers meaning ARTA's milliseconds.
-            FrequencySpanHz: 24000.0,
-            ResolutionMultiplier: 1,
+            // Pink noise, the widest span, 0.73 Hz bins and four averages. Kept in step with
+            // ImpulseResponseConfigPanel.vue, which carries the note about what the span means for
+            // the decay charts' own defaults.
+            FrequencySpanHz: 96000.0,
+            ResolutionMultiplier: 2,
             LevelMode: nameof(ThdSweepLevelMode.OutputVoltage),
             LevelValue: 0.0,
             LevelUnit: nameof(ThdSweepLevelUnit.Dbv),

@@ -7,7 +7,7 @@ import type {
   ResponseDelayView,
 } from '../api/client'
 import { isDelayView } from '../response/delayAxis'
-import { DEFAULT_CSD_ANALYSIS, type CsdAnalysis } from './decay'
+import { DEFAULT_CSD_ANALYSIS, csdSpanMs, type CsdAnalysis } from './decay'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -83,7 +83,9 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     delayTopUs: 1000,
     delayBottomUs: -1000,
     freqFromHz: 20,
-    freqToHz: 20000,
+    // The whole span a 96 kHz measurement covers, not the audio band: the decay charts are the ones
+    // read on this screen, and clipping them at 20 kHz hides the top two thirds of what was measured.
+    freqToHz: 96000,
     decayMode: 'Waterfall',
     decayPalette: 'Jet',
     decayColoredCurves: true,
@@ -139,8 +141,18 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartDecayColoredCurves === 'boolean') display.decayColoredCurves = stored.chartDecayColoredCurves
   if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0) display.decayRangeDb = stored.chartDecayRangeDb
   if (typeof stored.chartCsdFftLength === 'number') display.csd.fftLength = stored.chartCsdFftLength
-  if (typeof stored.chartCsdBlockShiftSamples === 'number') display.csd.blockShiftSamples = stored.chartCsdBlockShiftSamples
-  if (typeof stored.chartCsdBlockCount === 'number') display.csd.blockCount = stored.chartCsdBlockCount
+  // The span and the slice count, or — for a type stored before the controls were said in
+  // milliseconds — the shift and block count they replaced, converted at that measurement's own
+  // rate. The rate is the stored span doubled, which is where every other reader of these params
+  // gets it from.
+  if (typeof stored.chartCsdSlices === 'number') display.csd.slices = stored.chartCsdSlices
+  else if (typeof stored.chartCsdBlockCount === 'number') display.csd.slices = stored.chartCsdBlockCount
+
+  if (typeof stored.chartCsdSpanMs === 'number') {
+    display.csd.spanMs = stored.chartCsdSpanMs
+  } else if (typeof stored.chartCsdBlockShiftSamples === 'number' && typeof stored.frequencySpanHz === 'number') {
+    display.csd.spanMs = csdSpanMs(stored.chartCsdBlockShiftSamples, display.csd.slices, stored.frequencySpanHz * 2)
+  }
   if (stored.chartCsdWindowMode) display.csd.windowMode = stored.chartCsdWindowMode
   if (typeof stored.chartCsdRiseTimeMs === 'number') display.csd.riseTimeMs = stored.chartCsdRiseTimeMs
   if (typeof stored.chartBurstMaxPeriods === 'number') display.burstMaxPeriods = stored.chartBurstMaxPeriods

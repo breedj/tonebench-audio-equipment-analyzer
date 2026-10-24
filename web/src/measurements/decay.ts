@@ -226,16 +226,42 @@ export function wallGradientStops(steps = 32): { offset: number; index: number }
   const stops: { offset: number; index: number }[] = []
   for (let i = 0; i <= steps; i++) {
     const offset = i / steps
-    stops.push({ offset, index: Math.round((1 - offset) * (LUT_SIZE - 1)) })
+    stops.push({ offset, index: paletteIndex(1 - offset) })
   }
 
   return stops
 }
 
+/**
+ * How much of the palette the <em>bottom</em> of the level scale is held above: the foot of the
+ * scale reads the colour that used to sit a quarter of the way up it.
+ *
+ * <p>Asked for because the floor was too dark to read (Joost, 2026-10-24) — Jet's own foot is a
+ * near-black navy, and a surface whose whole quiet half is painted in it loses the shape of what is
+ * decaying. Compressing the ramp instead of brightening the palette keeps every colour the palette
+ * already had, in the same order; it is the <em>mapping</em> from level to colour that is squeezed
+ * into the top three quarters, which is the one place all three readers of it agree.</p>
+ *
+ * <p>The quarter the levels no longer reach is not wasted: <c>DecaySurfaceChart</c>'s body fill is
+ * <c>lutColor(lut, 0)</c> and stays the true floor, which is what hides the slices behind each
+ * curve. Darker than anything drawn on it is exactly what that fill wants to be.</p>
+ */
+export const PALETTE_FLOOR_FRACTION = 0.25
+
+/**
+ * The lookup index a position on the level scale maps to — 0 at the foot of the scale, 1 at the top.
+ * Every path from a level to a colour goes through here: the curves, the sonogram, the trailing
+ * wall and the key beside them, which is what stops any of them disagreeing about what a colour
+ * means.
+ */
+export function paletteIndex(fraction: number): number {
+  const f = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction
+  return Math.round((PALETTE_FLOOR_FRACTION + (1 - PALETTE_FLOOR_FRACTION) * f) * (LUT_SIZE - 1))
+}
+
 export function levelIndex(levelDb: number, topDb: number, bottomDb: number): number {
   const span = topDb - bottomDb || 1
-  const i = Math.round(((levelDb - bottomDb) / span) * (LUT_SIZE - 1))
-  return i < 0 ? 0 : i > LUT_SIZE - 1 ? LUT_SIZE - 1 : i
+  return paletteIndex((levelDb - bottomDb) / span)
 }
 
 /** The transform lengths the panel offers, as powers of two. */
@@ -261,28 +287,60 @@ export function csdSpanMs(blockShiftSamples: number, blockCount: number, sampleR
 
 export interface CsdAnalysis {
   fftLength: number
-  blockShiftSamples: number
-  blockCount: number
+  /**
+   * How far past the impulse the surface reaches, in milliseconds — and the setting the user turns,
+   * where it used to be the block shift in samples.
+   *
+   * <p>A shift in samples means four different things at the three sample rates, which is the trap
+   * every CSD setting carries: ARTA's 2 samples is 2.46 ms of decay off a 48 kHz sound card and
+   * 0.61 ms here at 192. A span in milliseconds is the same measurement at any rate, and it is what
+   * a reader of the chart actually wants to say. The shift is derived from it — see
+   * <c>csdBlockShiftSamples</c> — and quantised to a whole sample, so the span that comes out is
+   * near the one asked for rather than exactly it.</p>
+   */
+  spanMs: number
+  /** How many slices to cut that span into. The shift falls out of the two. */
+  slices: number
   windowMode: CsdWindowModeName
   riseTimeMs: number
 }
 
 /**
- * **ARTA's own defaults**, asked for in those numbers (Joost, 2026-10-24) so that a new measurement
- * opens on the same analysis ARTA does and the two surfaces can be put side by side.
+ * The block shift a span and a slice count come to, in whole samples and at least one.
  *
- * <p>They were derived from the sample rate until then, on the reasoning that every one of these
- * settings is in <b>samples</b>: 256 points is 5.3 ms at 48 kHz and 1.3 ms at 192, which is the
- * difference between resolving 188 Hz and resolving 750 Hz. That reasoning still holds, and the
- * answer to it here is the <em>span</em> default rather than a sliding transform length — a new
- * impulse measurement opens at a 24 kHz span, i.e. 48 kHz, where these numbers are exactly ARTA's
- * 5.33 ms window, 187.5 Hz and 2.46 ms of decay. Widen the span and they are not rescaled: the
- * panel prints what the length means in ms and Hz, and the chart says what it cannot resolve.</p>
+ * <p>There are <c>slices - 1</c> steps across the span, not <c>slices</c>: the first slice sits at
+ * the impulse itself, which is time zero rather than one step in.</p>
+ */
+export function csdBlockShiftSamples(spanMs: number, slices: number, sampleRateHz: number): number {
+  const steps = Math.max(1, Math.round(slices) - 1)
+  const samples = Math.round(((spanMs / 1000) * sampleRateHz) / steps)
+  return Math.max(1, Number.isFinite(samples) ? samples : 1)
+}
+
+/**
+ * The span that shift actually buys, which is what the panel prints: the shift is a whole number of
+ * samples, so a span of 2.5 ms at 192 kHz is really 2.458.
+ */
+export function csdAchievedSpanMs(analysis: CsdAnalysis, sampleRateHz: number): number {
+  return csdSpanMs(csdBlockShiftSamples(analysis.spanMs, analysis.slices, sampleRateHz), analysis.slices, sampleRateHz)
+}
+
+/**
+ * **ARTA's own analysis, said in units that do not move with the sample rate** (Joost,
+ * 2026-10-24), so that a new measurement opens on what ARTA opens on and the two surfaces can be
+ * put side by side.
+ *
+ * <p>ARTA's four numbers are 256 points, a shift of 2 and 60 blocks off a 48 kHz sound card: a
+ * 5.33 ms window resolving 187.5 Hz over 2.46 ms of decay. Two of those are in <b>samples</b> and
+ * mean something else at another rate, so what is written down here is the pair that does not —
+ * 2.5 ms of span over 60 slices, which quantises to ARTA's own 2.458 ms at 48 <i>and</i> at
+ * 192 kHz. The transform length is still in samples because it has to be a power of two, and 1024
+ * is the one that gives 5.33 ms and 187.5 Hz at the 192 kHz an impulse measurement now opens at.</p>
  */
 export const DEFAULT_CSD_ANALYSIS: Readonly<CsdAnalysis> = Object.freeze({
-  fftLength: 256,
-  blockShiftSamples: 2,
-  blockCount: 60,
+  fftLength: 1024,
+  spanMs: 2.5,
+  slices: 60,
   windowMode: 'Apodizing',
   riseTimeMs: 0.2,
 })

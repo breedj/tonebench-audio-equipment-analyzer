@@ -183,11 +183,13 @@ const { showPage } = useManual()
       <strong>FFT length</strong> is the whole frequency resolution — the panel prints what it means
       in milliseconds and hertz at the current sample rate, because a length in samples means
       different things at 48 and 192 kHz. It is the one real trade here: a longer transform reaches
-      lower and blurs the decay it is being used to look at over its own length. <strong>Block
-      shift</strong> and <strong>Max blocks</strong> set the time step and how far back the surface
-      goes; the panel prints the total. Ask for more decay than the record holds and the run is
-      refused rather than answered — past the record there is nothing but the gate, and the gate
-      decays perfectly.
+      lower and blurs the decay it is being used to look at over its own length. <strong>Decay
+      span</strong> is how far past the impulse the surface reaches and <strong>Slices</strong> is
+      how many spectra it is cut into; the step between slices falls out of the two, and the panel
+      prints both the span you will actually get and the step in samples it took. The span is in
+      milliseconds rather than samples on purpose, so the same setting is the same measurement at
+      every sample rate. Ask for more decay than the record holds and the run is refused rather than
+      answered — past the record there is nothing but the gate, and the gate decays perfectly.
     </p>
     <p>
       <strong>Analysis</strong> picks the window. The CSD window is a rectangle with a short taper
@@ -208,15 +210,18 @@ const { showPage } = useManual()
       and speech signals, and neither is shown for White PN.
     </p>
     <p>
-      <strong>Comparing with ARTA.</strong> The window is ARTA's, to the letter, so the same
-      settings mean the same thing — but <strong>FFT length</strong> and <strong>Block shift</strong>
-      are in <em>samples</em> in both programs, and a sample is four times shorter at 192 kHz than at
-      the 48 kHz a sound card usually runs at. ARTA's 256 and 2 are a 5.3 ms window resolving 187 Hz
-      and 2.46 ms of decay; typed in here at 192 kHz they are a 1.3 ms window resolving 750 Hz and
-      0.61 ms of decay, which is a quarter of the picture at the wrong end of the band. Multiply both
-      by four. The other difference is where time zero is: ours is the impulse peak, always, while
-      ARTA's is the cursor, which its manual has you set some way before the peak — so the flat
-      stretch at the back of an ARTA surface is largely the run-up to the impulse rather than decay.
+      <strong>Comparing with ARTA.</strong> The window is ARTA's, to the letter, and so is what a
+      new measurement opens on — a 5.33 ms window resolving 188 Hz over 2.46 ms of decay, which is
+      what ARTA's own 256 / 2 / 60 come to off a 48 kHz sound card. The numbers in the boxes differ
+      because two of ARTA's are in <em>samples</em> and a sample is four times shorter at 192 kHz:
+      its shift of 2 is this screen's 2.5 ms span, and its 256-point transform is 1024 here. Type
+      ARTA's own figures in at 192 kHz and you get a 1.3 ms window resolving 750 Hz — a quarter of
+      the picture at the wrong end of the band.
+    </p>
+    <p>
+      The other difference is where time zero is: ours is the impulse peak, always, while ARTA's is
+      the cursor, which its manual has you set some way before the peak — so the flat stretch at the
+      back of an ARTA surface is largely the run-up to the impulse rather than decay.
     </p>
 
     <h3>Burst decay</h3>

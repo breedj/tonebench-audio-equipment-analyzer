@@ -2293,6 +2293,18 @@ public sealed record ImpulseResponseParameters(
     /// a record already captured, and changing one redraws rather than re-measures. Stored all the
     /// same, because a surface is unreadable without knowing which analysis produced it.</summary>
     int? ChartCsdFftLength = null,
+    /// <summary>
+    /// How far past the impulse the decay surface reaches, in milliseconds, and how many slices it
+    /// is cut into — the pair the panel offers since 2026-10-24.
+    ///
+    /// <para>The two below are what they replaced: a block shift in <b>samples</b> and a block
+    /// count. A shift in samples is a different measurement at every rate, which is the trap every
+    /// CSD setting carries, so a stored type keeps the span instead and the shift is derived from
+    /// it at the rate the measurement runs at. Both are read on the way in — a type stored before
+    /// this converts its shift at its own sample rate — and only the new pair is written.</para>
+    /// </summary>
+    double? ChartCsdSpanMs = null,
+    int? ChartCsdSlices = null,
     int? ChartCsdBlockShiftSamples = null,
     int? ChartCsdBlockCount = null,
     string? ChartCsdWindowMode = null,

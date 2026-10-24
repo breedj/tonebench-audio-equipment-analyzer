@@ -7,7 +7,7 @@ import type {
   ResponseDelayView,
 } from '../api/client'
 import { isDelayView } from '../response/delayAxis'
-import { defaultCsdAnalysis, type CsdAnalysis } from './decay'
+import { DEFAULT_CSD_ANALYSIS, type CsdAnalysis } from './decay'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -58,10 +58,10 @@ export interface ImpulseDisplay {
 
 /**
  * What a fresh impulse measurement shows before anything is stored — the literals App.vue starts
- * from. The CSD analysis follows the sample rate (its settings are in samples), so the rate the
- * result was taken at is the one argument.
+ * from. It took the sample rate until 2026-10-24, when the CSD analysis stopped being derived from
+ * it; see DEFAULT_CSD_ANALYSIS.
  */
-export function defaultImpulseDisplay(sampleRateHz: number): ImpulseDisplay {
+export function defaultImpulseDisplay(): ImpulseDisplay {
   return {
     annotations: [],
     normalised: false,
@@ -88,15 +88,15 @@ export function defaultImpulseDisplay(sampleRateHz: number): ImpulseDisplay {
     decayPalette: 'Jet',
     decayColoredCurves: true,
     decayRangeDb: 30,
-    csd: defaultCsdAnalysis(sampleRateHz),
+    csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,
     burstPointsPerPeriod: 8,
     burstResolution: 'PreferFrequency',
   }
 }
 
-/** For callers that have no rate to hand — the 48 kHz defaults App.vue itself starts from. */
-export const DEFAULT_IMPULSE_DISPLAY: Readonly<ImpulseDisplay> = Object.freeze(defaultImpulseDisplay(48000))
+/** The same thing as a shared constant, for callers with nothing of their own to start from. */
+export const DEFAULT_IMPULSE_DISPLAY: Readonly<ImpulseDisplay> = Object.freeze(defaultImpulseDisplay())
 
 /** The display state an impulse type's `params_json` restores, over `base`; guarded field by field like the others. */
 export function impulseDisplayFromParams(

@@ -207,6 +207,31 @@ export function levelTicks(rangeDb: number): number[] {
 }
 
 /** Index into a palette LUT for a level, clamped to the window. */
+/**
+ * The colour stops of the trailing wall's gradient, from the top of the level axis to the foot of
+ * it — so the wall reads like the key beside it, red at the top and blue at the bottom.
+ *
+ * <p><b>The direction is the whole of this.</b> The wall used to be painted by hanging each slice's
+ * own colour straight down from its curve's end, which gradates it along <i>time</i>: red at the
+ * back where the response is loud, blue at the front where it has decayed. That is a second,
+ * contradictory key on the same picture, and it was reported as exactly that. The wall is the side
+ * face of the box, and a point on it has a level — the colour at any height is the colour of the
+ * level that height stands for, which puts the iso-colour bands parallel to the depth axis, as
+ * ARTA draws them.</p>
+ *
+ * @param steps How many stops to sample the palette at. Enough that the eye cannot find the joins,
+ * and few enough that a quad per slice costs nothing to build.
+ */
+export function wallGradientStops(steps = 32): { offset: number; index: number }[] {
+  const stops: { offset: number; index: number }[] = []
+  for (let i = 0; i <= steps; i++) {
+    const offset = i / steps
+    stops.push({ offset, index: Math.round((1 - offset) * (LUT_SIZE - 1)) })
+  }
+
+  return stops
+}
+
 export function levelIndex(levelDb: number, topDb: number, bottomDb: number): number {
   const span = topDb - bottomDb || 1
   const i = Math.round(((levelDb - bottomDb) / span) * (LUT_SIZE - 1))
@@ -243,28 +268,24 @@ export interface CsdAnalysis {
 }
 
 /**
- * Defaults derived from the sample rate rather than fixed, because every one of these settings is
- * in **samples** and a sample is four times shorter at 192 kHz than at 48. A fixed 256-point
- * transform is 5.3 ms at 48 kHz and 1.3 ms at 192 — the difference between resolving 188 Hz and
- * resolving 750 Hz, which is the difference between a usable chart and an empty one.
+ * **ARTA's own defaults**, asked for in those numbers (Joost, 2026-10-24) so that a new measurement
+ * opens on the same analysis ARTA does and the two surfaces can be put side by side.
  *
- * <p>The window lands near 5 ms and the stack spans about 5 ms after the impulse: long enough to
- * show a cabinet or driver resonance ringing, short enough that the transform still follows the
- * decay rather than averaging over it.</p>
+ * <p>They were derived from the sample rate until then, on the reasoning that every one of these
+ * settings is in <b>samples</b>: 256 points is 5.3 ms at 48 kHz and 1.3 ms at 192, which is the
+ * difference between resolving 188 Hz and resolving 750 Hz. That reasoning still holds, and the
+ * answer to it here is the <em>span</em> default rather than a sliding transform length — a new
+ * impulse measurement opens at a 24 kHz span, i.e. 48 kHz, where these numbers are exactly ARTA's
+ * 5.33 ms window, 187.5 Hz and 2.46 ms of decay. Widen the span and they are not rescaled: the
+ * panel prints what the length means in ms and Hz, and the chart says what it cannot resolve.</p>
  */
-export function defaultCsdAnalysis(sampleRateHz: number): CsdAnalysis {
-  const rate = sampleRateHz > 0 ? sampleRateHz : 48000
-  const wanted = rate * 0.005
-  let fftLength = CSD_FFT_LENGTHS[0]
-  for (const candidate of CSD_FFT_LENGTHS) {
-    if (Math.abs(Math.log(candidate / wanted)) < Math.abs(Math.log(fftLength / wanted))) fftLength = candidate
-  }
-
-  const blockCount = 40
-  const blockShiftSamples = Math.max(1, Math.round((rate * 0.005) / (blockCount - 1)))
-
-  return { fftLength, blockShiftSamples, blockCount, windowMode: 'Apodizing', riseTimeMs: 0.2 }
-}
+export const DEFAULT_CSD_ANALYSIS: Readonly<CsdAnalysis> = Object.freeze({
+  fftLength: 256,
+  blockShiftSamples: 2,
+  blockCount: 60,
+  windowMode: 'Apodizing',
+  riseTimeMs: 0.2,
+})
 
 /**
  * How many slices to draw, when the surface has more of them than the chart has pixels of depth.

@@ -122,12 +122,11 @@ describe('impulseDisplayFromParams', () => {
     expect(impulseDisplayFromParams('nope')).toEqual(DEFAULT_IMPULSE_DISPLAY)
   })
 
-  it('takes the CSD defaults from the sample rate it is given', () => {
-    const at192k = defaultImpulseDisplay(192000)
-    expect(at192k.csd.fftLength).toBeGreaterThan(DEFAULT_IMPULSE_DISPLAY.csd.fftLength)
-    // Never shares the nested analysis object with its base.
-    const display = impulseDisplayFromParams(null, at192k)
+  it('never shares the nested CSD analysis with its base', () => {
+    const base = defaultImpulseDisplay()
+    const display = impulseDisplayFromParams(null, base)
     display.csd.fftLength = 1
-    expect(at192k.csd.fftLength).not.toBe(1)
+    expect(base.csd.fftLength).not.toBe(1)
+    expect(DEFAULT_IMPULSE_DISPLAY.csd.fftLength).not.toBe(1)
   })
 })

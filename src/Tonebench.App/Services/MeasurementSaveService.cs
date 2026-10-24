@@ -280,13 +280,16 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public string DefaultImpulseResponseParametersJson() =>
         JsonSerializer.Serialize(new ImpulseResponseParameters(
-            FrequencySpanHz: 96000.0,
+            // ARTA's: pink noise at a 24 kHz span and four averages. The span is the one that
+            // matters beyond taste — it puts the sample rate at 48 kHz, where the decay charts'
+            // own defaults (256 / 2 / 60) are ARTA's numbers meaning ARTA's milliseconds.
+            FrequencySpanHz: 24000.0,
             ResolutionMultiplier: 1,
             LevelMode: nameof(ThdSweepLevelMode.OutputVoltage),
             LevelValue: 0.0,
             LevelUnit: nameof(ThdSweepLevelUnit.Dbv),
             SmoothingDenominator: 24,
-            AverageCount: 1,
+            AverageCount: 4,
             ReferenceMode: nameof(ImpulseReferenceMode.None),
             ReferenceCalibrationId: null,
             GatePreMs: ImpulseResponseRequest.DefaultGatePreMs,
@@ -296,7 +299,7 @@ public sealed class MeasurementSaveService(
             MaxHarmonicOrder: ImpulseResponseRequest.DefaultMaxHarmonicOrder,
             ChirpStartHz: FrequencyResponseRequest.DefaultChirpStartHz,
             LoadOhms: 8.0,
-            Stimulus: nameof(ResponseStimulus.Chirp),
+            Stimulus: nameof(ResponseStimulus.PinkNoise),
             NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz), SerializerOptions);
 
     /// <summary>

@@ -161,7 +161,7 @@ import { useImpulseResponse } from './composables/useImpulseResponse'
 import {
   BURST_FREQUENCY_COLUMNS,
   DECAY_DISPLAY_COLUMNS,
-  defaultCsdAnalysis,
+  DEFAULT_CSD_ANALYSIS,
 } from './measurements/decay'
 import { SWEEP_POINTS_KEY, useSweep } from './composables/useSweep'
 import { useImdSweep } from './composables/useImdSweep'
@@ -3431,7 +3431,7 @@ const impulseDecayPalette = ref<import('./api/client').DecayPalette>('Jet')
 const impulseDecayColoredCurves = ref(true)
 const impulseDecayRangeDb = ref(30)
 
-const initialCsd = defaultCsdAnalysis(48000)
+const initialCsd = DEFAULT_CSD_ANALYSIS
 const impulseCsdFftLength = ref(initialCsd.fftLength)
 const impulseCsdBlockShiftSamples = ref(initialCsd.blockShiftSamples)
 const impulseCsdBlockCount = ref(initialCsd.blockCount)
@@ -3457,38 +3457,10 @@ const impulseBurstFullDepthHz = computed(() => {
 })
 const impulseBurstResolution = ref<import('./api/client').BurstDecayResolutionName>('PreferFrequency')
 
-/** The sample rate the CSD defaults above were derived for. See the watcher below. */
-const impulseCsdDefaultsRate = ref(48000)
-
-/**
- * Untouched CSD defaults follow the measurement's sample rate.
- *
- * Every one of those settings is in **samples**, and a sample is four times shorter at 192 kHz than
- * at 48 — a 256-point transform resolves 188 Hz at one rate and 750 Hz at the other. Leaving the
- * defaults fixed would mean the chart is right at one sample rate and empty at another, for no
- * reason the user could see. Settings the user has actually changed are left alone, which is what
- * comparing against the previous rate's defaults establishes.
- */
-watch(
-  () => impulseStatus.value?.sampleRateHz ?? 0,
-  (rate) => {
-    if (!(rate > 0) || rate === impulseCsdDefaultsRate.value) return
-
-    const previous = defaultCsdAnalysis(impulseCsdDefaultsRate.value)
-    const untouched =
-      impulseCsdFftLength.value === previous.fftLength &&
-      impulseCsdBlockShiftSamples.value === previous.blockShiftSamples &&
-      impulseCsdBlockCount.value === previous.blockCount
-
-    impulseCsdDefaultsRate.value = rate
-    if (!untouched) return
-
-    const next = defaultCsdAnalysis(rate)
-    impulseCsdFftLength.value = next.fftLength
-    impulseCsdBlockShiftSamples.value = next.blockShiftSamples
-    impulseCsdBlockCount.value = next.blockCount
-  },
-)
+// The CSD defaults used to follow the measurement's sample rate from here, re-deriving them on a
+// rate change unless the user had touched them. They are ARTA's four numbers now, written down
+// rather than computed (see DEFAULT_CSD_ANALYSIS), so there is nothing left for a rate change to
+// re-derive — and a watcher whose two sides are the same constant is worse than none.
 
 let impulseDisplayRestoring = false
 

@@ -250,7 +250,7 @@ async function loadStoredData(detail: MeasurementDetail, type: MeasurementType |
       traces: toResponseTraces(response.traces),
       harmonics: stored.harmonics,
       display: withResultAnnotations(
-        impulseDisplayFromParams(displayParams, defaultImpulseDisplay(detail.sampleRateHz)),
+        impulseDisplayFromParams(displayParams, defaultImpulseDisplay()),
         detail,
       ),
       run: {

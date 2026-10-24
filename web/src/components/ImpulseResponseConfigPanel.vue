@@ -67,14 +67,21 @@ const VOLTAGE_UNITS: { value: SweepLevelUnit; label: string }[] = [
   { value: 'Dbv', label: 'dBV' },
 ]
 
-/** Kept in step with `MeasurementSaveService.DefaultImpulseResponseParametersJson`. */
+/**
+ * Kept in step with `MeasurementSaveService.DefaultImpulseResponseParametersJson`.
+ *
+ * <p><b>These are ARTA's, asked for in those terms</b> (Joost, 2026-10-24): Pink PN at a 24 kHz
+ * span, four averages. The span is the load-bearing one — it sets the sample rate to 48 kHz, which
+ * is where `DEFAULT_CSD_ANALYSIS`'s 256 / 2 / 60 mean exactly what the same four numbers mean in
+ * ARTA. Opening wider would leave the decay charts resolving 750 Hz instead of 187.</p>
+ */
 const form = reactive({
-  frequencySpanHz: 96000 as number,
+  frequencySpanHz: 24000 as number,
   resolutionMultiplier: 1,
   /** The level mode and the figure each mode was last set to — see measurements/levelMode.ts. */
   level: createLevelForm({ mode: 'OutputVoltage' }),
   smoothingDenominator: 24,
-  averageCount: 1,
+  averageCount: 4,
   referenceMode: 'None' as ImpulseReferenceModeName,
   referenceCalibrationId: null as number | null,
   gatePreMs: 1,
@@ -83,8 +90,8 @@ const form = reactive({
   extractHarmonics: true,
   maxHarmonicOrder: 5,
   chirpStartHz: 2,
-  /** What to play. The sweep by default, and the only one whose harmonics can be read. */
-  stimulus: 'Chirp' as ResponseStimulusName,
+  /** What to play. Pink PN, which is what ARTA recommends for acoustic work and opens on. */
+  stimulus: 'PinkNoise' as ResponseStimulusName,
   noiseCutoffHz: 5,
 })
 

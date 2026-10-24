@@ -7,13 +7,14 @@ import {
   csdSpanMs,
   decayLayout,
   drawnSliceIndices,
-  defaultCsdAnalysis,
+  DEFAULT_CSD_ANALYSIS,
   formatHz,
   levelAt,
   levelIndex,
   levelTicks,
   levelY,
   linearTicks,
+  wallGradientStops,
   logTicks,
   lutColor,
   orientSurface,
@@ -166,28 +167,65 @@ describe('paletteLut', () => {
   })
 })
 
-describe('defaultCsdAnalysis', () => {
+describe('wallGradientStops', () => {
   /**
-   * The reason the defaults are computed rather than written down. Every one of these settings is
-   * in samples, and a sample is four times shorter at 192 kHz than at 48 — a fixed 256-point
-   * transform resolves 188 Hz at one rate and 750 Hz at the other, which is the difference between
-   * a usable chart and an empty one.
+   * The bug this is here for: the wall used to hang each slice's own colour straight down from its
+   * curve's end, which gradates it along *time* — red at the back where the response is loud, blue
+   * at the front where it has decayed. That is a second key on the same picture, disagreeing with
+   * the one printed beside it. The wall is the side face of the box and a point on it has a level.
    */
-  it('keeps the window near five milliseconds at every sample rate', () => {
-    for (const rate of [48000, 96000, 192000]) {
-      const analysis = defaultCsdAnalysis(rate)
-      const windowMs = (analysis.fftLength / rate) * 1000
-      expect(windowMs).toBeGreaterThan(3)
-      expect(windowMs).toBeLessThan(8)
-      expect(Math.log2(analysis.fftLength) % 1).toBe(0)
+  it('runs from the top of the level axis to the foot of it', () => {
+    const stops = wallGradientStops()
+
+    expect(stops[0].offset).toBe(0)
+    expect(stops[0].index).toBe(255)
+    expect(stops[stops.length - 1].offset).toBe(1)
+    expect(stops[stops.length - 1].index).toBe(0)
+  })
+
+  it('is the same ramp the curves and the key are coloured from', () => {
+    // Every stop is the colour levelIndex gives the level at that height, which is what makes the
+    // wall and the curve that ends on it agree where they meet.
+    for (const stop of wallGradientStops(8)) {
+      const levelDb = 0 + stop.offset * -30
+      expect(stop.index).toBe(levelIndex(levelDb, 0, -30))
     }
   })
 
-  it('spans about five milliseconds of decay at every sample rate', () => {
-    for (const rate of [48000, 96000, 192000]) {
-      const analysis = defaultCsdAnalysis(rate)
-      expect(csdSpanMs(analysis.blockShiftSamples, analysis.blockCount, rate)).toBeCloseTo(5, 0)
+  it('samples the palette finely enough to read as a gradient, and monotonically', () => {
+    const stops = wallGradientStops()
+    expect(stops.length).toBeGreaterThan(16)
+    for (let i = 1; i < stops.length; i++) {
+      expect(stops[i].offset).toBeGreaterThan(stops[i - 1].offset)
+      expect(stops[i].index).toBeLessThan(stops[i - 1].index)
     }
+  })
+})
+
+describe('DEFAULT_CSD_ANALYSIS', () => {
+  it("is ARTA's own four numbers", () => {
+    expect(DEFAULT_CSD_ANALYSIS).toEqual({
+      fftLength: 256,
+      blockShiftSamples: 2,
+      blockCount: 60,
+      windowMode: 'Apodizing',
+      riseTimeMs: 0.2,
+    })
+  })
+
+  /**
+   * What makes those numbers the right ones to write down: the impulse screen opens at a 24 kHz
+   * span, so they mean at 48 kHz exactly what they mean in ARTA — a 5.33 ms window resolving
+   * 187.5 Hz, over 2.46 ms of decay. The span default is the other half of this and lives in
+   * `ImpulseResponseConfigPanel`.
+   */
+  it('is ARTA at the sample rate a new measurement opens on', () => {
+    const rate = 48000
+    expect((DEFAULT_CSD_ANALYSIS.fftLength / rate) * 1000).toBeCloseTo(5.33, 2)
+    expect(rate / DEFAULT_CSD_ANALYSIS.fftLength).toBeCloseTo(187.5, 1)
+    expect(
+      csdSpanMs(DEFAULT_CSD_ANALYSIS.blockShiftSamples, DEFAULT_CSD_ANALYSIS.blockCount, rate),
+    ).toBeCloseTo(2.46, 2)
   })
 })
 

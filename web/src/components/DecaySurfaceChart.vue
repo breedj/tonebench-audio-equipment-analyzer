@@ -26,6 +26,7 @@ import {
   paletteLut,
   pickSurfacePoint,
   sliceOrigin,
+  wallGradientStops,
 } from '../measurements/decay'
 
 /**
@@ -361,7 +362,7 @@ function drawWaterfall(
     }
   }
 
-  if (props.coloredCurves) paintTrailingWall(ctx, wall, lut, topDb, bottomDb)
+  if (props.coloredCurves) paintTrailingWall(ctx, wall, lut, layout.levelHeight)
 }
 
 /** One curve's body: the curve itself, then straight down to the foot of the box and back. */
@@ -386,18 +387,19 @@ function bodyPath(ctx: CanvasRenderingContext2D, points: { x: number; y: number 
  *
  * <p>Drawn <em>after</em> every curve, which is the ordering the geometry asks for rather than a
  * convenience: at any point inside the band, the wall is nearer the viewer than whatever surface
- * projects there, so it covers the last pixel or two of the curves behind. One quad per rib, with a
- * gradient along the top edge — perpendicular to that direction a linear gradient is constant, so
- * each rib hangs its own level's colour straight down to its own baseline, which is what puts the
- * palette's bands across the wall horizontally.</p>
+ * projects there, so it covers the last pixel or two of the curves behind. One quad per rib, each
+ * filled with a <em>vertical</em> gradient over that rib's own level axis — see
+ * <c>wallGradientStops</c> for why the direction is the point, and what it looked like when the
+ * gradient ran along the top edge instead.</p>
  */
 function paintTrailingWall(
   ctx: CanvasRenderingContext2D,
   wall: WallRib[],
   lut: Uint8Array,
-  topDb: number,
-  bottomDb: number,
+  levelHeight: number,
 ) {
+  const stops = wallGradientStops()
+
   for (let i = 1; i < wall.length; i++) {
     const back = wall[i - 1]
     const front = wall[i]
@@ -409,19 +411,13 @@ function paintTrailingWall(
     ctx.lineTo(back.x, back.floorY)
     ctx.closePath()
 
-    const backColor = lutColor(lut, levelIndex(back.levelDb, topDb, bottomDb))
-    const frontColor = lutColor(lut, levelIndex(front.levelDb, topDb, bottomDb))
-
-    // A zero-length gradient paints nothing at all rather than painting its last stop, which would
-    // punch a hole in the wall wherever two ribs land on the same pixel.
-    if (Math.abs(front.x - back.x) < 0.01 && Math.abs(front.y - back.y) < 0.01) {
-      ctx.fillStyle = backColor
-    } else {
-      const gradient = ctx.createLinearGradient(back.x, back.y, front.x, front.y)
-      gradient.addColorStop(0, backColor)
-      gradient.addColorStop(1, frontColor)
-      ctx.fillStyle = gradient
-    }
+    // The quad's own level axis: its foot is the bottom of the range and one level-height above it
+    // is the top. Taken at the middle of the two ribs, which differ by one depth step — half of
+    // that is the most this can be out, and it is a couple of pixels.
+    const floorY = (back.floorY + front.floorY) / 2
+    const gradient = ctx.createLinearGradient(0, floorY - levelHeight, 0, floorY)
+    for (const stop of stops) gradient.addColorStop(stop.offset, lutColor(lut, stop.index))
+    ctx.fillStyle = gradient
 
     // Stroked as well as filled: neighbouring quads share an edge exactly, and antialiasing leaves a
     // hairline of whatever is underneath along every one of them — a wall finely striped with the page.

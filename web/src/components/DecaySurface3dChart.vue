@@ -4,6 +4,7 @@ import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import { formatHz } from '../measurements/decay'
 import {
   decayCameraZoom,
+  DECAY_LIGHT,
   decayExportTitle,
   decayGridAspect,
   decayMesh,
@@ -188,6 +189,7 @@ function configure() {
   C.PeColor.BitmapGradientMode = false
   C.PeColor.GraphBmpStyle = E.BitmapStyle.NoBmp
   C.PeLegend.Show = false
+  C.PeFunction.SetLight(0, DECAY_LIGHT.x, DECAY_LIGHT.y, DECAY_LIGHT.z)
   C.PeString.MainTitle = ''
   C.PeString.SubTitle = ''
 
@@ -210,7 +212,6 @@ function configure() {
   C.PeData.ComputeShader = true
   C.PeConfigure.RenderEngine = E.RenderEngine.Direct3D
 
-  C.PeFunction.SetLight(0, -2.0, -7.0, -7.0)
 
   applyTheme()
   applyCamera()
@@ -370,10 +371,12 @@ function applyData() {
   const timeLabel = `Time (${surface.sliceAxis === 'Periods' ? 'periods' : 'ms'})`
   C.PeString.XAxisLabel = mesh.acrossIsFrequency ? 'Frequency (Hz)' : timeLabel
   C.PeString.ZAxisLabel = mesh.depthIsFrequency ? 'Frequency (Hz)' : timeLabel
-  // Blank, because the template draws it instead — see `dB` in the markup. The engine writes this
-  // one horizontally and has no text-angle property anywhere in its API, so a label that reads up
-  // the axis the way every other chart here writes it has to be ours.
-  C.PeString.YAxisLabel = ''
+  // The engine's own, which means horizontal: it has no text-angle property anywhere in its API, so
+  // this cannot be turned to read up the axis the way the Canvas 2D chart writes it. Drawing our
+  // own rotated one in the template was tried and reverted — the height axis moves as the surface
+  // is turned, and a label pinned to the left of the plot sits away from its own axis the moment
+  // anyone drags it. A label that travels with the axis beats a label that reads the right way up.
+  C.PeString.YAxisLabel = 'dB'
 
   C.PeFunction.Force3dxVerticeRebuild = true
   C.PeFunction.ReinitializeResetImage()
@@ -431,6 +434,7 @@ function onPointerMove() {
   } catch {
     hover.value = null
   }
+
 }
 
 function timeUnit(): string {
@@ -556,17 +560,6 @@ defineExpose({ exportPng })
     <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
     <div ref="host" class="block w-full"></div>
 
-    <!-- The height axis's label, ours rather than the engine's: it writes that one horizontally and
-         offers no way to turn text, so this is the only way to read it up the axis as the Canvas 2D
-         chart does. Pinned to the left, which is where the engine puts the height axis at every
-         lean the panel can ask for; drag the surface far enough round and the axis moves out from
-         under it. -->
-    <span
-      v-if="surface"
-      class="pointer-events-none absolute left-1 top-1/2 -translate-y-1/2 select-none text-[11px] text-neutral-600 dark:text-neutral-300"
-      style="writing-mode: vertical-rl; transform: translateY(-50%) rotate(180deg)"
-      >dB</span
-    >
 
     <p
       v-if="computing"

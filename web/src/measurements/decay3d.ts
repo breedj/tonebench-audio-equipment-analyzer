@@ -152,6 +152,25 @@ export function decayCameraZoom(widthPx: number, heightPx: number): number {
 }
 
 /**
+ * Where the light goes. One position, not one per camera angle.
+ *
+ * <p>The vendor demo's light lit its own default view and went dark as the camera moved round the
+ * box, which is what the surface looked like once the default lean changed: measured on a 60x400
+ * surface, the mean luminance of the lit pixels fell from 92.4 at azimuth 315 to 82.4 at azimuth
+ * 10. Reported 2026-10-25.</p>
+ *
+ * <p><b>Turning the light with the camera was the obvious answer and is the worse one.</b> Swept
+ * right round the circle in 30-degree steps, a light that follows the camera reads 77.3 at its
+ * worst and is below 95 at five of the twelve angles, because the relation between a good light
+ * and the camera is not a rotation about the height axis. This position — the demo's vector turned
+ * 90 degrees about that axis — reads <b>96.3 at its worst and 129 at its best over the whole
+ * circle</b>, and never goes dark at any angle the panel or a drag can reach. Over the lean the
+ * panel actually offers it is flatter still: 107.5 to 116.7, a spread of 9.2 against the old
+ * light's 31.5.</p>
+ */
+export const DECAY_LIGHT = { x: 7, y: -7, z: -2 } as const
+
+/**
  * The caption a report or a screenshot carries. Shared with the Canvas 2D chart rather than
  * written out twice, so a chapter reads identically whichever engine drew it.
  */

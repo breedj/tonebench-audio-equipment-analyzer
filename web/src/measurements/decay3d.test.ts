@@ -3,6 +3,7 @@ import type { DecaySurface } from '../api/client'
 import { levelAt, orientSurface, paletteIndex, paletteLut } from './decay'
 import {
   decayExportTitle,
+  DECAY_LIGHT,
   decayCameraZoom,
   DECAY_3D_ZOOM,
   DECAY_3D_ZOOM_NARROW,
@@ -260,5 +261,23 @@ describe('decayCameraZoom', () => {
   it('falls back to the ordinary framing rather than NaN before the plot has a size', () => {
     expect(decayCameraZoom(0, 0)).toBe(DECAY_3D_ZOOM)
     expect(decayCameraZoom(Number.NaN, 400)).toBe(DECAY_3D_ZOOM)
+  })
+})
+
+describe('DECAY_LIGHT', () => {
+  /**
+   * The light was turned about the height axis, not moved nearer or further: its distance from the
+   * origin is the vendor demo's to the last bit. Brightness is a property of that distance, so an
+   * edit that changed it would be changing two things while appearing to change one.
+   */
+  it("is the demo's light turned, not moved", () => {
+    const demo = { x: -2, y: -7, z: -7 }
+    const length = (v: { x: number; y: number; z: number }) => Math.hypot(v.x, v.y, v.z)
+    expect(length(DECAY_LIGHT)).toBeCloseTo(length(demo), 12)
+    expect(DECAY_LIGHT.y).toBe(demo.y)
+  })
+
+  it("is not the demo's own position, which went dark as the camera moved", () => {
+    expect([DECAY_LIGHT.x, DECAY_LIGHT.z]).not.toEqual([-2, -7])
   })
 })

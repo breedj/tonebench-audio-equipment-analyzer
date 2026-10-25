@@ -32,29 +32,46 @@ export interface DecayMesh {
   rows: number
   /** Points per curve. */
   cols: number
-  /** The across coordinate of each column — frequency in Hz, or time, whichever this view runs across. */
+  /**
+   * The across coordinate of each column — frequency in Hz, or time, whichever this view runs
+   * across. <b>Negated unless it is the frequency</b>, which {@link acrossNegated} says.
+   */
   x: Float64Array
   /** Whether {@link x} is a frequency, and so whether that axis wants a logarithmic scale. */
   acrossIsFrequency: boolean
+  /**
+   * Whether {@link x} has been negated, which is to say whether its axis is the linear one.
+   *
+   * <p>The chart sets the engine's <c>InvertedXAxis</c> either way, because the camera sits on the
+   * side of the box that mirrors this axis — see <c>DecaySurface3dChart.azimuthFor</c> — and that
+   * flag is what puts it back. What the flag <em>does</em> differs with the scale, and both halves
+   * were measured against proessentials 11.0.1 on 2026-10-25:</p>
+   *
+   * <ul>
+   *   <li><b>Logarithmic</b> (the frequency axis): the flag reverses the drawing and the labels
+   *   together, so the data is left alone. A log scale has no negative half anyway.</li>
+   *   <li><b>Linear</b> (the time axis): the flag reverses the labels only — setting it and
+   *   clearing it render byte for byte the same picture — so the data has to be negated to
+   *   reverse the drawing, and the flag hands the sign back to the ticks. This is exactly what the
+   *   vendor's own documentation says of the whole family: "subset data must be multiplied by
+   *   (-1) when passed into the chart to achieve the desired effect".</li>
+   * </ul>
+   */
+  acrossNegated: boolean
   /** Whether {@link z} is a frequency. The two are never both true. */
   depthIsFrequency: boolean
   /** Heights, row-major, <c>rows * cols</c> of them. NaN wherever the analysis has no answer. */
   y: Float64Array
-  /** One depth coordinate per curve. Negated when {@link invertDepth} is set. */
-  z: Float64Array
   /**
-   * Whether {@link z} has been negated, which the chart pairs with the engine's `InvertedZAxis`
-   * so the axis still reads its own positive values.
+   * One depth coordinate per curve, in its own units and never negated.
    *
-   * <p>This is how the depth axis is made to run away from the viewer — slice zero at the back,
-   * where the Canvas 2D chart puts it. It cannot be done by turning the camera: the two floor axes
-   * keep their handedness however the camera moves, so the azimuth that puts time the right way
-   * round mirrors the frequency axis with it.</p>
-   *
-   * <p>False where the depth axis carries the frequency, in the by-period view: that axis is
-   * logarithmic and a log scale cannot take a negative coordinate.</p>
+   * <p>Which end of it faces the viewer is the camera's business, not the data's — see
+   * <c>DecaySurface3dChart.azimuthFor</c>. Negating this was tried for an afternoon, to pair with
+   * the engine's <c>InvertedZAxis</c>, and that flag turns out to be <em>refused</em> by the 3D
+   * control: written true it reads back false, where the X and Y ones take. Measured 2026-10-25
+   * against proessentials 11.0.1.</p>
    */
-  invertDepth: boolean
+  z: Float64Array
   /** How many cells came back NaN — the ragged corner, and a useful thing to assert on. */
   missing: number
 }
@@ -88,18 +105,17 @@ export function decayMesh(surface: DecaySurface, mode: DecayChartMode, rangeDb: 
   return {
     rows,
     cols,
-    // The real values, and the frequency axis is told to scale itself logarithmically — which is
-    // what puts true hertz on the ticks. (The column index plus point labels was the first attempt
-    // and is a dead end: a 3D chart has no way to put strings on an axis, so the ticks read 0…399.)
-    x: Float64Array.from(view.across),
+    // The real values — the frequency axis is told to scale itself logarithmically, which is what
+    // puts true hertz on the ticks. (The column index plus point labels was the first attempt and
+    // is a dead end: a 3D chart has no way to put strings on an axis, so the ticks read 0…399.)
+    // Negated on the linear axis only; see `acrossNegated` for the whole of why.
+    x: Float64Array.from(view.across, (v) => (view.acrossIsFrequency ? v : -v)),
+    acrossNegated: !view.acrossIsFrequency,
     acrossIsFrequency: view.acrossIsFrequency,
     depthIsFrequency: view.depthIsFrequency,
     y,
-    // Negated, so the engine's "smallest coordinate nearest the viewer" puts slice zero at the
-    // back. `InvertedZAxis` hands the sign back to the labels. Not for a log axis, which has no
-    // negative half.
-    z: Float64Array.from(view.depth, (v) => (view.depthIsFrequency ? v : -v)),
-    invertDepth: !view.depthIsFrequency,
+    // Plain values. The camera is what puts slice zero at the back.
+    z: Float64Array.from(view.depth),
     missing,
   }
 }

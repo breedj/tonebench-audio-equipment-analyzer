@@ -251,7 +251,7 @@ function applyTheme() {
 
 /** The engine's azimuth for a panel lean, wrapped into the 0-359 the engine accepts. */
 function azimuthFor(rotationDeg: number): number {
-  return ((Math.round(180 - rotationDeg) % 360) + 360) % 360
+  return ((Math.round(360 - rotationDeg) % 360) + 360) % 360
 }
 
 function applyCamera() {
@@ -259,12 +259,11 @@ function applyCamera() {
   // The panel's lean maps onto the engine's azimuth, and its depth onto the elevation. Both of the
   // panel's ranges are narrower than the engine's, so nothing has to be clamped here.
   //
-  // <p><b>180, which is the side of the box that puts the frequency axis the way round the Canvas
-  // 2D chart draws it</b> — increasing left to right. Turning the camera to the other side (360 -
-  // lean) was tried for a day and reverted: it does put the depth axis the right way round, but
-  // the two floor axes keep their handedness however the camera moves, so it mirrors the frequency
-  // axis with it. The depth axis is reversed in the data instead — see <c>DecayMesh.invertDepth</c>
-  // — which is the only way to have both.</p>
+  // <p><b>The depth axis is what picks the side</b>: from here the engine draws the smallest depth
+  // coordinate at the <em>back</em>, so slice zero is where the Canvas 2D chart puts it and the
+  // axis counts up towards the viewer with its own positive numbers. The cost is that the two
+  // floor axes keep their handedness however the camera moves, so this side mirrors the across
+  // axis — which <c>InvertedXAxis</c> in <c>applyData</c> puts back.</p>
   appliedRotation = props.rotationDeg
   appliedDepth = props.depthPercent
   // Wrapped into 0-359, or a lean outside the range the subtraction lands in leaves the engine's
@@ -367,9 +366,21 @@ function applyData() {
   C.PeGrid.Configure.ZAxisScaleControl =
     mesh.depthIsFrequency ? enums.ScaleControl.Log : enums.ScaleControl.Normal
   C.PeGrid.Configure.YAxisScaleControl = enums.ScaleControl.Normal
-  // The depth coordinates are negated (see DecayMesh.invertDepth); this hands the sign back to the
-  // axis, so it still reads 0 at the back and counts up towards the viewer.
-  C.PeGrid.Configure.InvertedZAxis = mesh.invertDepth
+  // <p><b>Always, and it is what makes the across axis read the way the Canvas 2D chart draws it</b>
+  // — frequency increasing left to right in the by-frequency view, periods increasing left to
+  // right in the by-period one. The camera sits on the side of the box that puts the depth axis
+  // the right way round (see <c>azimuthFor</c>), and that side mirrors the across axis; this
+  // un-mirrors it. What it takes to un-mirror differs with the scale, and <c>decayMesh</c> owns
+  // the other half of it — see <c>DecayMesh.acrossNegated</c>, which is where the two cases are
+  // written down.</p>
+  //
+  // <p><b>PeGrid.Option, not PeGrid.Configure</b>: the engine's own types put the three
+  // inverted-axis flags under Option, a write to Configure lands on a property nothing reads, and
+  // JavaScript accepts it in silence. That mistake is what had this whole family written up here
+  // as inert for an afternoon. The Z one really is inert — <em>refused</em>, in fact: written true
+  // it reads back false on this control, where X and Y take — so the depth axis cannot be reversed
+  // this way at all, and the camera has to do it.</p>
+  C.PeGrid.Option.InvertedXAxis = true
   // Plain hertz on the log axis — 1000, not 10³. The rest of the app writes 1k through formatHz,
   // but the engine owns this axis's formatting and an unambiguous number beats a wrong one.
   C.PeGrid.Configure.LogScaleExpLabels = false

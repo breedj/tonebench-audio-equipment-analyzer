@@ -110,34 +110,45 @@ describe('decayMesh', () => {
     expect(across.depthIsFrequency).toBe(false)
 
     const byPeriod = decayMesh(dense(), 'WaterfallPeriods', 30)
-    expect([...byPeriod.x]).toEqual([0, 0.5])
+    expect([...byPeriod.x]).toEqual([-0, -0.5])
     expect([...byPeriod.z]).toEqual([100, 1000, 10000])
     expect(byPeriod.acrossIsFrequency).toBe(false)
     expect(byPeriod.depthIsFrequency).toBe(true)
   })
 
   /**
-   * The depth coordinates are negated so the engine, which draws its smallest coordinate nearest
-   * the viewer, puts slice zero at the back — where the Canvas 2D chart puts it. The chart pairs
-   * this with `InvertedZAxis`, which hands the sign back to the labels.
+   * <p>The depth coordinates are the measurement's own and are never negated — which end of the
+   * axis faces the viewer is the camera's business. Negating them to pair with the engine's
+   * <c>InvertedZAxis</c> was tried and reverted: that flag is refused by the 3D control, so the
+   * negation showed through as a time axis reading 0,0 / -0,5 / -1,0.</p>
    */
-  it('negates a time depth axis, and says that it did', () => {
-    const mesh = decayMesh(dense(), 'Waterfall', 30)
-    expect([...mesh.z]).toEqual([-0, -0.5])
-    expect(mesh.invertDepth).toBe(true)
+  it('leaves the depth coordinates exactly as the measurement gives them', () => {
+    expect([...decayMesh(dense(), 'Waterfall', 30).z]).toEqual([0, 0.5])
+    expect([...decayMesh(dense(), 'WaterfallPeriods', 30).z]).toEqual([100, 1000, 10000])
   })
 
-  /** A log axis has no negative half, so the frequency depth axis is left alone. */
-  it('leaves a frequency depth axis positive, since its scale is logarithmic', () => {
-    const mesh = decayMesh(dense(), 'WaterfallPeriods', 30)
-    expect([...mesh.z].every((v) => v > 0)).toBe(true)
-    expect(mesh.invertDepth).toBe(false)
-  })
-
-  it('negates the depth axis exactly when it is not the frequency one', () => {
+  /**
+   * <p>The across axis is negated exactly when it is the linear one, which is the half of
+   * un-mirroring that <c>InvertedXAxis</c> cannot do on its own: on a linear axis that flag
+   * reverses the labels and not the drawing. On the logarithmic frequency axis it reverses both,
+   * and a log scale could not take a negative coordinate anyway.</p>
+   */
+  it('negates the across axis exactly when it is the linear one', () => {
     for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
       const mesh = decayMesh(ragged(), mode, 30)
-      expect(mesh.invertDepth).toBe(!mesh.depthIsFrequency)
+      expect(mesh.acrossNegated, mode).toBe(!mesh.acrossIsFrequency)
+      const negative = [...mesh.x].some((v) => v < 0)
+      expect(negative, `${mode} has a negative across coordinate`).toBe(mesh.acrossNegated)
+    }
+  })
+
+  /** A log axis cannot carry a zero or a negative, whichever axis is carrying the frequency. */
+  it('keeps the depth axis positive, and the frequency axis whichever one it is', () => {
+    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
+      const mesh = decayMesh(ragged(), mode, 30)
+      expect([...mesh.z].every((v) => v >= 0), `${mode} z`).toBe(true)
+      const freqs = mesh.acrossIsFrequency ? mesh.x : mesh.z
+      expect([...freqs].every((f) => f > 0), `${mode} frequency`).toBe(true)
     }
   })
 

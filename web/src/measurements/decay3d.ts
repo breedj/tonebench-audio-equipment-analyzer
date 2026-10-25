@@ -121,7 +121,7 @@ export function peColor(r: number, g: number, b: number): number {
  * either, giving the depth axis a share of the plot box rather than a share of the slice count.</p>
  *
  * <p>So the box is a fixed shape and the <em>view</em> is what the panel's two numbers move:
- * Rotation swings the camera round it and Depth tilts it. A fixed box is also what lets one zoom
+ * Rotation swings the camera round it and Tilt raises it. A fixed box is also what lets one zoom
  * frame every surface, whatever its resolution.</p>
  */
 export function decayGridAspect(): { x: number; y: number; z: number } {

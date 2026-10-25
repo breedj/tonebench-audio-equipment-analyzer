@@ -560,7 +560,7 @@ const referenceLabel = computed(() => {
         </label>
         <label class="tb-field">
           <span class="tb-field-row">
-            <span>Depth</span>
+            <span>Tilt</span>
             <span class="tb-field-value">{{ decayDepthPercent }}%</span>
           </span>
           <input
@@ -570,7 +570,7 @@ const referenceLabel = computed(() => {
             :max="DECAY_DEPTH_PERCENT.max"
             step="1"
             class="tb-range"
-            title="How much of the chart's height the depth axis takes. The rest is the dB scale, so a deep-looking surface is one with a squashed level axis."
+            title="How far the view is tilted back. On the flat projection that is how much of the chart's height the depth axis takes, so a deep-looking surface is one with a squashed dB scale; on the 3D surface it raises the camera."
           />
         </label>
       </template>

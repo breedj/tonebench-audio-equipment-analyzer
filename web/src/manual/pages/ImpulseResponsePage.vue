@@ -322,11 +322,12 @@ const { showPage } = useManual()
       one replacing the other.
     </p>
     <p>
-      <strong>Rotation</strong> and <strong>Depth</strong> are the projection. Rotation is which way
+      <strong>Rotation</strong> and <strong>Tilt</strong> are the projection. Rotation is which way
       the stack recedes, in degrees from straight down: positive leans it to the left, as ARTA draws
       it, zero stacks the curves straight down the chart, and a negative angle sends them to the
-      right. Depth is how much of the chart's height the depth axis takes, so a deep-looking surface
-      is one with a squashed dB scale — the two share the box, and neither can be had for nothing.
+      right. Tilt is how far the view leans back. On this projection that is how much of the chart's
+      height the depth axis takes, so a deep-looking surface is one with a squashed dB scale — the
+      two share the box, and neither can be had for nothing.
     </p>
     <p>
       On the flat projection both can also be <strong>dragged on the chart itself</strong>: hold
@@ -353,7 +354,7 @@ const { showPage } = useManual()
       either way.
     </p>
     <p>
-      <strong>Rotation</strong> and <strong>Depth</strong> set the 3D view, and from the first drag
+      <strong>Rotation</strong> and <strong>Tilt</strong> set the 3D view, and from the first drag
       the chart's own camera takes over: it turns through a whole circle, which those two fields
       cannot describe, so they stop following it rather than springing the surface back part way
       through a turn. Changing either field puts the view where it says again. A screenshot taken

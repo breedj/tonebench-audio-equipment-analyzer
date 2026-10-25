@@ -100,7 +100,7 @@ import SettingsTable from '../components/SettingsTable.vue'
       The two decay surfaces on the impulse-response screen do not box-zoom, because neither axis is
       a window you can crop: the frequency span and the depth come from the analysis settings, and
       the dB range is a field of its own. Instead they are <strong>dragged to rotate</strong>, which
-      writes the Rotation and Depth fields in the display rail.
+      writes the Rotation and Tilt fields in the display rail.
     </p>
     <p>
       Where the browser offers WebGPU, those two waterfalls are drawn as a lit 3D surface that also

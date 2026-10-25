@@ -253,20 +253,48 @@ const referenceRateMismatch = computed(
   () => selectedReference.value !== null && Math.abs(selectedReference.value.sampleRateHz - sampleRateHz.value) > 0.5,
 )
 
-const invalid = computed<string | null>(() => {
+/**
+ * Why the run is refused, one message per settings section, so it is shown beside the control that
+ * is wrong rather than at the bottom of whichever section happens to be last.
+ *
+ * <p>It <em>was</em> one message at the foot of the Harmonics section, which worked only for as long
+ * as that section always existed. It stopped existing for a noise stimulus on 2026-10-24, and since
+ * Pink PN is also what a new measurement opens on, the commonest way to reach a refused run — a
+ * gate of 0 ms — disabled RUN, SINGLE and STOP and said nothing at all. Reported the next day.
+ * Keeping a message inside a conditional section is the mistake; each of these lives in a section
+ * that is always rendered.</p>
+ */
+const measurementProblem = computed<string | null>(() => {
   const levelProblem = levelInvalid(form.level, loadOhms.value)
   if (levelProblem) return levelProblem
   const averages = averageCountError(form.averageCount)
   if (averages) return averages
-  if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
-    return 'Chirp start must be between 0.5 and 1000 Hz.'
-  if (form.chirpStartHz >= chirpEndHz.value / 10) return 'Chirp start must be at least a decade below the span.'
+
+  // Only where the sweep is what is played: a start frequency left over from a chirp must not refuse
+  // a noise run that never reads it, and its control is not even shown then.
+  if (usesChirpStart(form.stimulus)) {
+    if (!Number.isFinite(form.chirpStartHz) || form.chirpStartHz < 0.5 || form.chirpStartHz > 1000)
+      return 'Chirp start must be between 0.5 and 1000 Hz.'
+    if (form.chirpStartHz >= chirpEndHz.value / 10) return 'Chirp start must be at least a decade below the span.'
+  }
+
+  if (usesNoiseCutoff(form.stimulus) && (!Number.isFinite(form.noiseCutoffHz) || form.noiseCutoffHz < 1 || form.noiseCutoffHz > 1000))
+    return 'The noise cut-off must be between 1 and 1000 Hz.'
+
+  return null
+})
+
+const gateProblem = computed<string | null>(() => {
   if (!(form.gatePreMs > 0)) return 'The gate must keep something before the impulse.'
   if (!(form.gatePostMs > 0)) return 'The gate must keep something after the impulse.'
   if (form.gatePreMs > maxGatePreMs.value)
     return `At this resolution the gate can keep at most ${maxGatePreMs.value.toFixed(2)} ms before the impulse.`
   if (form.gatePostMs > maxGatePostMs.value)
     return `At this resolution the gate can keep at most ${maxGatePostMs.value.toFixed(0)} ms after the impulse.`
+  return null
+})
+
+const referenceProblem = computed<string | null>(() => {
   if (usesStoredLoopback.value && form.referenceCalibrationId === null)
     return 'Pick a loopback calibration, or capture one.'
   if (referenceNotOnThisBench.value)
@@ -275,6 +303,11 @@ const invalid = computed<string | null>(() => {
     return `That calibration was taken at ${(selectedReference.value!.sampleRateHz / 1000).toFixed(0)} kHz and cannot be used at ${(sampleRateHz.value / 1000).toFixed(0)} kHz.`
   return null
 })
+
+/** The three together, in the order they are read, for the callers that only ask whether it can run. */
+const invalid = computed<string | null>(
+  () => measurementProblem.value ?? gateProblem.value ?? referenceProblem.value,
+)
 
 /**
  * The form as an `ImpulseResponseParameters`, for `measurement_type.params_json`. Every field the
@@ -513,6 +546,8 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         <EstimateBadge kind="time" title="Roughly how long one pass will take.">≈ {{ estimatedSeconds.toFixed(1) }} s</EstimateBadge>
       </div>
     </template>
+    <p v-if="measurementProblem" class="text-[11px] text-red-600 dark:text-red-400">{{ measurementProblem }}</p>
+
   </CollapsibleSection>
 
   <CollapsibleSection title="Gate">
@@ -587,6 +622,8 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         Nothing below ≈{{ gateResolutionHz.toFixed(0) }} Hz is real at this gate length.
       </span>
     </template>
+    <p v-if="gateProblem" class="text-[11px] text-red-600 dark:text-red-400">{{ gateProblem }}</p>
+
   </CollapsibleSection>
 
   <CollapsibleSection title="Reference">
@@ -644,6 +681,8 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         band edges, where the anti-alias filter would otherwise read as DUT roll-off.
       </template>
     </p>
+    <p v-if="referenceProblem" class="text-[11px] text-red-600 dark:text-red-400">{{ referenceProblem }}</p>
+
   </CollapsibleSection>
 
   <CollapsibleSection v-if="extractsHarmonics(form.stimulus)" title="Harmonics">
@@ -671,8 +710,6 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       {{ (harmonicCeilingHz / 1000).toFixed(1) }} kHz ÷ k, so H{{ form.maxHarmonicOrder }} ends at
       {{ (harmonicCeilingHz / form.maxHarmonicOrder / 1000).toFixed(2) }} kHz.
     </p>
-
-    <p v-if="invalid" class="text-[11px] text-red-600 dark:text-red-400">{{ invalid }}</p>
 
   </CollapsibleSection>
 </template>

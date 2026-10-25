@@ -153,6 +153,18 @@ function fitToGate() {
   timeToMs.value = i.gatePostMs
 }
 
+/**
+ * The highest frequency worth asking for: the measurement's own Nyquist, which in this app's terms
+ * is the frequency span. Past it there is nothing measured — the decay analyses clamp their band to
+ * it server-side, and the chart draws the grid the server answers with — so the control stops there
+ * rather than offering a stretch of axis nothing can fill.
+ *
+ * <p>The <em>spinner</em> stops there; a value already stored above it is left alone and simply
+ * means "as far as the measurement goes". Clamping the stored number instead would mark a
+ * measurement dirty merely for having been opened at a narrower span.</p>
+ */
+const freqCeilingHz = computed(() => (sampleRateHz.value > 0 ? Math.round(sampleRateHz.value / 2) : undefined))
+
 /** The band the harmonic curves actually cover — the widest order's, since the others stop earlier. */
 function fitToHarmonics() {
   const curves = harmonics.value
@@ -426,7 +438,9 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqFromHz"
             type="number"
-            step="1"
+            min="1"
+            :max="freqCeilingHz"
+            step="10"
             class="tb-input"
           />
         </label>
@@ -435,7 +449,9 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqToHz"
             type="number"
-            step="100"
+            min="2"
+            :max="freqCeilingHz"
+            step="1000"
             class="tb-input"
           />
         </label>
@@ -496,7 +512,9 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqFromHz"
             type="number"
-            step="1"
+            min="1"
+            :max="freqCeilingHz"
+            step="10"
             class="tb-input"
           />
         </label>
@@ -505,7 +523,9 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqToHz"
             type="number"
-            step="100"
+            min="2"
+            :max="freqCeilingHz"
+            step="1000"
             class="tb-input"
           />
         </label>

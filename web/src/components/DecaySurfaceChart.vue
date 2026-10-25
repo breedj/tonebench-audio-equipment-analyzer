@@ -27,7 +27,7 @@ import {
   paletteLut,
   pickSurfacePoint,
   paletteIndex,
-  shadeRuns,
+  columnSpans,
   sliceOrigin,
   wallGradientStops,
 } from '../measurements/decay'
@@ -343,6 +343,7 @@ function drawWaterfall(
    */
   let behind: (SurfacePoint | null)[] | null = null
   let behindPoints: SurfacePoint[] | null = null
+  let behindOriginY: number | null = null
 
   for (const index of drawnSliceIndices(count, layout.depthY)) {
     const depth = count > 1 ? index / (count - 1) : 0
@@ -364,8 +365,8 @@ function drawWaterfall(
 
     if (points.length < 2) continue
 
-    if (props.filled && behind && behindPoints) {
-      paintBand(ctx, behind, row, lut, topDb, bottomDb)
+    if (props.filled && behind && behindPoints && behindOriginY !== null) {
+      paintBand(ctx, behind, row, lut, (behindOriginY + origin.y) / 2, layout.levelHeight)
       strokeMesh(ctx, behindPoints, width)
     }
 
@@ -381,6 +382,7 @@ function drawWaterfall(
     if (props.filled) {
       behind = row
       behindPoints = points
+      behindOriginY = origin.y
     }
 
     const trailing = recedesLeft ? points[points.length - 1] : points[0]
@@ -452,51 +454,56 @@ interface SurfacePoint {
 }
 
 /**
- * The strip of surface between two neighbouring curves, as one polygon per run of equal colour.
+ * The strip of surface between two neighbouring curves, painted the way the trailing wall is: one
+ * <em>gradient</em> over this pair's own level axis, so the colour at any point of the band is the
+ * colour of the level that height stands for.
  *
- * <p>Each cell is the quad joining column <c>a</c> and <c>a + 1</c> of the two curves, shaded by
- * the mean of its four corners — a quad has one colour, and taking it from any one corner tilts the
- * whole band half a cell in that direction. Neighbouring cells of the same shade are drawn as one
- * strip (see <c>shadeRuns</c>): they share an exact edge, so a fill each leaves a hairline of
- * whatever is underneath along every join, which on a dark page is a surface finely ruled in black.
- * A cell with a corner the analysis never reached is left out, and ends the run.</p>
+ * <p><b>That is the rule, and a flat colour per cell was the bug.</b> Each cell was filled with the
+ * mean of its four corners, which is right only where the band is thin. Where the surface falls
+ * steeply the cell is a tall face: measured on a loudspeaker's cumulative spectral decay at 60°,
+ * <b>8.9 % of the 23 541 cells stood over 20 px high</b>, and the first step of the decay was a
+ * 27 px slab carrying one colour for a 1.7 dB drop. Neighbouring slabs then take their means at
+ * different heights, so reading down a column the colour steps <em>warmer</em> where the level has
+ * fallen — reported 2026-10-25 as the gradient going the wrong way in the background of the chart
+ * while going the right way at its trailing edge, which is exactly the half that was already a
+ * gradient.</p>
+ *
+ * <p>Anchored on the mean of the two slices' origins, as the wall's quads are: they are one depth
+ * step apart, which is 0.2 dB of the level axis here, and taking either end alone would tilt the
+ * whole band by that much.</p>
+ *
+ * <p>Drawn as one polygon per unbroken stretch of columns (see <c>columnSpans</c>) rather than one
+ * quad each — 400 columns across eighty slices is 32 000 quads. The stroke is the gradient too:
+ * neighbouring polygons share an exact edge, and antialiasing leaves a hairline of whatever is
+ * underneath along every one of them. Safe over the back edge — which is the curve behind —
+ * because that curve's own white line is stroked immediately after this, never before it.</p>
  */
 function paintBand(
   ctx: CanvasRenderingContext2D,
   behind: (SurfacePoint | null)[],
   front: (SurfacePoint | null)[],
   lut: Uint8Array,
-  topDb: number,
-  bottomDb: number,
+  originY: number,
+  levelHeight: number,
 ) {
-  const cells: (number | null)[] = []
+  const cells: boolean[] = []
   for (let a = 0; a + 1 < front.length; a++) {
-    const corners = [behind[a], behind[a + 1], front[a], front[a + 1]]
-    if (corners.some((corner) => corner === null)) {
-      cells.push(null)
-      continue
-    }
-    const mean = corners.reduce((sum, corner) => sum + corner!.level, 0) / 4
-    cells.push(shade(mean, topDb, bottomDb))
+    cells.push(behind[a] !== null && behind[a + 1] !== null && front[a] !== null && front[a + 1] !== null)
   }
 
-  for (const run of shadeRuns(cells)) {
+  const gradient = ctx.createLinearGradient(0, originY, 0, originY + levelHeight)
+  for (const stop of wallGradientStops()) gradient.addColorStop(stop.offset, lutColor(lut, stop.index))
+  ctx.fillStyle = gradient
+  ctx.strokeStyle = gradient
+  ctx.lineWidth = 1
+
+  for (const span of columnSpans(cells)) {
     ctx.beginPath()
-    ctx.moveTo(front[run.start]!.x, front[run.start]!.y)
-    for (let a = run.start + 1; a <= run.end + 1; a++) ctx.lineTo(front[a]!.x, front[a]!.y)
-    for (let a = run.end + 1; a >= run.start; a--) ctx.lineTo(behind[a]!.x, behind[a]!.y)
+    ctx.moveTo(front[span.start]!.x, front[span.start]!.y)
+    for (let a = span.start + 1; a <= span.end + 1; a++) ctx.lineTo(front[a]!.x, front[a]!.y)
+    for (let a = span.end + 1; a >= span.start; a--) ctx.lineTo(behind[a]!.x, behind[a]!.y)
     ctx.closePath()
-
-    const lutIndex = Math.round((run.shade / (SHADES - 1)) * 255)
-    ctx.fillStyle = lutColor(lut, lutIndex)
     ctx.fill()
-
-    // Stroked in its own colour for the same reason the trailing wall's quads are: neighbouring
-    // runs share an exact edge, and antialiasing leaves a hairline of whatever is underneath along
-    // every one of them. Safe over the back edge — which is the curve behind — because that curve's
-    // own white line is stroked immediately after this, never before it.
-    ctx.strokeStyle = ctx.fillStyle
-    ctx.lineWidth = 1
     ctx.stroke()
   }
 }

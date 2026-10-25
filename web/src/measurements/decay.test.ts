@@ -24,7 +24,7 @@ import {
   furthestReached,
   paletteLut,
   pickSurfacePoint,
-  shadeRuns,
+  columnSpans,
   sliceOrigin,
   sliceStride,
   DECAY_DEPTH_PERCENT,
@@ -81,34 +81,31 @@ describe('decayProjection', () => {
   })
 })
 
-describe('shadeRuns', () => {
-  it('joins neighbouring cells of the same colour into one strip', () => {
-    expect(shadeRuns([1, 1, 1, 2, 2])).toEqual([
-      { start: 0, end: 2, shade: 1 },
-      { start: 3, end: 4, shade: 2 },
+describe('columnSpans', () => {
+  it('joins neighbouring cells into one strip', () => {
+    expect(columnSpans([true, true, true, true, true])).toEqual([{ start: 0, end: 4 }])
+  })
+
+  /** A cell the analysis never reached ends the stretch — the polygon has to be continuous. */
+  it('breaks a stretch at a cell that cannot be drawn', () => {
+    expect(columnSpans([true, false, true])).toEqual([
+      { start: 0, end: 0 },
+      { start: 2, end: 2 },
     ])
   })
 
-  /** A cell the analysis never reached ends the run — the polygon has to be a continuous strip. */
-  it('breaks a run at a cell with no level', () => {
-    expect(shadeRuns([1, null, 1])).toEqual([
-      { start: 0, end: 0, shade: 1 },
-      { start: 2, end: 2, shade: 1 },
-    ])
-  })
-
-  it('covers every cell that has a colour, exactly once', () => {
-    const cells = [3, 3, null, 0, 1, 1, 1, null, null, 2]
-    const covered = shadeRuns(cells).flatMap((run) =>
-      Array.from({ length: run.end - run.start + 1 }, (_, i) => run.start + i),
+  it('covers every cell that can be drawn, exactly once', () => {
+    const cells = [true, true, false, true, true, true, false, false, true]
+    const covered = columnSpans(cells).flatMap((span) =>
+      Array.from({ length: span.end - span.start + 1 }, (_, i) => span.start + i),
     )
 
-    expect(covered).toEqual(cells.map((cell, i) => (cell === null ? null : i)).filter((i) => i !== null))
+    expect(covered).toEqual(cells.map((cell, i) => (cell ? i : null)).filter((i) => i !== null))
   })
 
   it('answers nothing for a row with nothing in it', () => {
-    expect(shadeRuns([])).toEqual([])
-    expect(shadeRuns([null, null])).toEqual([])
+    expect(columnSpans([])).toEqual([])
+    expect(columnSpans([false, false])).toEqual([])
   })
 })
 

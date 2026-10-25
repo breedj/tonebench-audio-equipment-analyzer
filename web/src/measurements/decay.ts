@@ -108,40 +108,38 @@ function clamp(value: number, bounds: { min: number; max: number; default: numbe
 }
 
 /**
- * Runs of equal shade over a row of cells, so the filled surface can be painted as one polygon per
- * run rather than one quad per column.
+ * The unbroken stretches of a row of cells, so a filled band can be painted as one polygon per
+ * stretch rather than one quad per column.
  *
  * <p>A 400-column surface across eighty slices is 32 000 quads, and a fill call each is a visibly
- * slow redraw for a picture nobody can see that much colour resolution in — the same reasoning the
- * stroked curves' own batching carries. A cell with no shade (a level the analysis never reached)
- * ends the run rather than joining it, because the polygon has to be a continuous strip.</p>
+ * slow redraw of a picture nobody can see that much detail in — the same reasoning the stroked
+ * curves' own batching carries. A cell the analysis never reached ends the stretch rather than
+ * joining it, because the polygon has to be a continuous strip.</p>
  */
-export function shadeRuns(shades: (number | null)[]): ShadeRun[] {
-  const runs: ShadeRun[] = []
-  let open: ShadeRun | null = null
+export function columnSpans(covered: boolean[]): ColumnSpan[] {
+  const spans: ColumnSpan[] = []
+  let open: ColumnSpan | null = null
 
-  for (let i = 0; i < shades.length; i++) {
-    const shade = shades[i]
-    if (shade === null) {
+  for (let i = 0; i < covered.length; i++) {
+    if (!covered[i]) {
       open = null
       continue
     }
-    if (open && shade === open.shade) {
+    if (open) {
       open.end = i
       continue
     }
-    open = { start: i, end: i, shade }
-    runs.push(open)
+    open = { start: i, end: i }
+    spans.push(open)
   }
 
-  return runs
+  return spans
 }
 
-/** A stretch of neighbouring cells that are all the same colour. Both ends are inclusive. */
-export interface ShadeRun {
+/** A stretch of neighbouring cells that can all be drawn. Both ends are inclusive. */
+export interface ColumnSpan {
   start: number
   end: number
-  shade: number
 }
 
 /**

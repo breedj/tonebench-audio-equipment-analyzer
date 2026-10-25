@@ -164,14 +164,25 @@ function configure() {
   // every zoom tried, so the framing is set explicitly instead.
   C.PePlot.Option.DxFitControlShape = false
   C.PePlot.Option.DxViewportX = 0
-  // Lifts the box off the bottom of the plot, where the engine otherwise parks it with the whole
-  // top of the panel empty. Measured on a 601x586 plot: ink within 3 px of the bottom edge falls
-  // from 190 px to 26 at this setting, with the top and right edges clear either way. It is not a
-  // plain translation — the figure is a measured optimum, and both larger and smaller are worse.
-  C.PePlot.Option.DxViewportY = 8
+  // Zero, and the lift is done with the margins below instead. `DxViewportY` is documented as a
+  // translation of up to three times the size of the axes and measures as almost nothing here —
+  // the whole legal range of -3..+3 moves the surface seven pixels on a 320-pixel plot. (An
+  // earlier 8 here was outside that range entirely, which is what made it read as a knob with a
+  // measured optimum rather than one that barely works.)
+  C.PePlot.Option.DxViewportY = 0
+  // Shift and drag translates the surface, as the vendor's own demo does it. The engine
+  // implements the gesture; this is only its speed, and without it the gesture does nothing.
+  C.PePlot.Option.DxViewportPanFactor = 10
+  // Takes a margin off the top and gives it to the bottom, which moves the whole plot box up
+  // inside the panel — the engine otherwise parks it on the floor with the top left empty.
+  // Measured on a 547x320 plot: the gap above the content falls from 58 px to 47 and the gap
+  // below rises from 4 to 15. Going further clips: at -150/150 the bottom gap is already 0.
+  C.PeConfigure.ImageAdjustTop = -100
+  C.PeConfigure.ImageAdjustBottom = 100
+  C.PeConfigure.ImageAdjustRight = -200
   C.PePlot.Option.DxFOV = 1
   // Well below any zoom we set, so the wheel still has somewhere to go in both directions.
-  C.PePlot.Option.DxZoomMin = -900
+  C.PePlot.Option.DxZoomMin = -90
   C.PePlot.Option.DxZoomMax = -3
   C.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
 
@@ -469,6 +480,10 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     ? {
         azimuth: chart.PeUserInterface.Scrollbar.DegreeOfRotation,
         elevation: chart.PeUserInterface.Scrollbar.ViewingHeight,
+        // The shift-and-drag translation too, for the same reason as the camera angles: once the
+        // surface has been moved, the props no longer describe what is on screen.
+        viewportX: chart.PePlot.Option.DxViewportX,
+        viewportY: chart.PePlot.Option.DxViewportY,
       }
     : null
 
@@ -491,6 +506,8 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
       if (live) {
         chart.PeUserInterface.Scrollbar.DegreeOfRotation = live.azimuth
         chart.PeUserInterface.Scrollbar.ViewingHeight = live.elevation
+        chart.PePlot.Option.DxViewportX = live.viewportX
+        chart.PePlot.Option.DxViewportY = live.viewportY
       }
       forceLightTheme()
       applyDataForExport()

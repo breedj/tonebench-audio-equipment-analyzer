@@ -123,26 +123,35 @@ export function peColor(r: number, g: number, b: number): number {
  * <p>So the box is a fixed shape and the <em>view</em> is what the panel's two numbers move:
  * Rotation swings the camera round it and Tilt raises it. A fixed box is also what lets one zoom
  * frame every surface, whatever its resolution.</p>
+ *
+ * <p><b>And it is a small box viewed from close to, not a large one viewed from far off</b>, which
+ * is not a free choice: <c>DxViewportX</c>/<c>Y</c> — the viewport translation, and what the
+ * engine's own shift-and-drag gesture writes — scale with the camera's distance. At ten times this
+ * size and ten times the distance the picture is identical to the pixel, and the whole legal
+ * translation range of -3..+3 moves the surface <em>seven pixels</em>, so the gesture looks broken.
+ * At this size the same range moves it 47, and the gesture works.</p>
  */
 export function decayGridAspect(): { x: number; y: number; z: number } {
-  return { x: 100, y: 45, z: 90 }
+  return { x: 10, y: 4.5, z: 9 }
 }
 
 /**
  * How far to pull the camera back, for a plot of this shape.
  *
  * <p>Measured rather than derived (2026-10-25, against the fixed box {@link decayGridAspect}
- * returns): <c>-220</c> frames the surface with nothing touching an edge at every aspect from
- * 0.98 to 4.0, which is every layout this app actually produces. Below about 0.95 — both rails
- * open on a narrow window — it clips, and <c>-320</c> covers that.</p>
+ * returns): the ordinary figure frames the surface with nothing touching an edge at every aspect
+ * from 0.98 to 4.0, which is every layout this app actually produces. Below about 0.95 — both
+ * rails open on a narrow window — it clips, and the narrow figure covers that. Both were measured
+ * at ten times this box and ten times this distance, where the picture is identical, and scaled
+ * with it.</p>
  *
  * <p>The engine's own <c>DxFitControlShape</c> is not the answer: it ignores the zoom and fills
  * the plot, measuring 65–99 % of the canvas covered with thousands of pixels against the edges at
  * every zoom tried. And the relation is not monotonic at extreme shapes — pulling further back
  * from a very tall, narrow plot can clip again — so this is a measured step rather than a formula.</p>
  */
-export const DECAY_3D_ZOOM = -220
-export const DECAY_3D_ZOOM_NARROW = -320
+export const DECAY_3D_ZOOM = -20
+export const DECAY_3D_ZOOM_NARROW = -29
 /** Below this width-over-height the surface no longer fits at the ordinary zoom. */
 export const DECAY_3D_NARROW_ASPECT = 0.95
 

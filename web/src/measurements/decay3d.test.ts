@@ -106,7 +106,6 @@ describe('decayMesh', () => {
   it('hands over the real axis values and says which axis is the frequency', () => {
     const across = decayMesh(dense(), 'Waterfall', 30)
     expect([...across.x]).toEqual([100, 1000, 10000])
-    expect([...across.z]).toEqual([0, 0.5])
     expect(across.acrossIsFrequency).toBe(true)
     expect(across.depthIsFrequency).toBe(false)
 
@@ -115,6 +114,31 @@ describe('decayMesh', () => {
     expect([...byPeriod.z]).toEqual([100, 1000, 10000])
     expect(byPeriod.acrossIsFrequency).toBe(false)
     expect(byPeriod.depthIsFrequency).toBe(true)
+  })
+
+  /**
+   * The depth coordinates are negated so the engine, which draws its smallest coordinate nearest
+   * the viewer, puts slice zero at the back — where the Canvas 2D chart puts it. The chart pairs
+   * this with `InvertedZAxis`, which hands the sign back to the labels.
+   */
+  it('negates a time depth axis, and says that it did', () => {
+    const mesh = decayMesh(dense(), 'Waterfall', 30)
+    expect([...mesh.z]).toEqual([-0, -0.5])
+    expect(mesh.invertDepth).toBe(true)
+  })
+
+  /** A log axis has no negative half, so the frequency depth axis is left alone. */
+  it('leaves a frequency depth axis positive, since its scale is logarithmic', () => {
+    const mesh = decayMesh(dense(), 'WaterfallPeriods', 30)
+    expect([...mesh.z].every((v) => v > 0)).toBe(true)
+    expect(mesh.invertDepth).toBe(false)
+  })
+
+  it('negates the depth axis exactly when it is not the frequency one', () => {
+    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
+      const mesh = decayMesh(ragged(), mode, 30)
+      expect(mesh.invertDepth).toBe(!mesh.depthIsFrequency)
+    }
   })
 
   it('never calls both axes a frequency, since one of them is always the time', () => {

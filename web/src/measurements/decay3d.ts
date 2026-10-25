@@ -40,8 +40,21 @@ export interface DecayMesh {
   depthIsFrequency: boolean
   /** Heights, row-major, <c>rows * cols</c> of them. NaN wherever the analysis has no answer. */
   y: Float64Array
-  /** One depth coordinate per curve. */
+  /** One depth coordinate per curve. Negated when {@link invertDepth} is set. */
   z: Float64Array
+  /**
+   * Whether {@link z} has been negated, which the chart pairs with the engine's `InvertedZAxis`
+   * so the axis still reads its own positive values.
+   *
+   * <p>This is how the depth axis is made to run away from the viewer — slice zero at the back,
+   * where the Canvas 2D chart puts it. It cannot be done by turning the camera: the two floor axes
+   * keep their handedness however the camera moves, so the azimuth that puts time the right way
+   * round mirrors the frequency axis with it.</p>
+   *
+   * <p>False where the depth axis carries the frequency, in the by-period view: that axis is
+   * logarithmic and a log scale cannot take a negative coordinate.</p>
+   */
+  invertDepth: boolean
   /** How many cells came back NaN — the ragged corner, and a useful thing to assert on. */
   missing: number
 }
@@ -82,7 +95,11 @@ export function decayMesh(surface: DecaySurface, mode: DecayChartMode, rangeDb: 
     acrossIsFrequency: view.acrossIsFrequency,
     depthIsFrequency: view.depthIsFrequency,
     y,
-    z: Float64Array.from(view.depth),
+    // Negated, so the engine's "smallest coordinate nearest the viewer" puts slice zero at the
+    // back. `InvertedZAxis` hands the sign back to the labels. Not for a log axis, which has no
+    // negative half.
+    z: Float64Array.from(view.depth, (v) => (view.depthIsFrequency ? v : -v)),
+    invertDepth: !view.depthIsFrequency,
     missing,
   }
 }

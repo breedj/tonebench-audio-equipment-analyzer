@@ -251,7 +251,7 @@ function applyTheme() {
 
 /** The engine's azimuth for a panel lean, wrapped into the 0-359 the engine accepts. */
 function azimuthFor(rotationDeg: number): number {
-  return ((Math.round(360 - rotationDeg) % 360) + 360) % 360
+  return ((Math.round(180 - rotationDeg) % 360) + 360) % 360
 }
 
 function applyCamera() {
@@ -259,22 +259,16 @@ function applyCamera() {
   // The panel's lean maps onto the engine's azimuth, and its depth onto the elevation. Both of the
   // panel's ranges are narrower than the engine's, so nothing has to be clamped here.
   //
-  // <p><b>360 rather than 180, which is which side of the box the camera sits on.</b> At 180 the
-  // depth axis ran the wrong way: time zero came out at the front and the stack receded into the
-  // past, where the Canvas 2D chart puts time zero at the back — <c>sliceOrigin(layout, 0)</c> is
-  // the top-left corner and increasing depth comes forward. Reported 2026-10-25 on both surfaces,
-  // the burst decay's Periods axis included, which is the same axis by another name.</p>
-  //
-  // <p>Note what this costs, because it is not free and no azimuth avoids it: the two floor axes
-  // keep their handedness however the camera moves, so turning the box to put time the right way
-  // round also mirrors the frequency axis. Frequency now increases right to left, where the Canvas
-  // 2D chart has it left to right. Reversing the depth <em>data</em> instead would keep both, and
-  // needs the engine's <c>InvertedZAxis</c> with negated values — which cannot work in the
-  // by-period view, whose depth axis is a logarithmic frequency.</p>
+  // <p><b>180, which is the side of the box that puts the frequency axis the way round the Canvas
+  // 2D chart draws it</b> — increasing left to right. Turning the camera to the other side (360 -
+  // lean) was tried for a day and reverted: it does put the depth axis the right way round, but
+  // the two floor axes keep their handedness however the camera moves, so it mirrors the frequency
+  // axis with it. The depth axis is reversed in the data instead — see <c>DecayMesh.invertDepth</c>
+  // — which is the only way to have both.</p>
   appliedRotation = props.rotationDeg
   appliedDepth = props.depthPercent
-  // Wrapped into 0-359, or a negative lean leaves the engine's range and it simply does not turn:
-  // 360 - (-10) is 370, which clamps. Reported 2026-10-25 as the slider doing nothing below zero.
+  // Wrapped into 0-359, or a lean outside the range the subtraction lands in leaves the engine's
+  // own and it simply does not turn. Reported 2026-10-25 as the slider doing nothing below zero.
   chart.PeUserInterface.Scrollbar.DegreeOfRotation = azimuthFor(props.rotationDeg)
   chart.PeUserInterface.Scrollbar.ViewingHeight = Math.round(props.depthPercent * 0.6)
 }
@@ -373,6 +367,9 @@ function applyData() {
   C.PeGrid.Configure.ZAxisScaleControl =
     mesh.depthIsFrequency ? enums.ScaleControl.Log : enums.ScaleControl.Normal
   C.PeGrid.Configure.YAxisScaleControl = enums.ScaleControl.Normal
+  // The depth coordinates are negated (see DecayMesh.invertDepth); this hands the sign back to the
+  // axis, so it still reads 0 at the back and counts up towards the viewer.
+  C.PeGrid.Configure.InvertedZAxis = mesh.invertDepth
   // Plain hertz on the log axis — 1000, not 10³. The rest of the app writes 1k through formatHz,
   // but the engine owns this axis's formatting and an unambiguous number beats a wrong one.
   C.PeGrid.Configure.LogScaleExpLabels = false

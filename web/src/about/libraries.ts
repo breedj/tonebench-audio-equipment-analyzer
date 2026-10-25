@@ -25,6 +25,12 @@ export interface Library {
   role: string
   /** Which manifest pins it, so the test can check the version and the coverage. */
   package?: { manifest: 'npm' | 'nuget'; id: string }
+  /**
+   * A copyright line the licence requires us to carry *in the application*. This page is where
+   * that obligation is met, so it is shown rather than kept in a file beside the exe — which the
+   * app deliberately does not have.
+   */
+  notice?: string
 }
 
 export interface LibraryGroup {
@@ -172,6 +178,18 @@ const SHIPPED: Library[] = [
     licence: 'MIT',
     role: 'The user interface — every screen, panel and dialog in this window.',
     package: { manifest: 'npm', id: 'vue' },
+  },
+  {
+    name: 'ProEssentials JS',
+    version: '11.0.1',
+    url: 'https://gigasoft.com/',
+    // No SPDX identifier exists: it is a commercial product with a free tier, and the tier is the
+    // thing worth stating. Not "free for non-commercial use" — that is both narrower and wider
+    // than the terms, which allow commercial use and redistribution below the threshold.
+    licence: 'Gigasoft ProEssentials JS licence — free, including redistribution, below USD 250,000 annual revenue',
+    role: 'Draws the rotatable 3D decay surface, where the browser offers WebGPU. The decay charts fall back to our own Canvas 2D ones everywhere else.',
+    notice: 'ProEssentials — Copyright 1994-2026 Gigasoft, Inc. All rights reserved.',
+    package: { manifest: 'npm', id: 'proessentials' },
   },
   {
     name: 'µPlot',

@@ -1,5 +1,10 @@
 # Files that Linux executes or that dpkg reads must stay LF whatever core.autocrlf says on the
-# machine that checked them out: a postinst with CRLF line endings fails at "#!/bin/sh".
+# machine that checked them out: a postinst with CRLF line endings fails at "#!/bin/sh
+".
 *.sh text eol=lf
 packaging/linux/deb/* text eol=lf
 packaging/udev/* text eol=lf
+
+# The charting engine. Git would autodetect it, but this file has rules precisely because
+# line-ending conversion has bitten before, and a corrupted wasm fails only at run time.
+*.wasm binary

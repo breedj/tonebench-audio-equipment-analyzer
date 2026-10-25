@@ -211,6 +211,14 @@ watch(
                     library.version
                   }}</span>
                   <p class="mt-0.5 text-[12px] text-neutral-500 dark:text-neutral-400">{{ library.role }}</p>
+                  <!-- Shown, not merely stored: this is where a licence that requires a copyright
+                       notice inside the application has that obligation met. -->
+                  <p
+                    v-if="library.notice"
+                    class="mt-0.5 text-[11px] text-neutral-400 dark:text-neutral-500"
+                  >
+                    {{ library.notice }}
+                  </p>
                 </div>
                 <div class="w-40 shrink-0 text-right text-[12px] text-neutral-500 dark:text-neutral-400">
                   {{ library.licence }}

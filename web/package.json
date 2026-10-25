@@ -11,6 +11,7 @@
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
+    "proessentials": "11.0.1",
     "uplot": "^1.6.32",
     "vue": "^3.5.40"
   },

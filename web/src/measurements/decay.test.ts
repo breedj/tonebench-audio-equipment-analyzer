@@ -30,6 +30,7 @@ import {
   DECAY_DEPTH_PERCENT,
   DECAY_ROTATION_DEG,
   decayProjection,
+  dragToView,
 } from './decay'
 
 describe('decayProjection', () => {
@@ -725,5 +726,56 @@ describe('advancesTrailingEdge', () => {
     }
 
     expect(ribs).toEqual([100, 96, 92, 88])
+  })
+})
+
+describe('dragToView', () => {
+  const mid = { rotation: 0, depth: 45 }
+
+  it('leans the stack with the horizontal travel and stands it up with the vertical', () => {
+    const right = dragToView(mid.rotation, mid.depth, 100, 0)
+    expect(right.rotationDeg).toBeGreaterThan(mid.rotation)
+    expect(right.depthPercent).toBe(mid.depth)
+
+    const up = dragToView(mid.rotation, mid.depth, 0, -100)
+    expect(up.depthPercent).toBeGreaterThan(mid.depth)
+    expect(up.rotationDeg).toBe(mid.rotation)
+  })
+
+  it('is symmetric about the starting point', () => {
+    const a = dragToView(mid.rotation, mid.depth, 60, 40)
+    const b = dragToView(mid.rotation, mid.depth, -60, -40)
+    expect(a.rotationDeg - mid.rotation).toBeCloseTo(mid.rotation - b.rotationDeg, 10)
+    expect(a.depthPercent - mid.depth).toBeCloseTo(mid.depth - b.depthPercent, 10)
+  })
+
+  /** The panel's fields clamp to these, so a drag that did not would make the two disagree. */
+  it('clamps to the same ranges the fields do, at both ends of both axes', () => {
+    expect(dragToView(0, 45, 100000, 0).rotationDeg).toBe(DECAY_ROTATION_DEG.max)
+    expect(dragToView(0, 45, -100000, 0).rotationDeg).toBe(DECAY_ROTATION_DEG.min)
+    expect(dragToView(0, 45, 0, -100000).depthPercent).toBe(DECAY_DEPTH_PERCENT.max)
+    expect(dragToView(0, 45, 0, 100000).depthPercent).toBe(DECAY_DEPTH_PERCENT.min)
+  })
+
+  it('stays inside the ranges from any legal starting point', () => {
+    for (const rotation of [DECAY_ROTATION_DEG.min, 0, DECAY_ROTATION_DEG.max]) {
+      for (const depth of [DECAY_DEPTH_PERCENT.min, 45, DECAY_DEPTH_PERCENT.max]) {
+        for (const [dx, dy] of [[500, 500], [-500, -500], [0, 0], [3, -3]]) {
+          const out = dragToView(rotation, depth, dx, dy)
+          expect(out.rotationDeg).toBeGreaterThanOrEqual(DECAY_ROTATION_DEG.min)
+          expect(out.rotationDeg).toBeLessThanOrEqual(DECAY_ROTATION_DEG.max)
+          expect(out.depthPercent).toBeGreaterThanOrEqual(DECAY_DEPTH_PERCENT.min)
+          expect(out.depthPercent).toBeLessThanOrEqual(DECAY_DEPTH_PERCENT.max)
+        }
+      }
+    }
+  })
+
+  it('does not move the view when nothing was dragged', () => {
+    expect(dragToView(25, 50, 0, 0)).toEqual({ rotationDeg: 25, depthPercent: 50 })
+  })
+
+  it('falls back to the foot of the range rather than passing NaN to the projection', () => {
+    expect(dragToView(Number.NaN, 50, 10, 0).rotationDeg).toBe(DECAY_ROTATION_DEG.min)
   })
 })

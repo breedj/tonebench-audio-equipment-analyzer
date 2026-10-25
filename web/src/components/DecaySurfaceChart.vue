@@ -13,6 +13,7 @@ import {
   axisFraction,
   decayLayout,
   decayProjection,
+  dragToView,
   drawnSliceIndices,
   formatHz,
   furthestReached,
@@ -86,6 +87,17 @@ const props = defineProps<{
   error: string | null
   /** What to say when there is nothing to draw. */
   emptyMessage: string
+}>()
+
+/**
+ * A drag on the surface writes the same two numbers the display rail's fields write, so the
+ * gesture, the panel and the stored settings can never disagree — and because the drag goes
+ * through the props, the Screenshot and the report draw exactly what is on screen for free.
+ * <c>DecaySurface3dChart</c> emits the same pair.
+ */
+const emit = defineEmits<{
+  (e: 'update:rotationDeg', value: number): void
+  (e: 'update:depthPercent', value: number): void
 }>()
 
 const { isDark } = useAppTheme()
@@ -345,7 +357,7 @@ function drawWaterfall(
   let behindPoints: SurfacePoint[] | null = null
   let behindOriginY: number | null = null
 
-  for (const index of drawnSliceIndices(count, layout.depthY)) {
+  for (const index of drawnSliceIndices(count, dragging.value ? layout.depthY / 3 : layout.depthY)) {
     const depth = count > 1 ? index / (count - 1) : 0
     const origin = sliceOrigin(layout, depth)
     const points: SurfacePoint[] = []
@@ -958,7 +970,54 @@ function drawDepthAxis(
  * curve owns the pixel is the painter's algorithm's answer — `pickSurfacePoint` replays it, so the
  * whole solid surface reports rather than only the curves.
  */
+/**
+ * Dragging the surface rotates it. Only while a button is held, so the hover readout — which is a
+ * move with no button — is untouched; the readout is suppressed for the length of the drag because
+ * what is under the cursor is moving with it.
+ *
+ * <p>While dragging, the stack is drawn at a coarser slice stride: a redraw is the whole waterfall
+ * and a few dozen curves per pointer event is what makes a drag feel heavy. The same trick the 3D
+ * engine's own wireframe rotation mode uses.</p>
+ */
+const dragging = ref(false)
+let dragFrom: { x: number; y: number; rotationDeg: number; depthPercent: number } | null = null
+
+function onPointerDown(event: PointerEvent) {
+  if (event.button !== 0 || !props.surface || !isWaterfall.value) return
+  dragFrom = {
+    x: event.clientX,
+    y: event.clientY,
+    rotationDeg: props.rotationDeg,
+    depthPercent: props.depthPercent,
+  }
+  dragging.value = true
+  clearHover()
+  ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
+  event.preventDefault()
+}
+
+function onPointerDrag(event: PointerEvent) {
+  if (!dragging.value || !dragFrom) return
+  const next = dragToView(
+    dragFrom.rotationDeg,
+    dragFrom.depthPercent,
+    event.clientX - dragFrom.x,
+    event.clientY - dragFrom.y,
+  )
+  if (next.rotationDeg !== props.rotationDeg) emit('update:rotationDeg', next.rotationDeg)
+  if (next.depthPercent !== props.depthPercent) emit('update:depthPercent', next.depthPercent)
+}
+
+function endDrag(event: PointerEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  dragFrom = null
+  ;(event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId)
+  draw()
+}
+
 function onMove(event: MouseEvent) {
+  if (dragging.value) return
   const surface = props.surface
   const view = oriented.value
   const element = canvas.value
@@ -1110,8 +1169,13 @@ onBeforeUnmount(() => {
     <canvas
       ref="canvas"
       class="block w-full"
+      :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
       @mousemove="onMove"
       @mouseleave="clearHover"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerDrag"
+      @pointerup="endDrag"
+      @pointercancel="endDrag"
     ></canvas>
     <canvas ref="overlay" class="pointer-events-none absolute left-0 top-0 block w-full"></canvas>
 

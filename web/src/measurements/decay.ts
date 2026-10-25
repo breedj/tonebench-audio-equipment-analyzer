@@ -83,6 +83,39 @@ const MAX_LEAN_FRACTION = 0.6
  * which is the commonest one, and nothing stored changes meaning, the old pair never having been
  * a setting at all.</p>
  */
+/**
+ * <p>Where a drag leaves the oblique projection: the pointer's horizontal travel leans the stack
+ * and its vertical travel sets how deep the stack runs, both clamped to the ranges the display
+ * rail's own fields are clamped to.</p>
+ *
+ * <p>In degrees and percent rather than pixels because that is what the projection and the panel
+ * both speak, so a drag, a typed figure and a stored setting are the same two numbers — which is
+ * also what lets the Screenshot and the report draw exactly what is on screen for free.</p>
+ *
+ * <p><c>DEG_PER_PIXEL</c> gives a comfortable half-turn of the usable range across a few hundred
+ * pixels; <c>PERCENT_PER_PIXEL</c> is negative in effect, because dragging <em>up</em> should
+ * stand the stack up rather than flatten it.</p>
+ */
+export const DRAG_DEG_PER_PIXEL = 0.35
+export const DRAG_PERCENT_PER_PIXEL = 0.22
+
+export function dragToView(
+  startRotationDeg: number,
+  startDepthPercent: number,
+  dx: number,
+  dy: number,
+): { rotationDeg: number; depthPercent: number } {
+  return {
+    rotationDeg: clampTo(startRotationDeg + dx * DRAG_DEG_PER_PIXEL, DECAY_ROTATION_DEG),
+    depthPercent: clampTo(startDepthPercent - dy * DRAG_PERCENT_PER_PIXEL, DECAY_DEPTH_PERCENT),
+  }
+}
+
+function clampTo(value: number, range: { min: number; max: number }): number {
+  if (!Number.isFinite(value)) return range.min
+  return value < range.min ? range.min : value > range.max ? range.max : value
+}
+
 export function decayProjection(
   rotationDeg: number,
   depthPercent: number,

@@ -329,6 +329,43 @@ const { showPage } = useManual()
       is one with a squashed dB scale — the two share the box, and neither can be had for nothing.
     </p>
     <p>
+      On the flat projection both can also be <strong>dragged on the chart itself</strong>: hold
+      the left button on the surface and move the pointer, sideways to lean the stack and up or
+      down to set its depth. The
+      fields follow the drag, so what you set by hand and what you set by dragging are the same two
+      numbers &mdash; which is also why a screenshot or a report drawn afterwards shows exactly the
+      view you left on screen. The stack is drawn at a coarser slice spacing while the button is
+      down and fills back in when it is released, and the readout is suspended for the length of the
+      drag, since what is under the pointer is moving with it.
+    </p>
+    <h3>The 3D view</h3>
+    <p>
+      Where the browser can drive a GPU, the two waterfalls are drawn as a <strong>lit 3D
+      surface</strong> that can be rotated and zoomed freely: drag to turn it, and use the wheel to
+      move the camera in and out. It is the same measurement, the same palette and the same dB
+      range as the flat projection &mdash; only the drawing differs.
+    </p>
+    <p>
+      This needs <strong>WebGPU</strong>, which Chrome and Edge 113 and later have on Windows and
+      macOS, and Firefox 141 and later has on Windows. On Linux it depends on the browser, the GPU
+      and the driver. Where it is not available the decay charts simply use the flat projection
+      described above, with no loss of measurement and no message &mdash; nothing needs setting
+      either way.
+    </p>
+    <p>
+      <strong>Rotation</strong> and <strong>Depth</strong> set the 3D view, and from the first drag
+      the chart's own camera takes over: it turns through a whole circle, which those two fields
+      cannot describe, so they stop following it rather than springing the surface back part way
+      through a turn. Changing either field puts the view where it says again. A screenshot taken
+      after a drag is the picture on screen, not the one the fields describe.
+    </p>
+    <p>
+      Two more differences. <strong>Sonogram</strong> is always drawn flat, because it is a colour
+      map and there is no surface to turn. And <strong>Filled</strong>, <strong>Coloured
+      curves</strong> and <strong>Thick lines</strong> describe how a stack of curves is drawn, so
+      they have no effect on the 3D surface, which is always a lit solid.
+    </p>
+    <p>
       <strong>Points per period</strong> is how finely the burst decay is sampled in time, and so how
       many curves the waterfall has to draw. Eight is the default, and at any ordinary chart size every
       one of them is drawn — what separates adjacent curves is the level between them, not the depth

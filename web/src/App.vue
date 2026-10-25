@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, ApiError, type ResponsePhaseKindName, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
 import { generatorLevelUnitOf } from './generatorLevel'
@@ -110,7 +110,12 @@ import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.
 import ImpulseResponseDisplayPanel from './components/ImpulseResponseDisplayPanel.vue'
 import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
 import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
+import { decaySurfaceGpuAvailable } from './charts/peCapability'
+import { decayModeIs3d } from './measurements/decay3d'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
+// Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
+// open an impulse measurement, or has no WebGPU, never fetches it at all.
+const DecaySurface3dChart = defineAsyncComponent(() => import('./components/DecaySurface3dChart.vue'))
 import LoopbackReferenceDialog from './components/LoopbackReferenceDialog.vue'
 import ResponsePolarChart from './components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from './components/ResponseSPlaneChart.vue'
@@ -147,7 +152,7 @@ import {
 import { useOutputImpedance } from './composables/useOutputImpedance'
 import { formatOhms } from './impedance/equivalent'
 import { DEFAULT_IMPULSE_DISPLAY, impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
-import { monochromeChartPng } from './charts/exportChart'
+import { monochromeChartPng, type ChartExportOptions } from './charts/exportChart'
 import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
 import { useScreenshotSettings } from './composables/useScreenshotSettings'
 import { useDateTimeFormat } from './composables/useDateTimeFormat'
@@ -2669,6 +2674,19 @@ const impulseChart = ref<InstanceType<typeof ImpulseResponseChart> | null>(null)
 const impulseResponseChart = ref<InstanceType<typeof FrequencyResponseChart> | null>(null)
 const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | null>(null)
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
+const impulseDecay3dChart = ref<{ exportPng: (o: ChartExportOptions) => Promise<Blob> } | null>(null)
+
+/**
+ * Whether the decay surfaces are drawn by the GPU engine. False until the probe answers, so the
+ * screen never waits on a blank panel — and false for ever on a bench without WebGPU, where the
+ * engine would otherwise draw a plausible surface that is not the measurement. See
+ * `charts/peCapability.ts`.
+ */
+const decayGpu = ref(false)
+decaySurfaceGpuAvailable().then((ok) => { decayGpu.value = ok })
+
+/** The sonogram is a flat colour map; there is nothing for a lit mesh to add to it. */
+const decayUses3d = computed(() => decayGpu.value && decayModeIs3d(impulseDecayMode.value))
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const outputImpedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)
@@ -2694,7 +2712,9 @@ function chartOnScreen() {
       case 'Harmonics':
         return impulseHarmonicsChart.value
       default:
-        return impulseDecayChart.value
+        // Whichever of the two decay charts is mounted. Read by the Screenshot dialog and by the
+        // issue reporter, which swallows an export failure silently — so this must not go null.
+        return impulseDecay3dChart.value ?? impulseDecayChart.value
     }
   }
   if (isImpedance.value) return impedanceView.value === 'Bode' ? impedanceChart.value : impedancePlaneChart.value
@@ -4593,7 +4613,29 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-bottom-db="impulseYBottomDb"
                 />
                 <!-- Both decay surfaces, drawn by one chart: they differ in what the depth axis
-                     counts and in nothing about how it is drawn. -->
+                     counts and in nothing about how it is drawn.
+
+                     Two charts, one prop list. The GPU one is used where WebGPU can actually draw
+                     it and the mode is a waterfall; everywhere else — no adapter, or the sonogram,
+                     which is a flat colour map — the Canvas 2D one draws, which is also what every
+                     report renders through. The two take the same props and expose the same
+                     exportPng, so nothing downstream knows which is on screen. -->
+                <DecaySurface3dChart
+                  v-else-if="decayUses3d"
+                  ref="impulseDecay3dChart"
+                  :surface="impulseView === 'Csd' ? impulseCsdSurface : impulseBurstSurface"
+                  :mode="impulseDecayMode"
+                  :palette="impulseDecayPalette"
+                  :colored-curves="impulseDecayColoredCurves"
+                  :filled="impulseDecayFilled"
+                  :rotation-deg="impulseDecayRotationDeg"
+                  :depth-percent="impulseDecayDepthPercent"
+                  :range-db="impulseDecayRangeDb"
+                  :thick-lines="impulseThickLines"
+                  :computing="impulseDecayComputing"
+                  :error="impulseDecayError"
+                  empty-message="Measure an impulse response, and this draws its decay."
+                />
                 <DecaySurfaceChart
                   v-else
                   ref="impulseDecayChart"
@@ -4609,6 +4651,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :computing="impulseDecayComputing"
                   :error="impulseDecayError"
                   empty-message="Measure an impulse response, and this draws its decay."
+                  @update:rotation-deg="impulseDecayRotationDeg = $event"
+                  @update:depth-percent="impulseDecayDepthPercent = $event"
                 />
 
                 <!-- What 0 dB means here, restated under the chart, because it is not the same

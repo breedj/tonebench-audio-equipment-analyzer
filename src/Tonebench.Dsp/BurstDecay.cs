@@ -18,6 +18,23 @@ public enum BurstDecayResolution
     /// every decay because the analysis itself lasts that long.
     /// </summary>
     PreferFrequency = 1,
+
+    /// <summary>
+    /// 7.63 periods wide, which is <b>a sixth of an octave</b> exactly — the narrowest rung, and the
+    /// one ARTA calls "prefer frequency resolution".
+    ///
+    /// <para><b>Why it exists.</b> ARTA offers 1/3 and 1/6 octave; this app offered 2/3 and 1/3, so
+    /// every setting here was one rung wider than its namesake there and the narrowest analysis ARTA
+    /// can do had no counterpart at all. Reported 2026-10-25 as ARTA showing more high-frequency
+    /// detail on the same measurement, which is exactly what a filter half as wide resolves. The two
+    /// older names predate the ladder and are kept as they are, since they are what stored
+    /// measurements carry; the dropdown labels all three by bandwidth, which is the thing the two
+    /// programs can actually be matched on.</para>
+    ///
+    /// <para>The width is set from the bandwidth rather than rounded to a whole number of periods,
+    /// unlike the two above — there is no stored measurement to keep looking the same.</para>
+    /// </summary>
+    SixthOctave = 2,
 }
 
 /// <summary>How to read a burst decay off an impulse response.</summary>
@@ -98,10 +115,25 @@ public static class BurstDecay
 
     /// <summary>
     /// The wavelet's width, as the full width at half maximum of its Gaussian envelope, in periods.
-    /// Its bandwidth follows: <c>Q = f / FWHM_f ≈ 1.13 x periods</c>.
+    ///
+    /// <para>Its bandwidth follows exactly: a Gaussian envelope whose time FWHM is <c>p</c> periods
+    /// transforms to one whose frequency FWHM is <c>0.8825 f / p</c> — which is ARTA's own
+    /// <c>Δf/f₀ = 2.3548/(ω₀σ)</c> written out, the same wavelet by the same definition. So the
+    /// ladder in octaves is <c>p = 0.8825 / (2^(n/2) − 2^(−n/2))</c>: 1.89 periods for two thirds of
+    /// an octave, 3.81 for a third, 7.63 for a sixth. The first two are rounded to 2 and 4, which is
+    /// within 5 % and is what every stored measurement was taken with.</para>
     /// </summary>
-    public static double WaveletPeriods(BurstDecayResolution resolution) =>
-        resolution == BurstDecayResolution.PreferFrequency ? 4.0 : 2.0;
+    public static double WaveletPeriods(BurstDecayResolution resolution) => resolution switch
+    {
+        BurstDecayResolution.SixthOctave => SixthOctavePeriods,
+        BurstDecayResolution.PreferFrequency => 4.0,
+        _ => 2.0,
+    };
+
+    /// <summary>
+    /// 0.8825 / (2^(1/12) − 2^(−1/12)) — the envelope width whose bandwidth is a sixth of an octave.
+    /// </summary>
+    private const double SixthOctavePeriods = 7.6334;
 
     /// <summary>Gaussian FWHM in standard deviations — <c>2 sqrt(2 ln 2)</c>.</summary>
     private const double FwhmSigmas = 2.3548200450309493;

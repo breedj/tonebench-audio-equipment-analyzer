@@ -183,4 +183,45 @@ public class BurstDecayTests
             .Where(s => column >= s.FirstValidColumn)
             .MaxBy(s => s.LevelDb[column - s.FirstValidColumn])!
             .Value;
+
+    /// <summary>
+    /// The three rungs are the octave fractions they are labelled with, which is the only thing a
+    /// measurement here and one in ARTA can be matched on: ARTA's "prefer time" is 1/3 octave and
+    /// its "prefer frequency" is 1/6, where the two older names here are 2/3 and 1/3.
+    ///
+    /// <para>Asserted from the wavelet's own width rather than against a constant: a Gaussian
+    /// envelope whose time FWHM is p periods has a frequency FWHM of 0.8825·f/p, which is ARTA's
+    /// Δf/f₀ = 2.3548/(ω₀σ) written out. The two rounded rungs are allowed 5 %, the sixth-octave one
+    /// is set from the bandwidth and is exact. The rounded pair come out about 5 % narrow of the
+    /// fraction they are named for -- 2 periods is really 0.63 of an octave and 4 is 0.32 -- which is
+    /// finer than anyone reads off a dropdown and is why they were left at whole periods.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(BurstDecayResolution.PreferTime, 2.0 / 3.0, 0.06)]
+    [InlineData(BurstDecayResolution.PreferFrequency, 1.0 / 3.0, 0.06)]
+    [InlineData(BurstDecayResolution.SixthOctave, 1.0 / 6.0, 0.001)]
+    public void TheResolutions_AreTheOctaveFractionsTheyAreLabelledWith(
+        BurstDecayResolution resolution, double octaves, double tolerance)
+    {
+        double periods = BurstDecay.WaveletPeriods(resolution);
+        double relativeBandwidth = 0.88252 / periods;
+        double expected = Math.Pow(2.0, octaves / 2.0) - Math.Pow(2.0, -octaves / 2.0);
+
+        Assert.Equal(expected, relativeBandwidth, expected * tolerance);
+    }
+
+    /// <summary>
+    /// And the ladder only ever narrows, which is what the labels promise. A rung out of order would
+    /// read as the dropdown doing the opposite of what it says.
+    /// </summary>
+    [Fact]
+    public void TheResolutions_NarrowInTheOrderTheyAreOffered()
+    {
+        Assert.True(
+            BurstDecay.WaveletPeriods(BurstDecayResolution.PreferTime)
+                < BurstDecay.WaveletPeriods(BurstDecayResolution.PreferFrequency));
+        Assert.True(
+            BurstDecay.WaveletPeriods(BurstDecayResolution.PreferFrequency)
+                < BurstDecay.WaveletPeriods(BurstDecayResolution.SixthOctave));
+    }
 }

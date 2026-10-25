@@ -1758,7 +1758,12 @@ export type ImpulseView = 'Impulse' | 'Response' | 'Harmonics' | 'Csd' | 'BurstD
 
 export type DecayAxisName = 'Milliseconds' | 'Periods'
 export type CsdWindowModeName = 'Apodizing' | 'Hann'
-export type BurstDecayResolutionName = 'PreferTime' | 'PreferFrequency'
+/**
+ * The wavelet's bandwidth. The first two names predate the ladder and are what stored measurements
+ * carry — they are 2/3 and 1/3 of an octave; `SixthOctave` is the narrowest and is what ARTA calls
+ * "prefer frequency resolution".
+ */
+export type BurstDecayResolutionName = 'PreferTime' | 'PreferFrequency' | 'SixthOctave'
 
 /**
  * One row of a decay surface. `levelDb` starts at `firstValidColumn`, not at column 0 — a burst

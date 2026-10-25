@@ -112,9 +112,16 @@ const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
   { value: 'Hann', label: 'STF, Hann window' },
 ]
 
+/**
+ * Labelled by bandwidth rather than by which end of the trade it favours, because that is the thing
+ * two programs can be matched on: ARTA's "prefer time" is 1/3 octave and its "prefer frequency" is
+ * 1/6, where this app's two old names are 2/3 and 1/3. Naming the octave fraction makes the rungs
+ * line up without anyone having to know that.
+ */
 const BURST_RESOLUTIONS: { value: BurstDecayResolutionName; label: string }[] = [
-  { value: 'PreferTime', label: 'Prefer time resolution' },
-  { value: 'PreferFrequency', label: 'Prefer frequency resolution' },
+  { value: 'PreferTime', label: '2/3 octave — fastest decay' },
+  { value: 'PreferFrequency', label: '1/3 octave' },
+  { value: 'SixthOctave', label: '1/6 octave — finest detail' },
 ]
 
 const CHART_MODES: { value: DecayChartMode; label: string }[] = [
@@ -629,7 +636,7 @@ const referenceLabel = computed(() => {
           <select
             v-model="burstResolution"
             class="tb-input"
-            title="How wide the analysis wavelet is. Preferring frequency separates resonances that sit close together, at the cost of taking twice as many periods to open up — so the first cycles of every decay are the analysis rather than the DUT."
+            title="How wide the analysis wavelet is, as a fraction of an octave. A narrower filter separates resonances that sit close together and resolves more detail at the top of the band, at the cost of lasting more periods — so the first cycles of every decay are the analysis opening up rather than the DUT. ARTA calls 1/3 octave prefer time and 1/6 octave prefer frequency, so match it by the fraction rather than by the words."
           >
             <option v-for="option in BURST_RESOLUTIONS" :key="option.value" :value="option.value">
               {{ option.label }}

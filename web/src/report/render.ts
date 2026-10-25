@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { api, type DecaySurface, type ImpulseBurstDecayRequest, type ImpulseCsdRequest } from '../api/client'
 import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX, type ChartExportOptions } from '../charts/exportChart'
-import { csdBlockShiftSamples } from '../measurements/decay'
+import { csdSpanSamples } from '../measurements/decay'
 import DecaySurfaceChart from '../components/DecaySurfaceChart.vue'
 import FrequencyResponseChart from '../components/FrequencyResponseChart.vue'
 import ImpedanceChart from '../components/ImpedanceChart.vue'
@@ -559,11 +559,11 @@ async function decaySurface(subject: ReportSubject, view: 'Csd' | 'BurstDecay'):
 
   try {
     if (view === 'Csd') {
-      // The span is in milliseconds and the server wants a shift in samples, so it is derived
-      // here exactly as the screen derives it — see csdBlockShiftSamples.
+      // The span is in milliseconds and the server wants a depth in samples, so it is converted
+      // here exactly as the screen converts it — see csdSpanSamples.
       const request: ImpulseCsdRequest = {
         fftLength: display.csd.fftLength,
-        blockShiftSamples: csdBlockShiftSamples(display.csd.spanMs, display.csd.slices, subject.data.impulse?.sampleRateHz ?? 0),
+        spanSamples: csdSpanSamples(display.csd.spanMs, subject.data.impulse?.sampleRateHz ?? 0),
         blockCount: display.csd.slices,
         startBeforePeakMs: display.csd.startBeforePeakMs,
         windowMode: display.csd.windowMode,

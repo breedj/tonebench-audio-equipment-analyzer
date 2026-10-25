@@ -398,7 +398,8 @@ public sealed record ImpulseResponseStartRequest(
 /// </summary>
 public sealed record ImpulseCsdRequest(
     int FftLength,
-    int BlockShiftSamples,
+    /// <summary>The surface's whole depth in samples — see <see cref="CsdSettings.SpanSamples"/>.</summary>
+    int SpanSamples,
     int BlockCount,
     string? WindowMode,
     double RiseTimeMs,
@@ -409,7 +410,7 @@ public sealed record ImpulseCsdRequest(
     double StartBeforePeakMs = 0.0)
 {
     public CsdSettings ToSettings(CsdWindowMode windowMode) =>
-        new(FftLength, BlockShiftSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns, StartBeforePeakMs);
+        new(FftLength, SpanSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns, StartBeforePeakMs);
 }
 
 /// <summary>Wire shape for a burst decay. See <see cref="ImpulseCsdRequest"/> on the mapping.</summary>

@@ -21,7 +21,7 @@ public class ImpulseDecayRequestTests
     {
         var wire = new ImpulseCsdRequest(
             FftLength: 2048,
-            BlockShiftSamples: 37,
+            SpanSamples: 37,
             BlockCount: 41,
             WindowMode: "Hann",
             RiseTimeMs: 0.35,
@@ -33,7 +33,7 @@ public class ImpulseDecayRequestTests
         var settings = wire.ToSettings(CsdWindowMode.Hann);
 
         Assert.Equal(2048, settings.FftLength);
-        Assert.Equal(37, settings.BlockShiftSamples);
+        Assert.Equal(37, settings.SpanSamples);
         Assert.Equal(41, settings.BlockCount);
         Assert.Equal(CsdWindowMode.Hann, settings.WindowMode);
         Assert.Equal(0.35, settings.RiseTimeMs);

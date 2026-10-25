@@ -1795,7 +1795,8 @@ export interface DecaySurface {
 /** The cumulative spectral decay's analysis settings — all display, never a reason to re-measure. */
 export interface ImpulseCsdRequest {
   fftLength: number
-  blockShiftSamples: number
+  /** The surface's whole depth in samples; the slices are spread across it. */
+  spanSamples: number
   blockCount: number
   windowMode: CsdWindowModeName
   riseTimeMs: number

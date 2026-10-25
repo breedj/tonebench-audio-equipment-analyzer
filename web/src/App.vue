@@ -162,7 +162,7 @@ import {
   BURST_FREQUENCY_COLUMNS,
   DECAY_DISPLAY_COLUMNS,
   DEFAULT_CSD_ANALYSIS,
-  csdBlockShiftSamples,
+  csdSpanSamples,
 } from './measurements/decay'
 import { SWEEP_POINTS_KEY, useSweep } from './composables/useSweep'
 import { useImdSweep } from './composables/useImdSweep'
@@ -3630,15 +3630,12 @@ function requestImpulseDecay() {
   impulseDecayTimer = setTimeout(() => {
     impulseDecayTimer = null
     if (isCsd) {
-      // The server still takes a shift in samples, which is what the transform needs; the span in
-      // milliseconds is what the user turns. See csdBlockShiftSamples.
+      // The server takes the depth in samples; the span in milliseconds is what the user turns, and
+      // the slices are spread across it there rather than stepped by a fixed amount here. See
+      // csdSpanSamples.
       const csdRequest = {
         fftLength: impulseCsdFftLength.value,
-        blockShiftSamples: csdBlockShiftSamples(
-          impulseCsdSpanMs.value,
-          impulseCsdSlices.value,
-          impulseStatus.value?.sampleRateHz ?? 0,
-        ),
+        spanSamples: csdSpanSamples(impulseCsdSpanMs.value, impulseStatus.value?.sampleRateHz ?? 0),
         blockCount: impulseCsdSlices.value,
         startBeforePeakMs: impulseCsdStartBeforePeakMs.value,
         windowMode: impulseCsdWindowMode.value,

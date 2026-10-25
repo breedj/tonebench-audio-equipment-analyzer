@@ -11,14 +11,14 @@ public class CumulativeSpectralDecayTests
 
     private static CsdSettings Settings(
         int fftLength = 512,
-        int blockShift = 16,
+        int spanSamples = 19 * 16,
         int blockCount = 20,
         CsdWindowMode mode = CsdWindowMode.Apodizing,
         double riseMs = 0.2,
         double lowHz = 100.0,
         double highHz = 20000.0,
         int columns = 300) =>
-        new(fftLength, blockShift, blockCount, mode, riseMs, lowHz, highHz, columns);
+        new(fftLength, spanSamples, blockCount, mode, riseMs, lowHz, highHz, columns);
 
     /// <summary>
     /// A record holding nothing but a single sample has no decay to show: every slice past the
@@ -64,7 +64,7 @@ public class CumulativeSpectralDecayTests
 
         // 1 ms of slices, so the whole span is a few time constants and the window (10.7 ms) is
         // long enough to resolve 1 kHz comfortably.
-        var settings = Settings(fftLength: 512, blockShift: 24, blockCount: 21);
+        var settings = Settings(fftLength: 512, spanSamples: 20 * 24, blockCount: 21);
         var surface = CumulativeSpectralDecay.Compute(ir, peak, SampleRateHz, RecordLength / 4, settings, Fft);
 
         int column = NearestColumn(surface.FreqHz, freqHz);
@@ -99,7 +99,7 @@ public class CumulativeSpectralDecayTests
         }
 
         var surface = CumulativeSpectralDecay.Compute(
-            ir, peak, SampleRateHz, RecordLength / 4, Settings(blockShift: 32, blockCount: 16), Fft);
+            ir, peak, SampleRateHz, RecordLength / 4, Settings(spanSamples: 15 * 32, blockCount: 16), Fft);
 
         // Nothing exceeds the surface reference, and the reference is reached.
         double highest = surface.Slices.SelectMany(s => s.LevelDb).Max();
@@ -130,7 +130,7 @@ public class CumulativeSpectralDecayTests
         ir[100] = 1.0;
 
         var ex = Assert.Throws<ArgumentOutOfRangeException>(() => CumulativeSpectralDecay.Compute(
-            ir, 100, SampleRateHz, 600, Settings(fftLength: 512, blockShift: 64, blockCount: 20), Fft));
+            ir, 100, SampleRateHz, 600, Settings(fftLength: 512, spanSamples: 19 * 64, blockCount: 20), Fft));
 
         Assert.Contains("past the impulse", ex.Message);
     }
@@ -251,7 +251,7 @@ public class CumulativeSpectralDecayTests
         ir[peak] = 1.0;
 
         // 1 ms at 48 kHz is 48 samples, and a 16-sample shift puts the impulse four slices in.
-        var settings = Settings(fftLength: 512, blockShift: 16, blockCount: 20) with { StartBeforePeakMs = 1.0 };
+        var settings = Settings(fftLength: 512, spanSamples: 19 * 16, blockCount: 20) with { StartBeforePeakMs = 1.0 };
         var surface = CumulativeSpectralDecay.Compute(
             ir, peak, SampleRateHz, RecordLength / 4, settings, Fft, availablePreSamples: RecordLength / 4);
 
@@ -268,7 +268,7 @@ public class CumulativeSpectralDecayTests
 
         // Without it, the fourth slice is three shifts past the impulse and already falling.
         var flush = CumulativeSpectralDecay.Compute(
-            ir, peak, SampleRateHz, RecordLength / 4, Settings(fftLength: 512, blockShift: 16, blockCount: 20), Fft);
+            ir, peak, SampleRateHz, RecordLength / 4, Settings(fftLength: 512, spanSamples: 19 * 16, blockCount: 20), Fft);
 
         Assert.True(
             flush.Slices[3].LevelDb.Max() < -40.0,

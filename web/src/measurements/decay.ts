@@ -279,7 +279,11 @@ export function describeCsdFftLength(fftLength: number, sampleRateHz: number): s
   return `${ms.toFixed(ms < 10 ? 2 : 1)} ms window, resolves ${hz.toFixed(hz < 10 ? 1 : 0)} Hz`
 }
 
-/** How far past the impulse a set of CSD slices reaches, in milliseconds. What the server checks. */
+/**
+ * How far past the impulse a set of CSD slices reaches, in milliseconds, given the block shift in
+ * samples that used to be the setting. Only {@link readImpulseDisplay} calls it, to convert a
+ * measurement stored before the span was the setting.
+ */
 export function csdSpanMs(blockShiftSamples: number, blockCount: number, sampleRateHz: number): number {
   if (!(sampleRateHz > 0)) return 0
   return ((blockCount - 1) * blockShiftSamples * 1000) / sampleRateHz
@@ -294,12 +298,12 @@ export interface CsdAnalysis {
    * <p>A shift in samples means four different things at the three sample rates, which is the trap
    * every CSD setting carries: ARTA's 2 samples is 2.46 ms of decay off a 48 kHz sound card and
    * 0.61 ms here at 192. A span in milliseconds is the same measurement at any rate, and it is what
-   * a reader of the chart actually wants to say. The shift is derived from it — see
-   * <c>csdBlockShiftSamples</c> — and quantised to a whole sample, so the span that comes out is
-   * near the one asked for rather than exactly it.</p>
+   * a reader of the chart actually wants to say. It is honoured to the sample — see
+   * <c>csdSpanSamples</c> — and the slices are spread across it, so the rounding lands on the gap
+   * between them and never on the length of the axis.</p>
    */
   spanMs: number
-  /** How many slices to cut that span into. The shift falls out of the two. */
+  /** How many slices to cut that span into. Changing it never changes how far the surface reaches. */
   slices: number
   /**
    * How far ahead of the impulse the first slice sits, in milliseconds. Zero starts the surface at
@@ -316,23 +320,35 @@ export interface CsdAnalysis {
 }
 
 /**
- * The block shift a span and a slice count come to, in whole samples and at least one.
+ * The surface's depth in whole samples, which is what the server takes.
  *
- * <p>There are <c>slices - 1</c> steps across the span, not <c>slices</c>: the first slice sits at
- * the impulse itself, which is time zero rather than one step in.</p>
+ * <p><b>It does not depend on the slice count, and that is the point.</b> It used to derive a
+ * <em>step</em> between slices instead, which had to be a whole sample and so put the rounding on
+ * the span: 2.46 ms asked for at 96 kHz came out 2.458 ms over 60 slices, 2.063 over 100 and 3.104
+ * over 150, the axis changing length because of a setting that has nothing to do with it. The span
+ * is rounded once here and the slices are spread across it server-side.</p>
  */
-export function csdBlockShiftSamples(spanMs: number, slices: number, sampleRateHz: number): number {
-  const steps = Math.max(1, Math.round(slices) - 1)
-  const samples = Math.round(((spanMs / 1000) * sampleRateHz) / steps)
+export function csdSpanSamples(spanMs: number, sampleRateHz: number): number {
+  const samples = Math.round((spanMs / 1000) * sampleRateHz)
   return Math.max(1, Number.isFinite(samples) ? samples : 1)
 }
 
 /**
- * The span that shift actually buys, which is what the panel prints: the shift is a whole number of
- * samples, so a span of 2.5 ms at 192 kHz is really 2.458.
+ * The span that really comes out, to the sample — within half a sample of the one asked for at any
+ * slice count, where it used to be out by a quarter of itself.
  */
 export function csdAchievedSpanMs(analysis: CsdAnalysis, sampleRateHz: number): number {
-  return csdSpanMs(csdBlockShiftSamples(analysis.spanMs, analysis.slices, sampleRateHz), analysis.slices, sampleRateHz)
+  return sampleRateHz > 0 ? (csdSpanSamples(analysis.spanMs, sampleRateHz) / sampleRateHz) * 1000 : 0
+}
+
+/**
+ * The average gap between slices, in samples — what the panel prints beside the span. Fractional on
+ * purpose: the slices land on whole samples individually, and a figure rounded here would claim a
+ * regularity they do not have.
+ */
+export function csdSliceStepSamples(analysis: CsdAnalysis, sampleRateHz: number): number {
+  const steps = Math.max(1, Math.round(analysis.slices) - 1)
+  return csdSpanSamples(analysis.spanMs, sampleRateHz) / steps
 }
 
 /**
@@ -343,13 +359,14 @@ export function csdAchievedSpanMs(analysis: CsdAnalysis, sampleRateHz: number): 
  * <p>ARTA's four numbers are 256 points, a shift of 2 and 60 blocks off a 48 kHz sound card: a
  * 5.33 ms window resolving 187.5 Hz over 2.46 ms of decay. Two of those are in <b>samples</b> and
  * mean something else at another rate, so what is written down here is the pair that does not —
- * 2.5 ms of span over 60 slices, which quantises to ARTA's own 2.458 ms at 48 <i>and</i> at
- * 192 kHz. The transform length is still in samples because it has to be a power of two, and 1024
- * is the one that gives 5.33 ms and 187.5 Hz at the 192 kHz an impulse measurement now opens at.</p>
+ * 2.46 ms of span over 60 slices, which is ARTA's own 2.4583 ms to within two microseconds and is
+ * now honoured to the sample at any rate and any slice count. The transform length is still in
+ * samples because it has to be a power of two, and 1024 is the one that gives 5.33 ms and 187.5 Hz
+ * at the 192 kHz an impulse measurement now opens at.</p>
  */
 export const DEFAULT_CSD_ANALYSIS: Readonly<CsdAnalysis> = Object.freeze({
   fftLength: 1024,
-  spanMs: 2.5,
+  spanMs: 2.46,
   slices: 60,
   windowMode: 'Apodizing',
   riseTimeMs: 0.2,

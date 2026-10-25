@@ -18,7 +18,7 @@ import {
   CSD_FFT_LENGTHS,
   DEFAULT_CSD_ANALYSIS,
   csdAchievedSpanMs,
-  csdBlockShiftSamples,
+  csdSliceStepSamples,
   describeCsdFftLength,
   PALETTE_NAMES,
 } from '../measurements/decay'
@@ -145,10 +145,11 @@ const csdSpanLabel = computed(() => {
   const rate = sampleRateHz.value
   if (!(rate > 0)) return `${csdSlices.value} slices`
 
-  const shift = csdBlockShiftSamples(csdSpanMs.value, csdSlices.value, rate)
-  const span = csdAchievedSpanMs({ ...DEFAULT_CSD_ANALYSIS, spanMs: csdSpanMs.value, slices: csdSlices.value }, rate)
+  const analysis = { ...DEFAULT_CSD_ANALYSIS, spanMs: csdSpanMs.value, slices: csdSlices.value }
+  const span = csdAchievedSpanMs(analysis, rate)
+  const step = csdSliceStepSamples(analysis, rate)
   const head = csdStartBeforePeakMs.value > 0 ? `, from −${csdStartBeforePeakMs.value.toFixed(2)} ms` : ''
-  return `${span.toFixed(2)} ms, ${shift} ${shift === 1 ? 'sample' : 'samples'} per slice${head}`
+  return `${span.toFixed(2)} ms, ${step.toFixed(step < 10 ? 1 : 0)} samples per slice${head}`
 })
 
 /**

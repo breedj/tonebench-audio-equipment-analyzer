@@ -4,7 +4,6 @@ import {
   acrossX,
   axisFraction,
   axisFractions,
-  csdSpanMs,
   decayLayout,
   drawnSliceIndices,
   DEFAULT_CSD_ANALYSIS,
@@ -15,7 +14,8 @@ import {
   levelY,
   linearTicks,
   csdAchievedSpanMs,
-  csdBlockShiftSamples,
+  csdSliceStepSamples,
+  csdSpanSamples,
   wallGradientStops,
   logTicks,
   lutColor,
@@ -219,29 +219,38 @@ describe('wallGradientStops', () => {
   })
 })
 
-describe('csdBlockShiftSamples', () => {
+describe('csdSpanSamples', () => {
   /**
    * The point of saying the span in milliseconds: the same setting is the same measurement at every
    * rate, where ARTA's "shift 2" is 2.46 ms off a 48 kHz sound card and 0.61 ms at 192.
    */
-  it('buys the same span at every sample rate', () => {
+  it('is the same length of time at every sample rate', () => {
     for (const rate of [48000, 96000, 192000]) {
-      const shift = csdBlockShiftSamples(2.5, 60, rate)
-      expect(csdSpanMs(shift, 60, rate)).toBeCloseTo(2.46, 1)
+      expect((csdSpanSamples(2.5, rate) / rate) * 1000).toBeCloseTo(2.5, 2)
     }
   })
 
-  it("lands on ARTA's own shift at ARTA's own rate", () => {
-    expect(csdBlockShiftSamples(2.5, 60, 48000)).toBe(2)
-    expect(csdBlockShiftSamples(2.5, 60, 192000)).toBe(8)
+  /**
+   * The fault this replaced: the step between slices had to be a whole sample, so rounding *it*
+   * made the span depend on a setting that has nothing to do with the axis — 2.46 ms asked for at
+   * 96 kHz came out 2.063 ms over 100 slices and 3.104 over 150. Reported 2026-10-25.
+   */
+  it('does not move with the slice count', () => {
+    for (const slices of [2, 20, 60, 100, 150, 200]) {
+      const analysis = { ...DEFAULT_CSD_ANALYSIS, spanMs: 2.46, slices }
+      expect(csdAchievedSpanMs(analysis, 96000)).toBeCloseTo(2.46, 2)
+    }
   })
 
-  it('steps across the span rather than past it, and never stops', () => {
-    // Sixty slices are fifty-nine steps: the first sits at the impulse, which is time zero.
-    expect(csdBlockShiftSamples(59 / 48, 60, 48000)).toBe(1)
-    // A span too short to buy even one sample still advances, or every slice would be the same one.
-    expect(csdBlockShiftSamples(0, 60, 48000)).toBe(1)
-    expect(csdBlockShiftSamples(2.5, 60, 0)).toBe(1)
+  it('never collapses to nothing', () => {
+    expect(csdSpanSamples(0, 48000)).toBe(1)
+    expect(csdSpanSamples(2.5, 0)).toBe(1)
+  })
+
+  /** The average gap, which is fractional on purpose: the slices land on whole samples one by one. */
+  it('reports the gap between slices without pretending it is regular', () => {
+    const analysis = { ...DEFAULT_CSD_ANALYSIS, spanMs: 2.46, slices: 100 }
+    expect(csdSliceStepSamples(analysis, 96000)).toBeCloseTo(236 / 99, 3)
   })
 })
 
@@ -249,7 +258,7 @@ describe('DEFAULT_CSD_ANALYSIS', () => {
   it("is ARTA's analysis, in units that do not move with the sample rate", () => {
     expect(DEFAULT_CSD_ANALYSIS).toEqual({
       fftLength: 1024,
-      spanMs: 2.5,
+      spanMs: 2.46,
       slices: 60,
       windowMode: 'Apodizing',
       riseTimeMs: 0.2,
@@ -268,7 +277,8 @@ describe('DEFAULT_CSD_ANALYSIS', () => {
     const rate = 192000
     expect((DEFAULT_CSD_ANALYSIS.fftLength / rate) * 1000).toBeCloseTo(5.33, 2)
     expect(rate / DEFAULT_CSD_ANALYSIS.fftLength).toBeCloseTo(187.5, 1)
-    expect(csdAchievedSpanMs(DEFAULT_CSD_ANALYSIS, rate)).toBeCloseTo(2.46, 2)
+    // 472 samples at 192 kHz, which is ARTA's own 118 at 48 kHz to the microsecond.
+    expect(csdAchievedSpanMs(DEFAULT_CSD_ANALYSIS, rate)).toBeCloseTo((118 / 48000) * 1000, 4)
   })
 })
 

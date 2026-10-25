@@ -41,8 +41,19 @@ public enum CsdWindowMode
 /// <c>fs / FftLength</c>. Power of two. This is the measurement's one real trade — a longer
 /// transform resolves lower, and blurs the decay it is being used to look at over its own length.
 /// </param>
-/// <param name="BlockShiftSamples">Samples between one slice and the next. The surface's time step.</param>
-/// <param name="BlockCount">How many slices. The surface spans <c>(BlockCount-1) blocks of BlockShiftSamples</c>.</param>
+/// <param name="SpanSamples">
+/// How far past the first slice the last one sits — the surface's whole depth, in samples.
+///
+/// <para><b>It is the span rather than the step between slices</b>, and that is the fix for a real
+/// fault: a step has to be a whole number of samples, so making <i>it</i> the exact quantity put the
+/// rounding error on the span, where it moved with the slice count. Asking for 2.46 ms at 96 kHz
+/// gave 2.458 ms over 60 slices, 2.063 over 100 and 3.104 over 150 — the axis changing length
+/// because of a setting that should not touch it (reported 2026-10-25). With the span fixed, slice
+/// <c>j</c> sits at <c>round(j · SpanSamples / (BlockCount − 1))</c>: the first and last land exactly
+/// where asked and the rounding falls on the spacing in between, which no one set and which varies
+/// by at most one sample.</para>
+/// </param>
+/// <param name="BlockCount">How many slices, spread across that span.</param>
 /// <param name="RiseTimeMs">
 /// The apodizing window's rise, in milliseconds. Ignored by <see cref="CsdWindowMode.Hann"/>.
 /// </param>
@@ -63,7 +74,7 @@ public enum CsdWindowMode
 /// </param>
 public sealed record CsdSettings(
     int FftLength,
-    int BlockShiftSamples,
+    int SpanSamples,
     int BlockCount,
     CsdWindowMode WindowMode,
     double RiseTimeMs,
@@ -100,8 +111,8 @@ public sealed record CsdSettings(
                 $"The transform length must be a power of two between {MinFftLength} and {MaxFftLength}.");
         }
 
-        if (BlockShiftSamples < 1)
-            throw new ArgumentOutOfRangeException(nameof(BlockShiftSamples), BlockShiftSamples, "The block shift must be at least one sample.");
+        if (SpanSamples < 1)
+            throw new ArgumentOutOfRangeException(nameof(SpanSamples), SpanSamples, "The span must be at least one sample.");
 
         if (BlockCount is < 2 or > MaxBlockCount)
             throw new ArgumentOutOfRangeException(nameof(BlockCount), BlockCount, $"Between 2 and {MaxBlockCount} blocks.");
@@ -198,7 +209,7 @@ public static class CumulativeSpectralDecay
         // Where the last slice's window ends, relative to the impulse. Checked rather than clamped:
         // a surface that quietly stopped short would still be drawn against the axis the request
         // asked for, and its last slices would be the gate's edge rather than the DUT's decay.
-        int reach = ((settings.BlockCount - 1) * settings.BlockShiftSamples) - preSamples - peakOffset + length;
+        int reach = settings.SpanSamples - preSamples - peakOffset + length;
         if (reach > availablePostSamples)
         {
             double haveMs = availablePostSamples * 1000.0 / sampleRateHz;
@@ -230,7 +241,10 @@ public static class CumulativeSpectralDecay
 
         for (int j = 0; j < settings.BlockCount; j++)
         {
-            int start = peakIndex - preSamples + (j * settings.BlockShiftSamples) - peakOffset;
+            // Rounded per slice rather than stepped by a fixed amount, so the first and last land
+            // exactly on the span that was asked for. See CsdSettings.SpanSamples.
+            int offset = SliceOffset(j, settings);
+            int start = peakIndex - preSamples + offset - peakOffset;
             for (int i = 0; i < length; i++)
             {
                 int source = (((start + i) % ir.Length) + ir.Length) % ir.Length;
@@ -249,7 +263,7 @@ public static class CumulativeSpectralDecay
 
             // Labelled against the impulse, so a head start reads as negative time rather than
             // re-zeroing the axis on wherever the surface happens to begin.
-            slices.Add((((j * settings.BlockShiftSamples) - preSamples) * 1000.0 / sampleRateHz, columns));
+            slices.Add(((offset - preSamples) * 1000.0 / sampleRateHz, columns));
         }
 
         // One reference for the whole surface, deliberately: the front slice keeps the DUT's
@@ -269,6 +283,15 @@ public static class CumulativeSpectralDecay
 
         return new DecaySurface(DecayAxis.Milliseconds, freqHz, result, binHz);
     }
+
+    /// <summary>
+    /// Where slice <paramref name="index"/> begins, in samples past the first one. Slice 0 is at
+    /// zero and the last is at <see cref="CsdSettings.SpanSamples"/> exactly, whatever the count.
+    /// </summary>
+    public static int SliceOffset(int index, CsdSettings settings) =>
+        settings.BlockCount < 2
+            ? 0
+            : (int)Math.Round((double)index * settings.SpanSamples / (settings.BlockCount - 1));
 
     /// <summary>
     /// The sliding window, and where the sample a slice is labelled with sits inside it.

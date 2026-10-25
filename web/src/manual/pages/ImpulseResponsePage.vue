@@ -185,10 +185,11 @@ const { showPage } = useManual()
       different things at 48 and 192 kHz. It is the one real trade here: a longer transform reaches
       lower and blurs the decay it is being used to look at over its own length. <strong>Decay
       span</strong> is how far past the impulse the surface reaches and <strong>Slices</strong> is
-      how many spectra it is cut into; the step between slices falls out of the two, and the panel
-      prints both the span you will actually get and the step in samples it took. The span is in
-      milliseconds rather than samples on purpose, so the same setting is the same measurement at
-      every sample rate. Ask for more decay than the record holds and the run is refused rather than
+      how many spectra it is cut into. The span is in milliseconds rather than samples on purpose,
+      so the same setting is the same measurement at every sample rate, and it is honoured to the
+      sample whatever the slice count — the slices are spread across it rather than stepped by a
+      fixed amount, so changing how many there are never changes how long the axis is. The panel
+      prints the span you get and the average gap between slices. Ask for more decay than the record holds and the run is refused rather than
       answered — past the record there is nothing but the gate, and the gate decays perfectly.
     </p>
     <p>

@@ -42,8 +42,22 @@ public static class LogFrequencyGrid
     /// says nothing anyway.</para>
     ///
     /// <para>A column with no bin of its own — which is every column at the bottom of the band
-    /// whenever the transform is short — takes the bin nearest its centre rather than nothing at
-    /// all. That draws the staircase the resolution really is, instead of a comb of gaps.</para>
+    /// whenever the transform is short — is <b>interpolated between the two bins it lies between</b>,
+    /// which is to say the curve is drawn as a straight line from one measured point to the next,
+    /// the way every other chart in this app joins its samples. It used to take the bin nearest its
+    /// centre, on the reasoning that a staircase draws the resolution the analysis really has; the
+    /// staircase is what that looked like, and it reads as a broken chart rather than as a coarse
+    /// one. Reported 2026-10-25 beside a burst decay, which is smooth because its wavelet is
+    /// evaluated <i>at</i> every column and so has a measurement per column — where a cumulative
+    /// spectral decay has one linear FFT and <c>sampleRate / fftLength</c> between its bins. At
+    /// 1024 points and 192 kHz that is 187.5 Hz, i.e. <b>five bins across 20 Hz – 1 kHz against 400
+    /// columns</b>, so eighty columns in a row repeated one value.</para>
+    ///
+    /// <para>Nothing about the resolution changes and no extremum is invented: an interpolated
+    /// column lies between the two bins either side of it, and the record length that set the bin
+    /// spacing is on the panel beside the chart. The interpolation is <b>geometric</b> — linear in
+    /// dB — because the surface is read in dB, so that is the one reading under which the drawn
+    /// segment is actually straight.</para>
     /// </summary>
     public static void ReduceMax(
         ReadOnlySpan<double> binMagnitudes, double binHz, double lowHz, double highHz, Span<float> destination)
@@ -65,9 +79,12 @@ public static class LogFrequencyGrid
 
             if (last < first)
             {
-                int nearest = Math.Clamp(
-                    (int)Math.Round(Math.Sqrt(edgeLow * edgeHigh) / binHz), 0, lastBin);
-                destination[c] = (float)binMagnitudes[nearest];
+                double position = Math.Clamp(Math.Sqrt(edgeLow * edgeHigh) / binHz, 0, lastBin);
+                int below = (int)Math.Floor(position);
+                int above = Math.Min(below + 1, lastBin);
+                destination[c] = above == below
+                    ? (float)binMagnitudes[below]
+                    : (float)Geometric(binMagnitudes[below], binMagnitudes[above], position - below);
                 continue;
             }
 
@@ -80,5 +97,17 @@ public static class LogFrequencyGrid
 
             destination[c] = (float)peak;
         }
+    }
+
+    /// <summary>
+    /// A point between two magnitudes, straight in dB. Floored first, because a bin can be exactly
+    /// zero and the whole point of going through the logarithm is that it cannot take one.
+    /// </summary>
+    private static double Geometric(double low, double high, double fraction)
+    {
+        const double floor = 1e-30;
+        double a = Math.Log(Math.Max(low, floor));
+        double b = Math.Log(Math.Max(high, floor));
+        return Math.Exp(a + (b - a) * fraction);
     }
 }

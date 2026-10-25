@@ -341,6 +341,17 @@ const { showPage } = useManual()
       staircase that leaves along the left of the surface is that limit receding, not a measurement.
     </p>
     <p>
+      The two views do not resolve frequency the same way, which is worth knowing before comparing
+      them. A burst decay runs <em>its own</em> wavelet at every frequency the chart draws, so it has
+      a measurement per column however wide the band is. A cumulative spectral decay has one
+      transform per slice, and its bins are the sample rate over the
+      <strong>FFT length</strong> — 188 Hz at 1024 samples and 192 kHz, which the caption under that
+      control states. Over a 20 Hz – 1 kHz band that is five bins, so below a few hundred hertz the
+      curve is a straight line drawn between measured points rather than detail. Lengthening the
+      transform is the only thing that buys resolution there, and it costs time: the window has to
+      fit inside the gated impulse response.
+    </p>
+    <p>
       <strong>Range</strong> is how far below 0 dB the chart reaches — 30 dB is a good place to
       start. <strong>Coloured curves</strong> colours each curve by level; off draws them in one
       colour, which reads the shape rather than the level. The <strong>From</strong> and

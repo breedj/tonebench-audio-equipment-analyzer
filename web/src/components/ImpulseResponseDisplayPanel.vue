@@ -14,6 +14,7 @@ import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useMeasurements } from '../composables/useMeasurements'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
+import { clampNumberField } from '../numberField'
 import {
   CSD_FFT_LENGTHS,
   DECAY_DEPTH_PERCENT,
@@ -180,6 +181,23 @@ function fitToGate() {
  * measurement dirty merely for having been opened at a narrower span.</p>
  */
 const freqCeilingHz = computed(() => (sampleRateHz.value > 0 ? Math.round(sampleRateHz.value / 2) : undefined))
+
+/*
+ * The three fields whose floor is kept here rather than in a `min` attribute, so that their
+ * spinners step on round numbers — see clampNumberField, which is where the reason lives. Their
+ * ceilings are still attributes: `max` is no part of HTML's step base.
+ */
+function clampFreqFrom() {
+  freqFromHz.value = clampNumberField(freqFromHz.value, 1, freqCeilingHz.value)
+}
+
+function clampFreqTo() {
+  freqToHz.value = clampNumberField(freqToHz.value, 2, freqCeilingHz.value)
+}
+
+function clampCsdSpan() {
+  csdSpanMs.value = clampNumberField(csdSpanMs.value, 0.05, 500)
+}
 
 /** The band the harmonic curves actually cover — the widest order's, since the others stop earlier. */
 function fitToHarmonics() {
@@ -454,10 +472,10 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqFromHz"
             type="number"
-            min="1"
             :max="freqCeilingHz"
             step="10"
             class="tb-input"
+            @change="clampFreqFrom"
           />
         </label>
         <label class="tb-field">
@@ -465,10 +483,10 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqToHz"
             type="number"
-            min="2"
             :max="freqCeilingHz"
             step="1000"
             class="tb-input"
+            @change="clampFreqTo"
           />
         </label>
       </div>
@@ -576,10 +594,10 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqFromHz"
             type="number"
-            min="1"
             :max="freqCeilingHz"
             step="10"
             class="tb-input"
+            @change="clampFreqFrom"
           />
         </label>
         <label class="tb-field">
@@ -587,10 +605,10 @@ const referenceLabel = computed(() => {
           <input
             v-model.number="freqToHz"
             type="number"
-            min="2"
             :max="freqCeilingHz"
             step="1000"
             class="tb-input"
+            @change="clampFreqTo"
           />
         </label>
       </div>
@@ -626,10 +644,10 @@ const referenceLabel = computed(() => {
             <input
               v-model.number="csdSpanMs"
               type="number"
-              min="0.05"
               max="500"
               step="0.5"
               class="tb-input"
+              @change="clampCsdSpan"
               title="How far past the impulse the surface reaches. In milliseconds rather than in samples, so it means the same measurement at every sample rate — the step between slices is worked out from it and printed below."
             />
           </label>

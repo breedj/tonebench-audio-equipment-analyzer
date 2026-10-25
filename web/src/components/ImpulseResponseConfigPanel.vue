@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clampNumberField } from '../numberField'
 import { computed, nextTick, reactive, watch } from 'vue'
 import {
   IMPULSE_GATE_WINDOWS,
@@ -574,9 +575,9 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         <input
           v-model.number="form.gatePostMs"
           type="number"
-          min="0.1"
           step="0.5"
           :disabled="running"
+          @change="form.gatePostMs = clampNumberField(form.gatePostMs, 0.1)"
           class="tb-input"
         />
       </label>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clampNumberField } from '../numberField'
 import { computed, nextTick, reactive, watch } from 'vue'
 import type { ThdAmplitudeSweepStartRequest, ThdVsAmplitudeParameters, WindowType } from '../api/client'
 import { useLoadOhms } from '../composables/useLoadOhms'
@@ -378,9 +379,9 @@ function run() {
         <input
           v-model.number="form.stopThdPercent"
           type="number"
-          min="0.001"
           step="0.1"
           :disabled="running || !form.stopOnThd"
+          @change="form.stopThdPercent = clampNumberField(form.stopThdPercent, 0.001)"
           class="tb-input w-18 shrink-0"
         />
         %

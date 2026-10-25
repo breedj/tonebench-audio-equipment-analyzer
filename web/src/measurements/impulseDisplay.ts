@@ -100,7 +100,11 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     decayMode: 'Waterfall',
     decayPalette: 'Jet',
     decayColoredCurves: true,
-    decayFilled: false,
+    // On: a filled surface is the picture a decay is read for, and the stack of bare curves is the
+    // one you drop to when a single curve's shape is the question. `decayColoredCurves` is left at
+    // its own default because it decides what the *unfilled* stack looks like, which is a separate
+    // answer and the one that applies once this is turned off.
+    decayFilled: true,
     decayRotationDeg: DECAY_ROTATION_DEG.default,
     decayDepthPercent: DECAY_DEPTH_PERCENT.default,
     decayRangeDb: 30,

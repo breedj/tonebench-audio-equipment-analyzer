@@ -111,6 +111,7 @@ import ImpulseResponseDisplayPanel from './components/ImpulseResponseDisplayPane
 import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
 import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
 import { decaySurfaceGpuAvailable } from './charts/peCapability'
+import { prefersGpuSurface, useDecaySurfaceEngine } from './composables/useDecaySurfaceEngine'
 import { decayModeIs3d } from './measurements/decay3d'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 // Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
@@ -2685,8 +2686,16 @@ const impulseDecay3dChart = ref<{ exportPng: (o: ChartExportOptions) => Promise<
 const decayGpu = ref(false)
 decaySurfaceGpuAvailable().then((ok) => { decayGpu.value = ok })
 
-/** The sonogram is a flat colour map; there is nothing for a lit mesh to add to it. */
-const decayUses3d = computed(() => decayGpu.value && decayModeIs3d(impulseDecayMode.value))
+const { decaySurfaceEngine } = useDecaySurfaceEngine()
+
+/**
+ * All three have to agree: the setting has to allow it, the browser has to offer an adapter, and
+ * the mode has to be a waterfall — the sonogram is a flat colour map with nothing for a lit mesh
+ * to add to it.
+ */
+const decayUses3d = computed(
+  () => prefersGpuSurface(decaySurfaceEngine.value) && decayGpu.value && decayModeIs3d(impulseDecayMode.value),
+)
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const outputImpedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const impedancePlaneChart = ref<InstanceType<typeof ImpedancePlaneChart> | null>(null)

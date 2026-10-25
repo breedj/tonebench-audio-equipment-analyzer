@@ -354,6 +354,11 @@ const { showPage } = useManual()
       either way.
     </p>
     <p>
+      It can also be turned off by hand: <strong>Configuration &rarr; General &rarr; Decay
+      surfaces</strong> chooses between the 3D surface where the browser allows it and the flat
+      projection always. The choice is kept for this browser rather than with the bench's settings.
+    </p>
+    <p>
       <strong>Rotation</strong> and <strong>Tilt</strong> set the 3D view, and from the first drag
       the chart's own camera takes over: it turns through a whole circle, which those two fields
       cannot describe, so they stop following it rather than springing the surface back part way

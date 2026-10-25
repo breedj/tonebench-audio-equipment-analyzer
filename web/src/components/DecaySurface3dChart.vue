@@ -237,6 +237,11 @@ function applyTheme() {
   for (let i = 0; i < colors.length; i++) C.PeColor.SubsetColors[i] = colors[i]
 }
 
+/** The engine's azimuth for a panel lean, wrapped into the 0-359 the engine accepts. */
+function azimuthFor(rotationDeg: number): number {
+  return ((Math.round(360 - rotationDeg) % 360) + 360) % 360
+}
+
 function applyCamera() {
   if (!chart) return
   // The panel's lean maps onto the engine's azimuth, and its depth onto the elevation. Both of the
@@ -256,7 +261,9 @@ function applyCamera() {
   // by-period view, whose depth axis is a logarithmic frequency.</p>
   appliedRotation = props.rotationDeg
   appliedDepth = props.depthPercent
-  chart.PeUserInterface.Scrollbar.DegreeOfRotation = Math.round(360 - props.rotationDeg)
+  // Wrapped into 0-359, or a negative lean leaves the engine's range and it simply does not turn:
+  // 360 - (-10) is 370, which clamps. Reported 2026-10-25 as the slider doing nothing below zero.
+  chart.PeUserInterface.Scrollbar.DegreeOfRotation = azimuthFor(props.rotationDeg)
   chart.PeUserInterface.Scrollbar.ViewingHeight = Math.round(props.depthPercent * 0.6)
 }
 
@@ -363,7 +370,10 @@ function applyData() {
   const timeLabel = `Time (${surface.sliceAxis === 'Periods' ? 'periods' : 'ms'})`
   C.PeString.XAxisLabel = mesh.acrossIsFrequency ? 'Frequency (Hz)' : timeLabel
   C.PeString.ZAxisLabel = mesh.depthIsFrequency ? 'Frequency (Hz)' : timeLabel
-  C.PeString.YAxisLabel = 'dB'
+  // Blank, because the template draws it instead — see `dB` in the markup. The engine writes this
+  // one horizontally and has no text-angle property anywhere in its API, so a label that reads up
+  // the axis the way every other chart here writes it has to be ours.
+  C.PeString.YAxisLabel = ''
 
   C.PeFunction.Force3dxVerticeRebuild = true
   C.PeFunction.ReinitializeResetImage()
@@ -545,6 +555,18 @@ defineExpose({ exportPng })
   <div ref="container" class="relative w-full">
     <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
     <div ref="host" class="block w-full"></div>
+
+    <!-- The height axis's label, ours rather than the engine's: it writes that one horizontally and
+         offers no way to turn text, so this is the only way to read it up the axis as the Canvas 2D
+         chart does. Pinned to the left, which is where the engine puts the height axis at every
+         lean the panel can ask for; drag the surface far enough round and the axis moves out from
+         under it. -->
+    <span
+      v-if="surface"
+      class="pointer-events-none absolute left-1 top-1/2 -translate-y-1/2 select-none text-[11px] text-neutral-600 dark:text-neutral-300"
+      style="writing-mode: vertical-rl; transform: translateY(-50%) rotate(180deg)"
+      >dB</span
+    >
 
     <p
       v-if="computing"

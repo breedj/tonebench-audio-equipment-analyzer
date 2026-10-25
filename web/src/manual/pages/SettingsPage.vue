@@ -35,6 +35,18 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>Decay surfaces</td>
+          <td>
+            How the cumulative spectral decay and the burst decay are drawn. <strong>3D where the
+            browser allows</strong> gives a lit surface that can be turned and zoomed freely, which
+            needs WebGPU; <strong>Always the flat projection</strong> draws the stacked curves
+            instead. Where the browser has no WebGPU the flat projection is used whatever this says,
+            and the sonogram is always flat. Like <em>Style</em> above, this is kept for this
+            browser rather than with the bench's settings — whether the 3D surface is worth having
+            is a property of this machine.
+          </td>
+        </tr>
+        <tr>
           <td>Capture delay (ms)</td>
           <td>
             How long the device under test is given to settle after <em>every</em> generator change

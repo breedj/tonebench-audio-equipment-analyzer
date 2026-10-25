@@ -6,6 +6,7 @@ import type { PanelIconName } from '../panels/panelIcons'
 import type { MeasurementKindTone } from '../measurements/kinds'
 import type { ProgrammableLoadKindName } from '../api/client'
 import { useAppTheme, type ThemeMode } from '../composables/useAppTheme'
+import { useDecaySurfaceEngine, type DecaySurfaceEngine } from '../composables/useDecaySurfaceEngine'
 import { useAutosave } from '../composables/useAutosave'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import { useDateTimeFormat } from '../composables/useDateTimeFormat'
@@ -24,6 +25,7 @@ const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const { themeMode } = useAppTheme()
+const { decaySurfaceEngine } = useDecaySurfaceEngine()
 const { captureDelayMs, set: setCaptureDelay } = useCaptureDelay()
 const { updateCheckEnabled } = useUpdateCheck()
 const { showWelcomeOnStartup, load: loadStartupConfig, setShowWelcomeOnStartup } = useStartupConfig()
@@ -184,6 +186,11 @@ watch(
 const dateFormatOptions = computed(() =>
   DATE_TIME_FORMATS.map((f) => ({ id: f.id, label: `${formatDateTime(dateFormatExampleAt.value, f.id)}  —  ${f.label}` })),
 )
+
+const DECAY_SURFACE_OPTIONS: { value: DecaySurfaceEngine; label: string }[] = [
+  { value: 'Auto', label: '3D where the browser allows' },
+  { value: 'Classic', label: 'Always the flat projection' },
+]
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'Auto', label: 'Auto' },
@@ -467,6 +474,19 @@ async function clearStoredCalibration() {
               class="w-32 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
             >
               <option v-for="o in THEME_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </label>
+
+          <label
+            class="flex flex-col gap-1"
+            title="How the cumulative spectral decay and the burst decay are drawn. The 3D surface can be turned and zoomed freely and needs WebGPU; where the browser has none, or for the sonogram, the flat projection draws either way. Kept per browser, like the style above — whether the 3D surface is worth having is a property of this machine."
+          >
+            Decay surfaces
+            <select
+              v-model="decaySurfaceEngine"
+              class="w-64 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            >
+              <option v-for="o in DECAY_SURFACE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
           </label>
 

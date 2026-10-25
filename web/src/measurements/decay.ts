@@ -59,7 +59,7 @@ export function decayLayout(
 }
 
 /** How far the stack leans, in degrees from straight down, and how deep it runs. */
-export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: 25 } as const
+export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -10 } as const
 export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 50 } as const
 
 /**

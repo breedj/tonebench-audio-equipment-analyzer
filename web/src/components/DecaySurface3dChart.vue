@@ -163,7 +163,11 @@ function configure() {
   // every zoom tried, so the framing is set explicitly instead.
   C.PePlot.Option.DxFitControlShape = false
   C.PePlot.Option.DxViewportX = 0
-  C.PePlot.Option.DxViewportY = 0
+  // Lifts the box off the bottom of the plot, where the engine otherwise parks it with the whole
+  // top of the panel empty. Measured on a 601x586 plot: ink within 3 px of the bottom edge falls
+  // from 190 px to 26 at this setting, with the top and right edges clear either way. It is not a
+  // plain translation — the figure is a measured optimum, and both larger and smaller are worse.
+  C.PePlot.Option.DxViewportY = 8
   C.PePlot.Option.DxFOV = 1
   // Well below any zoom we set, so the wheel still has somewhere to go in both directions.
   C.PePlot.Option.DxZoomMin = -900
@@ -240,9 +244,22 @@ function applyCamera() {
   if (!chart) return
   // The panel's lean maps onto the engine's azimuth, and its depth onto the elevation. Both of the
   // panel's ranges are narrower than the engine's, so nothing has to be clamped here.
+  //
+  // <p><b>360 rather than 180, which is which side of the box the camera sits on.</b> At 180 the
+  // depth axis ran the wrong way: time zero came out at the front and the stack receded into the
+  // past, where the Canvas 2D chart puts time zero at the back — <c>sliceOrigin(layout, 0)</c> is
+  // the top-left corner and increasing depth comes forward. Reported 2026-10-25 on both surfaces,
+  // the burst decay's Periods axis included, which is the same axis by another name.</p>
+  //
+  // <p>Note what this costs, because it is not free and no azimuth avoids it: the two floor axes
+  // keep their handedness however the camera moves, so turning the box to put time the right way
+  // round also mirrors the frequency axis. Frequency now increases right to left, where the Canvas
+  // 2D chart has it left to right. Reversing the depth <em>data</em> instead would keep both, and
+  // needs the engine's <c>InvertedZAxis</c> with negated values — which cannot work in the
+  // by-period view, whose depth axis is a logarithmic frequency.</p>
   appliedRotation = props.rotationDeg
   appliedDepth = props.depthPercent
-  chart.PeUserInterface.Scrollbar.DegreeOfRotation = Math.round(180 - props.rotationDeg)
+  chart.PeUserInterface.Scrollbar.DegreeOfRotation = Math.round(360 - props.rotationDeg)
   chart.PeUserInterface.Scrollbar.ViewingHeight = Math.round(props.depthPercent * 0.6)
 }
 
@@ -316,7 +333,9 @@ function applyData() {
   // but the engine owns this axis's formatting and an unambiguous number beats a wrong one.
   C.PeGrid.Configure.LogScaleExpLabels = false
 
-  const timeLabel = surface.sliceAxis === 'Periods' ? 'Periods' : 'Milliseconds'
+  // Word for word what the Canvas 2D chart writes, so the two charts of one measurement cannot
+  // disagree about what an axis is called.
+  const timeLabel = `Time (${surface.sliceAxis === 'Periods' ? 'periods' : 'ms'})`
   C.PeString.XAxisLabel = mesh.acrossIsFrequency ? 'Frequency (Hz)' : timeLabel
   C.PeString.ZAxisLabel = mesh.depthIsFrequency ? 'Frequency (Hz)' : timeLabel
   C.PeString.YAxisLabel = 'dB'

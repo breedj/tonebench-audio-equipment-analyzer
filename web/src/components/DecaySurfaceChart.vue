@@ -12,6 +12,7 @@ import {
   advancesTrailingEdge,
   axisFraction,
   decayLayout,
+  decayProjection,
   drawnSliceIndices,
   formatHz,
   furthestReached,
@@ -26,6 +27,7 @@ import {
   paletteLut,
   pickSurfacePoint,
   paletteIndex,
+  shadeRuns,
   sliceOrigin,
   wallGradientStops,
 } from '../measurements/decay'
@@ -68,6 +70,15 @@ const props = defineProps<{
   palette: DecayPalette
   /** Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level. */
   coloredCurves: boolean
+  /**
+   * Fill the surface between neighbouring curves instead of leaving the page between them. The
+   * curves are then one colour, because a filled band already carries the level and a coloured
+   * line on top of its own colour says nothing.
+   */
+  filled: boolean
+  /** The oblique projection: how far the stack leans, in degrees, and how deep it runs. */
+  rotationDeg: number
+  depthPercent: number
   /** How far below 0 dB the chart reaches. 0 dB means whatever this surface normalised to. */
   rangeDb: number
   thickLines: boolean
@@ -130,10 +141,23 @@ const MARGIN = { left: 70, right: 92, top: 22, bottom: 44 }
 /** The axis titles' font — a bolder cut of the tick font, the way uPlot titles its axes on the other charts. */
 const AXIS_TITLE_FONT = '600 11px system-ui, sans-serif'
 
-/** How much of the box the depth axis takes. Half, which is what makes a decay legible as depth rather than as a smear. */
-const DEPTH_FRACTION_Y = 0.5
-/** Negative: the stack recedes to the left, as ARTA's does. See `decayLayout`. */
-const DEPTH_FRACTION_X = -0.12
+/**
+ * The projection the panel's two numbers come to, for this plot's own size — see
+ * `decayProjection`, which is where the angle is turned into the fractions `decayLayout` splits
+ * the box by. Both of those used to be constants here (0.5 of the height, -0.12 of the width).
+ */
+function projectionFor(plotWidth: number, plotHeight: number) {
+  return decayProjection(props.rotationDeg, props.depthPercent, plotWidth, plotHeight)
+}
+
+/**
+ * What the curves are drawn in when the surface is filled. White in both themes, deliberately: it
+ * is drawn on saturated colour rather than on the page, so it reads either way, and it is what the
+ * mesh over a filled surface looks like everywhere else. The one boundary it cannot mark is the
+ * front curve on a light page, where the body below it is the page too — and there the colour step
+ * from the fill draws the edge on its own.
+ */
+const MESH_LINE_COLOR = '#ffffff'
 
 const isWaterfall = computed(() => props.mode !== 'Sonogram')
 
@@ -204,7 +228,8 @@ function renderScene(ctx: CanvasRenderingContext2D, cssWidth: number, cssHeight:
   const plotHeight = cssHeight - MARGIN.top - MARGIN.bottom
   if (plotWidth <= 20 || plotHeight <= 20) return
 
-  const layout = decayLayout(plotWidth, plotHeight, DEPTH_FRACTION_X, DEPTH_FRACTION_Y)
+  const projection = projectionFor(plotWidth, plotHeight)
+  const layout = decayLayout(plotWidth, plotHeight, projection.depthFractionX, projection.depthFractionY)
   const topDb = 0
   const bottomDb = -props.rangeDb
 
@@ -273,6 +298,20 @@ defineExpose({ exportPng })
  * Stacked curves, back to front. Each one is filled down to the foot of the box before it is
  * stroked, which is the whole of the hidden-line removal: a nearer curve is drawn lower, so its
  * fill covers whatever of the curves behind falls beneath it.
+ *
+ * <p><b>Filled</b>, the strip between each curve and the one behind it is painted from the palette
+ * as well, so the surface reads as a lit solid rather than as a stack of lines with the page
+ * showing between them. The curves are then stroked in one colour, because a line in its own band's
+ * colour marks nothing.</p>
+ *
+ * <p>Three things happen per slice there and <b>the order of them is the whole picture</b>: the
+ * band arriving at this slice is filled, the curve <em>behind</em> is stroked white, and only then
+ * is this slice's own body filled. The band has to go under the body fill or a surface that rises
+ * towards the viewer is drawn over the near curve that should hide it; and the mesh line has to go
+ * on after the band below it, because that band's top edge <em>is</em> that curve and filling it
+ * paints the line out. Stroked a slice too early it measured 567 white pixels of a 276 000-pixel
+ * surface — every line gone but the frontmost, which has no band in front of it. The frontmost
+ * curve is therefore stroked after the loop rather than inside it.</p>
  */
 function drawWaterfall(
   ctx: CanvasRenderingContext2D,
@@ -297,25 +336,40 @@ function drawWaterfall(
   const recedesLeft = layout.depthX < 0
   const wall: WallRib[] = []
   let reachedX: number | null = null
+  /**
+   * The previous drawn slice, indexed by across column rather than compacted — the band's quads
+   * join column a of one curve to column a of the next, so a slice that is missing a level in the
+   * middle must leave a hole there and not close the gap.
+   */
+  let behind: (SurfacePoint | null)[] | null = null
+  let behindPoints: SurfacePoint[] | null = null
 
   for (const index of drawnSliceIndices(count, layout.depthY)) {
     const depth = count > 1 ? index / (count - 1) : 0
     const origin = sliceOrigin(layout, depth)
-    const points: { x: number; y: number; level: number }[] = []
+    const points: SurfacePoint[] = []
+    const row: (SurfacePoint | null)[] = new Array(view.across.length).fill(null)
 
     for (let a = 0; a < view.across.length; a++) {
       const level = view.level(index, a)
       if (level === null) continue
-      points.push({
+      const point = {
         x: acrossX(layout, origin.x, view.acrossFraction[a]),
         y: levelY(layout, origin.y, level, topDb, bottomDb),
         level,
-      })
+      }
+      points.push(point)
+      row[a] = point
     }
 
     if (points.length < 2) continue
 
-    // Fill first: everything under this curve belongs to it, not to the curves behind. The fill
+    if (props.filled && behind && behindPoints) {
+      paintBand(ctx, behind, row, lut, topDb, bottomDb)
+      strokeMesh(ctx, behindPoints, width)
+    }
+
+    // Then the body: everything under this curve belongs to it, not to the curves behind. The fill
     // runs to the foot of the *box*, not to this curve's own baseline — further than its own floor
     // for a curve at the back, but every nearer one paints over the excess and the front one's
     // baseline is the foot of the box. What survives is one baseline stroke per curve lying on the
@@ -323,6 +377,11 @@ function drawWaterfall(
     bodyPath(ctx, points, plotHeight)
     ctx.fillStyle = body
     ctx.fill()
+
+    if (props.filled) {
+      behind = row
+      behindPoints = points
+    }
 
     const trailing = recedesLeft ? points[points.length - 1] : points[0]
     if (advancesTrailingEdge(trailing.x, reachedX, recedesLeft)) {
@@ -332,6 +391,9 @@ function drawWaterfall(
 
     ctx.lineWidth = width
     ctx.lineJoin = 'round'
+
+    // A filled surface's own curve waits for the band in front of it — see the note above.
+    if (props.filled) continue
 
     if (!props.coloredCurves) {
       ctx.beginPath()
@@ -363,7 +425,80 @@ function drawWaterfall(
     }
   }
 
-  if (props.coloredCurves) paintTrailingWall(ctx, wall, lut, layout.levelHeight)
+  // The front curve has no band in front of it to wait for.
+  if (props.filled && behindPoints) strokeMesh(ctx, behindPoints, width)
+
+  // The wall closes the near end of a surface that has a body to close; a stack of plain lines has
+  // none, which is the one combination it is left off.
+  if (props.coloredCurves || props.filled) paintTrailingWall(ctx, wall, lut, layout.levelHeight)
+}
+
+/** One curve of a filled surface, in the one colour the fill has left it. */
+function strokeMesh(ctx: CanvasRenderingContext2D, points: SurfacePoint[], width: number) {
+  ctx.lineWidth = width
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = MESH_LINE_COLOR
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (const point of points) ctx.lineTo(point.x, point.y)
+  ctx.stroke()
+}
+
+/** One sample of a slice, where the projection puts it and what level it stands for. */
+interface SurfacePoint {
+  x: number
+  y: number
+  level: number
+}
+
+/**
+ * The strip of surface between two neighbouring curves, as one polygon per run of equal colour.
+ *
+ * <p>Each cell is the quad joining column <c>a</c> and <c>a + 1</c> of the two curves, shaded by
+ * the mean of its four corners — a quad has one colour, and taking it from any one corner tilts the
+ * whole band half a cell in that direction. Neighbouring cells of the same shade are drawn as one
+ * strip (see <c>shadeRuns</c>): they share an exact edge, so a fill each leaves a hairline of
+ * whatever is underneath along every join, which on a dark page is a surface finely ruled in black.
+ * A cell with a corner the analysis never reached is left out, and ends the run.</p>
+ */
+function paintBand(
+  ctx: CanvasRenderingContext2D,
+  behind: (SurfacePoint | null)[],
+  front: (SurfacePoint | null)[],
+  lut: Uint8Array,
+  topDb: number,
+  bottomDb: number,
+) {
+  const cells: (number | null)[] = []
+  for (let a = 0; a + 1 < front.length; a++) {
+    const corners = [behind[a], behind[a + 1], front[a], front[a + 1]]
+    if (corners.some((corner) => corner === null)) {
+      cells.push(null)
+      continue
+    }
+    const mean = corners.reduce((sum, corner) => sum + corner!.level, 0) / 4
+    cells.push(shade(mean, topDb, bottomDb))
+  }
+
+  for (const run of shadeRuns(cells)) {
+    ctx.beginPath()
+    ctx.moveTo(front[run.start]!.x, front[run.start]!.y)
+    for (let a = run.start + 1; a <= run.end + 1; a++) ctx.lineTo(front[a]!.x, front[a]!.y)
+    for (let a = run.end + 1; a >= run.start; a--) ctx.lineTo(behind[a]!.x, behind[a]!.y)
+    ctx.closePath()
+
+    const lutIndex = Math.round((run.shade / (SHADES - 1)) * 255)
+    ctx.fillStyle = lutColor(lut, lutIndex)
+    ctx.fill()
+
+    // Stroked in its own colour for the same reason the trailing wall's quads are: neighbouring
+    // runs share an exact edge, and antialiasing leaves a hairline of whatever is underneath along
+    // every one of them. Safe over the back edge — which is the curve behind — because that curve's
+    // own white line is stroked immediately after this, never before it.
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
 }
 
 /** One curve's body: the curve itself, then straight down to the foot of the box and back. */
@@ -849,7 +984,8 @@ function onMove(event: MouseEvent) {
     return
   }
 
-  const layout = decayLayout(plotWidth, plotHeight, DEPTH_FRACTION_X, DEPTH_FRACTION_Y)
+  const projection = projectionFor(plotWidth, plotHeight)
+  const layout = decayLayout(plotWidth, plotHeight, projection.depthFractionX, projection.depthFractionY)
   const pick: DecayPick | null = pickSurfacePoint(
     view,
     layout,
@@ -924,7 +1060,18 @@ function drawMarker(at: { x: number; y: number } | null) {
 }
 
 watch(
-  () => [props.surface, props.mode, props.palette, props.coloredCurves, props.rangeDb, props.thickLines, isDark.value],
+  () => [
+    props.surface,
+    props.mode,
+    props.palette,
+    props.coloredCurves,
+    props.filled,
+    props.rotationDeg,
+    props.depthPercent,
+    props.rangeDb,
+    props.thickLines,
+    isDark.value,
+  ],
   () => draw(),
 )
 

@@ -3432,6 +3432,9 @@ const impulseFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.freqToHz)
 const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
 const impulseDecayPalette = ref<import('./api/client').DecayPalette>('Jet')
 const impulseDecayColoredCurves = ref(true)
+const impulseDecayFilled = ref(DEFAULT_IMPULSE_DISPLAY.decayFilled)
+const impulseDecayRotationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayRotationDeg)
+const impulseDecayDepthPercent = ref(DEFAULT_IMPULSE_DISPLAY.decayDepthPercent)
 const impulseDecayRangeDb = ref(30)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
@@ -3500,6 +3503,9 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayMode: impulseDecayMode.value,
     decayPalette: impulseDecayPalette.value,
     decayColoredCurves: impulseDecayColoredCurves.value,
+    decayFilled: impulseDecayFilled.value,
+    decayRotationDeg: impulseDecayRotationDeg.value,
+    decayDepthPercent: impulseDecayDepthPercent.value,
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
       fftLength: impulseCsdFftLength.value,
@@ -3557,6 +3563,9 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayMode.value = display.decayMode
   impulseDecayPalette.value = display.decayPalette
   impulseDecayColoredCurves.value = display.decayColoredCurves
+  impulseDecayFilled.value = display.decayFilled
+  impulseDecayRotationDeg.value = display.decayRotationDeg
+  impulseDecayDepthPercent.value = display.decayDepthPercent
   impulseDecayRangeDb.value = display.decayRangeDb
   impulseCsdFftLength.value = display.csd.fftLength
   impulseCsdSpanMs.value = display.csd.spanMs
@@ -3590,7 +3599,8 @@ watch(
     impulseShowDataPoints, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
     impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
-    impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayRangeDb,
+    impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
+    impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
     impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
@@ -3772,6 +3782,9 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayMode: impulseDecayMode.value,
       chartDecayPalette: impulseDecayPalette.value,
       chartDecayColoredCurves: impulseDecayColoredCurves.value,
+      chartDecayFilled: impulseDecayFilled.value,
+      chartDecayRotationDeg: impulseDecayRotationDeg.value,
+      chartDecayDepthPercent: impulseDecayDepthPercent.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
       chartCsdSpanMs: impulseCsdSpanMs.value,
@@ -4588,6 +4601,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :mode="impulseDecayMode"
                   :palette="impulseDecayPalette"
                   :colored-curves="impulseDecayColoredCurves"
+                  :filled="impulseDecayFilled"
+                  :rotation-deg="impulseDecayRotationDeg"
+                  :depth-percent="impulseDecayDepthPercent"
                   :range-db="impulseDecayRangeDb"
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
@@ -4655,6 +4671,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-mode="impulseDecayMode"
                   v-model:decay-palette="impulseDecayPalette"
                   v-model:decay-colored-curves="impulseDecayColoredCurves"
+                  v-model:decay-filled="impulseDecayFilled"
+                  v-model:decay-rotation-deg="impulseDecayRotationDeg"
+                  v-model:decay-depth-percent="impulseDecayDepthPercent"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"
                   v-model:csd-span-ms="impulseCsdSpanMs"

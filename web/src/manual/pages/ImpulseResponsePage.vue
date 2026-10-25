@@ -310,7 +310,23 @@ const { showPage } = useManual()
       slice is drawn a little further right than the one behind it, so a strip of every one of them
       is never covered; coloured by level, those strips read as a ramp down through the palette and
       are the quickest way to see how far the whole surface has fallen by the time it reaches the
-      front. <strong>Coloured curves</strong> turns it off along with the curve colouring.
+      front. <strong>Coloured curves</strong> turns it off along with the curve colouring, and a
+      <strong>Filled surface</strong> always draws it.
+    </p>
+    <p>
+      <strong>Filled surface</strong> paints the strip between each curve and the one behind it from
+      the palette, so the stack reads as a lit solid rather than as a set of lines with the page
+      showing between them; the curves themselves are then drawn in white, the level being carried
+      by the fill. It is the clearer picture of a ridge and its surroundings, where the unfilled
+      stack is the clearer picture of one curve's shape — which is why both are offered rather than
+      one replacing the other.
+    </p>
+    <p>
+      <strong>Rotation</strong> and <strong>Depth</strong> are the projection. Rotation is which way
+      the stack recedes, in degrees from straight down: positive leans it to the left, as ARTA draws
+      it, zero stacks the curves straight down the chart, and a negative angle sends them to the
+      right. Depth is how much of the chart's height the depth axis takes, so a deep-looking surface
+      is one with a squashed dB scale — the two share the box, and neither can be had for nothing.
     </p>
     <p>
       <strong>Points per period</strong> is how finely the burst decay is sampled in time, and so how

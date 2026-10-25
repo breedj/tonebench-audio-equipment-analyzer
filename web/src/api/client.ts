@@ -1727,6 +1727,9 @@ export interface ImpulseResponseParameters {
   chartDecayMode?: DecayChartMode | null
   chartDecayPalette?: DecayPalette | null
   chartDecayColoredCurves?: boolean | null
+  chartDecayFilled?: boolean | null
+  chartDecayRotationDeg?: number | null
+  chartDecayDepthPercent?: number | null
   chartDecayRangeDb?: number | null
   /** The cumulative spectral decay's analysis. Display settings, but a surface is unreadable without them. */
   chartCsdFftLength?: number | null

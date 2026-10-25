@@ -24,9 +24,93 @@ import {
   furthestReached,
   paletteLut,
   pickSurfacePoint,
+  shadeRuns,
   sliceOrigin,
   sliceStride,
+  DECAY_DEPTH_PERCENT,
+  DECAY_ROTATION_DEG,
+  decayProjection,
 } from './decay'
+
+describe('decayProjection', () => {
+  /**
+   * The point of saying the lean in degrees: the stack's direction on screen is the same whatever
+   * shape the chart is, where a fraction of the width against a fraction of the height leaned
+   * further on a wider window.
+   */
+  it('leans at the same screen angle whatever the plot is shaped like', () => {
+    for (const [width, height] of [[600, 400], [1200, 400], [1800, 300]]) {
+      const { depthFractionX, depthFractionY } = decayProjection(25, 50, width, height)
+      const angle = (Math.atan2(-depthFractionX * width, depthFractionY * height) * 180) / Math.PI
+      expect(angle).toBeCloseTo(25, 6)
+    }
+  })
+
+  /** Positive leans left, which is ARTA's projection and what the chart has always drawn. */
+  it('sends the stack left at a positive angle and right at a negative one', () => {
+    expect(decayProjection(25, 50, 1000, 400).depthFractionX).toBeLessThan(0)
+    expect(decayProjection(-25, 50, 1000, 400).depthFractionX).toBeGreaterThan(0)
+    expect(decayProjection(0, 50, 1000, 400).depthFractionX).toBe(0)
+  })
+
+  it('takes the depth as the fraction of the height it is a percentage of', () => {
+    expect(decayProjection(0, 50, 1000, 400).depthFractionY).toBeCloseTo(0.5, 10)
+    expect(decayProjection(0, 20, 1000, 400).depthFractionY).toBeCloseTo(0.2, 10)
+  })
+
+  /** A steep angle on a narrow chart must still leave something to draw the curves on. */
+  it('never leans so far that the curves have no width left', () => {
+    for (const rotation of [DECAY_ROTATION_DEG.min, DECAY_ROTATION_DEG.max]) {
+      const { depthFractionX } = decayProjection(rotation, DECAY_DEPTH_PERCENT.max, 200, 900)
+      expect(Math.abs(depthFractionX)).toBeLessThanOrEqual(0.6)
+    }
+  })
+
+  /** A cleared number box reads as NaN, and a plot with no height is reachable mid-layout. */
+  it('falls back to its defaults rather than drawing nothing', () => {
+    expect(decayProjection(Number.NaN, Number.NaN, 1000, 400).depthFractionY).toBeCloseTo(
+      DECAY_DEPTH_PERCENT.default / 100,
+      10,
+    )
+    expect(decayProjection(25, 50, 0, 400).depthFractionX).toBe(0)
+  })
+
+  it('clamps an angle and a depth typed past their own bounds', () => {
+    expect(decayProjection(0, 500, 1000, 400).depthFractionY).toBeCloseTo(DECAY_DEPTH_PERCENT.max / 100, 10)
+    expect(decayProjection(0, -5, 1000, 400).depthFractionY).toBeCloseTo(DECAY_DEPTH_PERCENT.min / 100, 10)
+  })
+})
+
+describe('shadeRuns', () => {
+  it('joins neighbouring cells of the same colour into one strip', () => {
+    expect(shadeRuns([1, 1, 1, 2, 2])).toEqual([
+      { start: 0, end: 2, shade: 1 },
+      { start: 3, end: 4, shade: 2 },
+    ])
+  })
+
+  /** A cell the analysis never reached ends the run — the polygon has to be a continuous strip. */
+  it('breaks a run at a cell with no level', () => {
+    expect(shadeRuns([1, null, 1])).toEqual([
+      { start: 0, end: 0, shade: 1 },
+      { start: 2, end: 2, shade: 1 },
+    ])
+  })
+
+  it('covers every cell that has a colour, exactly once', () => {
+    const cells = [3, 3, null, 0, 1, 1, 1, null, null, 2]
+    const covered = shadeRuns(cells).flatMap((run) =>
+      Array.from({ length: run.end - run.start + 1 }, (_, i) => run.start + i),
+    )
+
+    expect(covered).toEqual(cells.map((cell, i) => (cell === null ? null : i)).filter((i) => i !== null))
+  })
+
+  it('answers nothing for a row with nothing in it', () => {
+    expect(shadeRuns([])).toEqual([])
+    expect(shadeRuns([null, null])).toEqual([])
+  })
+})
 
 describe('decayLayout', () => {
   it('splits the box between the level range and the depth axis', () => {

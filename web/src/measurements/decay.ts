@@ -58,6 +58,92 @@ export function decayLayout(
   }
 }
 
+/** How far the stack leans, in degrees from straight down, and how deep it runs. */
+export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: 25 } as const
+export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 50 } as const
+
+/**
+ * How far sideways the lean may ever take the stack, as a fraction of the width. The curves get
+ * what is left, so without a bound a steep angle on a narrow chart leaves nothing to draw on.
+ */
+const MAX_LEAN_FRACTION = 0.6
+
+/**
+ * The oblique projection's two fractions, from the angle and the depth a user sets.
+ *
+ * <p>The depth axis's direction is a real screen angle here, measured from straight down and
+ * positive leaning left, where before it was a fixed fraction of the <em>width</em>
+ * (<c>-0.12</c>) against a fixed fraction of the <em>height</em>. Those are different lengths, so
+ * the lean the eye saw moved with the shape of the window: the same surface leaned noticeably
+ * further on a wide screen than on a narrow one. Taking it as an angle holds the picture's shape
+ * whatever the chart is sitting in, and is the only reading under which a number of degrees means
+ * anything.</p>
+ *
+ * <p>The cost is that the default, 25°, reproduces the old geometry only at about a 2:1 plot —
+ * which is the commonest one, and nothing stored changes meaning, the old pair never having been
+ * a setting at all.</p>
+ */
+export function decayProjection(
+  rotationDeg: number,
+  depthPercent: number,
+  width: number,
+  height: number,
+): { depthFractionX: number; depthFractionY: number } {
+  const rotation = clamp(rotationDeg, DECAY_ROTATION_DEG, Number.isFinite(rotationDeg))
+  const percent = clamp(depthPercent, DECAY_DEPTH_PERCENT, Number.isFinite(depthPercent))
+
+  const depthFractionY = percent / 100
+  const leanPx = depthFractionY * height * Math.tan((rotation * Math.PI) / 180)
+  const lean = width > 0 ? leanPx / width : 0
+  const bounded = Math.max(-MAX_LEAN_FRACTION, Math.min(MAX_LEAN_FRACTION, lean))
+
+  // `|| 0` rather than a bare negation: at zero rotation that is -0, which is arithmetically the
+  // same number and reads as leaning the other way to anything comparing the sign.
+  return { depthFractionX: -bounded || 0, depthFractionY }
+}
+
+function clamp(value: number, bounds: { min: number; max: number; default: number }, finite: boolean): number {
+  if (!finite) return bounds.default
+  return Math.max(bounds.min, Math.min(bounds.max, value))
+}
+
+/**
+ * Runs of equal shade over a row of cells, so the filled surface can be painted as one polygon per
+ * run rather than one quad per column.
+ *
+ * <p>A 400-column surface across eighty slices is 32 000 quads, and a fill call each is a visibly
+ * slow redraw for a picture nobody can see that much colour resolution in — the same reasoning the
+ * stroked curves' own batching carries. A cell with no shade (a level the analysis never reached)
+ * ends the run rather than joining it, because the polygon has to be a continuous strip.</p>
+ */
+export function shadeRuns(shades: (number | null)[]): ShadeRun[] {
+  const runs: ShadeRun[] = []
+  let open: ShadeRun | null = null
+
+  for (let i = 0; i < shades.length; i++) {
+    const shade = shades[i]
+    if (shade === null) {
+      open = null
+      continue
+    }
+    if (open && shade === open.shade) {
+      open.end = i
+      continue
+    }
+    open = { start: i, end: i, shade }
+    runs.push(open)
+  }
+
+  return runs
+}
+
+/** A stretch of neighbouring cells that are all the same colour. Both ends are inclusive. */
+export interface ShadeRun {
+  start: number
+  end: number
+  shade: number
+}
+
 /**
  * One slice's origin — the point its 0 dB line starts from.
  *

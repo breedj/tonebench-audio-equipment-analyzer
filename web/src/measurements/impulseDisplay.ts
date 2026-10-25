@@ -7,7 +7,13 @@ import type {
   ResponseDelayView,
 } from '../api/client'
 import { isDelayView } from '../response/delayAxis'
-import { DEFAULT_CSD_ANALYSIS, csdSpanMs, type CsdAnalysis } from './decay'
+import {
+  DECAY_DEPTH_PERCENT,
+  DECAY_ROTATION_DEG,
+  DEFAULT_CSD_ANALYSIS,
+  csdSpanMs,
+  type CsdAnalysis,
+} from './decay'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -44,6 +50,11 @@ export interface ImpulseDisplay {
   decayMode: DecayChartMode
   decayPalette: DecayPalette
   decayColoredCurves: boolean
+  /** Fill between the curves, and draw them in one colour. See DecaySurfaceChart. */
+  decayFilled: boolean
+  /** The oblique projection: the lean in degrees and the depth as a percentage of the plot. */
+  decayRotationDeg: number
+  decayDepthPercent: number
   decayRangeDb: number
   csd: CsdAnalysis
   burstMaxPeriods: number
@@ -89,6 +100,9 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     decayMode: 'Waterfall',
     decayPalette: 'Jet',
     decayColoredCurves: true,
+    decayFilled: false,
+    decayRotationDeg: DECAY_ROTATION_DEG.default,
+    decayDepthPercent: DECAY_DEPTH_PERCENT.default,
     decayRangeDb: 30,
     csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,
@@ -139,6 +153,13 @@ export function impulseDisplayFromParams(
   if (stored.chartDecayMode) display.decayMode = stored.chartDecayMode
   if (stored.chartDecayPalette) display.decayPalette = stored.chartDecayPalette
   if (typeof stored.chartDecayColoredCurves === 'boolean') display.decayColoredCurves = stored.chartDecayColoredCurves
+  if (typeof stored.chartDecayFilled === 'boolean') display.decayFilled = stored.chartDecayFilled
+  if (typeof stored.chartDecayRotationDeg === 'number' && Number.isFinite(stored.chartDecayRotationDeg)) {
+    display.decayRotationDeg = stored.chartDecayRotationDeg
+  }
+  if (typeof stored.chartDecayDepthPercent === 'number' && stored.chartDecayDepthPercent > 0) {
+    display.decayDepthPercent = stored.chartDecayDepthPercent
+  }
   if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0) display.decayRangeDb = stored.chartDecayRangeDb
   if (typeof stored.chartCsdFftLength === 'number') display.csd.fftLength = stored.chartCsdFftLength
   // The span and the slice count, or — for a type stored before the controls were said in

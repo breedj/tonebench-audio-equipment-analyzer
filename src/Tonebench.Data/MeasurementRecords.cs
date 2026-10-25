@@ -2288,6 +2288,20 @@ public sealed record ImpulseResponseParameters(
     string? ChartDecayMode = null,
     string? ChartDecayPalette = null,
     bool? ChartDecayColoredCurves = null,
+    /// <summary>
+    /// Whether the waterfall fills the surface between its curves — which also makes them one
+    /// colour, so <see cref="ChartDecayColoredCurves"/> says nothing while this is set. Null is
+    /// what every build before 2026-10-25 drew, there being no control for it.
+    /// </summary>
+    bool? ChartDecayFilled = null,
+    /// <summary>
+    /// The oblique projection: how far the stack leans, in degrees from straight down and positive
+    /// to the left, and how much of the chart's height the depth axis takes. Both were constants
+    /// until 2026-10-25; null is this build's default rather than those, which were a fraction of
+    /// the <i>width</i> against a fraction of the height and so leaned further on a wider window.
+    /// </summary>
+    double? ChartDecayRotationDeg = null,
+    double? ChartDecayDepthPercent = null,
     double? ChartDecayRangeDb = null,
     /// <summary>The cumulative spectral decay's analysis. Not run settings: they are questions put to
     /// a record already captured, and changing one redraws rather than re-measures. Stored all the

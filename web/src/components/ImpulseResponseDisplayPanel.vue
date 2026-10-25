@@ -16,6 +16,8 @@ import { useMeasurements } from '../composables/useMeasurements'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
 import {
   CSD_FFT_LENGTHS,
+  DECAY_DEPTH_PERCENT,
+  DECAY_ROTATION_DEG,
   DEFAULT_CSD_ANALYSIS,
   csdAchievedSpanMs,
   csdSliceStepSamples,
@@ -66,6 +68,9 @@ const DELAY_VIEWS: { value: ResponseDelayView; label: string }[] = [
 const decayMode = defineModel<DecayChartMode>('decayMode', { required: true })
 const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true })
 const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
+const decayFilled = defineModel<boolean>('decayFilled', { required: true })
+const decayRotationDeg = defineModel<number>('decayRotationDeg', { required: true })
+const decayDepthPercent = defineModel<number>('decayDepthPercent', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
 const csdSpanMs = defineModel<number>('csdSpanMs', { required: true })
@@ -495,14 +500,55 @@ const referenceLabel = computed(() => {
         </select>
       </label>
 
-      <label
-        v-if="decayMode !== 'Sonogram'"
-        class="tb-check-row"
-        title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
-      >
-        <input v-model="decayColoredCurves" type="checkbox" class="tb-check" />
-        Coloured curves
-      </label>
+      <template v-if="decayMode !== 'Sonogram'">
+        <label
+          class="tb-check-row"
+          title="Fill the surface between the curves instead of leaving the page between them, and draw the curves themselves in white. The level is then carried by the fill, so the curves read the shape."
+        >
+          <input v-model="decayFilled" type="checkbox" class="tb-check" />
+          Filled surface
+        </label>
+
+        <!-- Hidden rather than disabled under a filled surface: it decides the colour of the
+             curves, and there the fill has already decided it. -->
+        <label
+          v-if="!decayFilled"
+          class="tb-check-row"
+          title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
+        >
+          <input v-model="decayColoredCurves" type="checkbox" class="tb-check" />
+          Coloured curves
+        </label>
+
+        <!-- Two ends of one thing — where the depth axis points and how far it runs — so they are
+             read and set together. -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            Rotation (°)
+            <input
+              v-model.number="decayRotationDeg"
+              type="number"
+              :min="DECAY_ROTATION_DEG.min"
+              :max="DECAY_ROTATION_DEG.max"
+              step="5"
+              class="tb-input"
+              title="Which way the stack recedes, in degrees from straight down. Positive leans it to the left, as ARTA draws it; zero stacks the curves straight down the chart, and a negative angle sends them to the right."
+            />
+          </label>
+          <label class="tb-field">
+            Depth (%)
+            <input
+              v-model.number="decayDepthPercent"
+              type="number"
+              :min="DECAY_DEPTH_PERCENT.min"
+              :max="DECAY_DEPTH_PERCENT.max"
+              step="5"
+              class="tb-input"
+              title="How much of the chart's height the depth axis takes. The rest is the dB scale, so a deep-looking surface is one with a squashed level axis."
+            />
+          </label>
+        </div>
+      </template>
 
       <label class="tb-field">
         Range (dB)

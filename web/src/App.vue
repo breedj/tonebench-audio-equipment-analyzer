@@ -4706,6 +4706,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <template #aside>
                 <ImpulseResponseDisplayPanel
+                  :gpu-surface="decayUses3d"
                   v-model:view="impulseView"
                   v-model:normalised-impulse="impulseNormalised"
                   v-model:show-phase="impulseShowPhase"

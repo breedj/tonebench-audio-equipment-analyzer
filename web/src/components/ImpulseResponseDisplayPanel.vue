@@ -29,6 +29,18 @@ import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import CollapsibleSection from './CollapsibleSection.vue'
 
+/**
+ * Whether the GPU surface is drawing the decay charts rather than the Canvas 2D one.
+ *
+ * <p>Two of the controls below are the 2D painter's own and reach nothing on the lit mesh: the
+ * fill between the curves, and the colour of the curves themselves — a surface has no gaps to
+ * fill and no separate curves to colour. They are hidden rather than disabled, because a disabled
+ * control invites the reader to work out how to enable it, and here there is nothing to enable.
+ * Everything else in the section is shared: Rotation and Tilt move the camera, Palette is the
+ * height ramp, and the mode picks which surface is drawn.</p>
+ */
+const props = defineProps<{ gpuSurface?: boolean }>()
+
 const view = defineModel<ImpulseView>('view', { required: true })
 const normalisedImpulse = defineModel<boolean>('normalisedImpulse', { required: true })
 const showPhase = defineModel<boolean>('showPhase', { required: true })
@@ -519,7 +531,10 @@ const referenceLabel = computed(() => {
       </label>
 
       <template v-if="decayMode !== 'Sonogram'">
+        <!-- Both of these are the Canvas 2D painter's and reach nothing on the GPU surface; see
+             the `gpuSurface` prop. -->
         <label
+          v-if="!props.gpuSurface"
           class="tb-check-row"
           title="Fill the surface between the curves instead of leaving the page between them, and draw the curves themselves in white. The level is then carried by the fill, so the curves read the shape."
         >
@@ -530,7 +545,7 @@ const referenceLabel = computed(() => {
         <!-- Hidden rather than disabled under a filled surface: it decides the colour of the
              curves, and there the fill has already decided it. -->
         <label
-          v-if="!decayFilled"
+          v-if="!props.gpuSurface && !decayFilled"
           class="tb-check-row"
           title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
         >

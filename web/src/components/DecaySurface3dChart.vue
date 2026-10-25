@@ -5,6 +5,7 @@ import { formatHz } from '../measurements/decay'
 import {
   decayCameraZoom,
   DECAY_LIGHT,
+  DECAY_LIGHT_STRENGTH,
   decayExportTitle,
   decayGridAspect,
   decayMesh,
@@ -201,6 +202,7 @@ function configure() {
   C.PeColor.GraphBmpStyle = E.BitmapStyle.NoBmp
   C.PeLegend.Show = false
   C.PeFunction.SetLight(0, DECAY_LIGHT.x, DECAY_LIGHT.y, DECAY_LIGHT.z)
+  C.PePlot.Option.LightStrength = DECAY_LIGHT_STRENGTH
   C.PeString.MainTitle = ''
   C.PeString.SubTitle = ''
 
@@ -247,6 +249,17 @@ function applyTheme() {
   const colors = decaySubsetColors(props.palette, dark)
   C.PeColor.SubsetColors.clear()
   for (let i = 0; i < colors.length; i++) C.PeColor.SubsetColors[i] = colors[i]
+  // <p><b>Without this the Palette dropdown does nothing at all</b>, and does it silently: the
+  // ramp written here reaches the renderer only when the vertices happen to be built afterwards,
+  // which is true of the first draw and of nothing else. So the chart always opened on the right
+  // palette and never changed — and the engine's own default contour ramp is a rainbow, so for a
+  // while the chart looked Jet-coloured whatever was selected. Reported 2026-10-25; measured by
+  // pushing a full grey ramp, which rendered byte-identically until this flag was set.</p>
+  //
+  // <p>Neither <c>ReinitializeResetImage</c> nor <c>Force3dxVerticeRebuild</c> is enough —
+  // <c>Force3dxNewColors</c> is its own flag, documented as "force SubsetColors info to be
+  // updated", and it is the one that carries a colour change across.</p>
+  C.PeFunction.Force3dxNewColors = true
 }
 
 /** The engine's azimuth for a panel lean, wrapped into the 0-359 the engine accepts. */
@@ -564,6 +577,10 @@ function forceLightTheme() {
   const colors = decaySubsetColors(props.palette, false)
   C.PeColor.SubsetColors.clear()
   for (let i = 0; i < colors.length; i++) C.PeColor.SubsetColors[i] = colors[i]
+  // Set here too although the export copy's vertices are built after this and so would carry the
+  // ramp anyway: a colour write that is not pushed is the fault above, and one of the two places
+  // that writes this ramp remembering to push it is how that fault comes back.
+  C.PeFunction.Force3dxNewColors = true
 }
 
 /** applyData against the export copy, which has blocks of its own. */

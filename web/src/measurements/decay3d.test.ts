@@ -4,6 +4,7 @@ import { levelAt, orientSurface, paletteIndex, paletteLut } from './decay'
 import {
   decayExportTitle,
   DECAY_LIGHT,
+  DECAY_LIGHT_STRENGTH,
   decayCameraZoom,
   DECAY_3D_ZOOM,
   DECAY_3D_ZOOM_NARROW,
@@ -239,6 +240,20 @@ describe('decayGridAspect', () => {
   it('is close to square in the floor plane, so neither axis is foreshortened away', () => {
     const a = decayGridAspect()
     expect(Math.max(a.x, a.z) / Math.min(a.x, a.z)).toBeLessThan(1.5)
+  })
+})
+
+describe('DECAY_LIGHT_STRENGTH', () => {
+  /**
+   * The vendor documents 0.1 to 0.5 for this, and the figure is at the top of it deliberately —
+   * asked for 2026-10-25 because the foot of the palette read almost black. A value outside the
+   * range is not refused by the engine, it is silently clamped or ignored, so the bound is worth
+   * holding here.
+   */
+  it('is inside the range the engine documents, at the bright end of it', () => {
+    expect(DECAY_LIGHT_STRENGTH).toBeGreaterThanOrEqual(0.1)
+    expect(DECAY_LIGHT_STRENGTH).toBeLessThanOrEqual(0.5)
+    expect(DECAY_LIGHT_STRENGTH).toBeGreaterThan(0.3)
   })
 })
 

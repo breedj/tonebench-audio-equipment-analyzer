@@ -157,6 +157,12 @@ export function peColor(r: number, g: number, b: number): number {
  * Rotation swings the camera round it and Tilt raises it. A fixed box is also what lets one zoom
  * frame every surface, whatever its resolution.</p>
  *
+ * <p><b>The depth is 14 rather than 9 because the Canvas 2D chart is deeper than that</b> — asked
+ * for 2026-10-25, so the two charts of one measurement read alike — and the camera was pulled back
+ * with it, which is the half that cannot be skipped: at the old distance a 14-deep box runs off
+ * the plot and takes the frequency label with it. See {@link DECAY_3D_ZOOM}, whose two figures
+ * were scaled by this same 14/9.</p>
+ *
  * <p><b>And it is a small box viewed from close to, not a large one viewed from far off</b>, which
  * is not a free choice: <c>DxViewportX</c>/<c>Y</c> — the viewport translation, and what the
  * engine's own shift-and-drag gesture writes — scale with the camera's distance. At ten times this
@@ -165,7 +171,7 @@ export function peColor(r: number, g: number, b: number): number {
  * At this size the same range moves it 47, and the gesture works.</p>
  */
 export function decayGridAspect(): { x: number; y: number; z: number } {
-  return { x: 10, y: 4.5, z: 9 }
+  return { x: 10, y: 4.5, z: 14 }
 }
 
 /**
@@ -178,13 +184,22 @@ export function decayGridAspect(): { x: number; y: number; z: number } {
  * at ten times this box and ten times this distance, where the picture is identical, and scaled
  * with it.</p>
  *
+ * <p><b>More negative is further back</b>, which is worth writing down because the sweep that
+ * found it read as non-monotonic by eye and is not: counting surface pixels against the plot's own
+ * border, a 14-deep box reads <b>41 edge pixels at -30, 0 at -34 and 0 at -40</b>, with the
+ * drawn area falling 30.7 %, 24.9 %, 19.0 % of the canvas as it recedes. These figures moved with
+ * the box when it was deepened — the old pair, -20 and -29, was scaled by the same 14/9 the depth
+ * grew by. Note what the same measurement says about the <em>old</em> pairing: at 9 deep and -20
+ * the surface put <b>252 pixels</b> against the border, so it had been clipping slightly all
+ * along, which nothing had caught because the clipped part is the corner of a floor.</p>
+ *
  * <p>The engine's own <c>DxFitControlShape</c> is not the answer: it ignores the zoom and fills
  * the plot, measuring 65–99 % of the canvas covered with thousands of pixels against the edges at
  * every zoom tried. And the relation is not monotonic at extreme shapes — pulling further back
  * from a very tall, narrow plot can clip again — so this is a measured step rather than a formula.</p>
  */
-export const DECAY_3D_ZOOM = -20
-export const DECAY_3D_ZOOM_NARROW = -29
+export const DECAY_3D_ZOOM = -34
+export const DECAY_3D_ZOOM_NARROW = -49
 /** Below this width-over-height the surface no longer fits at the ordinary zoom. */
 export const DECAY_3D_NARROW_ASPECT = 0.95
 
@@ -201,16 +216,45 @@ export function decayCameraZoom(widthPx: number, heightPx: number): number {
  * surface, the mean luminance of the lit pixels fell from 92.4 at azimuth 315 to 82.4 at azimuth
  * 10. Reported 2026-10-25.</p>
  *
- * <p><b>Turning the light with the camera was the obvious answer and is the worse one.</b> Swept
- * right round the circle in 30-degree steps, a light that follows the camera reads 77.3 at its
- * worst and is below 95 at five of the twelve angles, because the relation between a good light
- * and the camera is not a rotation about the height axis. This position — the demo's vector turned
- * 90 degrees about that axis — reads <b>96.3 at its worst and 129 at its best over the whole
- * circle</b>, and never goes dark at any angle the panel or a drag can reach. Over the lean the
- * panel actually offers it is flatter still: 107.5 to 116.7, a spread of 9.2 against the old
- * light's 31.5.</p>
+ * <p><b>Turning the light with the camera, per frame, was the obvious answer and is the worse
+ * one.</b> Swept right round the circle in 30-degree steps, a light that follows the camera reads
+ * 77.3 at its worst and is below 95 at five of the twelve angles, because the relation between a
+ * good light and the camera is not a rotation about the height axis.</p>
+ *
+ * <p><b>But which side of the box the camera sits on is a different question, and this vector
+ * belongs to a side.</b> It was <c>{ 7, -7, -2 }</c> while the camera was at <c>180 - lean</c>;
+ * moving it to <c>360 - lean</c> to get the axes the right way round therefore left the light
+ * behind the surface, and the chart went dark — reported 2026-10-25 as exactly that, the day after
+ * the lighting had been called spot on. Mirroring it about the height axis, which is the same
+ * 180 degrees the camera moved, is the fix: measured on one capture, mean luminance
+ * <b>70.4 against 86.6</b>, a lift of 23 %, with the darkest quarter unchanged at 25.3 — the
+ * mirror lights the faces that face the viewer and does nothing for the shadowed ones, which is
+ * what <c>DECAY_LIGHT_STRENGTH</c> is for and why the two complaints needed two fixes. Three other
+ * vectors were tried at the new azimuth and all read lower: <c>-7,-7,-2</c> 100.1,
+ * <c>7,-7,2</c> 85.6 against this one's 121.1 in that run.</p>
  */
-export const DECAY_LIGHT = { x: 7, y: -7, z: -2 } as const
+export const DECAY_LIGHT = { x: -7, y: -7, z: 2 } as const
+
+/**
+ * The ambient floor, which is what decides how dark the darkest colour on the surface reads.
+ *
+ * <p>The engine's own default is 0.3 of a documented 0.1-0.5, and this is the top of that range.
+ * Asked for 2026-10-25 as "the darker blue is too dark": the surface is lit, so every colour in
+ * the palette is multiplied by a shading term, and at the foot of the ramp that leaves Jet's deep
+ * blue almost black against a near-black page.</p>
+ *
+ * <p><b>It costs no shading, which is the measured part.</b> Over the same capture the mean
+ * luminance of the darkest quarter of the surface goes <b>25.3 at 0.30, 35.1 at 0.42 and 42.0 at
+ * 0.50</b> — the dark end lifts by two thirds — while the standard deviation of luminance across
+ * the whole surface, which is what makes it read as a solid rather than a flat patch, goes
+ * <b>63.4, 66.8, 66.7</b>: it rises slightly and then holds. So brightening here does not flatten
+ * the picture, and there is no reason to stop short of the documented maximum.</p>
+ *
+ * <p><c>BackLight</c>, the secondary light 180 degrees from the primary, is deliberately left at
+ * its default: swept to 100 it rendered <em>identically</em> — mean 98.6 and dark quarter 33.4,
+ * to the digit, with it at 65 and at 100 — so it reaches nothing on this plot type.</p>
+ */
+export const DECAY_LIGHT_STRENGTH = 0.5
 
 /**
  * The caption a report or a screenshot carries. Shared with the Canvas 2D chart rather than

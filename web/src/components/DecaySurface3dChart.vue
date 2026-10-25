@@ -194,9 +194,6 @@ function configure() {
   C.PeGrid.Configure.AutoPadBeyondZeroX = true
   C.PeGrid.Configure.AutoPadBeyondZeroY = true
   C.PeGrid.Configure.AutoPadBeyondZeroZ = true
-  C.PeGrid.Option.ShowXAxis = E.ShowAxis.All
-  C.PeGrid.Option.ShowYAxis = E.ShowAxis.All
-  C.PeGrid.Option.ShowZAxis = E.ShowAxis.All
 
   // The hit test the readout needs. Without one of these the engine never builds its octree and
   // every GetHotSpot answers type -1 — which reads as "the pointer is never over the surface".
@@ -263,6 +260,26 @@ function applyCamera() {
   chart.PeUserInterface.Scrollbar.ViewingHeight = Math.round(props.depthPercent * 0.6)
 }
 
+/**
+ * The box, its grid numbers and its three axis labels — all of it, on or off together.
+ *
+ * <p>Off is what an empty chart wants: the engine plots its own built-in sample data whenever it
+ * has none of ours, so leaving the axes on draws a labelled box around a dataset that is not a
+ * measurement.</p>
+ */
+function showAxes(visible: boolean) {
+  if (!chart || !enums) return
+  const mode = visible ? enums.ShowAxis.All : enums.ShowAxis.Empty
+  chart.PeGrid.Option.ShowXAxis = mode
+  chart.PeGrid.Option.ShowYAxis = mode
+  chart.PeGrid.Option.ShowZAxis = mode
+  if (!visible) {
+    chart.PeString.XAxisLabel = ''
+    chart.PeString.YAxisLabel = ''
+    chart.PeString.ZAxisLabel = ''
+  }
+}
+
 /** The data, and the only place the mesh reaches the engine. */
 function applyData() {
   if (!chart || !control) return
@@ -280,10 +297,18 @@ function applyData() {
     blocks = null
     C.PeData.Subsets = 1
     C.PeData.Points = 1
+    // With nothing to plot the engine falls back to its own sample data, and draws that: a box of
+    // tick numbers from a dataset nobody asked for, under axes called "Y Axis" and "Z Axis". So an
+    // empty chart is drawn as furniture-less — the plot well keeps its colour, which is what holds
+    // the panel's shape, and the component's own "nothing measured yet" line is the only thing on
+    // it. Reported 2026-10-25.
+    showAxes(false)
     C.PeFunction.Force3dxVerticeRebuild = true
     C.PeFunction.ReinitializeResetImage()
     return
   }
+
+  showAxes(true)
 
   const mesh = decayMesh(surface, props.mode, props.rangeDb)
 

@@ -301,6 +301,16 @@ export interface CsdAnalysis {
   spanMs: number
   /** How many slices to cut that span into. The shift falls out of the two. */
   slices: number
+  /**
+   * How far ahead of the impulse the first slice sits, in milliseconds. Zero starts the surface at
+   * the impulse itself, which is what it always did.
+   *
+   * <p>ARTA's time zero is the cursor, which its manual has you set some way before the peak, so
+   * the front of an ARTA surface is the window sliding <em>towards</em> the arrival rather than away
+   * from it. This is the same head start, said in milliseconds; the time axis goes negative rather
+   * than re-zeroing, so the impulse stays at 0 wherever the surface begins.</p>
+   */
+  startBeforePeakMs: number
   windowMode: CsdWindowModeName
   riseTimeMs: number
 }
@@ -343,6 +353,7 @@ export const DEFAULT_CSD_ANALYSIS: Readonly<CsdAnalysis> = Object.freeze({
   slices: 60,
   windowMode: 'Apodizing',
   riseTimeMs: 0.2,
+  startBeforePeakMs: 0,
 })
 
 /**

@@ -192,6 +192,14 @@ const { showPage } = useManual()
       answered — past the record there is nothing but the gate, and the gate decays perfectly.
     </p>
     <p>
+      <strong>Start before peak</strong> begins the surface ahead of the impulse instead of at it, so
+      the first slices show the run-up rather than the decay. Zero — the default — starts at the
+      impulse. It exists for comparing with ARTA, whose time zero is its cursor; see below. The time
+      axis goes <em>negative</em> rather than re-zeroing, so the impulse stays at 0 ms wherever the
+      surface begins, and asking to start further back than the gate kept is refused with the figure
+      it has.
+    </p>
+    <p>
       <strong>Analysis</strong> picks the window. The CSD window is a rectangle with a short taper
       at each end: everything from the slice's own time to the end of the block counts at full
       weight, which is what a cumulative spectrum is the transform of, and the tapers are only there
@@ -219,9 +227,15 @@ const { showPage } = useManual()
       the picture at the wrong end of the band.
     </p>
     <p>
-      The other difference is where time zero is: ours is the impulse peak, always, while ARTA's is
-      the cursor, which its manual has you set some way before the peak — so the flat stretch at the
-      back of an ARTA surface is largely the run-up to the impulse rather than decay.
+      The other difference is where time zero is. Ours is the impulse peak unless you say otherwise;
+      ARTA's is the cursor, which its manual has you set some way before the peak — so the flat
+      stretch at the front of an ARTA surface is largely the run-up to the impulse rather than any
+      decay. That is not a quirk of its drawing: the window is a flat-topped rectangle starting at
+      each slice's own time, so a slice placed early still holds the whole impulse at full weight and
+      reads 0 dB. Set <strong>Start before peak</strong> to the same offset and ours does the same —
+      measured on the simulator's loudspeaker at ARTA's own analysis, a 2.5 ms head start holds 1 kHz
+      within a decibel across all sixty slices where starting at the peak falls 12 dB over the same
+      span.
     </p>
 
     <h3>Burst decay</h3>

@@ -565,6 +565,7 @@ async function decaySurface(subject: ReportSubject, view: 'Csd' | 'BurstDecay'):
         fftLength: display.csd.fftLength,
         blockShiftSamples: csdBlockShiftSamples(display.csd.spanMs, display.csd.slices, subject.data.impulse?.sampleRateHz ?? 0),
         blockCount: display.csd.slices,
+        startBeforePeakMs: display.csd.startBeforePeakMs,
         windowMode: display.csd.windowMode,
         riseTimeMs: display.csd.riseTimeMs,
         lowHz: display.freqFromHz,

@@ -1733,6 +1733,8 @@ export interface ImpulseResponseParameters {
   /** How far past the impulse the surface reaches, in ms, and how many slices it is cut into. */
   chartCsdSpanMs?: number | null
   chartCsdSlices?: number | null
+  /** How far ahead of the impulse the surface starts. Absent or zero starts it at the impulse. */
+  chartCsdStartBeforePeakMs?: number | null
   chartCsdBlockShiftSamples?: number | null
   chartCsdBlockCount?: number | null
   chartCsdWindowMode?: CsdWindowModeName | null
@@ -1800,6 +1802,7 @@ export interface ImpulseCsdRequest {
   lowHz: number
   highHz: number
   displayColumns: number
+  startBeforePeakMs: number
 }
 
 /** The burst decay's, likewise. */

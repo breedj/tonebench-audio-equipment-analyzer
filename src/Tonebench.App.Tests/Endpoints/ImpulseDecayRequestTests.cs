@@ -27,7 +27,8 @@ public class ImpulseDecayRequestTests
             RiseTimeMs: 0.35,
             LowHz: 123.0,
             HighHz: 17_000.0,
-            DisplayColumns: 321);
+            DisplayColumns: 321,
+            StartBeforePeakMs: 1.25);
 
         var settings = wire.ToSettings(CsdWindowMode.Hann);
 
@@ -39,6 +40,7 @@ public class ImpulseDecayRequestTests
         Assert.Equal(123.0, settings.LowHz);
         Assert.Equal(17_000.0, settings.HighHz);
         Assert.Equal(321, settings.DisplayColumns);
+        Assert.Equal(1.25, settings.StartBeforePeakMs);
     }
 
     [Fact]
@@ -69,8 +71,8 @@ public class ImpulseDecayRequestTests
     [Fact]
     public void BothPairsStillHaveTheFieldsTheMappingTestsCheck()
     {
-        Assert.Equal(8, ConstructorParameterCount(typeof(ImpulseCsdRequest)));
-        Assert.Equal(8, ConstructorParameterCount(typeof(CsdSettings)));
+        Assert.Equal(9, ConstructorParameterCount(typeof(ImpulseCsdRequest)));
+        Assert.Equal(9, ConstructorParameterCount(typeof(CsdSettings)));
         Assert.Equal(6, ConstructorParameterCount(typeof(ImpulseBurstDecayRequest)));
         Assert.Equal(6, ConstructorParameterCount(typeof(BurstDecaySettings)));
     }

@@ -223,10 +223,11 @@ public static class ImpulseResponseEndpoints
 
             try
             {
-                var (ir, left, available) = stored.Value;
+                var (ir, left, available, availableBefore) = stored.Value;
                 var settings = request.ToSettings(windowMode);
                 return Results.Ok(await Task.Run(
-                    () => CumulativeSpectralDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings, new FftFlatBackend()),
+                    () => CumulativeSpectralDecay.Compute(
+                        ir, left.PeakIndex, left.SampleRateHz, available, settings, new FftFlatBackend(), availableBefore),
                     ct));
             }
             catch (ArgumentOutOfRangeException ex)
@@ -248,7 +249,7 @@ public static class ImpulseResponseEndpoints
 
             try
             {
-                var (ir, left, available) = stored.Value;
+                var (ir, left, available, _) = stored.Value;
                 var settings = request.ToSettings(resolution);
                 return Results.Ok(await Task.Run(
                     () => BurstDecay.Compute(ir, left.PeakIndex, left.SampleRateHz, available, settings),
@@ -265,7 +266,7 @@ public static class ImpulseResponseEndpoints
     /// A stored result's left impulse as doubles, with how far past the peak a decay analysis may
     /// read; null when the result does not exist or holds no impulse.
     /// </summary>
-    private static async Task<(double[] Ir, StoredImpulseTrace Left, int AvailablePostSamples)?> LoadStoredImpulseAsync(
+    private static async Task<(double[] Ir, StoredImpulseTrace Left, int AvailablePostSamples, int AvailablePreSamples)?> LoadStoredImpulseAsync(
         long id, MeasurementRepository repo, JsonSerializerOptions serializerOptions, CancellationToken ct)
     {
         var stored = await repo.GetImpulseResultAsync(id, ct);
@@ -290,7 +291,13 @@ public static class ImpulseResponseEndpoints
         int available = parameters is null
             ? Math.Max(0, left.Ir.Length - left.PeakIndex - 1)
             : ImpulseResponseRunner.StoredAvailablePostSamples(left, parameters);
-        return (Array.ConvertAll(left.Ir, v => (double)v), left, available);
+
+        // And the same in front of it, which bounds a cumulative spectral decay's head start.
+        int availableBefore = parameters is null
+            ? Math.Max(0, left.PeakIndex)
+            : ImpulseResponseRunner.StoredAvailablePreSamples(left, parameters);
+
+        return (Array.ConvertAll(left.Ir, v => (double)v), left, available, availableBefore);
     }
 }
 
@@ -397,10 +404,12 @@ public sealed record ImpulseCsdRequest(
     double RiseTimeMs,
     double LowHz,
     double HighHz,
-    int DisplayColumns)
+    int DisplayColumns,
+    /// <summary>How far ahead of the impulse the first slice sits — see <see cref="CsdSettings.StartBeforePeakMs"/>.</summary>
+    double StartBeforePeakMs = 0.0)
 {
     public CsdSettings ToSettings(CsdWindowMode windowMode) =>
-        new(FftLength, BlockShiftSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns);
+        new(FftLength, BlockShiftSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns, StartBeforePeakMs);
 }
 
 /// <summary>Wire shape for a burst decay. See <see cref="ImpulseCsdRequest"/> on the mapping.</summary>

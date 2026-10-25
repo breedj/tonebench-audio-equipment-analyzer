@@ -70,6 +70,7 @@ const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
 const csdSpanMs = defineModel<number>('csdSpanMs', { required: true })
 const csdSlices = defineModel<number>('csdSlices', { required: true })
+const csdStartBeforePeakMs = defineModel<number>('csdStartBeforePeakMs', { required: true })
 const csdWindowMode = defineModel<CsdWindowModeName>('csdWindowMode', { required: true })
 const csdRiseTimeMs = defineModel<number>('csdRiseTimeMs', { required: true })
 const burstMaxPeriods = defineModel<number>('burstMaxPeriods', { required: true })
@@ -145,7 +146,9 @@ const csdSpanLabel = computed(() => {
   if (!(rate > 0)) return `${csdSlices.value} slices`
 
   const shift = csdBlockShiftSamples(csdSpanMs.value, csdSlices.value, rate)
-  return `${csdAchievedSpanMs({ ...DEFAULT_CSD_ANALYSIS, spanMs: csdSpanMs.value, slices: csdSlices.value }, rate).toFixed(2)} ms, ${shift} ${shift === 1 ? 'sample' : 'samples'} per slice`
+  const span = csdAchievedSpanMs({ ...DEFAULT_CSD_ANALYSIS, spanMs: csdSpanMs.value, slices: csdSlices.value }, rate)
+  const head = csdStartBeforePeakMs.value > 0 ? `, from −${csdStartBeforePeakMs.value.toFixed(2)} ms` : ''
+  return `${span.toFixed(2)} ms, ${shift} ${shift === 1 ? 'sample' : 'samples'} per slice${head}`
 })
 
 /**
@@ -586,6 +589,21 @@ const referenceLabel = computed(() => {
               step="1"
               class="tb-input"
               title="How many spectra to cut that span into. More is a finer picture of the decay and a denser chart; ARTA's own advice is that too coarse a step obscures high-frequency resonances."
+            />
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="tb-field">
+            Start before peak (ms)
+            <input
+              v-model.number="csdStartBeforePeakMs"
+              type="number"
+              min="0"
+              max="50"
+              step="0.5"
+              class="tb-input"
+              title="How far ahead of the impulse to begin, so the first slices show the run-up to it rather than the decay away from it. Zero starts at the impulse. ARTA's time zero is its cursor, which its manual has you set some way before the peak — set the same head start here to put the two surfaces side by side. The time axis goes negative rather than re-zeroing, so the impulse stays at 0 ms."
             />
           </label>
         </div>

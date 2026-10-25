@@ -148,6 +148,10 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartCsdSlices === 'number') display.csd.slices = stored.chartCsdSlices
   else if (typeof stored.chartCsdBlockCount === 'number') display.csd.slices = stored.chartCsdBlockCount
 
+  if (typeof stored.chartCsdStartBeforePeakMs === 'number') {
+    display.csd.startBeforePeakMs = stored.chartCsdStartBeforePeakMs
+  }
+
   if (typeof stored.chartCsdSpanMs === 'number') {
     display.csd.spanMs = stored.chartCsdSpanMs
   } else if (typeof stored.chartCsdBlockShiftSamples === 'number' && typeof stored.frequencySpanHz === 'number') {

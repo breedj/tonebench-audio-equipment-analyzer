@@ -155,7 +155,8 @@ public sealed class ImpulseResponseRunner(
         return Task.Run(
             () => CumulativeSpectralDecay.Compute(
                 impulse.Gated, impulse.PeakIndex, request.SampleRateHz,
-                AvailablePostSamples(request), settings, new FftFlatBackend()),
+                AvailablePostSamples(request), settings, new FftFlatBackend(),
+                AvailablePreSamples(request)),
             ct);
     }
 
@@ -188,13 +189,37 @@ public sealed class ImpulseResponseRunner(
     /// </summary>
     public static int StoredAvailablePostSamples(StoredImpulseTrace stored, ImpulseResponseParameters parameters)
     {
-        double sampleRateHz = parameters.FrequencySpanHz * 2.0;
-        int fftSize = (int)Math.Round(sampleRateHz / FrequencyResponseRequest.BaseBinHz) * Math.Max(1, parameters.ResolutionMultiplier);
-        double chirpEndHz = FrequencyResponseRequest.ChirpEndNyquistFraction * sampleRateHz / 2.0;
-        var gate = ImpulseGate.ForSweep(fftSize, Math.Max(parameters.ChirpStartHz, 0.1), chirpEndHz);
+        var gate = StoredSweepGate(parameters);
         int fromGate = Math.Max(0, gate.PostSamples - gate.TaperSamples);
         int fromRow = Math.Max(0, stored.Ir.Length - stored.PeakIndex - 1);
         return Math.Min(fromGate, fromRow);
+    }
+
+    /// <summary>
+    /// The same bound in front of the impulse — see <see cref="AvailablePreSamples"/>, and bounded
+    /// by the stored row as well, which keeps only a window either side of the peak.
+    /// </summary>
+    public static int StoredAvailablePreSamples(StoredImpulseTrace stored, ImpulseResponseParameters parameters)
+    {
+        var gate = StoredSweepGate(parameters);
+        return Math.Min(Math.Max(0, gate.PreSamples - gate.TaperSamples), Math.Max(0, stored.PeakIndex));
+    }
+
+    private static ImpulseGate StoredSweepGate(ImpulseResponseParameters parameters)
+    {
+        double sampleRateHz = parameters.FrequencySpanHz * 2.0;
+        int fftSize = (int)Math.Round(sampleRateHz / FrequencyResponseRequest.BaseBinHz) * Math.Max(1, parameters.ResolutionMultiplier);
+
+        // A noise stimulus keeps the whole period, where a sweep's gate stops short of the harmonic
+        // packets -- the same branch ImpulseResponseRequest.SweepGate takes.
+        if (!string.Equals(parameters.Stimulus, nameof(ResponseStimulus.Chirp), StringComparison.Ordinal)
+            && parameters.Stimulus is not null)
+        {
+            return ImpulseGate.ForNoise(fftSize);
+        }
+
+        double chirpEndHz = FrequencyResponseRequest.ChirpEndNyquistFraction * sampleRateHz / 2.0;
+        return ImpulseGate.ForSweep(fftSize, Math.Max(parameters.ChirpStartHz, 0.1), chirpEndHz);
     }
 
     /// <summary>The measured impulse and the settings that produced it, or a message saying there is none.</summary>
@@ -220,6 +245,19 @@ public sealed class ImpulseResponseRunner(
     {
         var gate = request.SweepGate;
         return Math.Max(0, gate.PostSamples - gate.TaperSamples);
+    }
+
+    /// <summary>
+    /// And how much of it is the DUT <i>before</i> the impulse, which is what bounds a cumulative
+    /// spectral decay's head start. The taper is excluded for the same reason, and on a sweep this
+    /// is the stretch between the impulse and the gate's leading edge — half way back to the
+    /// second-harmonic packet, so a few milliseconds at any ordinary setting and tens of them at a
+    /// long record.
+    /// </summary>
+    private static int AvailablePreSamples(ImpulseResponseRequest request)
+    {
+        var gate = request.SweepGate;
+        return Math.Max(0, gate.PreSamples - gate.TaperSamples);
     }
 
     /// <summary>

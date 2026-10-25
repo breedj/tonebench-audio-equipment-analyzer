@@ -3438,6 +3438,7 @@ const initialCsd = DEFAULT_CSD_ANALYSIS
 const impulseCsdFftLength = ref(initialCsd.fftLength)
 const impulseCsdSpanMs = ref(initialCsd.spanMs)
 const impulseCsdSlices = ref(initialCsd.slices)
+const impulseCsdStartBeforePeakMs = ref(initialCsd.startBeforePeakMs)
 const impulseCsdWindowMode = ref<import('./api/client').CsdWindowModeName>(initialCsd.windowMode)
 const impulseCsdRiseTimeMs = ref(initialCsd.riseTimeMs)
 
@@ -3506,6 +3507,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
       slices: impulseCsdSlices.value,
       windowMode: impulseCsdWindowMode.value,
       riseTimeMs: impulseCsdRiseTimeMs.value,
+      startBeforePeakMs: impulseCsdStartBeforePeakMs.value,
     },
     burstMaxPeriods: impulseBurstMaxPeriods.value,
     burstPointsPerPeriod: impulseBurstPointsPerPeriod.value,
@@ -3559,6 +3561,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseCsdFftLength.value = display.csd.fftLength
   impulseCsdSpanMs.value = display.csd.spanMs
   impulseCsdSlices.value = display.csd.slices
+  impulseCsdStartBeforePeakMs.value = display.csd.startBeforePeakMs
   impulseCsdWindowMode.value = display.csd.windowMode
   impulseCsdRiseTimeMs.value = display.csd.riseTimeMs
   impulseBurstMaxPeriods.value = display.burstMaxPeriods
@@ -3588,7 +3591,7 @@ watch(
     impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayRangeDb,
-    impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdWindowMode,
+    impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
   () => {
@@ -3637,6 +3640,7 @@ function requestImpulseDecay() {
           impulseStatus.value?.sampleRateHz ?? 0,
         ),
         blockCount: impulseCsdSlices.value,
+        startBeforePeakMs: impulseCsdStartBeforePeakMs.value,
         windowMode: impulseCsdWindowMode.value,
         riseTimeMs: impulseCsdRiseTimeMs.value,
         lowHz: impulseFreqFromHz.value,
@@ -3671,6 +3675,7 @@ watch(
     impulseCsdFftLength.value,
     impulseCsdSpanMs.value,
     impulseCsdSlices.value,
+    impulseCsdStartBeforePeakMs.value,
     impulseCsdWindowMode.value,
     impulseCsdRiseTimeMs.value,
     impulseBurstMaxPeriods.value,
@@ -3774,6 +3779,7 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartCsdFftLength: impulseCsdFftLength.value,
       chartCsdSpanMs: impulseCsdSpanMs.value,
       chartCsdSlices: impulseCsdSlices.value,
+      chartCsdStartBeforePeakMs: impulseCsdStartBeforePeakMs.value,
       chartCsdWindowMode: impulseCsdWindowMode.value,
       chartCsdRiseTimeMs: impulseCsdRiseTimeMs.value,
       chartBurstMaxPeriods: impulseBurstMaxPeriods.value,
@@ -4656,6 +4662,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:csd-fft-length="impulseCsdFftLength"
                   v-model:csd-span-ms="impulseCsdSpanMs"
                   v-model:csd-slices="impulseCsdSlices"
+                  v-model:csd-start-before-peak-ms="impulseCsdStartBeforePeakMs"
                   v-model:csd-window-mode="impulseCsdWindowMode"
                   v-model:csd-rise-time-ms="impulseCsdRiseTimeMs"
                   v-model:burst-max-periods="impulseBurstMaxPeriods"

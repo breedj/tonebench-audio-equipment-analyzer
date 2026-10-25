@@ -233,4 +233,77 @@ public class CumulativeSpectralDecayTests
 
         return best;
     }
+
+    /// <summary>
+    /// A head start puts the first slices <em>before</em> the impulse, which is what ARTA's surfaces
+    /// do: its time zero is the cursor, set some way ahead of the peak, so the front of one is the
+    /// window sliding towards the arrival rather than away from it. That is why an ARTA CSD can read
+    /// flat for milliseconds where ours has already collapsed, and matching it needs the same offset.
+    ///
+    /// <para>The axis goes negative rather than re-zeroing: a slice says where it sits relative to
+    /// the impulse, so the impulse stays at 0 ms wherever the surface begins.</para>
+    /// </summary>
+    [Fact]
+    public void Compute_WithAHeadStart_BeginsBeforeTheImpulseAndStillCallsItZero()
+    {
+        const int peak = 4000;
+        var ir = new double[RecordLength];
+        ir[peak] = 1.0;
+
+        // 1 ms at 48 kHz is 48 samples, and a 16-sample shift puts the impulse four slices in.
+        var settings = Settings(fftLength: 512, blockShift: 16, blockCount: 20) with { StartBeforePeakMs = 1.0 };
+        var surface = CumulativeSpectralDecay.Compute(
+            ir, peak, SampleRateHz, RecordLength / 4, settings, Fft, availablePreSamples: RecordLength / 4);
+
+        Assert.Equal(-1.0, surface.Slices[0].Value, 3);
+        Assert.Equal(3, surface.Slices.Select((s, i) => (s, i)).First(x => Math.Abs(x.s.Value) < 1e-9).i);
+
+        // And every slice up to the impulse reads full weight, which is the whole point: the window
+        // is a flat-topped rectangle starting at the slice's own time, so one placed early still has
+        // the impulse inside its flat part. A head start therefore buys a stretch of surface that
+        // does *not* decay — which is exactly what an ARTA CSD shows at its front, and what ours
+        // could not show while every slice began at the peak.
+        foreach (var slice in surface.Slices.Take(4))
+            Assert.Equal(0.0, slice.LevelDb.Max(), 3);
+
+        // Without it, the fourth slice is three shifts past the impulse and already falling.
+        var flush = CumulativeSpectralDecay.Compute(
+            ir, peak, SampleRateHz, RecordLength / 4, Settings(fftLength: 512, blockShift: 16, blockCount: 20), Fft);
+
+        Assert.True(
+            flush.Slices[3].LevelDb.Max() < -40.0,
+            $"with no head start the fourth slice read {flush.Slices[3].LevelDb.Max()} dB");
+    }
+
+    /// <summary>
+    /// And it is bounded by the record in front of the impulse, not clamped to it: reading further
+    /// back is reading the gate's own taper, or a sweep's harmonic packets, either of which would be
+    /// drawn as the DUT's run-up.
+    /// </summary>
+    [Fact]
+    public void Compute_WithAHeadStartPastTheRecord_IsRefused()
+    {
+        var ir = new double[RecordLength];
+        ir[4000] = 1.0;
+
+        var settings = Settings(fftLength: 512) with { StartBeforePeakMs = 10.0 };
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => CumulativeSpectralDecay.Compute(
+            ir, 4000, SampleRateHz, RecordLength / 4, settings, Fft, availablePreSamples: 48));
+
+        Assert.Contains("before the impulse", ex.Message);
+    }
+
+    /// <summary>Zero is what every slice did before the control existed, and is still the default.</summary>
+    [Fact]
+    public void Compute_WithNoHeadStart_StartsAtTheImpulse()
+    {
+        var ir = new double[RecordLength];
+        ir[4000] = 1.0;
+
+        var surface = CumulativeSpectralDecay.Compute(
+            ir, 4000, SampleRateHz, RecordLength / 4, Settings(), Fft);
+
+        Assert.Equal(0.0, surface.Slices[0].Value, 9);
+        Assert.Equal(0.0, surface.Slices[0].LevelDb.Max(), 3);
+    }
 }

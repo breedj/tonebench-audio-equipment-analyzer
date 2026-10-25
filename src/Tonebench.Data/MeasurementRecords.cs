@@ -2305,6 +2305,11 @@ public sealed record ImpulseResponseParameters(
     /// </summary>
     double? ChartCsdSpanMs = null,
     int? ChartCsdSlices = null,
+    /// <summary>
+    /// How far ahead of the impulse the decay surface starts, in ms. Null, or zero, starts it at the
+    /// impulse — which is what every build before 2026-10-25 did, there being no control for it.
+    /// </summary>
+    double? ChartCsdStartBeforePeakMs = null,
     int? ChartCsdBlockShiftSamples = null,
     int? ChartCsdBlockCount = null,
     string? ChartCsdWindowMode = null,

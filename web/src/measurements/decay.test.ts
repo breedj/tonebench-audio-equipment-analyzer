@@ -253,6 +253,8 @@ describe('DEFAULT_CSD_ANALYSIS', () => {
       slices: 60,
       windowMode: 'Apodizing',
       riseTimeMs: 0.2,
+      // Starts at the impulse, which is what every build before the head start existed did.
+      startBeforePeakMs: 0,
     })
   })
 

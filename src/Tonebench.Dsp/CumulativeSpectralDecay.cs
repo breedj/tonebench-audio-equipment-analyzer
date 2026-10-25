@@ -46,6 +46,21 @@ public enum CsdWindowMode
 /// <param name="RiseTimeMs">
 /// The apodizing window's rise, in milliseconds. Ignored by <see cref="CsdWindowMode.Hann"/>.
 /// </param>
+/// <param name="StartBeforePeakMs">
+/// How far ahead of the impulse the first slice sits, in milliseconds. Zero — the default and what
+/// every slice did until 2026-10-25 — starts the surface at the impulse itself.
+///
+/// <para><b>Why it is offered.</b> ARTA's time zero is the cursor, which its manual has the user set
+/// some way before the peak, so the front of an ARTA surface is the window sliding <i>towards</i>
+/// the arrival rather than away from it — which is why one can read flat for several milliseconds
+/// where ours has already collapsed. Matching that needs the same head start, and asking for it in
+/// milliseconds is the one way to say it that means the same thing at every sample rate.</para>
+///
+/// <para><b>The time axis goes negative rather than being re-zeroed.</b> A slice is labelled by
+/// where it sits relative to the <i>impulse</i>, so a pre-roll puts the first slices at &#8722;2.5 ms
+/// and the impulse still at 0. Re-zeroing on the first slice, as ARTA does, would make "3 ms" mean
+/// three milliseconds after wherever somebody happened to click.</para>
+/// </param>
 public sealed record CsdSettings(
     int FftLength,
     int BlockShiftSamples,
@@ -54,7 +69,8 @@ public sealed record CsdSettings(
     double RiseTimeMs,
     double LowHz,
     double HighHz,
-    int DisplayColumns)
+    int DisplayColumns,
+    double StartBeforePeakMs = 0.0)
 {
     public const int MinFftLength = 64;
 
@@ -67,6 +83,13 @@ public sealed record CsdSettings(
     public const double MaxRiseTimeMs = 1.0;
 
     public const int MaxDisplayColumns = 1000;
+
+    /// <summary>
+    /// The furthest ahead of the impulse a surface may start. Generous — what actually bounds it is
+    /// the record in front of the impulse, which <see cref="CumulativeSpectralDecay.Compute"/>
+    /// checks against rather than guessing here.
+    /// </summary>
+    public const double MaxStartBeforePeakMs = 50.0;
 
     public void Validate()
     {
@@ -97,6 +120,13 @@ public sealed record CsdSettings(
 
         if (DisplayColumns is < 2 or > MaxDisplayColumns)
             throw new ArgumentOutOfRangeException(nameof(DisplayColumns), DisplayColumns, $"Between 2 and {MaxDisplayColumns} columns.");
+
+        if (double.IsNaN(StartBeforePeakMs) || StartBeforePeakMs is < 0.0 or > MaxStartBeforePeakMs)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(StartBeforePeakMs), StartBeforePeakMs,
+                $"The head start runs from 0 to {MaxStartBeforePeakMs:0.#} ms.");
+        }
     }
 }
 
@@ -128,13 +158,21 @@ public static class CumulativeSpectralDecay
     /// How far past the impulse the record is real rather than gate. The surface may not reach past
     /// it — see the type's own remarks.
     /// </param>
+    /// <param name="availablePreSamples">
+    /// And how far <i>before</i> it, which is what bounds
+    /// <see cref="CsdSettings.StartBeforePeakMs"/>: reading further back than that is reading the
+    /// gate's own taper, or — on a sweep — the harmonic packets the gate exists to delete, either of
+    /// which would be drawn as the DUT's own run-up. Checked rather than clamped, for the reason the
+    /// post bound is.
+    /// </param>
     public static DecaySurface Compute(
         ReadOnlySpan<double> ir,
         int peakIndex,
         double sampleRateHz,
         int availablePostSamples,
         CsdSettings settings,
-        IFftBackend fft)
+        IFftBackend fft,
+        int availablePreSamples = 0)
     {
         ArgumentNullException.ThrowIfNull(fft);
         ArgumentNullException.ThrowIfNull(settings);
@@ -147,10 +185,20 @@ public static class CumulativeSpectralDecay
 
         var window = BuildWindow(settings, sampleRateHz, out int peakOffset);
 
+        int preSamples = (int)Math.Round(settings.StartBeforePeakMs * sampleRateHz / 1000.0);
+        if (preSamples > availablePreSamples)
+        {
+            double haveMs = availablePreSamples * 1000.0 / sampleRateHz;
+            throw new ArgumentOutOfRangeException(
+                nameof(settings),
+                $"A {settings.StartBeforePeakMs:0.##} ms head start reads before the impulse, and only {haveMs:0.##} ms of the record in front of it is real. "
+                    + "Lower it, or lengthen the gate.");
+        }
+
         // Where the last slice's window ends, relative to the impulse. Checked rather than clamped:
         // a surface that quietly stopped short would still be drawn against the axis the request
         // asked for, and its last slices would be the gate's edge rather than the DUT's decay.
-        int reach = ((settings.BlockCount - 1) * settings.BlockShiftSamples) - peakOffset + length;
+        int reach = ((settings.BlockCount - 1) * settings.BlockShiftSamples) - preSamples - peakOffset + length;
         if (reach > availablePostSamples)
         {
             double haveMs = availablePostSamples * 1000.0 / sampleRateHz;
@@ -182,7 +230,7 @@ public static class CumulativeSpectralDecay
 
         for (int j = 0; j < settings.BlockCount; j++)
         {
-            int start = peakIndex + (j * settings.BlockShiftSamples) - peakOffset;
+            int start = peakIndex - preSamples + (j * settings.BlockShiftSamples) - peakOffset;
             for (int i = 0; i < length; i++)
             {
                 int source = (((start + i) % ir.Length) + ir.Length) % ir.Length;
@@ -199,7 +247,9 @@ public static class CumulativeSpectralDecay
             foreach (float value in columns)
                 surfacePeak = Math.Max(surfacePeak, value);
 
-            slices.Add((j * settings.BlockShiftSamples * 1000.0 / sampleRateHz, columns));
+            // Labelled against the impulse, so a head start reads as negative time rather than
+            // re-zeroing the axis on wherever the surface happens to begin.
+            slices.Add((((j * settings.BlockShiftSamples) - preSamples) * 1000.0 / sampleRateHz, columns));
         }
 
         // One reference for the whole surface, deliberately: the front slice keeps the DUT's

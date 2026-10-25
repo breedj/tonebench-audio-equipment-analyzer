@@ -375,6 +375,24 @@
     @apply h-7 w-full min-w-0 rounded-md border border-neutral-300 px-1.5 text-[12px] text-neutral-900;
     @apply disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-100;
   }
+  /* A slider, for a setting that is turned by eye against the picture rather than typed — the decay
+     surface's two projection angles. `accent-color` is the whole of the theming, as it is for
+     `tb-check`: a range input styled by hand needs a track and a thumb rule per browser engine, and
+     all three of them already draw a good one in the page's own blue from that single property.
+     The 32 px height keeps it on the same row rhythm as `tb-input`. */
+  .tb-range {
+    @apply h-8 w-full min-w-0 cursor-pointer accent-blue-600 disabled:opacity-60;
+  }
+  /* The caption row above a slider: its name on the left and where it currently stands on the
+     right. A slider cannot be read back without that figure, and these are settings a user sets by
+     eye and then wants to know the number of — so the number is part of the control, not a tooltip.
+     `tabular-nums` so it does not jiggle while being dragged. */
+  .tb-field-row {
+    @apply flex items-baseline justify-between gap-2;
+  }
+  .tb-field-value {
+    @apply text-[12px] tabular-nums text-neutral-800 dark:text-neutral-200;
+  }
   /* A checkbox or radio and its text. The 15 px box is the mockup's; the browser default is 13.
      `tb-check-row` is the label around it, so a column of them lines up on the box rather than on
      the text. */

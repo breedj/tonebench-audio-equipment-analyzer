@@ -521,33 +521,40 @@ const referenceLabel = computed(() => {
         </label>
 
         <!-- Two ends of one thing — where the depth axis points and how far it runs — so they are
-             read and set together. -->
-        <div class="grid grid-cols-2 gap-2.5">
-          <label class="tb-field">
-            Rotation (°)
-            <input
-              v-model.number="decayRotationDeg"
-              type="number"
-              :min="DECAY_ROTATION_DEG.min"
-              :max="DECAY_ROTATION_DEG.max"
-              step="5"
-              class="tb-input"
-              title="Which way the stack recedes, in degrees from straight down. Positive leans it to the left, as ARTA draws it; zero stacks the curves straight down the chart, and a negative angle sends them to the right."
-            />
-          </label>
-          <label class="tb-field">
-            Depth (%)
-            <input
-              v-model.number="decayDepthPercent"
-              type="number"
-              :min="DECAY_DEPTH_PERCENT.min"
-              :max="DECAY_DEPTH_PERCENT.max"
-              step="5"
-              class="tb-input"
-              title="How much of the chart's height the depth axis takes. The rest is the dB scale, so a deep-looking surface is one with a squashed level axis."
-            />
-          </label>
-        </div>
+             read and set together. Sliders rather than boxes: neither has a figure anybody knows in
+             advance, they are turned until the picture looks right, and the chart follows the drag.
+             Stacked rather than side by side, because a slider needs the width to be worth
+             dragging. -->
+        <label class="tb-field">
+          <span class="tb-field-row">
+            <span>Rotation</span>
+            <span class="tb-field-value">{{ decayRotationDeg }}°</span>
+          </span>
+          <input
+            v-model.number="decayRotationDeg"
+            type="range"
+            :min="DECAY_ROTATION_DEG.min"
+            :max="DECAY_ROTATION_DEG.max"
+            step="1"
+            class="tb-range"
+            title="Which way the stack recedes, in degrees from straight down. Positive leans it to the left, as ARTA draws it; zero stacks the curves straight down the chart, and a negative angle sends them to the right."
+          />
+        </label>
+        <label class="tb-field">
+          <span class="tb-field-row">
+            <span>Depth</span>
+            <span class="tb-field-value">{{ decayDepthPercent }}%</span>
+          </span>
+          <input
+            v-model.number="decayDepthPercent"
+            type="range"
+            :min="DECAY_DEPTH_PERCENT.min"
+            :max="DECAY_DEPTH_PERCENT.max"
+            step="1"
+            class="tb-range"
+            title="How much of the chart's height the depth axis takes. The rest is the dB scale, so a deep-looking surface is one with a squashed level axis."
+          />
+        </label>
       </template>
 
       <label class="tb-field">

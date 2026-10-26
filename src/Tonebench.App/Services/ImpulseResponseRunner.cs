@@ -282,7 +282,8 @@ public sealed class ImpulseResponseRunner(
                     Running, _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     [.. _traces], [.. _impulses], [.. _harmonics],
-                    _referenceMode, _referenceName, _gateResolutionHz, _gatePreMs, _gatePostMs);
+                    _referenceMode, _referenceName, _gateResolutionHz, _gatePreMs, _gatePostMs,
+                    _lastRequest?.Stimulus);
             }
         }
     }

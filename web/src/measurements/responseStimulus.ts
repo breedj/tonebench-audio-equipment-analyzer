@@ -19,6 +19,11 @@ export const RESPONSE_STIMULI: { value: ResponseStimulusName; label: string }[] 
   { value: 'SpeechMale2020', label: 'Male PN [2020]' },
 ]
 
+/** What the dropdown calls a stimulus, for prose that has to name one the user picked. */
+export function stimulusLabel(stimulus: ResponseStimulusName): string {
+  return RESPONSE_STIMULI.find((s) => s.value === stimulus)?.label ?? stimulus
+}
+
 /** Everything that is not the sweep: a periodic noise sequence over exactly one analysis record. */
 export function isNoiseStimulus(stimulus: ResponseStimulusName): boolean {
   return stimulus !== 'Chirp'

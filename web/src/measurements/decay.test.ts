@@ -10,6 +10,7 @@ import {
   formatHz,
   levelAt,
   levelIndex,
+  PALETTE_FLOOR_FRACTION,
   levelTicks,
   levelY,
   linearTicks,
@@ -242,25 +243,31 @@ describe('paletteLut', () => {
   })
 
   /**
-   * The foot of the level scale is held a quarter of the way up the palette — see
-   * PALETTE_FLOOR_FRACTION — so the quiet end of a surface is a readable blue rather than Jet's
-   * near-black navy. The top of the scale is still the top of the palette.
+   * The foot of the level scale is held some way up the palette — see PALETTE_FLOOR_FRACTION — so
+   * the quiet end of a surface is a readable blue rather than Jet's near-black navy. The top of
+   * the scale is still the top of the palette, at either floor.
    */
   it('maps the top of the range to the top of the table and the bottom to the palette floor', () => {
+    const floor = Math.round(PALETTE_FLOOR_FRACTION * 255)
     expect(levelIndex(0, 0, -40)).toBe(255)
-    expect(levelIndex(-40, 0, -40)).toBe(64)
-    expect(levelIndex(-20, 0, -40)).toBe(159)
+    expect(levelIndex(-40, 0, -40)).toBe(floor)
+    expect(levelIndex(-20, 0, -40)).toBe(Math.round((PALETTE_FLOOR_FRACTION + (1 - PALETTE_FLOOR_FRACTION) * 0.5) * 255))
     // And anything past either end saturates rather than wrapping.
-    expect(levelIndex(-300, 0, -40)).toBe(64)
+    expect(levelIndex(-300, 0, -40)).toBe(floor)
     expect(levelIndex(10, 0, -40)).toBe(255)
   })
 
   /**
-   * Stated the way it was asked for: on a 0 to -20 dB scale, the foot now reads what -15 dB used to.
+   * <p>Stated the way the two asks were put, each against the scale that was on screen when it was
+   * made. 2026-10-24: on a 0 to -20 dB scale the foot should read what -15 dB used to, i.e. a
+   * quarter of the way up an untouched ramp. 2026-10-26: on a 0 to -50 dB scale the foot should
+   * read what -45 dB read <em>under that first mapping</em>, which is the arithmetic that gives
+   * 0.325 and the one thing a literal 83 here would not say.</p>
    */
-  it('gives the foot of the scale the colour that sat three quarters of the way down it', () => {
-    const wasAtMinus15 = Math.round(((-15 - -20) / 20) * 255)
-    expect(levelIndex(-20, 0, -20)).toBe(wasAtMinus15)
+  it('gives the foot of the scale the colour the two asks put there', () => {
+    const quarterUp = 0.25
+    expect(PALETTE_FLOOR_FRACTION).toBeCloseTo(quarterUp + (1 - quarterUp) * ((-45 - -50) / 50), 10)
+    expect(levelIndex(-50, 0, -50)).toBe(Math.round(PALETTE_FLOOR_FRACTION * 255))
   })
 })
 

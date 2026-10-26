@@ -293,7 +293,21 @@ public sealed record ImpulseResponseStatus(
     string? ReferenceCalibrationName,
     double GateResolutionHz,
     double GatePreMs,
-    double GatePostMs);
+    double GatePostMs,
+    /// <summary>
+    /// The stimulus the run on screen played, or null where nothing has run yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>Carried so the Harmonics view can say why it is empty. Harmonic curves are extracted
+    /// from a sweep's own deconvolution residue — see <see cref="ImpulseResponseRequest.ExtractsHarmonics"/>
+    /// — so every noise stimulus produces none, which since Pink PN became the default (2026-10-24)
+    /// is what a new measurement does. Reported 2026-10-26 as the harmonics display not working
+    /// any more, with the Autofit button disabled beside it: both were correct and neither said
+    /// so.</para>
+    /// <para>The run's own stimulus and not the panel's staged one, which is the whole point:
+    /// turning the dropdown after a run must not relabel what that run did.</para>
+    /// </remarks>
+    ResponseStimulus? Stimulus);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record ImpulseResponseStarted(

@@ -359,11 +359,23 @@ export function wallGradientStops(steps = 32): { offset: number; index: number }
  * already had, in the same order; it is the <em>mapping</em> from level to colour that is squeezed
  * into the top three quarters, which is the one place all three readers of it agree.</p>
  *
- * <p>The quarter the levels no longer reach is not wasted: <c>DecaySurfaceChart</c>'s body fill is
+ * <p>The part the levels no longer reach is not wasted: <c>DecaySurfaceChart</c>'s body fill is
  * <c>lutColor(lut, 0)</c> and stays the true floor, which is what hides the slices behind each
  * curve. Darker than anything drawn on it is exactly what that fill wants to be.</p>
+ *
+ * <p><b>Raised from 0.25 on 2026-10-26, and the figure is derived rather than chosen</b>: "the
+ * colour now used for -45 dB should become the colour for -50 dB", on a chart whose range was the
+ * 50 dB default. -45 dB there sits at a fraction of 0.1 up the level scale, so it maps to
+ * <c>0.25 + 0.75 x 0.1 = 0.325</c>, and putting that colour at the foot of the scale <em>is</em>
+ * setting this constant to 0.325. The top of the scale is untouched at either value, so this
+ * lifts the quiet end and nothing else.</p>
+ *
+ * <p>The ask came from the GPU surface, where the shading multiplies the palette and so costs the
+ * dark end twice over — but it is applied here, to the shared mapping, rather than per chart. A
+ * level has to mean the same colour on both charts; the lit mesh already has its own answer to
+ * being dark, which is <c>DECAY_LIGHT_STRENGTH</c>.</p>
  */
-export const PALETTE_FLOOR_FRACTION = 0.25
+export const PALETTE_FLOOR_FRACTION = 0.325
 
 /**
  * The lookup index a position on the level scale maps to — 0 at the foot of the scale, 1 at the top.

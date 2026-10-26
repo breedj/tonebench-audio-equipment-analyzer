@@ -113,6 +113,7 @@ import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
 import { decaySurfaceGpuAvailable } from './charts/peCapability'
 import { prefersGpuSurface, useDecaySurfaceEngine } from './composables/useDecaySurfaceEngine'
 import { decayModeIs3d } from './measurements/decay3d'
+import { extractsHarmonics, stimulusLabel } from './measurements/responseStimulus'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 // Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
 // open an impulse measurement, or has no WebGPU, never fetches it at all.
@@ -836,6 +837,7 @@ const {
   computeBurstDecay: computeImpulseBurstDecay,
   computeStoredCsd: computeStoredImpulseCsd,
   computeStoredBurstDecay: computeStoredImpulseBurstDecay,
+  invalidateDecay: invalidateImpulseDecay,
 } = useImpulseResponse()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
@@ -2673,6 +2675,28 @@ const spectrumChart = ref<InstanceType<typeof SpectrumChart> | null>(null)
 const sweepChart = ref<InstanceType<typeof ThdSweepChart> | null>(null)
 const impulseChart = ref<InstanceType<typeof ImpulseResponseChart> | null>(null)
 const impulseResponseChart = ref<InstanceType<typeof FrequencyResponseChart> | null>(null)
+/**
+ * Why the Harmonics view has nothing to draw, where the reason is one the screen can name.
+ *
+ * <p>Harmonic curves are read out of a sweep's own deconvolution residue, so a noise stimulus
+ * produces none at all — and Pink PN has been the default since 2026-10-24, which is what makes
+ * this the ordinary case rather than a corner. Without the line the view draws an empty chart and
+ * the Autofit button beside it is disabled, both of them correct and neither saying so.</p>
+ *
+ * <p>Null whenever there <em>is</em> something on the chart, whenever nothing has run (the chart's
+ * own empty state covers that), and on a status from a build that does not report its stimulus.
+ * The run's stimulus, never the panel's staged one: turning the dropdown afterwards must not
+ * relabel what the run did.</p>
+ */
+const harmonicsUnavailableNote = computed(() => {
+  if (impulseHarmonics.value.length > 0 || visibleHarmonicOverlays.value.length > 0) return null
+  const stimulus = impulseStatus.value?.stimulus
+  if (!stimulus || extractsHarmonics(stimulus)) return null
+  return `This run played ${stimulusLabel(stimulus)}. Harmonic curves come from a sweep, whose distortion `
+    + 'returns as separate packets the analysis can pick out; noise spreads its distortion evenly '
+    + 'across the record, where nothing can separate it. Measure with Sweep (chirp) and Harmonics on.'
+})
+
 const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | null>(null)
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
 const impulseDecay3dChart = ref<{ exportPng: (o: ChartExportOptions) => Promise<Blob> } | null>(null)
@@ -3663,7 +3687,13 @@ function requestImpulseDecay() {
   // the analysis being broken rather than as having no input.
   const live = (impulseStatus.value?.passesCompleted ?? 0) > 0
   const storedId = live ? null : (visibleImpulseOverlays.value[0]?.id ?? null)
-  if (!live && storedId === null) return
+  if (!live && storedId === null) {
+    // Nothing to draw: clear rather than return, or the surface computed from the history item
+    // that has just been unchecked stays on the chart with nothing on screen claiming it.
+    // Reported 2026-10-26 as deselecting a history item not clearing the chart.
+    invalidateImpulseDecay()
+    return
+  }
 
   const isCsd = impulseView.value === 'Csd'
   impulseDecayTimer = setTimeout(() => {
@@ -4621,6 +4651,16 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-db="impulseYTopDb"
                   :y-bottom-db="impulseYBottomDb"
                 />
+                <!-- Why the harmonics view is empty, when it is empty for a reason the screen can
+                     name. A noise run produces no harmonic curves at all, so without this the view
+                     draws nothing and the Autofit button beside it sits disabled, both correct and
+                     neither saying so — reported 2026-10-26 as the display not working any more. -->
+                <p
+                  v-if="impulseView === 'Harmonics' && harmonicsUnavailableNote"
+                  class="text-[11px] text-neutral-500 dark:text-neutral-400"
+                >
+                  {{ harmonicsUnavailableNote }}
+                </p>
                 <!-- Both decay surfaces, drawn by one chart: they differ in what the depth axis
                      counts and in nothing about how it is drawn.
 

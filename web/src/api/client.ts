@@ -1641,6 +1641,8 @@ export interface ImpulseResponseStatus {
   gateResolutionHz: number
   gatePreMs: number
   gatePostMs: number
+  /** What the run on screen played, or null before anything has run. Null on a build older than this. */
+  stimulus: ResponseStimulusName | null
 }
 
 /** A stored loopback calibration, as the picker lists it. */

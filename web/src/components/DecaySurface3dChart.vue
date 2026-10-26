@@ -55,6 +55,14 @@ const props = defineProps<{
   computing: boolean
   error: string | null
   emptyMessage: string
+  /**
+   * A fixed drawing height, for a chart that is one of several stacked in the view.
+   *
+   * <p>A decay surface cannot overlay, so comparing runs means a chart each — and fitting every one
+   * of them to the view would give four charts four full views. Left undefined by the one chart
+   * that is the view's own, which then fits it as before.</p>
+   */
+  pageHeightPx?: number
 }>()
 
 /**
@@ -75,7 +83,7 @@ const container = ref<HTMLDivElement | null>(null)
 const host = ref<HTMLDivElement | null>(null)
 // First in setup, so the control is built at the height it will keep rather than resized a frame
 // later — see the composable's own remarks.
-const chartHeight = useResultChartHeight(container, host)
+const chartHeight = useResultChartHeight(container, host, { pageHeightPx: () => props.pageHeightPx })
 
 const { isDark } = useAppTheme()
 

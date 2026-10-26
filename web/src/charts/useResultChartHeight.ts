@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
 import { expandedChart } from '../composables/useExpandedChart'
 import { MIN_RESULT_CHART_HEIGHT_PX, RESULT_CHART_HEIGHT_PX } from './dimensions'
 
@@ -31,7 +31,7 @@ export interface ResultChartHeightOptions {
    * measure it (a root at `inset: 0` is the window's height whatever it contains) and reads what
    * the page last saw.</p>
    */
-  pageHeightPx?: number
+  pageHeightPx?: MaybeRefOrGetter<number | undefined>
 }
 
 /** The whole element plus its bottom margin — what a block above the chart costs the column. */
@@ -97,7 +97,11 @@ export function useResultChartHeight(
 ): Ref<number> {
   // A secondary chart starts at its own height rather than the full-width fallback, so a plot
   // built on mount is built at the size it will keep instead of being resized a frame later.
-  const height = ref(options.pageHeightPx ?? RESULT_CHART_HEIGHT_PX)
+  // A getter rather than a plain number, because a chart can become one of several stacked while
+  // it is mounted — the impulse screen's decay views do exactly that when a history item is
+  // checked on — and read once it would keep the full-view height it was built with.
+  const pageHeight = () => toValue(options.pageHeightPx)
+  const height = ref(pageHeight() ?? RESULT_CHART_HEIGHT_PX)
   const aboveHeight = options.aboveHeight ?? fullHeightWithMargin
   let mainObserver: ResizeObserver | null = null
   let aboveObserver: ResizeObserver | null = null
@@ -129,8 +133,9 @@ export function useResultChartHeight(
     // Kept, not fitted, and deliberately not clamped to MIN_RESULT_CHART_HEIGHT_PX: that floor is
     // what stops a *result* chart squashing on a short window, and every secondary height here is
     // below it on purpose.
-    if (options.pageHeightPx !== undefined) {
-      height.value = options.pageHeightPx
+    const kept = pageHeight()
+    if (kept !== undefined) {
+      height.value = kept
       return
     }
 
@@ -166,6 +171,9 @@ export function useResultChartHeight(
     // The expanded flag flips before the attribute's rule has laid the root out, so the measure
     // waits a frame; the ResizeObserver on main is no help here, since main does not move.
     watch(expandedChart, () => requestAnimationFrame(measure))
+    // A chart that becomes one of several, or stops being one, re-measures: the kept height is a
+    // getter for exactly this.
+    watch(pageHeight, () => measure())
   })
   onBeforeUnmount(() => {
     mainObserver?.disconnect()

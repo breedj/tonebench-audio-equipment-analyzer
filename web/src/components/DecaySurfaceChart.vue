@@ -87,6 +87,14 @@ const props = defineProps<{
   error: string | null
   /** What to say when there is nothing to draw. */
   emptyMessage: string
+  /**
+   * A fixed drawing height, for a chart that is one of several stacked in the view.
+   *
+   * <p>A decay surface cannot overlay, so comparing runs means a chart each — and fitting every one
+   * of them to the view would give four charts four full views. Left undefined by the one chart
+   * that is the view's own, which then fits it as before.</p>
+   */
+  pageHeightPx?: number
 }>()
 
 /**
@@ -106,7 +114,7 @@ const container = ref<HTMLDivElement | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
 // Fitted to the view — see charts/useResultChartHeight.ts. This chart has no furniture of its own:
 // the container is the root and the canvas fills it, so the fit is the view's height outright.
-const chartHeight = useResultChartHeight(container, canvas)
+const chartHeight = useResultChartHeight(container, canvas, { pageHeightPx: () => props.pageHeightPx })
 watch(chartHeight, () => draw())
 /**
  * The marker under the cursor, on its own canvas over the chart. A mousemove must not redraw the

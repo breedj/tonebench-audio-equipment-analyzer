@@ -112,7 +112,9 @@ import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
 import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
 import { decaySurfaceGpuAvailable } from './charts/peCapability'
 import { prefersGpuSurface, useDecaySurfaceEngine } from './composables/useDecaySurfaceEngine'
+import type { DecaySurface } from './api/client'
 import { decayModeIs3d } from './measurements/decay3d'
+import { decaySubjectIds, decaySubjects } from './measurements/decaySubjects'
 import { extractsHarmonics, stimulusLabel } from './measurements/responseStimulus'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 // Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
@@ -838,6 +840,11 @@ const {
   computeStoredCsd: computeStoredImpulseCsd,
   computeStoredBurstDecay: computeStoredImpulseBurstDecay,
   invalidateDecay: invalidateImpulseDecay,
+  csdExtras: impulseCsdExtras,
+  burstExtras: impulseBurstExtras,
+  computeExtraCsd: computeExtraImpulseCsd,
+  computeExtraBurstDecay: computeExtraImpulseBurstDecay,
+  pruneDecayExtras: pruneImpulseDecayExtras,
 } = useImpulseResponse()
 
 // Which screen the main pane shows. App.vue used to render the FFT view for any selected type,
@@ -3690,6 +3697,44 @@ watch(
  * <p>Nothing here re-measures. That is the point of the two views: the record is already captured
  * and every one of these settings is a different question put to it.</p>
  */
+/**
+ * Which runs the decay views draw, in the order they are stacked.
+ *
+ * <p>A decay surface is a heatmap: it cannot overlay, so comparing runs means a chart each
+ * (asked for 2026-10-26). The live measurement comes first where there is one, then every checked
+ * history item — at most three, which the checklist already enforces — so at most four charts.</p>
+ *
+ * <p>Subject zero is the <em>primary</em>, and it is deliberately the same run the single chart
+ * drew before this existed: everything else that reads one surface — the screenshot gate, the
+ * notes under the chart, a report — goes on reading its own.</p>
+ */
+const impulseDecaySubjects = computed(
+  () => decaySubjects((impulseStatus.value?.passesCompleted ?? 0) > 0, visibleImpulseOverlays.value),
+)
+
+/** Everything under the primary chart: always stored results, since a live run is always first. */
+const impulseDecayExtraSubjects = computed(() => impulseDecaySubjects.value.slice(1))
+
+/** Whether the view is one that stacks a chart per run at all — the two decay analyses. */
+const impulseDecayStacks = computed(
+  () => impulseDecayExtraSubjects.value.length > 0 && (impulseView.value === 'Csd' || impulseView.value === 'BurstDecay'),
+)
+
+/**
+ * The drawing height each decay chart keeps once there is more than one of them. Fitting every
+ * chart to the view would give four charts four full views; at this height four of them scroll in
+ * `main` as one comparison. Undefined for a lone chart, which fits the view as it always has.
+ */
+const DECAY_STACK_HEIGHT_PX = 340
+const impulseDecayChartHeight = computed(() => (impulseDecayStacks.value ? DECAY_STACK_HEIGHT_PX : undefined))
+
+/** One extra subject's surface for the view on screen, or null while it is still being computed. */
+function impulseDecayExtraSurface(measurementId: number | null): DecaySurface | null {
+  if (measurementId === null) return null
+  const map = impulseView.value === 'Csd' ? impulseCsdExtras.value : impulseBurstExtras.value
+  return map.get(measurementId) ?? null
+}
+
 let impulseDecayTimer: ReturnType<typeof setTimeout> | null = null
 
 function requestImpulseDecay() {
@@ -3697,19 +3742,22 @@ function requestImpulseDecay() {
   if (!isImpulseResponse.value) return
   if (impulseView.value !== 'Csd' && impulseView.value !== 'BurstDecay') return
 
-  // A surface is a heatmap and cannot overlay, so there is one subject: the live measurement when
-  // there is one, otherwise the first checked history item. Without this second case a checked item
-  // drew its waveform and its gated response and then left both decay views blank, which reads as
-  // the analysis being broken rather than as having no input.
-  const live = (impulseStatus.value?.passesCompleted ?? 0) > 0
-  const storedId = live ? null : (visibleImpulseOverlays.value[0]?.id ?? null)
-  if (!live && storedId === null) {
+  // A surface is a heatmap and cannot overlay, so each run on screen gets its own chart and its own
+  // analysis — see impulseDecaySubjects. The first is the primary and keeps the pair of refs
+  // everything else reads; the rest are keyed by measurement id.
+  const subjects = impulseDecaySubjects.value
+  // Drop the surfaces of runs that have been unchecked. Megabytes each, and the stale one would
+  // otherwise be drawn again the moment that item were checked back on, before its recompute.
+  pruneImpulseDecayExtras(decaySubjectIds(subjects))
+  if (subjects.length === 0) {
     // Nothing to draw: clear rather than return, or the surface computed from the history item
     // that has just been unchecked stays on the chart with nothing on screen claiming it.
     // Reported 2026-10-26 as deselecting a history item not clearing the chart.
     invalidateImpulseDecay()
     return
   }
+  const storedId = subjects[0].measurementId
+  const extras = subjects.slice(1)
 
   const isCsd = impulseView.value === 'Csd'
   impulseDecayTimer = setTimeout(() => {
@@ -3730,6 +3778,9 @@ function requestImpulseDecay() {
         displayColumns: DECAY_DISPLAY_COLUMNS,
       }
       void (storedId === null ? computeImpulseCsd(csdRequest) : computeStoredImpulseCsd(storedId, csdRequest))
+      for (const extra of extras) {
+        if (extra.measurementId !== null) void computeExtraImpulseCsd(extra.measurementId, csdRequest)
+      }
     } else {
       const burstRequest = {
         lowHz: impulseFreqFromHz.value,
@@ -3742,6 +3793,9 @@ function requestImpulseDecay() {
       void (storedId === null
         ? computeImpulseBurstDecay(burstRequest)
         : computeStoredImpulseBurstDecay(storedId, burstRequest))
+      for (const extra of extras) {
+        if (extra.measurementId !== null) void computeExtraImpulseBurstDecay(extra.measurementId, burstRequest)
+      }
     }
   }, 250)
 }
@@ -4672,16 +4726,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :y-top-db="impulseYTopDb"
                   :y-bottom-db="impulseYBottomDb"
                 />
-                <!-- Why the harmonics view is empty, when it is empty for a reason the screen can
-                     name. A noise run produces no harmonic curves at all, so without this the view
-                     draws nothing and the Autofit button beside it sits disabled, both correct and
-                     neither saying so — reported 2026-10-26 as the display not working any more. -->
-                <p
-                  v-if="impulseView === 'Harmonics' && harmonicsUnavailableNote"
-                  class="text-[11px] text-neutral-500 dark:text-neutral-400"
-                >
-                  {{ harmonicsUnavailableNote }}
-                </p>
                 <!-- Both decay surfaces, drawn by one chart: they differ in what the depth axis
                      counts and in nothing about how it is drawn.
 
@@ -4690,8 +4734,17 @@ onBeforeUnmount(() => stopLoadPolling?.())
                      which is a flat colour map — the Canvas 2D one draws, which is also what every
                      report renders through. The two take the same props and expose the same
                      exportPng, so nothing downstream knows which is on screen. -->
+                <div v-else class="flex flex-col gap-1">
+                <!-- The primary run's name, shown only once there is something to tell it from.
+                     The stacked ones carry theirs below. -->
+                <p
+                  v-if="impulseDecayStacks"
+                  class="text-[11px] font-medium text-neutral-500 dark:text-neutral-400"
+                >
+                  {{ impulseDecaySubjects[0]?.label }}
+                </p>
                 <DecaySurface3dChart
-                  v-else-if="decayUses3d"
+                  v-if="decayUses3d"
                   ref="impulseDecay3dChart"
                   :surface="impulseView === 'Csd' ? impulseCsdSurface : impulseBurstSurface"
                   :mode="impulseDecayMode"
@@ -4709,6 +4762,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
                   :error="impulseDecayError"
+                  :page-height-px="impulseDecayChartHeight"
                   empty-message="Measure an impulse response, and this draws its decay."
                 />
                 <DecaySurfaceChart
@@ -4725,10 +4779,72 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
                   :error="impulseDecayError"
+                  :page-height-px="impulseDecayChartHeight"
                   empty-message="Measure an impulse response, and this draws its decay."
                   @update:rotation-deg="impulseDecayRotationDeg = $event"
                   @update:depth-percent="impulseDecayDepthPercent = $event"
                 />
+
+                <!-- One chart per checked history item, stacked under the primary. A decay surface
+                     is a heatmap and cannot overlay, so this is what comparing runs looks like
+                     (asked for 2026-10-26). Only the two decay views: every other view on this
+                     screen draws its runs as curves on one chart, which is better. Each carries
+                     its run's name, and so does the primary once there is more than one of them —
+                     four unlabelled surfaces are not a comparison. -->
+                <template v-if="impulseDecayStacks">
+                  <div v-for="subject in impulseDecayExtraSubjects" :key="subject.key" class="flex flex-col gap-1">
+                    <p class="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">{{ subject.label }}</p>
+                    <DecaySurface3dChart
+                      v-if="decayUses3d"
+                      :surface="impulseDecayExtraSurface(subject.measurementId)"
+                      :mode="impulseDecayMode"
+                      :palette="impulseDecayPalette"
+                      :colored-curves="impulseDecayColoredCurves"
+                      :filled="impulseDecayFilled"
+                      :rotation-deg="impulseDecayRotationDeg"
+                      :depth-percent="impulseDecayDepthPercent"
+                      :move-x="impulseDecayMoveX"
+                      :move-y="impulseDecayMoveY"
+                      :magnification="impulseDecayMagnification"
+                      :light-azimuth-deg="impulseDecayLightAzimuthDeg"
+                      :light-elevation-deg="impulseDecayLightElevationDeg"
+                      :range-db="impulseDecayRangeDb"
+                      :thick-lines="impulseThickLines"
+                      :computing="false"
+                      :error="null"
+                      :page-height-px="impulseDecayChartHeight"
+                      empty-message="Analysing this run…"
+                    />
+                    <DecaySurfaceChart
+                      v-else
+                      :surface="impulseDecayExtraSurface(subject.measurementId)"
+                      :mode="impulseDecayMode"
+                      :palette="impulseDecayPalette"
+                      :colored-curves="impulseDecayColoredCurves"
+                      :filled="impulseDecayFilled"
+                      :rotation-deg="impulseDecayRotationDeg"
+                      :depth-percent="impulseDecayDepthPercent"
+                      :range-db="impulseDecayRangeDb"
+                      :thick-lines="impulseThickLines"
+                      :computing="false"
+                      :error="null"
+                      :page-height-px="impulseDecayChartHeight"
+                      empty-message="Analysing this run…"
+                    />
+                  </div>
+                </template>
+                </div>
+
+                <!-- Why the harmonics view is empty, when it is empty for a reason the screen can
+                     name. A noise run produces no harmonic curves at all, so without this the view
+                     draws nothing and the Autofit button beside it sits disabled, both correct and
+                     neither saying so — reported 2026-10-26 as the display not working any more. -->
+                <p
+                  v-if="impulseView === 'Harmonics' && harmonicsUnavailableNote"
+                  class="text-[11px] text-neutral-500 dark:text-neutral-400"
+                >
+                  {{ harmonicsUnavailableNote }}
+                </p>
 
                 <!-- What 0 dB means here, restated under the chart, because it is not the same
                      thing in the two measurements and the difference decides how the picture is

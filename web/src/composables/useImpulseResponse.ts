@@ -40,8 +40,26 @@ const error = ref<string | null>(null)
  */
 const csdSurface = shallowRef<DecaySurface | null>(null)
 const burstSurface = shallowRef<DecaySurface | null>(null)
+
+/**
+ * The same two analyses for the <em>other</em> runs on screen, keyed by stored measurement id.
+ *
+ * <p>A decay surface is a heatmap and cannot overlay, so comparing runs means a chart each — which
+ * is what the impulse screen draws for the two decay views since 2026-10-26. The pair above stays
+ * the primary subject's (the live run, or the first checked history item when nothing is live) so
+ * that everything already reading it — the screenshot gate, the notes under the chart, the report
+ * — goes on meaning what it meant; these are the extras stacked under it.</p>
+ *
+ * <p>Replaced rather than mutated on every write, because a <c>shallowRef</c> holding a Map does
+ * not notice a <c>set</c> into it.</p>
+ */
+const csdExtras = shallowRef<ReadonlyMap<number, DecaySurface>>(new Map())
+const burstExtras = shallowRef<ReadonlyMap<number, DecaySurface>>(new Map())
 const decayError = ref<string | null>(null)
 const decayComputing = ref(false)
+
+/** One request token per extra subject — see computeExtraCsd. */
+const extraTokens = new Map<number, number>()
 
 /**
  * Which decay request is the current one. A burst decay takes a noticeable fraction of a second, so
@@ -70,7 +88,23 @@ function invalidateDecay() {
   decayToken++
   csdSurface.value = null
   burstSurface.value = null
+  csdExtras.value = new Map()
+  burstExtras.value = new Map()
   decayError.value = null
+}
+
+/**
+ * Drops the extra surfaces of runs that are no longer on screen.
+ *
+ * <p>Called with the ids still wanted rather than with the one removed, so unchecking several at
+ * once, switching measurement and closing a project all go through the same line. A surface is
+ * megabytes, so this is worth doing rather than letting them accumulate behind a Map.</p>
+ */
+function pruneDecayExtras(keep: ReadonlySet<number>): void {
+  for (const [map, ref] of [[csdExtras.value, csdExtras], [burstExtras.value, burstExtras]] as const) {
+    if ([...map.keys()].every((id) => keep.has(id))) continue
+    ref.value = new Map([...map].filter(([id]) => keep.has(id)))
+  }
 }
 
 function startPolling() {
@@ -180,6 +214,46 @@ export function useImpulseResponse() {
     }
   }
 
+  /**
+   * The two analyses for an <em>extra</em> subject — a checked history item stacked under the
+   * primary chart. Its own token rather than the shared one: these run alongside the primary and a
+   * shared token would have each of them cancelling the others as they were queued.
+   */
+  async function computeExtraCsd(measurementId: number, request: ImpulseCsdRequest): Promise<void> {
+    const token = extraTokens.get(measurementId) ?? 0
+    const mine = token + 1
+    extraTokens.set(measurementId, mine)
+    try {
+      const surface = await api.computeStoredImpulseCsd(measurementId, request)
+      if (extraTokens.get(measurementId) !== mine) return
+      csdExtras.value = new Map(csdExtras.value).set(measurementId, surface)
+    } catch {
+      // Deliberately silent, unlike the primary's: the one error line on this screen belongs to
+      // the chart the settings are being turned against, and a stacked comparison that fails is
+      // better shown as the empty chart it will be than as a message about the main one.
+      if (extraTokens.get(measurementId) !== mine) return
+      const next = new Map(csdExtras.value)
+      next.delete(measurementId)
+      csdExtras.value = next
+    }
+  }
+
+  async function computeExtraBurstDecay(measurementId: number, request: ImpulseBurstDecayRequest): Promise<void> {
+    const token = extraTokens.get(measurementId) ?? 0
+    const mine = token + 1
+    extraTokens.set(measurementId, mine)
+    try {
+      const surface = await api.computeStoredImpulseBurstDecay(measurementId, request)
+      if (extraTokens.get(measurementId) !== mine) return
+      burstExtras.value = new Map(burstExtras.value).set(measurementId, surface)
+    } catch {
+      if (extraTokens.get(measurementId) !== mine) return
+      const next = new Map(burstExtras.value)
+      next.delete(measurementId)
+      burstExtras.value = next
+    }
+  }
+
   async function computeStoredBurstDecay(measurementId: number, request: ImpulseBurstDecayRequest): Promise<void> {
     const token = ++decayToken
     decayComputing.value = true
@@ -281,6 +355,11 @@ export function useImpulseResponse() {
     computeBurstDecay,
     computeStoredCsd,
     computeStoredBurstDecay,
+    csdExtras,
+    burstExtras,
+    computeExtraCsd,
+    computeExtraBurstDecay,
+    pruneDecayExtras,
     invalidateDecay,
     traces,
     impulses,

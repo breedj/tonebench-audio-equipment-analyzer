@@ -14,6 +14,12 @@ import {
   csdSpanMs,
   type CsdAnalysis,
 } from './decay'
+import {
+  DECAY_LIGHT_AZIMUTH,
+  DECAY_LIGHT_ELEVATION,
+  DECAY_VIEW_MAGNIFICATION,
+  DECAY_VIEW_MOVE,
+} from './decay3d'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -55,6 +61,16 @@ export interface ImpulseDisplay {
   /** The oblique projection: the lean in degrees and the depth as a percentage of the plot. */
   decayRotationDeg: number
   decayDepthPercent: number
+  /**
+   * The GPU surface's own view: where it sits, how large it is drawn, and where the light comes
+   * from. Stored so a view that took some turning can be kept, which is the whole reason they are
+   * settings rather than only a drag. Read by that chart alone — the Canvas 2D one has no camera.
+   */
+  decayMoveX: number
+  decayMoveY: number
+  decayMagnification: number
+  decayLightAzimuthDeg: number
+  decayLightElevationDeg: number
   decayRangeDb: number
   csd: CsdAnalysis
   burstMaxPeriods: number
@@ -107,6 +123,11 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     decayFilled: true,
     decayRotationDeg: DECAY_ROTATION_DEG.default,
     decayDepthPercent: DECAY_DEPTH_PERCENT.default,
+    decayMoveX: DECAY_VIEW_MOVE.default,
+    decayMoveY: DECAY_VIEW_MOVE.default,
+    decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
+    decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
+    decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
     decayRangeDb: 30,
     csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,
@@ -163,6 +184,23 @@ export function impulseDisplayFromParams(
   }
   if (typeof stored.chartDecayDepthPercent === 'number' && stored.chartDecayDepthPercent > 0) {
     display.decayDepthPercent = stored.chartDecayDepthPercent
+  }
+  // Finite rather than positive: Move takes either sign and zero is its default, so the usual
+  // `> 0` guard every window field here carries would silently drop the commonest stored value.
+  if (typeof stored.chartDecayMoveX === 'number' && Number.isFinite(stored.chartDecayMoveX)) {
+    display.decayMoveX = stored.chartDecayMoveX
+  }
+  if (typeof stored.chartDecayMoveY === 'number' && Number.isFinite(stored.chartDecayMoveY)) {
+    display.decayMoveY = stored.chartDecayMoveY
+  }
+  if (typeof stored.chartDecayMagnification === 'number' && stored.chartDecayMagnification > 0) {
+    display.decayMagnification = stored.chartDecayMagnification
+  }
+  if (typeof stored.chartDecayLightAzimuthDeg === 'number' && Number.isFinite(stored.chartDecayLightAzimuthDeg)) {
+    display.decayLightAzimuthDeg = stored.chartDecayLightAzimuthDeg
+  }
+  if (typeof stored.chartDecayLightElevationDeg === 'number' && Number.isFinite(stored.chartDecayLightElevationDeg)) {
+    display.decayLightElevationDeg = stored.chartDecayLightElevationDeg
   }
   if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0) display.decayRangeDb = stored.chartDecayRangeDb
   if (typeof stored.chartCsdFftLength === 'number') display.csd.fftLength = stored.chartCsdFftLength

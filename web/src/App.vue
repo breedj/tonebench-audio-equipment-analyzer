@@ -3488,6 +3488,11 @@ const impulseDecayColoredCurves = ref(true)
 const impulseDecayFilled = ref(DEFAULT_IMPULSE_DISPLAY.decayFilled)
 const impulseDecayRotationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayRotationDeg)
 const impulseDecayDepthPercent = ref(DEFAULT_IMPULSE_DISPLAY.decayDepthPercent)
+const impulseDecayMoveX = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveX)
+const impulseDecayMoveY = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveY)
+const impulseDecayMagnification = ref(DEFAULT_IMPULSE_DISPLAY.decayMagnification)
+const impulseDecayLightAzimuthDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightAzimuthDeg)
+const impulseDecayLightElevationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightElevationDeg)
 const impulseDecayRangeDb = ref(30)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
@@ -3559,6 +3564,11 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayFilled: impulseDecayFilled.value,
     decayRotationDeg: impulseDecayRotationDeg.value,
     decayDepthPercent: impulseDecayDepthPercent.value,
+    decayMoveX: impulseDecayMoveX.value,
+    decayMoveY: impulseDecayMoveY.value,
+    decayMagnification: impulseDecayMagnification.value,
+    decayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
+    decayLightElevationDeg: impulseDecayLightElevationDeg.value,
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
       fftLength: impulseCsdFftLength.value,
@@ -3619,6 +3629,11 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayFilled.value = display.decayFilled
   impulseDecayRotationDeg.value = display.decayRotationDeg
   impulseDecayDepthPercent.value = display.decayDepthPercent
+  impulseDecayMoveX.value = display.decayMoveX
+  impulseDecayMoveY.value = display.decayMoveY
+  impulseDecayMagnification.value = display.decayMagnification
+  impulseDecayLightAzimuthDeg.value = display.decayLightAzimuthDeg
+  impulseDecayLightElevationDeg.value = display.decayLightElevationDeg
   impulseDecayRangeDb.value = display.decayRangeDb
   impulseCsdFftLength.value = display.csd.fftLength
   impulseCsdSpanMs.value = display.csd.spanMs
@@ -3654,6 +3669,7 @@ watch(
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
     impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
+    impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification, impulseDecayLightAzimuthDeg, impulseDecayLightElevationDeg,
     impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
@@ -3844,6 +3860,11 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayFilled: impulseDecayFilled.value,
       chartDecayRotationDeg: impulseDecayRotationDeg.value,
       chartDecayDepthPercent: impulseDecayDepthPercent.value,
+      chartDecayMoveX: impulseDecayMoveX.value,
+      chartDecayMoveY: impulseDecayMoveY.value,
+      chartDecayMagnification: impulseDecayMagnification.value,
+      chartDecayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
+      chartDecayLightElevationDeg: impulseDecayLightElevationDeg.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
       chartCsdSpanMs: impulseCsdSpanMs.value,
@@ -4679,6 +4700,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :filled="impulseDecayFilled"
                   :rotation-deg="impulseDecayRotationDeg"
                   :depth-percent="impulseDecayDepthPercent"
+                  :move-x="impulseDecayMoveX"
+                  :move-y="impulseDecayMoveY"
+                  :magnification="impulseDecayMagnification"
+                  :light-azimuth-deg="impulseDecayLightAzimuthDeg"
+                  :light-elevation-deg="impulseDecayLightElevationDeg"
                   :range-db="impulseDecayRangeDb"
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
@@ -4768,6 +4794,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-filled="impulseDecayFilled"
                   v-model:decay-rotation-deg="impulseDecayRotationDeg"
                   v-model:decay-depth-percent="impulseDecayDepthPercent"
+                  v-model:decay-move-x="impulseDecayMoveX"
+                  v-model:decay-move-y="impulseDecayMoveY"
+                  v-model:decay-magnification="impulseDecayMagnification"
+                  v-model:decay-light-azimuth-deg="impulseDecayLightAzimuthDeg"
+                  v-model:decay-light-elevation-deg="impulseDecayLightElevationDeg"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"
                   v-model:csd-span-ms="impulseCsdSpanMs"

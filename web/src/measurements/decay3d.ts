@@ -187,25 +187,113 @@ export function decayGridAspect(): { x: number; y: number; z: number } {
  * <p><b>More negative is further back</b>, which is worth writing down because the sweep that
  * found it read as non-monotonic by eye and is not: counting surface pixels against the plot's own
  * border, a 14-deep box reads <b>41 edge pixels at -30, 0 at -34 and 0 at -40</b>, with the
- * drawn area falling 30.7 %, 24.9 %, 19.0 % of the canvas as it recedes. These figures moved with
- * the box when it was deepened — the old pair, -20 and -29, was scaled by the same 14/9 the depth
- * grew by. Note what the same measurement says about the <em>old</em> pairing: at 9 deep and -20
- * the surface put <b>252 pixels</b> against the border, so it had been clipping slightly all
- * along, which nothing had caught because the clipped part is the corner of a floor.</p>
+ * drawn area falling 30.7 %, 24.9 %, 19.0 % of the canvas as it recedes. Note what the same
+ * measurement says about the pairing before the box was deepened: at 9 deep and -20 the surface
+ * put <b>252 pixels</b> against the border, so it had been clipping slightly all along, which
+ * nothing had caught because the clipped part is the corner of a floor.</p>
+ *
+ * <p><b>Both figures were measured again on 2026-10-26 for how well they *fill* the plot, which is
+ * a different question from whether they clip, and the narrow one was far out.</b> Asked for as a
+ * default view matching a supplied picture. The limiting dimension is not the same at the two
+ * shapes — a wide plot runs out of height and a near-square one runs out of width — which is the
+ * whole reason this is per-aspect. Measured as the surface's own bounding box over the canvas, by
+ * magnifying until it reached an edge: at <b>aspect 1.39</b> the surface already spans 0.21-0.89
+ * of the height at the fitted distance and has about <b>10 %</b> left, while at <b>aspect 0.95</b>
+ * it spans 0.18-0.85 of the width and has about <b>55 %</b>. So the ordinary figure moved a little
+ * and the narrow one a lot; it had been scaled with the box the day before without being
+ * re-measured, which is what left it pulled so far back — and a chart at a 1000-pixel window sits
+ * right on the 0.95 threshold, so that over-conservative rung is what a bench actually saw.</p>
+ *
+ * <p>The limit is close to -31 at every aspect measured and is reached by a different edge at each
+ * (the sides near 1.0, the floor by 1.4), so the ordinary figure is set one notch inside it:
+ * at aspect 1.06, <b>-31 puts 217 pixels against the border while -33 leaves a left margin of
+ * 0.086 and -34 of 0.104</b>, all three filling far more of the plot than the narrow rung did.</p>
  *
  * <p>The engine's own <c>DxFitControlShape</c> is not the answer: it ignores the zoom and fills
  * the plot, measuring 65–99 % of the canvas covered with thousands of pixels against the edges at
  * every zoom tried. And the relation is not monotonic at extreme shapes — pulling further back
  * from a very tall, narrow plot can clip again — so this is a measured step rather than a formula.</p>
  */
-export const DECAY_3D_ZOOM = -34
-export const DECAY_3D_ZOOM_NARROW = -49
+export const DECAY_3D_ZOOM = -33
+export const DECAY_3D_ZOOM_NARROW = -38
 /** Below this width-over-height the surface no longer fits at the ordinary zoom. */
 export const DECAY_3D_NARROW_ASPECT = 0.95
 
 export function decayCameraZoom(widthPx: number, heightPx: number): number {
   if (!(widthPx > 0) || !(heightPx > 0)) return DECAY_3D_ZOOM
   return widthPx / heightPx < DECAY_3D_NARROW_ASPECT ? DECAY_3D_ZOOM_NARROW : DECAY_3D_ZOOM
+}
+
+/**
+ * The view controls the GigaSoft demo offers and this chart did not, added 2026-10-26 after a
+ * side-by-side with it: where the surface sits, how big it is drawn, and where the light comes
+ * from. They live in a section of their own, collapsed, because none of them is touched on an
+ * ordinary visit — the defaults are the view the chart opens on, and these are for matching a
+ * picture or lighting an awkward one.
+ *
+ * <p>Each is stored with the measurement, so a view that took some turning can be kept. That is
+ * the whole reason they are settings rather than a drag: the shift-and-drag gesture already moves
+ * the surface and is forgotten the moment the chart is rebuilt.</p>
+ */
+
+/**
+ * How far the surface is moved across the plot, in the engine's own viewport units.
+ *
+ * <p>±3 is the documented legal range of <c>DxViewportX</c>/<c>Y</c> and is also why the box is
+ * small and close rather than large and far: that range scales with the camera's distance, and at
+ * ten times this size it moves the surface seven pixels. See {@link decayGridAspect}.</p>
+ */
+export const DECAY_VIEW_MOVE = { min: -3, max: 3, default: 0 } as const
+
+/**
+ * How large the surface is drawn, as a percentage of the framing the plot's own shape gives it.
+ *
+ * <p>A percentage of {@link decayCameraZoom} rather than a zoom outright, so that framing — which
+ * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
+ * the fitted view.</p>
+ */
+export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 250, default: 100 } as const
+
+/** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
+export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 164 } as const
+
+/** How high the light sits, in degrees above the floor plane. */
+export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 44 } as const
+
+/**
+ * How far the light sits from the box — fixed, and not a control.
+ *
+ * <p>Brightness is a property of this distance, so leaving it out of the two angle controls is
+ * what makes them turn the light rather than dim it. The figure is the vendor demo's own, which
+ * {@link DECAY_LIGHT} has matched since it was first turned.</p>
+ */
+export const DECAY_LIGHT_RADIUS = Math.hypot(2, 7, 7)
+
+/** The light's position from the two angles the panel turns. */
+export function decayLightVector(azimuthDeg: number, elevationDeg: number): { x: number; y: number; z: number } {
+  const az = (azimuthDeg * Math.PI) / 180
+  const el = (elevationDeg * Math.PI) / 180
+  const flat = DECAY_LIGHT_RADIUS * Math.cos(el)
+  return {
+    x: flat * Math.cos(az),
+    // Negative is above: the engine's height axis points down for the light, which is why every
+    // vector that has ever lit this chart has had a negative y.
+    y: -DECAY_LIGHT_RADIUS * Math.sin(el),
+    z: flat * Math.sin(az),
+  }
+}
+
+/**
+ * The camera distance for a plot of this shape at this magnification.
+ *
+ * <p>More negative is further back, so a larger magnification divides. Clamped to the engine's own
+ * <c>DxZoomMin</c> at the far end and short of zero at the near one, where the camera would be
+ * inside the box.</p>
+ */
+export function decayMagnifiedZoom(baseZoom: number, magnificationPercent: number): number {
+  const pct = Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
+  const zoom = baseZoom * (100 / pct)
+  return Math.min(-1, Math.max(-90, zoom))
 }
 
 /**
@@ -233,7 +321,7 @@ export function decayCameraZoom(widthPx: number, heightPx: number): number {
  * vectors were tried at the new azimuth and all read lower: <c>-7,-7,-2</c> 100.1,
  * <c>7,-7,2</c> 85.6 against this one's 121.1 in that run.</p>
  */
-export const DECAY_LIGHT = { x: -7, y: -7, z: 2 } as const
+export const DECAY_LIGHT = decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default)
 
 /**
  * The ambient floor, which is what decides how dark the darkest colour on the surface reads.

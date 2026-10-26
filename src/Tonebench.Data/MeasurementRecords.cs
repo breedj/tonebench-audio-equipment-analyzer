@@ -2302,6 +2302,23 @@ public sealed record ImpulseResponseParameters(
     /// </summary>
     double? ChartDecayRotationDeg = null,
     double? ChartDecayDepthPercent = null,
+    /// <summary>
+    /// The GPU surface's own view, which the Canvas 2D chart has no counterpart for: where the
+    /// surface sits across and up the plot, how large it is drawn as a percentage of the framing
+    /// the plot's shape gives it, and the two angles the light is turned to.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-10-26 with the controls themselves, after a side-by-side with the vendor's own
+    /// demo, which offers all five. Stored because the point of them is keeping a view that took
+    /// some turning — the shift-and-drag gesture already moves the surface and is forgotten the
+    /// moment the chart is rebuilt. Null throughout on anything stored before them, and on a
+    /// measurement nobody has opened that section on.
+    /// </remarks>
+    double? ChartDecayMoveX = null,
+    double? ChartDecayMoveY = null,
+    double? ChartDecayMagnification = null,
+    double? ChartDecayLightAzimuthDeg = null,
+    double? ChartDecayLightElevationDeg = null,
     double? ChartDecayRangeDb = null,
     /// <summary>The cumulative spectral decay's analysis. Not run settings: they are questions put to
     /// a record already captured, and changing one redraws rather than re-measures. Stored all the

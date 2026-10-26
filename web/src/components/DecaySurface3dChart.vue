@@ -4,7 +4,8 @@ import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import { formatHz } from '../measurements/decay'
 import {
   decayCameraZoom,
-  DECAY_LIGHT,
+  decayLightVector,
+  decayMagnifiedZoom,
   DECAY_LIGHT_STRENGTH,
   decayExportTitle,
   decayGridAspect,
@@ -39,6 +40,16 @@ const props = defineProps<{
   filled: boolean
   rotationDeg: number
   depthPercent: number
+  /**
+   * The five view controls of the panel's own collapsed section — where the surface sits, how
+   * large it is drawn, and where the light comes from. See `measurements/decay3d.ts` for their
+   * ranges; all five are stored with the measurement, which is what lets an awkward view be kept.
+   */
+  moveX: number
+  moveY: number
+  magnification: number
+  lightAzimuthDeg: number
+  lightElevationDeg: number
   rangeDb: number
   thickLines: boolean
   computing: boolean
@@ -164,13 +175,14 @@ function configure() {
   // The camera. `DxFitControlShape` overrides the zoom outright and framed the surface badly at
   // every zoom tried, so the framing is set explicitly instead.
   C.PePlot.Option.DxFitControlShape = false
-  C.PePlot.Option.DxViewportX = 0
-  // Zero, and the lift is done with the margins below instead. `DxViewportY` is documented as a
-  // translation of up to three times the size of the axes and measures as almost nothing here —
-  // the whole legal range of -3..+3 moves the surface seven pixels on a 320-pixel plot. (An
-  // earlier 8 here was outside that range entirely, which is what made it read as a knob with a
-  // measured optimum rather than one that barely works.)
-  C.PePlot.Option.DxViewportY = 0
+  // The panel's Move controls, in the engine's own viewport units. The resting lift is still done
+  // with the margins below: `DxViewportY` is documented as a translation of up to three times the
+  // size of the axes and measures as almost nothing here — the whole legal range of -3..+3 moves
+  // the surface seven pixels on a 320-pixel plot — so it is the fine adjustment and the margins
+  // are the coarse one. (An earlier 8 here was outside that range entirely, which is what made it
+  // read as a knob with a measured optimum rather than one that barely works.)
+  C.PePlot.Option.DxViewportX = props.moveX
+  C.PePlot.Option.DxViewportY = props.moveY
   // Shift and drag translates the surface, as the vendor's own demo does it. The engine
   // implements the gesture; this is only its speed, and without it the gesture does nothing.
   C.PePlot.Option.DxViewportPanFactor = 10
@@ -185,7 +197,7 @@ function configure() {
   // Well below any zoom we set, so the wheel still has somewhere to go in both directions.
   C.PePlot.Option.DxZoomMin = -90
   C.PePlot.Option.DxZoomMax = -3
-  C.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
+  C.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(plotWidth(), chartHeight.value), props.magnification)
 
   C.PeUserInterface.RotationDetail = E.RotationDetail.WireFrame
   C.PeUserInterface.Scrollbar.HorzScrollBar = false
@@ -201,7 +213,8 @@ function configure() {
   C.PeColor.BitmapGradientMode = false
   C.PeColor.GraphBmpStyle = E.BitmapStyle.NoBmp
   C.PeLegend.Show = false
-  C.PeFunction.SetLight(0, DECAY_LIGHT.x, DECAY_LIGHT.y, DECAY_LIGHT.z)
+  const light = decayLightVector(props.lightAzimuthDeg, props.lightElevationDeg)
+  C.PeFunction.SetLight(0, light.x, light.y, light.z)
   C.PePlot.Option.LightStrength = DECAY_LIGHT_STRENGTH
   C.PeString.MainTitle = ''
   C.PeString.SubTitle = ''
@@ -419,7 +432,7 @@ function resize() {
   const width = plotWidth()
   const height = chartHeight.value
   // The zoom follows the plot's shape, so a resize re-frames rather than only re-rasterising.
-  chart.PePlot.Option.DxZoom = decayCameraZoom(width, height)
+  chart.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(width, height), props.magnification)
   control.setSize(width, height)
 }
 
@@ -429,6 +442,23 @@ watch(() => [props.palette, isDark.value], () => {
   applyTheme()
   chart?.PeFunction.ReinitializeResetImage()
 })
+/**
+ * The five view controls. They are applied by `configure()`, which is where every engine property
+ * is written, so this re-runs that rather than repeating four writes — and it is a separate
+ * watcher from the camera's because that one short-circuits when the two angles have not moved,
+ * which none of these touch.
+ */
+watch(
+  () => [props.moveX, props.moveY, props.magnification, props.lightAzimuthDeg, props.lightElevationDeg],
+  () => {
+    if (!chart) return
+    configure()
+    applyTheme()
+    applyCamera()
+    chart.PeFunction.ReinitializeResetImage()
+  },
+)
+
 watch(() => [props.rotationDeg, props.depthPercent], () => {
   if (props.rotationDeg === appliedRotation && props.depthPercent === appliedDepth) return
   applyCamera()
@@ -521,7 +551,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
       chart = copy.attach(runtime.attachApi)
       enums = runtime.Enums
       configure()
-      chart.PePlot.Option.DxZoom = decayCameraZoom(width, plotHeight)
+      chart.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(width, plotHeight), props.magnification)
       // The live camera, not the props: once the surface has been dragged the props no longer
       // describe what is on screen, and a screenshot has to be the picture the user is looking at.
       if (live) {

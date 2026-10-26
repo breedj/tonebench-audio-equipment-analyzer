@@ -27,6 +27,12 @@ import {
 } from '../measurements/decay'
 import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
+import {
+  DECAY_LIGHT_AZIMUTH,
+  DECAY_LIGHT_ELEVATION,
+  DECAY_VIEW_MAGNIFICATION,
+  DECAY_VIEW_MOVE,
+} from '../measurements/decay3d'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -83,6 +89,11 @@ const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true 
 const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
 const decayFilled = defineModel<boolean>('decayFilled', { required: true })
 const decayRotationDeg = defineModel<number>('decayRotationDeg', { required: true })
+const decayMoveX = defineModel<number>('decayMoveX', { required: true })
+const decayMoveY = defineModel<number>('decayMoveY', { required: true })
+const decayMagnification = defineModel<number>('decayMagnification', { required: true })
+const decayLightAzimuthDeg = defineModel<number>('decayLightAzimuthDeg', { required: true })
+const decayLightElevationDeg = defineModel<number>('decayLightElevationDeg', { required: true })
 const decayDepthPercent = defineModel<number>('decayDepthPercent', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
@@ -588,6 +599,99 @@ const referenceLabel = computed(() => {
             title="How far the view is tilted back. On the flat projection that is how much of the chart's height the depth axis takes, so a deep-looking surface is one with a squashed dB scale; on the 3D surface it raises the camera."
           />
         </label>
+
+        <!-- The five the vendor's own demo offers and this chart did not. In a section of their
+             own and collapsed, because none of them is touched on an ordinary visit: the defaults
+             are the view the chart opens on, and these are for matching a picture or lighting an
+             awkward surface. Only on the GPU chart — the flat projection has no camera and no
+             light, so there would be nothing for any of them to move. -->
+        <CollapsibleSection
+          v-if="props.gpuSurface"
+          title="Surface view"
+          size="xs"
+          icon="sliders"
+          :default-open="false"
+        >
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Move horizontally</span>
+              <span class="tb-field-value">{{ decayMoveX.toFixed(1) }}</span>
+            </span>
+            <input
+              v-model.number="decayMoveX"
+              type="range"
+              :min="DECAY_VIEW_MOVE.min"
+              :max="DECAY_VIEW_MOVE.max"
+              step="0.1"
+              class="tb-range"
+              title="Slides the surface across the plot. The engine's own translation, which is a fine adjustment here rather than a coarse one — the whole range is a few tens of pixels."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Move vertically</span>
+              <span class="tb-field-value">{{ decayMoveY.toFixed(1) }}</span>
+            </span>
+            <input
+              v-model.number="decayMoveY"
+              type="range"
+              :min="DECAY_VIEW_MOVE.min"
+              :max="DECAY_VIEW_MOVE.max"
+              step="0.1"
+              class="tb-range"
+              title="Slides the surface up and down the plot."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Magnification</span>
+              <span class="tb-field-value">{{ decayMagnification }}%</span>
+            </span>
+            <input
+              v-model.number="decayMagnification"
+              type="range"
+              :min="DECAY_VIEW_MAGNIFICATION.min"
+              :max="DECAY_VIEW_MAGNIFICATION.max"
+              step="5"
+              class="tb-range"
+              title="How large the surface is drawn, as a percentage of the framing the plot's own shape gives it. 100% is that framing; past it the surface can run off the plot, which is what the two Move sliders are then for."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Rotate light horizontally</span>
+              <span class="tb-field-value">{{ decayLightAzimuthDeg }}°</span>
+            </span>
+            <input
+              v-model.number="decayLightAzimuthDeg"
+              type="range"
+              :min="DECAY_LIGHT_AZIMUTH.min"
+              :max="DECAY_LIGHT_AZIMUTH.max"
+              step="1"
+              class="tb-range"
+              title="Where the light sits around the box. The default lights the side the camera is on; turning it right round puts the surface in its own shadow."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Rotate light vertically</span>
+              <span class="tb-field-value">{{ decayLightElevationDeg }}°</span>
+            </span>
+            <input
+              v-model.number="decayLightElevationDeg"
+              type="range"
+              :min="DECAY_LIGHT_ELEVATION.min"
+              :max="DECAY_LIGHT_ELEVATION.max"
+              step="1"
+              class="tb-range"
+              title="How high the light sits. The distance does not change with it, so this turns the light rather than dimming it — how dark the darkest colour reads is the palette's floor, not this."
+            />
+          </label>
+        </CollapsibleSection>
       </template>
 
       <label class="tb-field">

@@ -4,7 +4,13 @@ import { levelAt, orientSurface, paletteIndex, paletteLut } from './decay'
 import {
   decayExportTitle,
   DECAY_LIGHT,
+  DECAY_LIGHT_AZIMUTH,
+  DECAY_LIGHT_ELEVATION,
+  DECAY_LIGHT_RADIUS,
   DECAY_LIGHT_STRENGTH,
+  decayLightVector,
+  decayMagnifiedZoom,
+  DECAY_VIEW_MAGNIFICATION,
   decayCameraZoom,
   DECAY_3D_ZOOM,
   DECAY_3D_ZOOM_NARROW,
@@ -257,6 +263,33 @@ describe('DECAY_LIGHT_STRENGTH', () => {
   })
 })
 
+describe('decayMagnifiedZoom', () => {
+  /** 100 % is the framing the plot's own shape gives it, which is what makes this ride on top. */
+  it('leaves the fitted distance alone at 100 %', () => {
+    expect(decayMagnifiedZoom(-34, 100)).toBeCloseTo(-34, 10)
+  })
+
+  /** More negative is further back, so magnifying divides. */
+  it('brings the camera in as the magnification rises, and pushes it back as it falls', () => {
+    expect(decayMagnifiedZoom(-34, 200)).toBeCloseTo(-17, 10)
+    expect(decayMagnifiedZoom(-34, 50)).toBeCloseTo(-68, 10)
+  })
+
+  /**
+   * The engine's own DxZoomMin is -90, and a distance at or past zero puts the camera inside the
+   * box. Both ends are clamped rather than refused: these arrive from a slider.
+   */
+  it('stays inside the distances the engine will take', () => {
+    expect(decayMagnifiedZoom(-80, DECAY_VIEW_MAGNIFICATION.min)).toBe(-90)
+    expect(decayMagnifiedZoom(-1, DECAY_VIEW_MAGNIFICATION.max)).toBe(-1)
+  })
+
+  it('clamps a magnification from outside the slider rather than trusting it', () => {
+    expect(decayMagnifiedZoom(-34, 10_000)).toBe(decayMagnifiedZoom(-34, DECAY_VIEW_MAGNIFICATION.max))
+    expect(decayMagnifiedZoom(-34, 0)).toBe(decayMagnifiedZoom(-34, DECAY_VIEW_MAGNIFICATION.min))
+  })
+})
+
 describe('decayExportTitle', () => {
   it('names the measurement and the view, for all three modes', () => {
     const burst = ragged()
@@ -324,7 +357,32 @@ describe('DECAY_LIGHT', () => {
     const demo = { x: -2, y: -7, z: -7 }
     const length = (v: { x: number; y: number; z: number }) => Math.hypot(v.x, v.y, v.z)
     expect(length(DECAY_LIGHT)).toBeCloseTo(length(demo), 12)
-    expect(DECAY_LIGHT.y).toBe(demo.y)
+  })
+
+  /**
+   * It is built from the two angles the panel turns now, so the default angles have to reproduce
+   * the vector those luminance measurements were taken against — mirroring it about the height
+   * axis read 70.4 against 86.6 mean luminance, and that figure belongs to this direction.
+   */
+  it('is what the default angles point at, within a rounding of the measured vector', () => {
+    expect(DECAY_LIGHT.x).toBeCloseTo(-7, 1)
+    expect(DECAY_LIGHT.y).toBeCloseTo(-7, 1)
+    expect(DECAY_LIGHT.z).toBeCloseTo(2, 1)
+    expect(DECAY_LIGHT).toEqual(decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default))
+  })
+
+  it('turns rather than dims: every angle is the same distance from the box', () => {
+    for (const az of [0, 45, 164, 270, 359]) {
+      for (const el of [-90, -20, 0, 44, 90]) {
+        const v = decayLightVector(az, el)
+        expect(Math.hypot(v.x, v.y, v.z), `${az}/${el}`).toBeCloseTo(DECAY_LIGHT_RADIUS, 10)
+      }
+    }
+  })
+
+  it('puts a higher elevation further above the box, which is the negative side', () => {
+    expect(decayLightVector(164, 80).y).toBeLessThan(decayLightVector(164, 10).y)
+    expect(decayLightVector(164, 0).y).toBeCloseTo(0, 10)
   })
 
   it("is not the demo's own position, which went dark as the camera moved", () => {

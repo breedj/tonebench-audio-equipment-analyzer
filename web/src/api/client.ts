@@ -1732,6 +1732,12 @@ export interface ImpulseResponseParameters {
   chartDecayFilled?: boolean | null
   chartDecayRotationDeg?: number | null
   chartDecayDepthPercent?: number | null
+  /** The GPU surface's own view — see ImpulseResponseParameters on the server. Null on an older type. */
+  chartDecayMoveX?: number | null
+  chartDecayMoveY?: number | null
+  chartDecayMagnification?: number | null
+  chartDecayLightAzimuthDeg?: number | null
+  chartDecayLightElevationDeg?: number | null
   chartDecayRangeDb?: number | null
   /** The cumulative spectral decay's analysis. Display settings, but a surface is unreadable without them. */
   chartCsdFftLength?: number | null

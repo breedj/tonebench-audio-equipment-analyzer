@@ -170,29 +170,31 @@ export function peColor(r: number, g: number, b: number): number {
  * translation range of -3..+3 moves the surface <em>seven pixels</em>, so the gesture looks broken.
  * At this size the same range moves it 47, and the gesture works.</p>
  */
-export function decayGridAspect(lengths: DecayAxisLengths = DECAY_AXIS_LENGTH_DEFAULT): { x: number; y: number } {
-  // <p><b>Only two of the engine's three aspect numbers may be written, and the third is the trap.</b>
-  // It documents <c>GridAspectX</c> as the x axis "as relates to z" and <c>GridAspectY</c> as y
-  // "as relates to z" — so z is already the unit those two are measured in — while
-  // <c>GridAspectZ</c> is z "as relates to x". Writing all three states the shape twice and
-  // contradicts itself, and the box then degenerates to a slab that no later value changes: the
-  // three sliders looked completely inert on 2026-10-26, through a reload and through
-  // <c>render()</c> alike, and that was why.</p>
+export function decayGridAspect(lengths: DecayAxisLengths = DECAY_AXIS_LENGTH_DEFAULT): { x: number; y: number; z: number } {
+  // <p><b>All three aspect numbers are written, and they have to agree with each other.</b> The
+  // engine documents <c>GridAspectX</c> as the x axis "as relates to z" and <c>GridAspectY</c> as y
+  // "as relates to z", while <c>GridAspectZ</c> is z <em>"as relates to x"</em> — so X and Z are two
+  // statements of one ratio and <c>X · Z = 1</c> is the constraint between them. Raw lengths break
+  // it (10 and 14, where 14 is not 1/10), and a box told two contradictory things about its own
+  // shape degenerates to a slab that no later value moves: that is why all three sliders looked
+  // completely inert on 2026-10-26, through a reload, through <c>ReinitializeResetImage()</c> and
+  // through <c>render()</c> alike.</p>
   //
-  // <p>So the depth is expressed by dividing the other two by it, and <c>GridAspectZ</c> is never
-  // written at all. The multiplier is the default depth, which keeps the magnitude the camera was
-  // measured against: at the defaults this returns 10 and 4.5, exactly the figures
-  // {@link DECAY_3D_ZOOM} was framed around, so a measurement that never touches a slider is drawn
-  // to the pixel as before.</p>
+  // <p>Writing only X and Y satisfies the constraint by saying nothing, and was the first fix — but
+  // it leaves the depth edge as the <em>unit</em> the other two are measured in, so the Time slider
+  // shortened frequency and level instead of lengthening time, and rescaled the whole box doing it.
+  // Reported the same day, in those words: the time axis length slider does not change the time
+  // axis. Writing the consistent triple is what gives each slider its own edge.</p>
   //
-  // <p>The engine reads the magnitude as well as the ratio, which is why the multiplier is needed
-  // and why a plain <c>x/z</c> is wrong: normalised to about 1 the whole box is drawn some three
-  // times smaller, and the camera would have to come in to match — and the viewport translation the
-  // two Move sliders write scales with the camera's distance, so that trade buys a correct ratio and
-  // breaks the gesture (see {@link DECAY_VIEW_MOVE_X}).</p>
-  const depth = lengths.z > 0 ? lengths.z : DECAY_AXIS_LENGTH_DEFAULT.z
-  const unit = DECAY_AXIS_LENGTH_DEFAULT.z
-  return { x: (lengths.x / depth) * unit, y: (lengths.y / depth) * unit }
+  // <p><b>These are ratios, so they carry no size</b>, and the box is drawn about ten times smaller
+  // than the raw lengths drew it — which is why {@link DECAY_3D_ZOOM} is scaled to match rather than
+  // being the figure the earlier framing was measured at. Do not try to restore the magnitude by
+  // scaling the triple: multiplying X and Z by anything breaks <c>X · Z = 1</c> and puts the slab
+  // back.</p>
+  const x = lengths.x > 0 ? lengths.x : DECAY_AXIS_LENGTH_DEFAULT.x
+  const y = lengths.y > 0 ? lengths.y : DECAY_AXIS_LENGTH_DEFAULT.y
+  const z = lengths.z > 0 ? lengths.z : DECAY_AXIS_LENGTH_DEFAULT.z
+  return { x: x / z, y: y / z, z: z / x }
 }
 
 /** How long each edge of the box is drawn, in the engine's own grid-aspect units. */
@@ -218,15 +220,6 @@ export interface DecayAxisLengths {
  * touches them is drawn exactly as before. The camera's framing was measured against that box too
  * (see {@link DECAY_3D_ZOOM}), so stretching an axis a long way can push the surface off the plot
  * — which is what Magnification and the two Move sliders are then for.</p>
- */
-/**
- * <p><b>The depth is the one the other two are measured against, so it rescales the picture.</b>
- * That is the engine's own frame and not a choice here: with <c>GridAspectZ</c> left alone (see
- * {@link decayGridAspect}) the depth edge is the unit, and x and y are lengths in it — so halving
- * the depth doubles the other two rather than shortening one edge, and the whole box is drawn
- * larger. Magnification is what compensates, which is part of why the two sit in the same section.
- * The two cannot be separated without writing the third aspect number, and writing it is what made
- * all three inert.</p>
  */
 export const DECAY_AXIS_LENGTH_DEFAULT: DecayAxisLengths = { x: 10, y: 4.5, z: 14 }
 export const DECAY_AXIS_LENGTH = { min: 2, max: 30, step: 0.5 } as const
@@ -271,8 +264,12 @@ export const DECAY_AXIS_LENGTH = { min: 2, max: 30, step: 0.5 } as const
  * every zoom tried. And the relation is not monotonic at extreme shapes — pulling further back
  * from a very tall, narrow plot can clip again — so this is a measured step rather than a formula.</p>
  */
-export const DECAY_3D_ZOOM = -33
-export const DECAY_3D_ZOOM_NARROW = -38
+// <p>Scaled by a tenth on 2026-10-26, when {@link decayGridAspect} went from raw lengths to the
+// engine's own ratios: the box those draw is about ten times smaller, so the camera comes in by the
+// same factor and the picture is the one these figures were measured for. The relation below is
+// unchanged — it is the shape of the plot that decides which of the two applies.</p>
+export const DECAY_3D_ZOOM = -3.3
+export const DECAY_3D_ZOOM_NARROW = -3.8
 /** Below this width-over-height the surface no longer fits at the ordinary zoom. */
 export const DECAY_3D_NARROW_ASPECT = 0.95
 

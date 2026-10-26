@@ -432,6 +432,7 @@ function applyData() {
   const aspect = decayGridAspect({ x: props.axisLengthX, y: props.axisLengthY, z: props.axisLengthZ })
   C.PeGrid.Option.GridAspectX = aspect.x
   C.PeGrid.Option.GridAspectY = aspect.y
+  C.PeGrid.Option.GridAspectZ = aspect.z
 
   // Whichever axis carries the frequency is scaled logarithmically, which is what puts true hertz
   // on its ticks. The height axis is in dB and the time axis starts at zero, so neither can be.

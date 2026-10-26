@@ -384,14 +384,13 @@ const { showPage } = useManual()
     </p>
     <p>
       The last three set the shape of the box itself: <strong>Frequency axis length</strong>,
-      <strong>Level axis length</strong> and <strong>Time axis length</strong>. They are
-      proportions rather than sizes, and the time axis is the one the other two are measured
-      against &mdash; so shortening it does not shorten an edge, it lengthens the other two and the
-      whole box is drawn larger. Magnification is what brings it back, which is why the two sit in
-      the same section. A flatter level axis makes a shallow decay legible; a longer time axis
-      separates slices that would otherwise overlap. Unlike the other five these rebuild the chart
-      rather than turning it, so they take a moment to land; the box's proportions are fixed when
-      the scene is built and cannot be changed after it.
+      <strong>Level axis length</strong> and <strong>Time axis length</strong>. Each stretches its
+      own edge and leaves the other two where they are &mdash; a flatter level axis makes a shallow
+      decay legible, and a longer time axis spreads the slices apart so they stop overlapping. They
+      are proportions rather than sizes, so what they set is the shape of the box; Magnification
+      sets how large it is drawn, which is why the two sit in the same section. Unlike the other
+      five these rebuild the chart rather than turning it, so they take a moment to land: the box's
+      proportions are fixed when the scene is built and cannot be changed after it.
     </p>
     <p>
       A <strong>colour key</strong> stands to the right of the box, labelled in dB, showing the

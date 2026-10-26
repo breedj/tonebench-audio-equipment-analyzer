@@ -234,6 +234,7 @@ describe('decayGridAspect', () => {
     const a = decayGridAspect()
     expect(a.x).toBeGreaterThan(0)
     expect(a.y).toBeGreaterThan(0)
+    expect(a.z).toBeGreaterThan(0)
   })
 
   it('is wider than it is tall, so a waterfall reads as one', () => {
@@ -242,47 +243,55 @@ describe('decayGridAspect', () => {
   })
 
   /**
-   * <b>Two numbers, never three.</b> The engine measures x and y <em>against z</em>, so z is the
-   * unit and a third figure states the shape a second time — which is what made all three sliders
-   * look inert, the box having degenerated to a slab that no later value moved. A depth is
-   * therefore a divisor of the other two, and this is the case that fails if someone adds z back.
+   * <b>The constraint, and the whole reason the three sliders were dead.</b> The engine measures x
+   * and y against z, and z against x — so X and Z state one ratio twice and their product is 1.
+   * Raw lengths break that (10 and 14), and a box told two contradictory things about its shape
+   * degenerates to a slab that no later value moves.
    */
-  it('expresses the depth by dividing the other two, and returns no third number', () => {
-    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
-    expect(Object.keys(base).sort()).toEqual(['x', 'y'])
-
-    const deeper = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: DECAY_AXIS_LENGTH_DEFAULT.z * 2 })
-    expect(deeper.x).toBeCloseTo(base.x / 2, 10)
-    expect(deeper.y).toBeCloseTo(base.y / 2, 10)
-  })
-
-  /** Each slider has to reach the picture on its own, or it is furniture. */
-  it('answers a change of any one length', () => {
-    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
-    const wider = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, x: DECAY_AXIS_LENGTH_DEFAULT.x * 2 })
-    const taller = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, y: DECAY_AXIS_LENGTH_DEFAULT.y * 2 })
-    expect(wider.x).toBeCloseTo(base.x * 2, 10)
-    expect(wider.y).toBeCloseTo(base.y, 10)
-    expect(taller.y).toBeCloseTo(base.y * 2, 10)
-    expect(taller.x).toBeCloseTo(base.x, 10)
+  it('writes a triple that agrees with itself, so x over z and z over x multiply to one', () => {
+    for (const lengths of [
+      DECAY_AXIS_LENGTH_DEFAULT,
+      { x: 3, y: 2, z: 30 },
+      { x: 25, y: 12, z: 4 },
+    ]) {
+      const a = decayGridAspect(lengths)
+      expect(a.x * a.z).toBeCloseTo(1, 10)
+    }
   })
 
   /**
-   * The multiplier is the default depth rather than 1, so the defaults come out at the magnitude
-   * every camera figure here was measured against — the engine reads the size as well as the
-   * ratio, and normalising to about 1 draws the box some three times smaller.
+   * Each slider has to reach its own edge, which is the second report of 2026-10-26: writing only
+   * X and Y satisfied the constraint but left the depth as the unit, so the Time slider shortened
+   * the other two instead of lengthening time.
    */
-  it('leaves the default box at the magnitude the camera was framed around', () => {
-    const a = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
-    expect(a.x).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.x, 10)
-    expect(a.y).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.y, 10)
+  it('lengthens the axis whose slider moved, and leaves the other two alone', () => {
+    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
+    const deeper = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: DECAY_AXIS_LENGTH_DEFAULT.z * 2 })
+    // z against x doubles; x and y, which are measured against z, halve with it.
+    expect(deeper.z).toBeCloseTo(base.z * 2, 10)
+    expect(deeper.x).toBeCloseTo(base.x / 2, 10)
+    expect(deeper.y / deeper.x).toBeCloseTo(base.y / base.x, 10)
+
+    const wider = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, x: DECAY_AXIS_LENGTH_DEFAULT.x * 2 })
+    expect(wider.x).toBeCloseTo(base.x * 2, 10)
+    expect(wider.z).toBeCloseTo(base.z / 2, 10)
+
+    const taller = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, y: DECAY_AXIS_LENGTH_DEFAULT.y * 2 })
+    expect(taller.y).toBeCloseTo(base.y * 2, 10)
+    expect(taller.x).toBeCloseTo(base.x, 10)
+    expect(taller.z).toBeCloseTo(base.z, 10)
   })
 
-  /** A depth of zero would divide by it; the stored field is guarded, and so is this. */
-  it('falls back to the default depth rather than dividing by zero', () => {
-    const a = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: 0 })
-    expect(Number.isFinite(a.x)).toBe(true)
-    expect(a.x).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.x, 10)
+  /** A length of zero would divide by it; the stored fields are guarded, and so is this. */
+  it('falls back to the default rather than dividing by zero', () => {
+    for (const lengths of [
+      { ...DECAY_AXIS_LENGTH_DEFAULT, z: 0 },
+      { ...DECAY_AXIS_LENGTH_DEFAULT, x: 0 },
+      { ...DECAY_AXIS_LENGTH_DEFAULT, y: 0 },
+    ]) {
+      const a = decayGridAspect(lengths)
+      expect(Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.z)).toBe(true)
+    }
   })
 })
 

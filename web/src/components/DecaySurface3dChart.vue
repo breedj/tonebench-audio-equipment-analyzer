@@ -48,6 +48,10 @@ const props = defineProps<{
   moveX: number
   moveY: number
   magnification: number
+  /** How long each edge of the box is drawn; see DecayAxisLengths. */
+  axisLengthX: number
+  axisLengthY: number
+  axisLengthZ: number
   lightAzimuthDeg: number
   lightElevationDeg: number
   rangeDb: number
@@ -83,6 +87,12 @@ const container = ref<HTMLDivElement | null>(null)
 const host = ref<HTMLDivElement | null>(null)
 // First in setup, so the control is built at the height it will keep rather than resized a frame
 // later — see the composable's own remarks.
+/**
+ * How many levels the colour key is labelled at. Six reads as a scale and fits the shortest chart
+ * this screen draws; the ramp itself is 256 colours and is unaffected.
+ */
+const DECAY_KEY_STEPS = 6
+
 const chartHeight = useResultChartHeight(container, host, { pageHeightPx: () => props.pageHeightPx })
 
 const { isDark } = useAppTheme()
@@ -97,6 +107,8 @@ type PeControlInstance = {
   attach<T>(api: unknown): T
   setSize(width: number, height: number): number
   invalidate(): number
+  /** Full re-layout, then paint. Needed where a property is only read while the scene is laid out. */
+  render(): number
   destroy(): void
 }
 
@@ -121,17 +133,16 @@ function plotWidth(): number {
   return Math.max(MIN_WIDTH, Math.round(container.value?.clientWidth ?? MIN_WIDTH))
 }
 
-onMounted(async () => {
-  let runtime
-  try {
-    runtime = await peRuntime()
-  } catch (e) {
-    failure.value = `The 3D chart engine could not be loaded: ${e instanceof Error ? e.message : String(e)}`
-    return
-  }
-  // The await above is long enough that the user can leave the view inside it.
-  if (disposed || !host.value) return
+type PeRuntime = Awaited<ReturnType<typeof peRuntime>>
+let runtime: PeRuntime | null = null
 
+/**
+ * Construct the control and fill it. Separate from {@link onMounted} because the box's own shape
+ * is read while the scene is laid out and cannot be changed afterwards — see the axis-length
+ * watcher below — so the three length sliders rebuild rather than refresh.
+ */
+function build(): boolean {
+  if (!runtime || !host.value) return false
   enums = runtime.Enums
   try {
     control = new (window as unknown as { PeControl: new (el: HTMLElement, o: unknown) => PeControlInstance }).PeControl(
@@ -144,10 +155,35 @@ onMounted(async () => {
     applyData()
     control.el.addEventListener('pointermove', onPointerMove)
     control.el.addEventListener('pointerleave', clearHover)
+    return true
   } catch (e) {
     failure.value = `The 3D chart could not be started: ${e instanceof Error ? e.message : String(e)}`
+    return false
+  }
+}
+
+/** Drop the control, listeners and all. The destroy is what releases the GPU context. */
+function teardown() {
+  control?.el.removeEventListener('pointermove', onPointerMove)
+  control?.el.removeEventListener('pointerleave', clearHover)
+  // Unconditionally: this is the one that leaks a GPU context, and the impulse screen's views are
+  // switched constantly.
+  control?.destroy()
+  control = null
+  chart = null
+  blocks = null
+}
+
+onMounted(async () => {
+  try {
+    runtime = await peRuntime()
+  } catch (e) {
+    failure.value = `The 3D chart engine could not be loaded: ${e instanceof Error ? e.message : String(e)}`
     return
   }
+  // The await above is long enough that the user can leave the view inside it.
+  if (disposed || !host.value) return
+  if (!build()) return
 
   observer = new ResizeObserver(() => resize())
   if (container.value) observer.observe(container.value)
@@ -157,14 +193,7 @@ onBeforeUnmount(() => {
   disposed = true
   observer?.disconnect()
   observer = null
-  control?.el.removeEventListener('pointermove', onPointerMove)
-  control?.el.removeEventListener('pointerleave', clearHover)
-  // Unconditionally: this is the one that leaks a GPU context, and the impulse screen's views are
-  // switched constantly.
-  control?.destroy()
-  control = null
-  chart = null
-  blocks = null
+  teardown()
 })
 
 /** Everything that is not the data. Written once; only the palette and the camera change after. */
@@ -220,7 +249,14 @@ function configure() {
   C.PeConfigure.BorderTypes = E.TABorder.NoBorder
   C.PeColor.BitmapGradientMode = false
   C.PeColor.GraphBmpStyle = E.BitmapStyle.NoBmp
-  C.PeLegend.Show = false
+  // The colour key, as the vendor's own demo draws it and asked for 2026-10-26. A contour-style
+  // legend is a ramp with levels against it, which is what the Canvas 2D chart welds to its own
+  // level axis — it cannot be welded here, since the engine draws that axis, so this is the same
+  // reading in the shape the engine has for it. Left or right only, which the property's own
+  // documentation says; right, so it does not sit over the dB labels.
+  C.PeLegend.Show = true
+  C.PeLegend.ContourStyle = true
+  C.PeLegend.Location = E.LegendLocation.Right
   const light = decayLightVector(props.lightAzimuthDeg, props.lightElevationDeg)
   C.PeFunction.SetLight(0, light.x, light.y, light.z)
   C.PePlot.Option.LightStrength = DECAY_LIGHT_STRENGTH
@@ -319,6 +355,9 @@ function showAxes(visible: boolean) {
   chart.PeGrid.Option.ShowXAxis = mode
   chart.PeGrid.Option.ShowYAxis = mode
   chart.PeGrid.Option.ShowZAxis = mode
+  // The colour key is furniture too: a scale beside an empty plot is a key to nothing. Joost asked
+  // for the axes to go on an empty measurement and keep the plot well, and this is the same ask.
+  chart.PeLegend.Show = visible
   if (!visible) {
     chart.PeString.XAxisLabel = ''
     chart.PeString.YAxisLabel = ''
@@ -388,10 +427,11 @@ function applyData() {
   C.PeGrid.Configure.ManualMinY = -props.rangeDb
   C.PeGrid.Configure.ManualMaxY = 0
 
-  const aspect = decayGridAspect()
+  // Two numbers, never three — GridAspectZ is left at its default on purpose, and decayGridAspect
+  // says why: writing it as well states the box's shape twice, and contradicts it.
+  const aspect = decayGridAspect({ x: props.axisLengthX, y: props.axisLengthY, z: props.axisLengthZ })
   C.PeGrid.Option.GridAspectX = aspect.x
   C.PeGrid.Option.GridAspectY = aspect.y
-  C.PeGrid.Option.GridAspectZ = aspect.z
 
   // Whichever axis carries the frequency is scaled logarithmically, which is what puts true hertz
   // on its ticks. The height axis is in dB and the time axis starts at zero, so neither can be.
@@ -431,6 +471,21 @@ function applyData() {
   // anyone drags it. A label that travels with the axis beats a label that reads the right way up.
   C.PeString.YAxisLabel = 'dB'
 
+  // <p>The key's labels. The ramp is 256 colours and the legend will label every one of them
+  // given the chance, which is a solid column of numbers — so this names a handful at known
+  // heights and leaves the rest blank, which is what the property is for ("possibly define a few
+  // labels at strategic colors to prevent overlapping").</p>
+  //
+  // <p>Index <c>i</c> of the ramp is the level a fraction <c>i / 255</c> up the scale, by
+  // construction: <c>decaySubsetColors</c> fills it through <c>paletteIndex</c> over exactly that
+  // fraction. So the arithmetic here and the colour of the surface cannot disagree.</p>
+  C.PeString.ContourLabels.clear()
+  for (let i = 0; i < DECAY_KEY_STEPS; i++) {
+    const index = Math.round((i / (DECAY_KEY_STEPS - 1)) * 255)
+    C.PeString.ContourLabels[index] = `${Math.round(-props.rangeDb + (index / 255) * props.rangeDb)}`
+  }
+  C.PeString.ContourLegendTitle = 'dB'
+
   C.PeFunction.Force3dxVerticeRebuild = true
   C.PeFunction.ReinitializeResetImage()
 }
@@ -451,10 +506,10 @@ watch(() => [props.palette, isDark.value], () => {
   chart?.PeFunction.ReinitializeResetImage()
 })
 /**
- * The five view controls. They are applied by `configure()`, which is where every engine property
- * is written, so this re-runs that rather than repeating four writes — and it is a separate
- * watcher from the camera's because that one short-circuits when the two angles have not moved,
- * which none of these touch.
+ * Where the surface sits, how big it is drawn and where the light comes from. They are applied by
+ * `configure()`, which is where every engine property is written, so this re-runs that rather than
+ * repeating five writes — and it is a separate watcher from the camera's because that one
+ * short-circuits when the two angles have not moved, which none of these touch.
  */
 watch(
   () => [props.moveX, props.moveY, props.magnification, props.lightAzimuthDeg, props.lightElevationDeg],
@@ -463,7 +518,31 @@ watch(
     configure()
     applyTheme()
     applyCamera()
+    chart.PeFunction.Force3dxVerticeRebuild = true
     chart.PeFunction.ReinitializeResetImage()
+  },
+)
+
+/**
+ * <p><b>The three axis lengths rebuild the control, and nothing cheaper reaches them.</b> The box's
+ * proportions are read while the scene is laid out and never looked at again: measured 2026-10-26,
+ * moving any of the three through a reinitialise — and again through `render()`, with the vertices
+ * forced to rebuild both times — left the picture <em>byte-identical</em>, the same pixels in the
+ * same places. The same values applied at construction draw a different box, which is what says it
+ * is the refresh rather than the values. (The first hour of that was spent on a worse fault
+ * underneath it: all three aspect numbers were being written, which states the shape twice and
+ * degenerates the box — see {@link decayGridAspect}.)</p>
+ *
+ * <p>A rebuild destroys a GPU context and creates another, which is not something to do lightly;
+ * it is affordable here only because these three live in a collapsed section nobody opens on an
+ * ordinary visit. Do not fold them into the watcher above.</p>
+ */
+watch(
+  () => [props.axisLengthX, props.axisLengthY, props.axisLengthZ],
+  () => {
+    if (!control || disposed) return
+    teardown()
+    build()
   },
 )
 

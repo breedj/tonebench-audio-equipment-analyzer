@@ -170,9 +170,66 @@ export function peColor(r: number, g: number, b: number): number {
  * translation range of -3..+3 moves the surface <em>seven pixels</em>, so the gesture looks broken.
  * At this size the same range moves it 47, and the gesture works.</p>
  */
-export function decayGridAspect(): { x: number; y: number; z: number } {
-  return { x: 10, y: 4.5, z: 14 }
+export function decayGridAspect(lengths: DecayAxisLengths = DECAY_AXIS_LENGTH_DEFAULT): { x: number; y: number } {
+  // <p><b>Only two of the engine's three aspect numbers may be written, and the third is the trap.</b>
+  // It documents <c>GridAspectX</c> as the x axis "as relates to z" and <c>GridAspectY</c> as y
+  // "as relates to z" — so z is already the unit those two are measured in — while
+  // <c>GridAspectZ</c> is z "as relates to x". Writing all three states the shape twice and
+  // contradicts itself, and the box then degenerates to a slab that no later value changes: the
+  // three sliders looked completely inert on 2026-10-26, through a reload and through
+  // <c>render()</c> alike, and that was why.</p>
+  //
+  // <p>So the depth is expressed by dividing the other two by it, and <c>GridAspectZ</c> is never
+  // written at all. The multiplier is the default depth, which keeps the magnitude the camera was
+  // measured against: at the defaults this returns 10 and 4.5, exactly the figures
+  // {@link DECAY_3D_ZOOM} was framed around, so a measurement that never touches a slider is drawn
+  // to the pixel as before.</p>
+  //
+  // <p>The engine reads the magnitude as well as the ratio, which is why the multiplier is needed
+  // and why a plain <c>x/z</c> is wrong: normalised to about 1 the whole box is drawn some three
+  // times smaller, and the camera would have to come in to match — and the viewport translation the
+  // two Move sliders write scales with the camera's distance, so that trade buys a correct ratio and
+  // breaks the gesture (see {@link DECAY_VIEW_MOVE_X}).</p>
+  const depth = lengths.z > 0 ? lengths.z : DECAY_AXIS_LENGTH_DEFAULT.z
+  const unit = DECAY_AXIS_LENGTH_DEFAULT.z
+  return { x: (lengths.x / depth) * unit, y: (lengths.y / depth) * unit }
 }
+
+/** How long each edge of the box is drawn, in the engine's own grid-aspect units. */
+export interface DecayAxisLengths {
+  /** The across axis — frequency in the by-frequency views, time in the by-period one. */
+  x: number
+  /** The height axis, which is always the level in dB. */
+  y: number
+  /** The depth axis, the other of time and frequency. */
+  z: number
+}
+
+/**
+ * The lengths the box is drawn at unless a measurement says otherwise, and the range the three
+ * sliders offer.
+ *
+ * <p>Asked for 2026-10-26 ("controls to set the length of the axes individually"), which is worth
+ * having for the reason {@link decayGridAspect} gives: the three axes have no common unit, so
+ * there is no proportion to be right and the shape is a reading preference. A flatter height makes
+ * a shallow decay legible; a longer depth separates slices that overlap.</p>
+ *
+ * <p>The defaults are the fixed box these were measured against, so a measurement that never
+ * touches them is drawn exactly as before. The camera's framing was measured against that box too
+ * (see {@link DECAY_3D_ZOOM}), so stretching an axis a long way can push the surface off the plot
+ * — which is what Magnification and the two Move sliders are then for.</p>
+ */
+/**
+ * <p><b>The depth is the one the other two are measured against, so it rescales the picture.</b>
+ * That is the engine's own frame and not a choice here: with <c>GridAspectZ</c> left alone (see
+ * {@link decayGridAspect}) the depth edge is the unit, and x and y are lengths in it — so halving
+ * the depth doubles the other two rather than shortening one edge, and the whole box is drawn
+ * larger. Magnification is what compensates, which is part of why the two sit in the same section.
+ * The two cannot be separated without writing the third aspect number, and writing it is what made
+ * all three inert.</p>
+ */
+export const DECAY_AXIS_LENGTH_DEFAULT: DecayAxisLengths = { x: 10, y: 4.5, z: 14 }
+export const DECAY_AXIS_LENGTH = { min: 2, max: 30, step: 0.5 } as const
 
 /**
  * How far to pull the camera back, for a plot of this shape.
@@ -242,8 +299,22 @@ export function decayCameraZoom(widthPx: number, heightPx: number): number {
  * <p>±3 is the documented legal range of <c>DxViewportX</c>/<c>Y</c> and is also why the box is
  * small and close rather than large and far: that range scales with the camera's distance, and at
  * ten times this size it moves the surface seven pixels. See {@link decayGridAspect}.</p>
+ *
+ * <p>The two axes have their own ranges and their own defaults, which is why they are two
+ * constants: the opening view sits further up the plot than across it.</p>
  */
-export const DECAY_VIEW_MOVE = { min: -3, max: 3, default: 0 } as const
+export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 2 } as const
+
+/**
+ * The same up the plot, and its range is <b>not</b> the sideways one.
+ *
+ * <p>Up to 4 rather than 3, asked for 2026-10-26: the default view already sits at 3 and there was
+ * no room left above it. The engine documents ±3 as the legal translation, so the top of this
+ * slider is past what it promises — it is accepted and keeps moving the surface, and the
+ * consequence of asking for too much here is the surface leaving the plot, which is on screen the
+ * moment it happens rather than silent.</p>
+ */
+export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 3 } as const
 
 /**
  * How large the surface is drawn, as a percentage of the framing the plot's own shape gives it.
@@ -252,13 +323,13 @@ export const DECAY_VIEW_MOVE = { min: -3, max: 3, default: 0 } as const
  * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
  * the fitted view.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 250, default: 100 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 250, default: 140 } as const
 
 /** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
-export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 164 } as const
+export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 180 } as const
 
 /** How high the light sits, in degrees above the floor plane. */
-export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 44 } as const
+export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 40 } as const
 
 /**
  * How far the light sits from the box — fixed, and not a control.

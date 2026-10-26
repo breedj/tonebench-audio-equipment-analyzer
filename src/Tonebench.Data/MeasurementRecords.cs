@@ -2319,6 +2319,15 @@ public sealed record ImpulseResponseParameters(
     double? ChartDecayMagnification = null,
     double? ChartDecayLightAzimuthDeg = null,
     double? ChartDecayLightElevationDeg = null,
+    /// <summary>
+    /// How long each edge of the surface's box is drawn, in the engine's own grid-aspect units —
+    /// across, height and depth. Asked for 2026-10-26: the three axes have no common unit, so
+    /// there is no proportion to be right and the shape is a reading preference. Null is the fixed
+    /// box everything before them was drawn at.
+    /// </summary>
+    double? ChartDecayAxisLengthX = null,
+    double? ChartDecayAxisLengthY = null,
+    double? ChartDecayAxisLengthZ = null,
     double? ChartDecayRangeDb = null,
     /// <summary>The cumulative spectral decay's analysis. Not run settings: they are questions put to
     /// a record already captured, and changing one redraws rather than re-measures. Stored all the

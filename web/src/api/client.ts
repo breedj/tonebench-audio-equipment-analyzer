@@ -1738,6 +1738,9 @@ export interface ImpulseResponseParameters {
   chartDecayMagnification?: number | null
   chartDecayLightAzimuthDeg?: number | null
   chartDecayLightElevationDeg?: number | null
+  chartDecayAxisLengthX?: number | null
+  chartDecayAxisLengthY?: number | null
+  chartDecayAxisLengthZ?: number | null
   chartDecayRangeDb?: number | null
   /** The cumulative spectral decay's analysis. Display settings, but a surface is unreadable without them. */
   chartCsdFftLength?: number | null

@@ -28,11 +28,14 @@ import {
 import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import {
+  DECAY_AXIS_LENGTH,
   DECAY_LIGHT_AZIMUTH,
   DECAY_LIGHT_ELEVATION,
   DECAY_VIEW_MAGNIFICATION,
-  DECAY_VIEW_MOVE,
+  DECAY_VIEW_MOVE_X,
+  DECAY_VIEW_MOVE_Y,
 } from '../measurements/decay3d'
+import { harmonicsUnavailableNote } from '../measurements/harmonicsAvailability'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -94,6 +97,9 @@ const decayMoveY = defineModel<number>('decayMoveY', { required: true })
 const decayMagnification = defineModel<number>('decayMagnification', { required: true })
 const decayLightAzimuthDeg = defineModel<number>('decayLightAzimuthDeg', { required: true })
 const decayLightElevationDeg = defineModel<number>('decayLightElevationDeg', { required: true })
+const decayAxisLengthX = defineModel<number>('decayAxisLengthX', { required: true })
+const decayAxisLengthY = defineModel<number>('decayAxisLengthY', { required: true })
+const decayAxisLengthZ = defineModel<number>('decayAxisLengthZ', { required: true })
 const decayDepthPercent = defineModel<number>('decayDepthPercent', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
@@ -118,6 +124,9 @@ const overlayImpulses = computed(() =>
   overlays.value.map((o) => (o.visible ? o.impulseTrace : null)).filter((t): t is ImpulseTraceJson => !!t),
 )
 
+/** Checked history items carrying harmonic curves, which Autofit and its note both count. */
+const overlayHarmonics = computed(() => overlays.value.filter((o) => o.visible && o.harmonicCurves?.length))
+
 /** Checked history items carrying a gated magnitude, likewise. */
 const overlayGains = computed(() =>
   overlays.value
@@ -136,6 +145,15 @@ const VIEWS: { value: ImpulseView; label: string }[] = [
 
 /** The two views that are analyses of the impulse rather than readings off it. */
 const isDecayView = computed(() => view.value === 'Csd' || view.value === 'BurstDecay')
+
+/**
+ * What the across and depth edges of the box are carrying, for the two axis-length sliders that
+ * move them. Which is which swaps with the projection — Waterfall (f) runs frequency across and
+ * recedes in time, Waterfall (p) the other way about — so a fixed pair of labels would be wrong
+ * half the time, and "X" and "Z" say nothing to anyone.
+ */
+const acrossAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Time' : 'Frequency'))
+const depthAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Frequency' : 'Time'))
 
 const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
   { value: 'Apodizing', label: 'CSD, apodizing window' },
@@ -249,6 +267,17 @@ const canAutofit = computed(() => {
   if (view.value === 'Response') return traces.value.length > 0 || overlayGains.value.length > 0
   return harmonics.value.length > 0
 })
+
+/**
+ * The line under a disabled Autofit. Only the Harmonics view has a reason that can be named —
+ * everywhere else the button is dead because nothing has been measured yet, which the chart's own
+ * empty state already says and a second line beside it would only repeat.
+ */
+const autofitBlockedNote = computed(() => (
+  view.value === 'Harmonics'
+    ? harmonicsUnavailableNote(status.value?.stimulus, harmonics.value.length > 0 || overlayHarmonics.value.length > 0)
+    : null
+))
 
 const autofitTitle = computed(() => {
   if (view.value === 'Impulse') {
@@ -384,6 +413,16 @@ const referenceLabel = computed(() => {
   >
     Autofit
   </button>
+  <!-- Why that button is dead, where there is a reason worth giving. Beside the control rather
+       than only under the chart: a disabled button with nothing near it reads as a fault, and the
+       rail is where somebody goes looking when a view draws nothing. Same wording as the chart's
+       own line, from one module. -->
+  <p
+    v-if="!canAutofit && autofitBlockedNote"
+    class="text-[11px] text-neutral-500 dark:text-neutral-400"
+  >
+    {{ autofitBlockedNote }}
+  </p>
 
   <CollapsibleSection title="Display">
     <label class="tb-field">
@@ -620,8 +659,8 @@ const referenceLabel = computed(() => {
             <input
               v-model.number="decayMoveX"
               type="range"
-              :min="DECAY_VIEW_MOVE.min"
-              :max="DECAY_VIEW_MOVE.max"
+              :min="DECAY_VIEW_MOVE_X.min"
+              :max="DECAY_VIEW_MOVE_X.max"
               step="0.1"
               class="tb-range"
               title="Slides the surface across the plot. The engine's own translation, which is a fine adjustment here rather than a coarse one — the whole range is a few tens of pixels."
@@ -636,8 +675,8 @@ const referenceLabel = computed(() => {
             <input
               v-model.number="decayMoveY"
               type="range"
-              :min="DECAY_VIEW_MOVE.min"
-              :max="DECAY_VIEW_MOVE.max"
+              :min="DECAY_VIEW_MOVE_Y.min"
+              :max="DECAY_VIEW_MOVE_Y.max"
               step="0.1"
               class="tb-range"
               title="Slides the surface up and down the plot."
@@ -673,6 +712,54 @@ const referenceLabel = computed(() => {
               step="1"
               class="tb-range"
               title="Where the light sits around the box. The default lights the side the camera is on; turning it right round puts the surface in its own shadow."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>{{ acrossAxisLabel }} axis length</span>
+              <span class="tb-field-value">{{ decayAxisLengthX.toFixed(1) }}</span>
+            </span>
+            <input
+              v-model.number="decayAxisLengthX"
+              type="range"
+              :min="DECAY_AXIS_LENGTH.min"
+              :max="DECAY_AXIS_LENGTH.max"
+              :step="DECAY_AXIS_LENGTH.step"
+              class="tb-range"
+              title="How long the box is drawn across. The three axes have no common unit, so there is no proportion to be right — stretch whichever one you are reading."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Level axis length</span>
+              <span class="tb-field-value">{{ decayAxisLengthY.toFixed(1) }}</span>
+            </span>
+            <input
+              v-model.number="decayAxisLengthY"
+              type="range"
+              :min="DECAY_AXIS_LENGTH.min"
+              :max="DECAY_AXIS_LENGTH.max"
+              :step="DECAY_AXIS_LENGTH.step"
+              class="tb-range"
+              title="How tall the box is drawn. Raising it makes a shallow decay legible; it changes the shape of the picture and not the dB range, which is Range (dB)."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>{{ depthAxisLabel }} axis length</span>
+              <span class="tb-field-value">{{ decayAxisLengthZ.toFixed(1) }}</span>
+            </span>
+            <input
+              v-model.number="decayAxisLengthZ"
+              type="range"
+              :min="DECAY_AXIS_LENGTH.min"
+              :max="DECAY_AXIS_LENGTH.max"
+              :step="DECAY_AXIS_LENGTH.step"
+              class="tb-range"
+              title="How deep the box is drawn — how far the stack recedes. A longer one separates slices that overlap."
             />
           </label>
 

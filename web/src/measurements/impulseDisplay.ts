@@ -18,7 +18,9 @@ import {
   DECAY_LIGHT_AZIMUTH,
   DECAY_LIGHT_ELEVATION,
   DECAY_VIEW_MAGNIFICATION,
-  DECAY_VIEW_MOVE,
+  DECAY_AXIS_LENGTH_DEFAULT,
+  DECAY_VIEW_MOVE_X,
+  DECAY_VIEW_MOVE_Y,
 } from './decay3d'
 
 /**
@@ -71,6 +73,10 @@ export interface ImpulseDisplay {
   decayMagnification: number
   decayLightAzimuthDeg: number
   decayLightElevationDeg: number
+  /** How long each edge of the surface's box is drawn; see DecayAxisLengths. */
+  decayAxisLengthX: number
+  decayAxisLengthY: number
+  decayAxisLengthZ: number
   decayRangeDb: number
   csd: CsdAnalysis
   burstMaxPeriods: number
@@ -123,11 +129,14 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     decayFilled: true,
     decayRotationDeg: DECAY_ROTATION_DEG.default,
     decayDepthPercent: DECAY_DEPTH_PERCENT.default,
-    decayMoveX: DECAY_VIEW_MOVE.default,
-    decayMoveY: DECAY_VIEW_MOVE.default,
+    decayMoveX: DECAY_VIEW_MOVE_X.default,
+    decayMoveY: DECAY_VIEW_MOVE_Y.default,
     decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
     decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
     decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
+    decayAxisLengthX: DECAY_AXIS_LENGTH_DEFAULT.x,
+    decayAxisLengthY: DECAY_AXIS_LENGTH_DEFAULT.y,
+    decayAxisLengthZ: DECAY_AXIS_LENGTH_DEFAULT.z,
     decayRangeDb: 30,
     csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,
@@ -201,6 +210,16 @@ export function impulseDisplayFromParams(
   }
   if (typeof stored.chartDecayLightElevationDeg === 'number' && Number.isFinite(stored.chartDecayLightElevationDeg)) {
     display.decayLightElevationDeg = stored.chartDecayLightElevationDeg
+  }
+  // Positive: a zero-length axis is a box with no extent, which the engine draws as nothing.
+  if (typeof stored.chartDecayAxisLengthX === 'number' && stored.chartDecayAxisLengthX > 0) {
+    display.decayAxisLengthX = stored.chartDecayAxisLengthX
+  }
+  if (typeof stored.chartDecayAxisLengthY === 'number' && stored.chartDecayAxisLengthY > 0) {
+    display.decayAxisLengthY = stored.chartDecayAxisLengthY
+  }
+  if (typeof stored.chartDecayAxisLengthZ === 'number' && stored.chartDecayAxisLengthZ > 0) {
+    display.decayAxisLengthZ = stored.chartDecayAxisLengthZ
   }
   if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0) display.decayRangeDb = stored.chartDecayRangeDb
   if (typeof stored.chartCsdFftLength === 'number') display.csd.fftLength = stored.chartCsdFftLength

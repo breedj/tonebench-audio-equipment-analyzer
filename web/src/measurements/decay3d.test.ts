@@ -14,6 +14,7 @@ import {
   decayCameraZoom,
   DECAY_3D_ZOOM,
   DECAY_3D_ZOOM_NARROW,
+  DECAY_AXIS_LENGTH_DEFAULT,
   decayGridAspect,
   decayMesh,
   decayModeIs3d,
@@ -230,22 +231,58 @@ describe('decayGridAspect', () => {
    * 400-column, 60-slice CSD, and the surface is then drawn edge-on and clipped.
    */
   it('is the same box whatever the resolution of the surface', () => {
-    expect(decayGridAspect()).toEqual(decayGridAspect())
     const a = decayGridAspect()
     expect(a.x).toBeGreaterThan(0)
     expect(a.y).toBeGreaterThan(0)
-    expect(a.z).toBeGreaterThan(0)
   })
 
-  it('is wider and deeper than it is tall, so a waterfall reads as one', () => {
+  it('is wider than it is tall, so a waterfall reads as one', () => {
     const a = decayGridAspect()
     expect(a.y).toBeLessThan(a.x)
-    expect(a.y).toBeLessThan(a.z)
   })
 
-  it('is close to square in the floor plane, so neither axis is foreshortened away', () => {
-    const a = decayGridAspect()
-    expect(Math.max(a.x, a.z) / Math.min(a.x, a.z)).toBeLessThan(1.5)
+  /**
+   * <b>Two numbers, never three.</b> The engine measures x and y <em>against z</em>, so z is the
+   * unit and a third figure states the shape a second time — which is what made all three sliders
+   * look inert, the box having degenerated to a slab that no later value moved. A depth is
+   * therefore a divisor of the other two, and this is the case that fails if someone adds z back.
+   */
+  it('expresses the depth by dividing the other two, and returns no third number', () => {
+    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
+    expect(Object.keys(base).sort()).toEqual(['x', 'y'])
+
+    const deeper = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: DECAY_AXIS_LENGTH_DEFAULT.z * 2 })
+    expect(deeper.x).toBeCloseTo(base.x / 2, 10)
+    expect(deeper.y).toBeCloseTo(base.y / 2, 10)
+  })
+
+  /** Each slider has to reach the picture on its own, or it is furniture. */
+  it('answers a change of any one length', () => {
+    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
+    const wider = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, x: DECAY_AXIS_LENGTH_DEFAULT.x * 2 })
+    const taller = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, y: DECAY_AXIS_LENGTH_DEFAULT.y * 2 })
+    expect(wider.x).toBeCloseTo(base.x * 2, 10)
+    expect(wider.y).toBeCloseTo(base.y, 10)
+    expect(taller.y).toBeCloseTo(base.y * 2, 10)
+    expect(taller.x).toBeCloseTo(base.x, 10)
+  })
+
+  /**
+   * The multiplier is the default depth rather than 1, so the defaults come out at the magnitude
+   * every camera figure here was measured against — the engine reads the size as well as the
+   * ratio, and normalising to about 1 draws the box some three times smaller.
+   */
+  it('leaves the default box at the magnitude the camera was framed around', () => {
+    const a = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
+    expect(a.x).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.x, 10)
+    expect(a.y).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.y, 10)
+  })
+
+  /** A depth of zero would divide by it; the stored field is guarded, and so is this. */
+  it('falls back to the default depth rather than dividing by zero', () => {
+    const a = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: 0 })
+    expect(Number.isFinite(a.x)).toBe(true)
+    expect(a.x).toBeCloseTo(DECAY_AXIS_LENGTH_DEFAULT.x, 10)
   })
 })
 
@@ -360,14 +397,17 @@ describe('DECAY_LIGHT', () => {
   })
 
   /**
-   * It is built from the two angles the panel turns now, so the default angles have to reproduce
-   * the vector those luminance measurements were taken against — mirroring it about the height
-   * axis read 70.4 against 86.6 mean luminance, and that figure belongs to this direction.
+   * <p>The invariant that survived the default being retuned by eye (2026-10-26, to 180/40 from
+   * the measured 164/44): the light has to be on the <em>camera's</em> side of the box, which is
+   * the negative x half. That is the fault this family has actually had — moving the camera to
+   * `360 - lean` left the light behind the surface and the chart went dark, 70.4 against 86.6 mean
+   * luminance — and it is the one an angle typed into the panel can bring back.</p>
+   *
+   * <p>It is also above the box, which is the negative y half; see decayLightVector.</p>
    */
-  it('is what the default angles point at, within a rounding of the measured vector', () => {
-    expect(DECAY_LIGHT.x).toBeCloseTo(-7, 1)
-    expect(DECAY_LIGHT.y).toBeCloseTo(-7, 1)
-    expect(DECAY_LIGHT.z).toBeCloseTo(2, 1)
+  it('is in front of the surface and above it, which is the side the camera is on', () => {
+    expect(DECAY_LIGHT.x).toBeLessThan(0)
+    expect(DECAY_LIGHT.y).toBeLessThan(0)
     expect(DECAY_LIGHT).toEqual(decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default))
   })
 

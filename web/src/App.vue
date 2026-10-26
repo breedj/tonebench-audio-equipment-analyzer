@@ -115,7 +115,7 @@ import { prefersGpuSurface, useDecaySurfaceEngine } from './composables/useDecay
 import type { DecaySurface } from './api/client'
 import { decayModeIs3d } from './measurements/decay3d'
 import { decaySubjectIds, decaySubjects } from './measurements/decaySubjects'
-import { extractsHarmonics, stimulusLabel } from './measurements/responseStimulus'
+import { harmonicsUnavailableNote } from './measurements/harmonicsAvailability'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
 // Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
 // open an impulse measurement, or has no WebGPU, never fetches it at all.
@@ -2695,14 +2695,15 @@ const impulseResponseChart = ref<InstanceType<typeof FrequencyResponseChart> | n
  * The run's stimulus, never the panel's staged one: turning the dropdown afterwards must not
  * relabel what the run did.</p>
  */
-const harmonicsUnavailableNote = computed(() => {
-  if (impulseHarmonics.value.length > 0 || visibleHarmonicOverlays.value.length > 0) return null
-  const stimulus = impulseStatus.value?.stimulus
-  if (!stimulus || extractsHarmonics(stimulus)) return null
-  return `This run played ${stimulusLabel(stimulus)}. Harmonic curves come from a sweep, whose distortion `
-    + 'returns as separate packets the analysis can pick out; noise spreads its distortion evenly '
-    + 'across the record, where nothing can separate it. Measure with Sweep (chirp) and Harmonics on.'
-})
+/**
+ * Why the Harmonics view is empty, where the reason is one the screen can name. The wording is a
+ * module because the display rail says the same thing beside its disabled Autofit button — see
+ * measurements/harmonicsAvailability.ts.
+ */
+const harmonicsNote = computed(() => harmonicsUnavailableNote(
+  impulseStatus.value?.stimulus,
+  impulseHarmonics.value.length > 0 || visibleHarmonicOverlays.value.length > 0,
+))
 
 const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | null>(null)
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
@@ -3500,6 +3501,9 @@ const impulseDecayMoveY = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveY)
 const impulseDecayMagnification = ref(DEFAULT_IMPULSE_DISPLAY.decayMagnification)
 const impulseDecayLightAzimuthDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightAzimuthDeg)
 const impulseDecayLightElevationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightElevationDeg)
+const impulseDecayAxisLengthX = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthX)
+const impulseDecayAxisLengthY = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthY)
+const impulseDecayAxisLengthZ = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthZ)
 const impulseDecayRangeDb = ref(30)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
@@ -3576,6 +3580,9 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayMagnification: impulseDecayMagnification.value,
     decayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
     decayLightElevationDeg: impulseDecayLightElevationDeg.value,
+    decayAxisLengthX: impulseDecayAxisLengthX.value,
+    decayAxisLengthY: impulseDecayAxisLengthY.value,
+    decayAxisLengthZ: impulseDecayAxisLengthZ.value,
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
       fftLength: impulseCsdFftLength.value,
@@ -3641,6 +3648,9 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayMagnification.value = display.decayMagnification
   impulseDecayLightAzimuthDeg.value = display.decayLightAzimuthDeg
   impulseDecayLightElevationDeg.value = display.decayLightElevationDeg
+  impulseDecayAxisLengthX.value = display.decayAxisLengthX
+  impulseDecayAxisLengthY.value = display.decayAxisLengthY
+  impulseDecayAxisLengthZ.value = display.decayAxisLengthZ
   impulseDecayRangeDb.value = display.decayRangeDb
   impulseCsdFftLength.value = display.csd.fftLength
   impulseCsdSpanMs.value = display.csd.spanMs
@@ -3677,6 +3687,7 @@ watch(
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
     impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
     impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification, impulseDecayLightAzimuthDeg, impulseDecayLightElevationDeg,
+    impulseDecayAxisLengthX, impulseDecayAxisLengthY, impulseDecayAxisLengthZ,
     impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
@@ -3721,12 +3732,17 @@ const impulseDecayStacks = computed(
 )
 
 /**
- * The drawing height each decay chart keeps once there is more than one of them. Fitting every
- * chart to the view would give four charts four full views; at this height four of them scroll in
- * `main` as one comparison. Undefined for a lone chart, which fits the view as it always has.
+ * The drawing height a stacked decay chart keeps — <b>none</b>, so every one of them fits the view
+ * exactly as a lone chart does and the stack scrolls in `main`.
+ *
+ * <p>They were shrunk to a shared 340 px when stacking was built, on the reasoning that four
+ * charts should not be four full views. Asked for the other way on 2026-10-26: a surface shrunk to
+ * fit beside its neighbours is harder to read than the same surface scrolled to, and reading one
+ * is the whole point of putting two on screen. Kept as a named computed rather than deleting the
+ * prop, since the prop is the general answer for a chart that is not the view's own and the two
+ * sweep previews still use it.</p>
  */
-const DECAY_STACK_HEIGHT_PX = 340
-const impulseDecayChartHeight = computed(() => (impulseDecayStacks.value ? DECAY_STACK_HEIGHT_PX : undefined))
+const impulseDecayChartHeight = computed<number | undefined>(() => undefined)
 
 /** One extra subject's surface for the view on screen, or null while it is still being computed. */
 function impulseDecayExtraSurface(measurementId: number | null): DecaySurface | null {
@@ -3919,6 +3935,9 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayMagnification: impulseDecayMagnification.value,
       chartDecayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
       chartDecayLightElevationDeg: impulseDecayLightElevationDeg.value,
+      chartDecayAxisLengthX: impulseDecayAxisLengthX.value,
+      chartDecayAxisLengthY: impulseDecayAxisLengthY.value,
+      chartDecayAxisLengthZ: impulseDecayAxisLengthZ.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
       chartCsdSpanMs: impulseCsdSpanMs.value,
@@ -4758,6 +4777,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :magnification="impulseDecayMagnification"
                   :light-azimuth-deg="impulseDecayLightAzimuthDeg"
                   :light-elevation-deg="impulseDecayLightElevationDeg"
+                  :axis-length-x="impulseDecayAxisLengthX"
+                  :axis-length-y="impulseDecayAxisLengthY"
+                  :axis-length-z="impulseDecayAxisLengthZ"
                   :range-db="impulseDecayRangeDb"
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
@@ -4808,6 +4830,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :magnification="impulseDecayMagnification"
                       :light-azimuth-deg="impulseDecayLightAzimuthDeg"
                       :light-elevation-deg="impulseDecayLightElevationDeg"
+                  :axis-length-x="impulseDecayAxisLengthX"
+                  :axis-length-y="impulseDecayAxisLengthY"
+                  :axis-length-z="impulseDecayAxisLengthZ"
                       :range-db="impulseDecayRangeDb"
                       :thick-lines="impulseThickLines"
                       :computing="false"
@@ -4840,10 +4865,10 @@ onBeforeUnmount(() => stopLoadPolling?.())
                      draws nothing and the Autofit button beside it sits disabled, both correct and
                      neither saying so — reported 2026-10-26 as the display not working any more. -->
                 <p
-                  v-if="impulseView === 'Harmonics' && harmonicsUnavailableNote"
+                  v-if="impulseView === 'Harmonics' && harmonicsNote"
                   class="text-[11px] text-neutral-500 dark:text-neutral-400"
                 >
-                  {{ harmonicsUnavailableNote }}
+                  {{ harmonicsNote }}
                 </p>
 
                 <!-- What 0 dB means here, restated under the chart, because it is not the same
@@ -4915,6 +4940,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-magnification="impulseDecayMagnification"
                   v-model:decay-light-azimuth-deg="impulseDecayLightAzimuthDeg"
                   v-model:decay-light-elevation-deg="impulseDecayLightElevationDeg"
+                  v-model:decay-axis-length-x="impulseDecayAxisLengthX"
+                  v-model:decay-axis-length-y="impulseDecayAxisLengthY"
+                  v-model:decay-axis-length-z="impulseDecayAxisLengthZ"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"
                   v-model:csd-span-ms="impulseCsdSpanMs"

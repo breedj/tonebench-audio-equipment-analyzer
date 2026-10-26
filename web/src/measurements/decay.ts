@@ -59,8 +59,8 @@ export function decayLayout(
 }
 
 /** How far the stack leans, in degrees from straight down, and how deep it runs. */
-export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -10 } as const
-export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 50 } as const
+export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -35 } as const
+export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 59 } as const
 
 /**
  * How far sideways the lean may ever take the stack, as a fraction of the width. The curves get

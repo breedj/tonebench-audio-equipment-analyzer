@@ -635,20 +635,55 @@ function drawSonogram(
 
   // The surface's own columns are already log-spaced across its band, and so is this axis, so the
   // pixel-to-column map is a straight scale rather than a search.
+  //
+  // <p><b>The level is interpolated between cells, not snapped to the nearest one.</b> A sonogram
+  // is routinely far more pixels than cells — a 60 x 400 cumulative spectral decay over a 700-pixel
+  // plot is a dozen pixels per cell down the depth axis — so nearest-neighbour draws it as a grid
+  // of flat tiles, which is what it looked like beside the lit surface (asked for 2026-10-26:
+  // "the nice gradient we have in the surface plot"). The surface gets its gradient from the
+  // engine shading a mesh between vertices; this is the same thing done by hand.</p>
+  //
+  // <p>Interpolated in <b>dB</b>, which is the scale the picture is read on and the one the
+  // palette is mapped over, so a pixel half way between two cells is the colour half way between
+  // their colours. A cell with no data — the ragged low-frequency corner of a burst decay — takes
+  // no part rather than counting as a level: the weights of the corners that do have data are
+  // renormalised, and only a pixel with no data at any corner is left as background. Interpolating
+  // through a missing cell would draw a slope into a corner that was never measured.</p>
   for (let px = 0; px < width; px++) {
-    const column = Math.min(columns - 1, Math.round((px / Math.max(1, width - 1)) * (columns - 1)))
+    const cx = (px / Math.max(1, width - 1)) * (columns - 1)
+    const c0 = Math.min(columns - 1, Math.floor(cx))
+    const c1 = Math.min(columns - 1, c0 + 1)
+    const fx = cx - c0
     for (let py = 0; py < height; py++) {
-      const row = Math.min(rows - 1, Math.round((py / Math.max(1, height - 1)) * (rows - 1)))
-      const level = levelAt(surface, row, column)
+      const ry = (py / Math.max(1, height - 1)) * (rows - 1)
+      const r0 = Math.min(rows - 1, Math.floor(ry))
+      const r1 = Math.min(rows - 1, r0 + 1)
+      const fy = ry - r0
+
+      let sum = 0
+      let weight = 0
+      for (const [row, col, w] of [
+        [r0, c0, (1 - fy) * (1 - fx)],
+        [r0, c1, (1 - fy) * fx],
+        [r1, c0, fy * (1 - fx)],
+        [r1, c1, fy * fx],
+      ] as const) {
+        if (w === 0) continue
+        const value = levelAt(surface, row, col)
+        if (value === null) continue
+        sum += value * w
+        weight += w
+      }
+
       const offset = (py * width + px) * 4
       image.data[offset + 3] = 255
-      if (level === null) {
+      if (weight === 0) {
         image.data[offset] = background[0]
         image.data[offset + 1] = background[1]
         image.data[offset + 2] = background[2]
         continue
       }
-      const index = levelIndex(level, topDb, bottomDb)
+      const index = levelIndex(sum / weight, topDb, bottomDb)
       image.data[offset] = lut[index * 3]
       image.data[offset + 1] = lut[index * 3 + 1]
       image.data[offset + 2] = lut[index * 3 + 2]

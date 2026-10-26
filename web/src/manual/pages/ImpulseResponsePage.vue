@@ -86,9 +86,9 @@ const { showPage } = useManual()
     </p>
     <p>
       So on a run made with any PN signal the <strong>Harmonics</strong> view has nothing to draw
-      and its <strong>Autofit</strong> button is disabled. The view says which signal that run
-      played and what to measure instead; it is not a fault, and nothing is missing from the
-      measurement itself.
+      and its <strong>Autofit</strong> button is disabled. Both the view and the display rail, under
+      that disabled button, say which signal the run played and what to measure instead; it is not a
+      fault, and nothing is missing from the measurement itself.
     </p>
     <p>
       The distortion packets the gate discards are a measurement in their own right, and reading them
@@ -372,7 +372,7 @@ const { showPage } = useManual()
       after a drag is the picture on screen, not the one the fields describe.
     </p>
     <p>
-      <strong>Surface view</strong>, collapsed below them, holds five more. <strong>Move
+      <strong>Surface view</strong>, collapsed below them, holds eight more. <strong>Move
       horizontally</strong> and <strong>Move vertically</strong> slide the surface within the plot
       and <strong>Magnification</strong> sets how large it is drawn, as a percentage of the framing
       the plot's own shape gives it &mdash; 100% is that framing, and past it the surface can run
@@ -383,8 +383,27 @@ const { showPage } = useManual()
       colour reads is the palette, not the light.
     </p>
     <p>
+      The last three set the shape of the box itself: <strong>Frequency axis length</strong>,
+      <strong>Level axis length</strong> and <strong>Time axis length</strong>. They are
+      proportions rather than sizes, and the time axis is the one the other two are measured
+      against &mdash; so shortening it does not shorten an edge, it lengthens the other two and the
+      whole box is drawn larger. Magnification is what brings it back, which is why the two sit in
+      the same section. A flatter level axis makes a shallow decay legible; a longer time axis
+      separates slices that would otherwise overlap. Unlike the other five these rebuild the chart
+      rather than turning it, so they take a moment to land; the box's proportions are fixed when
+      the scene is built and cannot be changed after it.
+    </p>
+    <p>
+      A <strong>colour key</strong> stands to the right of the box, labelled in dB, showing the
+      palette as it is actually mapped &mdash; including the quarter of the ramp the floor is
+      lifted by, so a colour read off the surface can be carried to it directly. It is hidden along
+      with the axes when <strong>Show axes</strong> is cleared.
+    </p>
+    <p>
       Two more differences. <strong>Sonogram</strong> is always drawn flat, because it is a colour
-      map and there is no surface to turn. And <strong>Filled</strong> and <strong>Coloured
+      map and there is no surface to turn &mdash; but its colours are now blended across each cell
+      rather than filled flat, so it carries the same smooth gradient the surface does and a
+      resonance reads as a ridge instead of a staircase. And <strong>Filled</strong> and <strong>Coloured
       curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
       3D surface, which is always a lit solid.
     </p>

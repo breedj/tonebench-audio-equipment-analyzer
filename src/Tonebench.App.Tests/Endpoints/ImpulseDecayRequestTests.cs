@@ -16,6 +16,55 @@ namespace Tonebench.App.Tests.Endpoints;
 /// </summary>
 public class ImpulseDecayRequestTests
 {
+    /// <summary>
+    /// The depth travels as a time and the server converts it with the record's own rate. The
+    /// client cannot: it knows only the live runner's rate, which is 0 before anything has run, so
+    /// a stored result opened on a fresh start asked for one sample and came back flat.
+    /// </summary>
+    [Fact]
+    public void CsdRequest_WithASpanInMilliseconds_ConvertsItAtTheRecordsOwnRate()
+    {
+        var wire = Wire() with { SpanMs = 2.46, SpanSamples = 1 };
+
+        Assert.Equal(472, wire.SpanSamplesAt(192_000));
+        Assert.Equal(118, wire.SpanSamplesAt(48_000));
+    }
+
+    /// <summary>One request serves every stacked result, and they need not share a rate.</summary>
+    [Fact]
+    public void CsdRequest_WithASpanInMilliseconds_AnswersEachRateOnItsOwn()
+    {
+        var wire = Wire() with { SpanMs = 10.0 };
+
+        Assert.NotEqual(wire.SpanSamplesAt(48_000), wire.SpanSamplesAt(192_000));
+    }
+
+    /// <summary>A build that sends no time, and a record whose rate is not known, keep the count.</summary>
+    [Fact]
+    public void CsdRequest_WithNoSpanInMilliseconds_KeepsTheSampleCount()
+    {
+        Assert.Equal(37, Wire().SpanSamplesAt(192_000));
+        Assert.Equal(37, (Wire() with { SpanMs = 2.46 }).SpanSamplesAt(0));
+    }
+
+    /// <summary>A span too short to reach a whole sample is still a slice, never a refusal.</summary>
+    [Fact]
+    public void CsdRequest_WithASpanShorterThanASample_IsStillOneSample()
+    {
+        Assert.Equal(1, (Wire() with { SpanMs = 0.0001 }).SpanSamplesAt(48_000));
+    }
+
+    static ImpulseCsdRequest Wire() => new(
+        FftLength: 2048,
+        SpanSamples: 37,
+        BlockCount: 41,
+        WindowMode: "Hann",
+        RiseTimeMs: 0.35,
+        LowHz: 123.0,
+        HighHz: 17_000.0,
+        DisplayColumns: 321,
+        StartBeforePeakMs: 1.25);
+
     [Fact]
     public void CsdRequest_ToSettings_CarriesEveryFieldAcross()
     {
@@ -30,7 +79,7 @@ public class ImpulseDecayRequestTests
             DisplayColumns: 321,
             StartBeforePeakMs: 1.25);
 
-        var settings = wire.ToSettings(CsdWindowMode.Hann);
+        var settings = wire.ToSettings(CsdWindowMode.Hann, sampleRateHz: 0);
 
         Assert.Equal(2048, settings.FftLength);
         Assert.Equal(37, settings.SpanSamples);
@@ -71,7 +120,9 @@ public class ImpulseDecayRequestTests
     [Fact]
     public void BothPairsStillHaveTheFieldsTheMappingTestsCheck()
     {
-        Assert.Equal(9, ConstructorParameterCount(typeof(ImpulseCsdRequest)));
+        // Ten against the settings' nine: SpanMs is the wire's alone, since the settings record
+        // takes the depth already converted at the record's own rate. See ImpulseCsdRequest.SpanMs.
+        Assert.Equal(10, ConstructorParameterCount(typeof(ImpulseCsdRequest)));
         Assert.Equal(9, ConstructorParameterCount(typeof(CsdSettings)));
         Assert.Equal(6, ConstructorParameterCount(typeof(ImpulseBurstDecayRequest)));
         Assert.Equal(6, ConstructorParameterCount(typeof(BurstDecaySettings)));

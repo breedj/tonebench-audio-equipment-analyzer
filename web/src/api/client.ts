@@ -1811,6 +1811,14 @@ export interface ImpulseCsdRequest {
   fftLength: number
   /** The surface's whole depth in samples; the slices are spread across it. */
   spanSamples: number
+  /**
+   * The same depth as a time, which the server converts with the measurement's own sample rate and
+   * which wins over `spanSamples`. The client cannot do that conversion correctly: it knows only
+   * the live runner's rate, which is 0 before anything has run — a stored result opened on a fresh
+   * start then asked for one sample and came back flat (reported 2026-10-26) — and one request is
+   * sent to every stacked result, which may not share a rate.
+   */
+  spanMs?: number
   blockCount: number
   windowMode: CsdWindowModeName
   riseTimeMs: number

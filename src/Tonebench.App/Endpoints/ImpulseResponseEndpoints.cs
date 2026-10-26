@@ -108,7 +108,8 @@ public static class ImpulseResponseEndpoints
 
             try
             {
-                return Results.Ok(await runner.ComputeCumulativeSpectralDecayAsync(request.ToSettings(windowMode), ct));
+                return Results.Ok(await runner.ComputeCumulativeSpectralDecayAsync(
+                    request.ToSettings(windowMode, runner.Status.SampleRateHz), ct));
             }
             catch (ArgumentOutOfRangeException ex)
             {
@@ -224,7 +225,8 @@ public static class ImpulseResponseEndpoints
             try
             {
                 var (ir, left, available, availableBefore) = stored.Value;
-                var settings = request.ToSettings(windowMode);
+                // This record's own rate, not the live runner's — see ImpulseCsdRequest.SpanMs.
+                var settings = request.ToSettings(windowMode, left.SampleRateHz);
                 return Results.Ok(await Task.Run(
                     () => CumulativeSpectralDecay.Compute(
                         ir, left.PeakIndex, left.SampleRateHz, available, settings, new FftFlatBackend(), availableBefore),
@@ -407,10 +409,36 @@ public sealed record ImpulseCsdRequest(
     double HighHz,
     int DisplayColumns,
     /// <summary>How far ahead of the impulse the first slice sits — see <see cref="CsdSettings.StartBeforePeakMs"/>.</summary>
-    double StartBeforePeakMs = 0.0)
+    double StartBeforePeakMs = 0.0,
+    /// <summary>
+    /// The surface's whole depth as a <em>time</em>, which is what the panel actually sets, and
+    /// which wins over <see cref="SpanSamples"/> whenever it is positive.
+    /// </summary>
+    /// <remarks>
+    /// <para>A depth in samples is a different measurement at every sample rate — the reason the
+    /// panel asks for milliseconds at all — so the conversion needs the rate of the record being
+    /// analysed, and only the server knows that per measurement. The client used to convert with
+    /// the <em>live runner's</em> rate, which is <c>0</c> until something has been measured: a
+    /// stored result opened on a fresh start therefore asked for a span of one sample, every slice
+    /// landed on the same sample, and the surface came back flat. Pressing Run fixed it by giving
+    /// the runner a rate, which is exactly how it was reported on 2026-10-26.</para>
+    /// <para>It was wrong a second way that no amount of client arithmetic could fix: one request
+    /// serves every stacked result, so two results taken at different rates shared one sample
+    /// count and only one of them could be right.</para>
+    /// </remarks>
+    double SpanMs = 0.0)
 {
-    public CsdSettings ToSettings(CsdWindowMode windowMode) =>
-        new(FftLength, SpanSamples, BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns, StartBeforePeakMs);
+    public CsdSettings ToSettings(CsdWindowMode windowMode, double sampleRateHz) =>
+        new(FftLength, SpanSamplesAt(sampleRateHz), BlockCount, windowMode, RiseTimeMs, LowHz, HighHz, DisplayColumns, StartBeforePeakMs);
+
+    /// <summary>The depth in samples at this record's own rate, preferring the time where given.</summary>
+    public int SpanSamplesAt(double sampleRateHz)
+    {
+        if (SpanMs <= 0 || !(sampleRateHz > 0))
+            return SpanSamples;
+        var samples = (int)Math.Round(SpanMs / 1000.0 * sampleRateHz);
+        return Math.Max(1, samples);
+    }
 }
 
 /// <summary>Wire shape for a burst decay. See <see cref="ImpulseCsdRequest"/> on the mapping.</summary>

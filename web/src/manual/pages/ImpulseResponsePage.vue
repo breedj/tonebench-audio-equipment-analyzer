@@ -374,11 +374,10 @@ const { showPage } = useManual()
     <p>
       <strong>Surface view</strong>, collapsed below them, holds eight more. <strong>Move
       horizontally</strong> and <strong>Move vertically</strong> slide the surface within the plot
-      and <strong>Magnification</strong> sets how large it is drawn. It is a longer lens rather than a
-      step towards the surface &mdash; 100% is the camera's ordinary 45&deg; view and the top of the
-      slider is a near-isometric one, so the picture grows quickly at first and very little past
-      about 500%. Magnified far enough the surface can run off the plot, which is what the two Move
-      sliders are then for. <strong>Rotate light
+      and <strong>Magnification</strong> sets how large it is drawn, from half size to filling the plot
+      with the axes pushed off it. Magnified far enough the surface runs past the edge, which is
+      what the two Move sliders are then for. The mouse wheel zooms the same way; the camera is the
+      wheel's from the first turn, and moving the slider puts it back where the slider says. <strong>Rotate light
       horizontally</strong> and <strong>Rotate light vertically</strong> move the light around the
       box without changing its distance, so they turn it rather than dimming it. All five are
       stored with the measurement, so a view that took some turning is kept; how dark the darkest

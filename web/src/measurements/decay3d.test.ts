@@ -10,6 +10,7 @@ import {
   DECAY_LIGHT_STRENGTH,
   decayLightVector,
   decayFieldOfView,
+  decayPulledBackZoom,
   DECAY_VIEW_MAGNIFICATION,
   decayCameraZoom,
   DECAY_3D_ZOOM,
@@ -309,25 +310,51 @@ describe('DECAY_LIGHT_STRENGTH', () => {
   })
 })
 
-describe('decayFieldOfView', () => {
+describe('decayFieldOfView and decayPulledBackZoom', () => {
+  const BASE = -3.3
+
   /**
-   * Magnification is the camera's field of view, not its distance: the box is scale-free (see
-   * decayGridAspect), so the only way to fill the plot is optical. Driving DxZoom instead saturates
-   * as the camera nears the focal point — 250 %, 400 % and 700 % were barely distinguishable, and
-   * the slider read as stuck at its own maximum.
+   * The report, in three parts: "a magnification of 90 % results in a larger graph than 110 %",
+   * "above 200 % does not work", "setting it lower, up to 50, does not change it". All three are
+   * the engine quantising DxFOV to whole numbers and clamping it at 1 — measured, 100 / 120 / 150 %
+   * rendered byte-identically at 19 122 pixels of surface, as did 50 and 100 %.
    */
-  it("is the engine's own 45-degree view at 100 per cent", () => {
-    expect(decayFieldOfView(100)).toBeCloseTo(1, 10)
+  it('takes the whole number of the lens, never below one', () => {
+    expect(decayFieldOfView(50)).toBe(1)
+    expect(decayFieldOfView(100)).toBe(1)
+    expect(decayFieldOfView(199)).toBe(1)
+    expect(decayFieldOfView(200)).toBe(2)
+    expect(decayFieldOfView(800)).toBe(8)
   })
 
-  it('narrows the view as the magnification rises, which is what enlarges the surface', () => {
-    expect(decayFieldOfView(250)).toBeGreaterThan(decayFieldOfView(100))
-    expect(decayFieldOfView(50)).toBeLessThan(decayFieldOfView(100))
+  /** The camera covers what the lens cannot, which is what makes the slider monotonic throughout. */
+  it('grows without a dead step anywhere along the slider', () => {
+    const sizes = []
+    for (let pct = DECAY_VIEW_MAGNIFICATION.min; pct <= DECAY_VIEW_MAGNIFICATION.max; pct += 5) {
+      // Bigger means a narrower lens, or a camera nearer the surface — zoom is negative, so
+      // "nearer" is a smaller magnitude.
+      sizes.push(decayFieldOfView(pct) / Math.abs(decayPulledBackZoom(BASE, pct)))
+    }
+    for (let i = 1; i < sizes.length; i++) expect(sizes[i]).toBeGreaterThan(sizes[i - 1])
   })
 
-  it("clamps to the slider's own range rather than trusting a stored value", () => {
+  /** Below 100 % the lens is pinned, so the camera is the whole of the reduction. */
+  it('pulls the camera back below 100 per cent, where the lens cannot open any wider', () => {
+    expect(decayPulledBackZoom(BASE, 50)).toBeCloseTo(BASE * 2, 10)
+    expect(decayPulledBackZoom(BASE, 100)).toBeCloseTo(BASE, 10)
+  })
+
+  /** On a whole number the camera sits at the base framing every figure here was measured at. */
+  it('leaves the camera at its base wherever the lens lands exactly', () => {
+    for (const pct of [100, 200, 300, 800]) {
+      expect(decayPulledBackZoom(BASE, pct)).toBeCloseTo(BASE, 10)
+    }
+  })
+
+  it('clamps to the slider’s own range, and survives a cleared box', () => {
     expect(decayFieldOfView(10_000)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max))
     expect(decayFieldOfView(0)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.min))
+    expect(Number.isFinite(decayPulledBackZoom(BASE, Number.NaN))).toBe(true)
   })
 
   /** The vendor documents 8 to 10 as near-isometric, which is where the picture stops growing. */

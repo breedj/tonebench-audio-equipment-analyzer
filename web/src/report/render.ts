@@ -566,6 +566,7 @@ async function decaySurface(subject: ReportSubject, view: 'Csd' | 'BurstDecay'):
       // here exactly as the screen converts it — see csdSpanSamples.
       const request: ImpulseCsdRequest = {
         fftLength: display.csd.fftLength,
+        spanMs: display.csd.spanMs,
         spanSamples: csdSpanSamples(display.csd.spanMs, subject.data.impulse?.sampleRateHz ?? 0),
         blockCount: display.csd.slices,
         startBeforePeakMs: display.csd.startBeforePeakMs,

@@ -6,6 +6,7 @@ import {
   decayCameraZoom,
   decayLightVector,
   decayFieldOfView,
+  decayPulledBackZoom,
   DECAY_LIGHT_STRENGTH,
   decayExportTitle,
   decayGridAspect,
@@ -230,12 +231,17 @@ function configure() {
   C.PeConfigure.ImageAdjustTop = -100
   C.PeConfigure.ImageAdjustBottom = 100
   C.PeConfigure.ImageAdjustRight = -200
-  C.PePlot.Option.DxFOV = 1
-  // Well below any zoom we set, so the wheel still has somewhere to go in both directions.
+  // <p>The wheel's own limits, and they have to bracket the zooms this chart sets or the gesture
+  // has nowhere to go. The near end was <c>-3</c>, measured when the box was built from raw
+  // lengths and the camera sat around -33; with the box reduced to ratios the camera lives at
+  // about -3.3, so that ceiling left the wheel three tenths of a unit of travel and it could never
+  // come in — reported 2026-10-26 as the wheel no longer zooming the way the vendor's own demo
+  // does. Near enough to the focal point to push the axes out of the plot, which is the state that
+  // report is asking for, and no nearer: past it the camera ends up inside the box.</p>
   C.PePlot.Option.DxZoomMin = -90
-  C.PePlot.Option.DxZoomMax = -3
-  C.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
+  C.PePlot.Option.DxZoomMax = -0.2
   C.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
+  C.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(plotWidth(), chartHeight.value), props.magnification)
 
   C.PeUserInterface.RotationDetail = E.RotationDetail.WireFrame
   C.PeUserInterface.Scrollbar.HorzScrollBar = false
@@ -497,8 +503,8 @@ function resize() {
   const width = plotWidth()
   const height = chartHeight.value
   // The zoom follows the plot's shape, so a resize re-frames rather than only re-rasterising.
-  chart.PePlot.Option.DxZoom = decayCameraZoom(width, height)
   chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
+  chart.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(width, height), props.magnification)
   control.setSize(width, height)
 }
 
@@ -641,8 +647,8 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
       chart = copy.attach(runtime.attachApi)
       enums = runtime.Enums
       configure()
-      chart.PePlot.Option.DxZoom = decayCameraZoom(width, plotHeight)
       chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
+      chart.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(width, plotHeight), props.magnification)
       // The live camera, not the props: once the surface has been dragged the props no longer
       // describe what is on screen, and a screenshot has to be the picture the user is looking at.
       if (live) {

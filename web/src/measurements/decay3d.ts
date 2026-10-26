@@ -320,7 +320,7 @@ export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
  * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
  * the fitted view.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 250 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 400 } as const
 
 /** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
 export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 180 } as const
@@ -374,9 +374,44 @@ export function decayLightVector(azimuthDeg: number, elevationDeg: number): { x:
  * <p>The ceiling is the vendor's own near-isometric end. Past about 500 % the picture grows very
  * little, because the view angle is already narrow and narrowing it further buys less and less.</p>
  */
+/**
+ * <p>How large the surface is drawn. <b>Two engine properties carry one slider</b>, because neither
+ * covers the range on its own, and the measurements that say so are worth keeping.</p>
+ *
+ * <p><c>DxFOV</c> is the lens — documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10
+ * is near isometric. It is the only lever that magnifies a box with no size of its own (see
+ * {@link decayGridAspect}), but it is <b>quantised to whole numbers and clamped at 1</b>: measured
+ * 2026-10-26, 100 %, 120 % and 150 % rendered byte-identically at 19 122 pixels of surface, as did
+ * 50 % and 100 %, while 200 % gave 48 202 and 400 % 74 184. So on its own the slider does nothing
+ * at all over seven eighths of its travel — which is how it was reported ("a magnification of 90 %
+ * results in a larger graph than 110 %", "above 200 % does not work", "lower, up to 50, does not
+ * change it").</p>
+ *
+ * <p><c>DxZoom</c> is the camera, and it fills the gaps: it moves continuously, pulls back without
+ * limit, and saturates only as it approaches the focal point. So the whole number of the lens is
+ * taken first and the camera covers the fraction, which makes the control monotonic end to end.</p>
+ *
+ * <p><b>The lens is written before the camera at every call site</b>, because setting it moves the
+ * camera — the vendor says so and the measurement agrees: written the other way round, 110 % drew a
+ * surface a quarter the size of 90 %.</p>
+ */
 export function decayFieldOfView(magnificationPercent: number): number {
-  const pct = Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
-  return pct / 100
+  return Math.max(1, Math.floor(clampMagnification(magnificationPercent) / 100))
+}
+
+/**
+ * Where the camera sits for this magnification: the base framing where the lens lands exactly on a
+ * whole number, pulled back below it and brought in above it. See {@link decayFieldOfView} for why
+ * the two share one slider.
+ */
+export function decayPulledBackZoom(baseZoom: number, magnificationPercent: number): number {
+  const magnification = clampMagnification(magnificationPercent) / 100
+  return baseZoom * (decayFieldOfView(magnificationPercent) / magnification)
+}
+
+function clampMagnification(magnificationPercent: number): number {
+  if (!Number.isFinite(magnificationPercent)) return DECAY_VIEW_MAGNIFICATION.default
+  return Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
 }
 
 

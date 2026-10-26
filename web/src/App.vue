@@ -3784,6 +3784,11 @@ function requestImpulseDecay() {
       // csdSpanSamples.
       const csdRequest = {
         fftLength: impulseCsdFftLength.value,
+        // The depth travels as a time and the server converts it with each measurement's own rate;
+        // the sample count is the fallback for a build that does not read spanMs. See
+        // ImpulseCsdRequest.SpanMs — converting here is what made a stored result flat before
+        // anything had run, and cannot be right for stacked results taken at different rates.
+        spanMs: impulseCsdSpanMs.value,
         spanSamples: csdSpanSamples(impulseCsdSpanMs.value, impulseStatus.value?.sampleRateHz ?? 0),
         blockCount: impulseCsdSlices.value,
         startBeforePeakMs: impulseCsdStartBeforePeakMs.value,

@@ -85,6 +85,12 @@ const { showPage } = useManual()
       evenly over the record as a raised floor rather than as packets at known places.
     </p>
     <p>
+      So on a run made with any PN signal the <strong>Harmonics</strong> view has nothing to draw
+      and its <strong>Autofit</strong> button is disabled. The view says which signal that run
+      played and what to measure instead; it is not a fault, and nothing is missing from the
+      measurement itself.
+    </p>
+    <p>
       The distortion packets the gate discards are a measurement in their own right, and reading them
       costs nothing extra — the sweep is already made. Each curve shows one harmonic order against
       the <strong>fundamental</strong> that produced it, in dB relative to the response at that same
@@ -366,10 +372,28 @@ const { showPage } = useManual()
       after a drag is the picture on screen, not the one the fields describe.
     </p>
     <p>
+      <strong>Surface view</strong>, collapsed below them, holds five more. <strong>Move
+      horizontally</strong> and <strong>Move vertically</strong> slide the surface within the plot
+      and <strong>Magnification</strong> sets how large it is drawn, as a percentage of the framing
+      the plot's own shape gives it &mdash; 100% is that framing, and past it the surface can run
+      off the plot, which is what the two Move sliders are then for. <strong>Rotate light
+      horizontally</strong> and <strong>Rotate light vertically</strong> move the light around the
+      box without changing its distance, so they turn it rather than dimming it. All five are
+      stored with the measurement, so a view that took some turning is kept; how dark the darkest
+      colour reads is the palette, not the light.
+    </p>
+    <p>
       Two more differences. <strong>Sonogram</strong> is always drawn flat, because it is a colour
-      map and there is no surface to turn. And <strong>Filled</strong>, <strong>Coloured
-      curves</strong> and <strong>Thick lines</strong> describe how a stack of curves is drawn, so
-      they have no effect on the 3D surface, which is always a lit solid.
+      map and there is no surface to turn. And <strong>Filled</strong> and <strong>Coloured
+      curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
+      3D surface, which is always a lit solid.
+    </p>
+    <p>
+      <strong>A decay surface cannot be overlaid.</strong> Curves can share a chart and a colour map
+      cannot, so checking history items on these two views stacks a chart each instead: the
+      measured run first, then one per checked item, each under its own name. At most four, since
+      the history list plots three at a time. Unchecking removes that chart again. Every other view
+      on this screen draws its runs as curves on one chart, as before.
     </p>
     <p>
       <strong>Points per period</strong> is how finely the burst decay is sampled in time, and so how

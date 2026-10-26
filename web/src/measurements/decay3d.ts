@@ -300,7 +300,7 @@ export function decayCameraZoom(widthPx: number, heightPx: number): number {
  * <p>The two axes have their own ranges and their own defaults, which is why they are two
  * constants: the opening view sits further up the plot than across it.</p>
  */
-export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 2 } as const
+export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 0 } as const
 
 /**
  * The same up the plot, and its range is <b>not</b> the sideways one.
@@ -311,7 +311,7 @@ export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 2 } as const
  * consequence of asking for too much here is the surface leaving the plot, which is on screen the
  * moment it happens rather than silent.</p>
  */
-export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 3 } as const
+export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
 
 /**
  * How large the surface is drawn, as a percentage of the framing the plot's own shape gives it.
@@ -320,7 +320,7 @@ export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 3 } as const
  * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
  * the fitted view.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 250, default: 140 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 250 } as const
 
 /** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
 export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 180 } as const
@@ -358,11 +358,27 @@ export function decayLightVector(azimuthDeg: number, elevationDeg: number): { x:
  * <c>DxZoomMin</c> at the far end and short of zero at the near one, where the camera would be
  * inside the box.</p>
  */
-export function decayMagnifiedZoom(baseZoom: number, magnificationPercent: number): number {
+/**
+ * <p>How large the surface is drawn, as the camera's <b>field of view</b> rather than its distance.
+ * <c>DxFOV</c> is documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10 is near
+ * isometric — a longer lens, which magnifies without moving the camera into the box.</p>
+ *
+ * <p><b>It is the field of view and not <c>DxZoom</c> because the box has no size of its own.</b>
+ * {@link decayGridAspect} returns ratios, which fixes the box's shape and leaves its scale to the
+ * engine, so the only way to fill the plot is optical. Driving <c>DxZoom</c> instead saturates as
+ * the camera nears the focal point: measured 2026-10-26 at the default box, 250 %, 400 % and 700 %
+ * were barely distinguishable, and the slider read as stuck at its own maximum — which is how it
+ * was reported ("I like to enlarge the chart, but it is already at 250 %"). The same measurement
+ * says the clamp in <c>decayMagnifiedZoom</c> was never the limit; that function is gone with it.</p>
+ *
+ * <p>The ceiling is the vendor's own near-isometric end. Past about 500 % the picture grows very
+ * little, because the view angle is already narrow and narrowing it further buys less and less.</p>
+ */
+export function decayFieldOfView(magnificationPercent: number): number {
   const pct = Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
-  const zoom = baseZoom * (100 / pct)
-  return Math.min(-1, Math.max(-90, zoom))
+  return pct / 100
 }
+
 
 /**
  * Where the light goes. One position, not one per camera angle.

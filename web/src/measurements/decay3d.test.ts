@@ -9,7 +9,7 @@ import {
   DECAY_LIGHT_RADIUS,
   DECAY_LIGHT_STRENGTH,
   decayLightVector,
-  decayMagnifiedZoom,
+  decayFieldOfView,
   DECAY_VIEW_MAGNIFICATION,
   decayCameraZoom,
   DECAY_3D_ZOOM,
@@ -309,33 +309,33 @@ describe('DECAY_LIGHT_STRENGTH', () => {
   })
 })
 
-describe('decayMagnifiedZoom', () => {
-  /** 100 % is the framing the plot's own shape gives it, which is what makes this ride on top. */
-  it('leaves the fitted distance alone at 100 %', () => {
-    expect(decayMagnifiedZoom(-34, 100)).toBeCloseTo(-34, 10)
-  })
-
-  /** More negative is further back, so magnifying divides. */
-  it('brings the camera in as the magnification rises, and pushes it back as it falls', () => {
-    expect(decayMagnifiedZoom(-34, 200)).toBeCloseTo(-17, 10)
-    expect(decayMagnifiedZoom(-34, 50)).toBeCloseTo(-68, 10)
-  })
-
+describe('decayFieldOfView', () => {
   /**
-   * The engine's own DxZoomMin is -90, and a distance at or past zero puts the camera inside the
-   * box. Both ends are clamped rather than refused: these arrive from a slider.
+   * Magnification is the camera's field of view, not its distance: the box is scale-free (see
+   * decayGridAspect), so the only way to fill the plot is optical. Driving DxZoom instead saturates
+   * as the camera nears the focal point — 250 %, 400 % and 700 % were barely distinguishable, and
+   * the slider read as stuck at its own maximum.
    */
-  it('stays inside the distances the engine will take', () => {
-    expect(decayMagnifiedZoom(-80, DECAY_VIEW_MAGNIFICATION.min)).toBe(-90)
-    expect(decayMagnifiedZoom(-1, DECAY_VIEW_MAGNIFICATION.max)).toBe(-1)
+  it("is the engine's own 45-degree view at 100 per cent", () => {
+    expect(decayFieldOfView(100)).toBeCloseTo(1, 10)
   })
 
-  it('clamps a magnification from outside the slider rather than trusting it', () => {
-    expect(decayMagnifiedZoom(-34, 10_000)).toBe(decayMagnifiedZoom(-34, DECAY_VIEW_MAGNIFICATION.max))
-    expect(decayMagnifiedZoom(-34, 0)).toBe(decayMagnifiedZoom(-34, DECAY_VIEW_MAGNIFICATION.min))
+  it('narrows the view as the magnification rises, which is what enlarges the surface', () => {
+    expect(decayFieldOfView(250)).toBeGreaterThan(decayFieldOfView(100))
+    expect(decayFieldOfView(50)).toBeLessThan(decayFieldOfView(100))
+  })
+
+  it("clamps to the slider's own range rather than trusting a stored value", () => {
+    expect(decayFieldOfView(10_000)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max))
+    expect(decayFieldOfView(0)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.min))
+  })
+
+  /** The vendor documents 8 to 10 as near-isometric, which is where the picture stops growing. */
+  it('reaches the near-isometric end the engine documents, and no further', () => {
+    expect(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max)).toBeGreaterThanOrEqual(8)
+    expect(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max)).toBeLessThanOrEqual(10)
   })
 })
-
 describe('decayExportTitle', () => {
   it('names the measurement and the view, for all three modes', () => {
     const burst = ragged()

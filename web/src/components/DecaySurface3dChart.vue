@@ -5,7 +5,7 @@ import { formatHz } from '../measurements/decay'
 import {
   decayCameraZoom,
   decayLightVector,
-  decayMagnifiedZoom,
+  decayFieldOfView,
   DECAY_LIGHT_STRENGTH,
   decayExportTitle,
   decayGridAspect,
@@ -234,7 +234,8 @@ function configure() {
   // Well below any zoom we set, so the wheel still has somewhere to go in both directions.
   C.PePlot.Option.DxZoomMin = -90
   C.PePlot.Option.DxZoomMax = -3
-  C.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(plotWidth(), chartHeight.value), props.magnification)
+  C.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
+  C.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
 
   C.PeUserInterface.RotationDetail = E.RotationDetail.WireFrame
   C.PeUserInterface.Scrollbar.HorzScrollBar = false
@@ -496,7 +497,8 @@ function resize() {
   const width = plotWidth()
   const height = chartHeight.value
   // The zoom follows the plot's shape, so a resize re-frames rather than only re-rasterising.
-  chart.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(width, height), props.magnification)
+  chart.PePlot.Option.DxZoom = decayCameraZoom(width, height)
+  chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
   control.setSize(width, height)
 }
 
@@ -639,7 +641,8 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
       chart = copy.attach(runtime.attachApi)
       enums = runtime.Enums
       configure()
-      chart.PePlot.Option.DxZoom = decayMagnifiedZoom(decayCameraZoom(width, plotHeight), props.magnification)
+      chart.PePlot.Option.DxZoom = decayCameraZoom(width, plotHeight)
+      chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
       // The live camera, not the props: once the surface has been dragged the props no longer
       // describe what is on screen, and a screenshot has to be the picture the user is looking at.
       if (live) {

@@ -57,12 +57,51 @@ function offsetAbove(main: HTMLElement, rootEl: HTMLElement): number {
 }
 
 /**
+ * The marker a view puts on a column of charts that are all one view tall.
+ *
+ * <p>A decay surface is a heatmap and cannot overlay, so comparing runs means a chart each, stacked
+ * — and each of them is meant to fit the view exactly as a lone chart does, with the stack
+ * scrolling. Measured from its own root, the second chart reserves the first one and comes out at
+ * the minimum height, the third shorter still: reported 2026-10-27 as the second, third and fourth
+ * being less high than the top one.</p>
+ *
+ * <p>So a chart inside a marked column is fitted from the <em>column's</em> top rather than its own,
+ * which gives every chart in it the same number by construction instead of by anything keeping two
+ * measurements in step. An attribute rather than a prop because the fit is a fact about where the
+ * chart sits, which the template is the one place that knows; and with no marked ancestor, or with
+ * one chart in the column, it is exactly the offset of the chart itself.</p>
+ *
+ * <p>What it costs is that each chart's own caption is not reserved, so a stack of four scrolls by
+ * four captions more than four views. That is the right way round — the caption belongs to the
+ * chart under it, and the chart is a whole view.</p>
+ */
+export const CHART_STACK_ATTRIBUTE = 'data-chart-stack'
+
+/**
+ * The element a chart's fit is measured from: the column it is stacked in, or the chart itself.
+ *
+ * <p>Separate from the measuring so it can be tested — vitest runs in the node environment here,
+ * where there is no `getBoundingClientRect` to measure with but a stand-in `closest` is two
+ * lines. It is also the one place both cases go through, so the ordinary single chart cannot be
+ * changed by accident while the stacked one is being fixed.</p>
+ */
+export function fitFrom<T extends { closest(selector: string): T | null }>(rootEl: T): T {
+  return rootEl.closest(`[${CHART_STACK_ATTRIBUTE}]`) ?? rootEl
+}
+
+function fitOffset(main: HTMLElement, rootEl: HTMLElement): number {
+  return offsetAbove(main, fitFrom(rootEl))
+}
+
+/**
  * The plot height that lets a whole result chart fit the measurement view: the window, less the
  * app header and the status bar, less the view's own padding, less whatever sits above the chart
  * in the view (`offsetAbove`), less the chart's own furniture — its readout row, the axis
  * labels it draws outside the plot, whatever else the component puts around the plot box.
  * Scrolled to the top of the view, the chart is then in view completely, and on any screen tall
- * enough the chart simply takes the height it is given.
+ * enough the chart simply takes the height it is given. A chart in a marked column of them is
+ * fitted from the column's top instead, so they are all one view tall — see
+ * {@link CHART_STACK_ATTRIBUTE}.
  *
  * Two arguments, both elements the component already has: `root` is the component's outermost
  * element and `plot` the box whose height this sets. The furniture is measured as the difference
@@ -139,7 +178,7 @@ export function useResultChartHeight(
       return
     }
 
-    let visible = main.clientHeight - verticalPadding(main) - offsetAbove(main, rootEl)
+    let visible = main.clientHeight - verticalPadding(main) - fitOffset(main, rootEl)
     // The offset already holds the whole of `above`; the caller decides how much of it to keep.
     const above = options.above?.value
     if (above) visible += fullHeightWithMargin(above) - aboveHeight(above)

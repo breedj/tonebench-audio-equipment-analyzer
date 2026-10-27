@@ -3731,18 +3731,15 @@ const impulseDecayStacks = computed(
   () => impulseDecayExtraSubjects.value.length > 0 && (impulseView.value === 'Csd' || impulseView.value === 'BurstDecay'),
 )
 
-/**
- * The drawing height a stacked decay chart keeps — <b>none</b>, so every one of them fits the view
- * exactly as a lone chart does and the stack scrolls in `main`.
- *
- * <p>They were shrunk to a shared 340 px when stacking was built, on the reasoning that four
- * charts should not be four full views. Asked for the other way on 2026-10-26: a surface shrunk to
- * fit beside its neighbours is harder to read than the same surface scrolled to, and reading one
- * is the whole point of putting two on screen. Kept as a named computed rather than deleting the
- * prop, since the prop is the general answer for a chart that is not the view's own and the two
- * sweep previews still use it.</p>
+/*
+ * How tall a stacked decay chart is drawn is not decided here any more. They were shrunk to a
+ * shared 340 px when stacking was built, on the reasoning that four charts should not be four full
+ * views; asked for the other way on 2026-10-26, since a surface shrunk to fit beside its
+ * neighbours is harder to read than the same surface scrolled to. Passing no height at all left
+ * each one fitting the view *from its own top*, so the second reserved the first and came out at
+ * the minimum — reported 2026-10-27. The column carries `data-chart-stack` instead, which fits
+ * every chart in it from the column's top; see CHART_STACK_ATTRIBUTE.
  */
-const impulseDecayChartHeight = computed<number | undefined>(() => undefined)
 
 /** One extra subject's surface for the view on screen, or null while it is still being computed. */
 function impulseDecayExtraSurface(measurementId: number | null): DecaySurface | null {
@@ -4756,7 +4753,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                      which is a flat colour map — the Canvas 2D one draws, which is also what every
                      report renders through. The two take the same props and expose the same
                      exportPng, so nothing downstream knows which is on screen. -->
-                <div v-else class="flex flex-col gap-1">
+                <!-- Marked as one column of charts: every chart inside it is fitted from this
+                     element's top rather than its own, so the stacked ones are the same height as
+                     the primary instead of each reserving the charts above it and coming out at
+                     the minimum. See CHART_STACK_ATTRIBUTE. -->
+                <div v-else data-chart-stack class="flex flex-col gap-1">
                 <!-- The primary run's name, shown only once there is something to tell it from.
                      The stacked ones carry theirs below. -->
                 <p
@@ -4787,7 +4788,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
                   :error="impulseDecayError"
-                  :page-height-px="impulseDecayChartHeight"
                   empty-message="Measure an impulse response, and this draws its decay."
                 />
                 <DecaySurfaceChart
@@ -4804,7 +4804,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
                   :error="impulseDecayError"
-                  :page-height-px="impulseDecayChartHeight"
                   empty-message="Measure an impulse response, and this draws its decay."
                   @update:rotation-deg="impulseDecayRotationDeg = $event"
                   @update:depth-percent="impulseDecayDepthPercent = $event"
@@ -4840,7 +4839,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :thick-lines="impulseThickLines"
                       :computing="false"
                       :error="null"
-                      :page-height-px="impulseDecayChartHeight"
                       empty-message="Analysing this run…"
                     />
                     <DecaySurfaceChart
@@ -4856,7 +4854,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :thick-lines="impulseThickLines"
                       :computing="false"
                       :error="null"
-                      :page-height-px="impulseDecayChartHeight"
                       empty-message="Analysing this run…"
                     />
                   </div>

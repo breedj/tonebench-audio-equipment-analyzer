@@ -9,12 +9,15 @@ REM running -- so a running instance is asked to shut down first, gracefully, ov
 REM Nothing listening is the ordinary case and is silent.
 curl -s -m 2 -o nul -X POST http://127.0.0.1:8399/api/app/shutdown 2>nul && echo Stopping a running instance...
 
+REM Both failure branches below pause, for the reason run.bat gives: started by double-clicking,
+REM the window closes the moment the batch exits and takes the message with it.
 echo Building frontend...
 pushd "%~dp0web"
 call npm run build
 if errorlevel 1 (
     echo Frontend build failed.
     popd
+    pause
     exit /b 1
 )
 popd
@@ -24,6 +27,7 @@ echo Building backend...
 dotnet build "%~dp0src\Tonebench.App\Tonebench.App.csproj" --nologo -v quiet
 if errorlevel 1 (
     echo Backend build failed.
+    pause
     exit /b 1
 )
 

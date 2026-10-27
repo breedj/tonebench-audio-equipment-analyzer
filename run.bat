@@ -9,12 +9,18 @@ REM running -- so a running instance is asked to shut down first, gracefully, ov
 REM Nothing listening is the ordinary case and is silent.
 curl -s -m 2 -o nul -X POST http://127.0.0.1:8399/api/app/shutdown 2>nul && echo Stopping a running instance...
 
+REM Both failure branches below pause. Started by double-clicking, the console window is closed the
+REM moment the batch exits -- so without it the message naming which step failed, and the compiler
+REM or bundler output above it, are gone before they can be read, and the whole thing reads as the
+REM app having crashed on startup. Reported that way on 2026-10-27. Run from a terminal the text
+REM stays anyway; there the pause costs one keypress.
 echo Building frontend...
 pushd "%~dp0web"
 call npm run build
 if errorlevel 1 (
     echo Frontend build failed.
     popd
+    pause
     exit /b 1
 )
 popd
@@ -24,6 +30,7 @@ echo Building backend...
 dotnet build "%~dp0src\Tonebench.App\Tonebench.App.csproj" --nologo -v quiet
 if errorlevel 1 (
     echo Backend build failed.
+    pause
     exit /b 1
 )
 

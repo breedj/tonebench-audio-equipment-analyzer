@@ -211,12 +211,12 @@ watch(running, (isRunning, wasRunning) => {
     </label>
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
-        Top (Ω)
-        <input :value="zTopOhms" type="number" step="any" class="tb-input" @change="onTopZChange" />
-      </label>
-      <label class="tb-field">
         Bottom (Ω)
         <input :value="zBottomOhms" type="number" step="any" class="tb-input" @change="onBottomZChange" />
+      </label>
+      <label class="tb-field">
+        Top (Ω)
+        <input :value="zTopOhms" type="number" step="any" class="tb-input" @change="onTopZChange" />
       </label>
     </div>
     <!-- The chart's one Autofit, in the first axis section rather than a scroll below the fields
@@ -238,12 +238,12 @@ watch(running, (isRunning, wasRunning) => {
   <CollapsibleSection v-if="showPhase && phaseAvailable" title="Phase axis" size="xs">
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
-        Top (°)
-        <input :value="phaseTopDeg" type="number" step="15" class="tb-input" @change="onTopPhaseChange" />
-      </label>
-      <label class="tb-field">
         Bottom (°)
         <input :value="phaseBottomDeg" type="number" step="15" class="tb-input" @change="onBottomPhaseChange" />
+      </label>
+      <label class="tb-field">
+        Top (°)
+        <input :value="phaseTopDeg" type="number" step="15" class="tb-input" @change="onTopPhaseChange" />
       </label>
     </div>
   </CollapsibleSection>

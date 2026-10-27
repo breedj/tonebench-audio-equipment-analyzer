@@ -122,7 +122,6 @@ const IMPEDANCE_COLOR = ['#111827', '#f3f4f6'] as const
 const SHORT_CAL_COLOR = ['#c2410c', '#fb923c'] as const
 const PHASE_COLOR = ['#7c3aed', '#a78bfa'] as const
 const COHERENCE_COLOR = ['#059669', '#34d399'] as const
-const DAMPING_FACTOR_COLOR = ['#2563eb', '#60a5fa'] as const
 
 /** The screen's palette, following the app theme; the export builds its own light one. See charts/palette.ts. */
 const palette = computed(() => makeChartPalette(isDark.value))
@@ -809,9 +808,15 @@ function buildOptions(width: number, height: number, p: ChartPalette, interactiv
         // reads as "no chart" rather than as an error.
         values: (_u, vals) =>
           vals.map((v) => (v == null || !(v > 0) ? '' : formatDampingFactor((props.dampingFactorNominalOhms ?? 0) / v))),
-        stroke: p.color(DAMPING_FACTOR_COLOR),
+        // Drawn in the **|Z| axis's** own colour rather than one of its own (Joost,
+        // 2026-10-27). Every other right-hand axis here is coloured to tie it to its own
+        // curve — the phase and the coherence each have one — and this axis has none:
+        // it relabels the single near-black |Z| curve, which is what the cursor readout already
+        // says by appending the DF to the ohms reading. A blue axis beside a black curve with
+        // no blue line anywhere reads as a quantity that failed to draw.
+        stroke: p.axis,
         grid: { show: false },
-        ticks: { stroke: p.color(DAMPING_FACTOR_COLOR), width: 1 },
+        ticks: { stroke: p.grid, width: p.gridWidth },
       },
       {
         scale: 'coh',

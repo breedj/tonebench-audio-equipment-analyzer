@@ -8,20 +8,11 @@ import type {
 } from '../api/client'
 import { isDelayView } from '../response/delayAxis'
 import {
-  DECAY_DEPTH_PERCENT,
-  DECAY_ROTATION_DEG,
   DEFAULT_CSD_ANALYSIS,
   csdSpanMs,
   type CsdAnalysis,
 } from './decay'
-import {
-  DECAY_LIGHT_AZIMUTH,
-  DECAY_LIGHT_ELEVATION,
-  DECAY_VIEW_MAGNIFICATION,
-  DECAY_AXIS_LENGTH_DEFAULT,
-  DECAY_VIEW_MOVE_X,
-  DECAY_VIEW_MOVE_Y,
-} from './decay3d'
+import { decayViewDefaults } from './decay3d'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -127,16 +118,9 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     // its own default because it decides what the *unfilled* stack looks like, which is a separate
     // answer and the one that applies once this is turned off.
     decayFilled: true,
-    decayRotationDeg: DECAY_ROTATION_DEG.default,
-    decayDepthPercent: DECAY_DEPTH_PERCENT.default,
-    decayMoveX: DECAY_VIEW_MOVE_X.default,
-    decayMoveY: DECAY_VIEW_MOVE_Y.default,
-    decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
-    decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
-    decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
-    decayAxisLengthX: DECAY_AXIS_LENGTH_DEFAULT.x,
-    decayAxisLengthY: DECAY_AXIS_LENGTH_DEFAULT.y,
-    decayAxisLengthZ: DECAY_AXIS_LENGTH_DEFAULT.z,
+    // The ten view sliders, spread rather than listed, so that a new measurement and the Surface
+    // view panel's Reset view button cannot come to disagree about what the default view is.
+    ...decayViewDefaults(),
     decayRangeDb: 30,
     csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,

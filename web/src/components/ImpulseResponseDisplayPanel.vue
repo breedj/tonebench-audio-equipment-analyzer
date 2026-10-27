@@ -34,6 +34,7 @@ import {
   DECAY_VIEW_MAGNIFICATION,
   DECAY_VIEW_MOVE_X,
   DECAY_VIEW_MOVE_Y,
+  decayViewDefaults,
 } from '../measurements/decay3d'
 import { harmonicsUnavailableNote } from '../measurements/harmonicsAvailability'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -154,6 +155,31 @@ const isDecayView = computed(() => view.value === 'Csd' || view.value === 'Burst
  */
 const acrossAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Time' : 'Frequency'))
 const depthAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Frequency' : 'Time'))
+
+/**
+ * Puts every one of the ten view sliders back where a new measurement starts, from the one function
+ * that also seeds a new measurement — see `decayViewDefaults`, which is where the reasoning for
+ * including Rotation and Tilt is.
+ *
+ * <p>It writes the models rather than touching the chart, so it marks the measurement dirty like
+ * any other slider, is saved like any other setting, and the chart follows because it follows them.</p>
+ */
+function resetView() {
+  const d = decayViewDefaults()
+  decayRotationDeg.value = d.decayRotationDeg
+  decayDepthPercent.value = d.decayDepthPercent
+  decayMoveX.value = d.decayMoveX
+  decayMoveY.value = d.decayMoveY
+  decayMagnification.value = d.decayMagnification
+  decayLightAzimuthDeg.value = d.decayLightAzimuthDeg
+  decayLightElevationDeg.value = d.decayLightElevationDeg
+  decayAxisLengthX.value = d.decayAxisLengthX
+  decayAxisLengthY.value = d.decayAxisLengthY
+  decayAxisLengthZ.value = d.decayAxisLengthZ
+}
+
+const resetViewTitle =
+  'Puts the camera, the box and the light back where a new measurement starts — these eight sliders, and Rotation and Tilt above them.'
 
 const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
   { value: 'Apodizing', label: 'CSD, apodizing window' },
@@ -778,6 +804,15 @@ const referenceLabel = computed(() => {
               title="How high the light sits. The distance does not change with it, so this turns the light rather than dimming it — how dark the darkest colour reads is the palette's floor, not this."
             />
           </label>
+
+          <!-- At the foot of the section rather than in its header: beside the chevron it would be
+               hit by anyone reaching to collapse the panel, and ten sliders is a lot to put back by
+               hand. It covers Rotation and Tilt too, although their sliders are above this section
+               — they are the camera, and a reset that left the box at whatever angle the last turn
+               gave it would not be handing back the view it promises. The title says so. -->
+          <button type="button" class="btn-panel-accent w-full" :title="resetViewTitle" @click="resetView">
+            Reset view
+          </button>
         </CollapsibleSection>
       </template>
 

@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { DecaySurface } from '../api/client'
-import { levelAt, orientSurface, paletteIndex, paletteLut } from './decay'
 import {
+  DECAY_DEPTH_PERCENT,
+  DECAY_ROTATION_DEG,
+  levelAt,
+  orientSurface,
+  paletteIndex,
+  paletteLut,
+} from './decay'
+import { defaultImpulseDisplay } from './impulseDisplay'
+import {
+  DECAY_AXIS_LENGTH,
+  DECAY_VIEW_MOVE_X,
+  DECAY_VIEW_MOVE_Y,
+  decayViewDefaults,
   decayExportTitle,
   DECAY_LIGHT,
   DECAY_LIGHT_AZIMUTH,
@@ -293,6 +305,87 @@ describe('decayGridAspect', () => {
       const a = decayGridAspect(lengths)
       expect(Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.z)).toBe(true)
     }
+  })
+})
+
+describe('decayViewDefaults', () => {
+  /**
+   * <b>The point of the function.</b> The Surface view panel's Reset view button writes these ten
+   * values; a new measurement opens on them too, and it has to be the same ten — a button that
+   * restored a view no measurement ever starts at would be the worse of two wrong answers. Asserted
+   * against `defaultImpulseDisplay` rather than against a copy of the figures, so the test fails if
+   * either side gains a field the other has not.
+   */
+  it('is exactly the view a new measurement opens on', () => {
+    const fresh = defaultImpulseDisplay()
+    const defaults = decayViewDefaults()
+    for (const [key, value] of Object.entries(defaults)) {
+      expect(fresh[key as keyof typeof fresh], key).toBe(value)
+    }
+  })
+
+  /** Rotation and Tilt are in it although their sliders sit above the panel the button is in. */
+  it('covers the camera as well as the box and the light', () => {
+    expect(Object.keys(decayViewDefaults()).sort()).toEqual([
+      'decayAxisLengthX',
+      'decayAxisLengthY',
+      'decayAxisLengthZ',
+      'decayDepthPercent',
+      'decayLightAzimuthDeg',
+      'decayLightElevationDeg',
+      'decayMagnification',
+      'decayMoveX',
+      'decayMoveY',
+      'decayRotationDeg',
+    ])
+  })
+
+  /**
+   * A default outside its own slider's range makes a control that cannot be returned to where it
+   * started — the slider clamps the value the moment it is dragged, and the figure it opened on is
+   * then unreachable. It fails silently, which is why it is worth a test rather than a glance.
+   */
+  it('puts every slider inside its own range', () => {
+    const d = decayViewDefaults()
+    const within = (v: number, range: { min: number; max: number }, what: string) => {
+      expect(v, what).toBeGreaterThanOrEqual(range.min)
+      expect(v, what).toBeLessThanOrEqual(range.max)
+    }
+    within(d.decayRotationDeg, DECAY_ROTATION_DEG, 'rotation')
+    within(d.decayDepthPercent, DECAY_DEPTH_PERCENT, 'tilt')
+    within(d.decayMoveX, DECAY_VIEW_MOVE_X, 'move x')
+    within(d.decayMoveY, DECAY_VIEW_MOVE_Y, 'move y')
+    within(d.decayMagnification, DECAY_VIEW_MAGNIFICATION, 'magnification')
+    within(d.decayLightAzimuthDeg, DECAY_LIGHT_AZIMUTH, 'light azimuth')
+    within(d.decayLightElevationDeg, DECAY_LIGHT_ELEVATION, 'light elevation')
+    within(d.decayAxisLengthX, DECAY_AXIS_LENGTH, 'across axis')
+    within(d.decayAxisLengthY, DECAY_AXIS_LENGTH, 'level axis')
+    within(d.decayAxisLengthZ, DECAY_AXIS_LENGTH, 'depth axis')
+  })
+
+  /**
+   * Each slider's own step has to land on its default, or the first nudge jumps to a figure the
+   * chart never opened on and there is no way back to it by dragging.
+   */
+  it('lands on each slider’s own step', () => {
+    const d = decayViewDefaults()
+    const onStep = (v: number, min: number, step: number, what: string) => {
+      const steps = (v - min) / step
+      expect(Math.abs(steps - Math.round(steps)), what).toBeLessThan(1e-9)
+    }
+    onStep(d.decayRotationDeg, DECAY_ROTATION_DEG.min, 1, 'rotation')
+    onStep(d.decayDepthPercent, DECAY_DEPTH_PERCENT.min, 1, 'tilt')
+    onStep(d.decayMoveX, DECAY_VIEW_MOVE_X.min, 0.1, 'move x')
+    onStep(d.decayMoveY, DECAY_VIEW_MOVE_Y.min, 0.1, 'move y')
+    onStep(d.decayMagnification, DECAY_VIEW_MAGNIFICATION.min, 5, 'magnification')
+    onStep(d.decayAxisLengthX, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'across axis')
+    onStep(d.decayAxisLengthY, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'level axis')
+    onStep(d.decayAxisLengthZ, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'depth axis')
+  })
+
+  /** Fresh objects: the panel writes into the models it hands back, and freezing one would throw. */
+  it('hands back a new object each time', () => {
+    expect(decayViewDefaults()).not.toBe(decayViewDefaults())
   })
 })
 

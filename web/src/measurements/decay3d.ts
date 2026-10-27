@@ -1,5 +1,7 @@
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import {
+  DECAY_DEPTH_PERCENT,
+  DECAY_ROTATION_DEG,
   levelAt,
   orientSurface,
   paletteIndex,
@@ -216,12 +218,16 @@ export interface DecayAxisLengths {
  * there is no proportion to be right and the shape is a reading preference. A flatter height makes
  * a shallow decay legible; a longer depth separates slices that overlap.</p>
  *
- * <p>The defaults are the fixed box these were measured against, so a measurement that never
- * touches them is drawn exactly as before. The camera's framing was measured against that box too
- * (see {@link DECAY_3D_ZOOM}), so stretching an axis a long way can push the surface off the plot
- * — which is what Magnification and the two Move sliders are then for.</p>
+ * <p><b>The defaults are the box Joost turned these three sliders to and asked to keep</b>
+ * (2026-10-27, with the rest of {@link decayViewDefaults}), which is a longer and considerably
+ * taller box than the one the camera's framing was originally measured against. That is safe
+ * because the framing is a function of the aspect ratios and not of these numbers — see
+ * {@link decayGridAspect}, which divides them down to a triple of order one — and because the
+ * magnification default was chosen on the same screen, in the same sitting, against this box. Any
+ * further stretching can still push the surface off the plot, which is what Magnification and the
+ * two Move sliders are then for.</p>
  */
-export const DECAY_AXIS_LENGTH_DEFAULT: DecayAxisLengths = { x: 10, y: 4.5, z: 14 }
+export const DECAY_AXIS_LENGTH_DEFAULT: DecayAxisLengths = { x: 25, y: 11.5, z: 21 }
 export const DECAY_AXIS_LENGTH = { min: 2, max: 30, step: 0.5 } as const
 
 /**
@@ -311,7 +317,7 @@ export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 0 } as const
  * consequence of asking for too much here is the surface leaving the plot, which is on screen the
  * moment it happens rather than silent.</p>
  */
-export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
+export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0.1 } as const
 
 /**
  * How large the surface is drawn, as a percentage of the framing the plot's own shape gives it.
@@ -320,13 +326,64 @@ export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
  * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
  * the fitted view.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 400 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 600 } as const
 
 /** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
-export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 180 } as const
+export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 215 } as const
 
 /** How high the light sits, in degrees above the floor plane. */
-export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 40 } as const
+export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 20 } as const
+
+/**
+ * Everything about the decay view that is a camera, a box or a light — the ten sliders, under the
+ * names the display state carries them by.
+ */
+export interface DecayViewSettings {
+  decayRotationDeg: number
+  decayDepthPercent: number
+  decayMoveX: number
+  decayMoveY: number
+  decayMagnification: number
+  decayLightAzimuthDeg: number
+  decayLightElevationDeg: number
+  decayAxisLengthX: number
+  decayAxisLengthY: number
+  decayAxisLengthZ: number
+}
+
+/**
+ * The view a measurement opens on, and the one the Surface view panel's <b>Reset view</b> button
+ * gives back.
+ *
+ * <p><b>It is one function because those have to be the same ten numbers</b>, and a button that
+ * restored a view no new measurement ever opens on would be the worse of two wrong answers.
+ * <c>defaultImpulseDisplay</c> spreads this rather than listing the fields beside it, so there is
+ * no second copy to drift — which is the trap the per-mode level memory and the impedance stimulus
+ * defaults have each already walked into, each time by writing one default in two places.</p>
+ *
+ * <p><b>Rotation and Tilt are in it although their sliders sit above the panel the button is in.</b>
+ * They are this chart's camera — Rotation swings it round the box and Tilt raises it — so a reset
+ * that left them where they were would hand back a box seen from whatever angle the last turn left,
+ * which is to say not the view it promises. The button's own title says it covers them.</p>
+ *
+ * <p>The figures are Joost's, turned on the bench and asked for as the defaults on 2026-10-27.
+ * Nothing here is derived, and nothing here can be: what makes a decay surface readable is a matter
+ * of looking at one, which is also why all ten are sliders rather than boxes.</p>
+ */
+export function decayViewDefaults(): DecayViewSettings {
+  return {
+    decayRotationDeg: DECAY_ROTATION_DEG.default,
+    decayDepthPercent: DECAY_DEPTH_PERCENT.default,
+    decayMoveX: DECAY_VIEW_MOVE_X.default,
+    decayMoveY: DECAY_VIEW_MOVE_Y.default,
+    decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
+    decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
+    decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
+    decayAxisLengthX: DECAY_AXIS_LENGTH_DEFAULT.x,
+    decayAxisLengthY: DECAY_AXIS_LENGTH_DEFAULT.y,
+    decayAxisLengthZ: DECAY_AXIS_LENGTH_DEFAULT.z,
+  }
+}
 
 /**
  * How far the light sits from the box — fixed, and not a control.

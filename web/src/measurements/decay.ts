@@ -58,9 +58,22 @@ export function decayLayout(
   }
 }
 
-/** How far the stack leans, in degrees from straight down, and how deep it runs. */
-export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -35 } as const
-export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 59 } as const
+/**
+ * How far the stack leans, in degrees from straight down, and how deep it runs.
+ *
+ * <p><b>The two defaults are a view Joost turned the chart to and asked to keep</b> (2026-10-27),
+ * not a derived figure — which is the only kind of answer available here, since what makes a decay
+ * readable is a matter of looking at one. They are the GPU surface's camera as much as the flat
+ * projection's geometry, and both charts take them, so the one picture is the one both open on.</p>
+ *
+ * <p>Changing these reaches a measurement that has never stored a view, and nothing else: the two
+ * fields are restored from <c>params_json</c> where they are present, so a measurement saved with
+ * the old angles keeps them. The way back to these is the Surface view panel's <b>Reset view</b>
+ * button — see <c>decayViewDefaults</c>, which is what that button and a new measurement both
+ * read.</p>
+ */
+export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -17 } as const
+export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 48 } as const
 
 /**
  * How far sideways the lean may ever take the stack, as a fraction of the width. The curves get

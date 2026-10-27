@@ -4622,24 +4622,22 @@ onBeforeUnmount(() => stopLoadPolling?.())
           <template v-if="isImpulseResponse">
             <MeasurementLayout>
               <template #rail>
+                <!-- SINGLE / STOP. There is deliberately no RUN here (Joost, 2026-10-27): a
+                     continuous impulse run repeats a sweep that takes seconds, re-deconvolves it
+                     and recomputes whichever decay surface is on screen, and the result it
+                     replaces is the one you were reading. Every other kind's SINGLE sits beside a
+                     green RUN and so is blue; alone, it is the button that starts the measurement,
+                     which on every screen here is the green one. The server still accepts a
+                     continuous request — nothing in the UI now sends one. -->
                 <div class="flex gap-3">
                   <button
                     type="button"
                     class="btn-run-go"
                     :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
-                    :title="impulseConfigPanel?.invalid ?? 'Sweeps a chirp and re-measures the impulse response until you press Stop.'"
-                    @click="runImpulseResponse(true)"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
-                    Run
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-run-single"
-                    :disabled="impulseRunning || !!impulseConfigPanel?.invalid"
                     :title="impulseConfigPanel?.invalid ?? 'Measures the impulse response once and stops.'"
                     @click="runImpulseResponse(false)"
                   >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
                     Single
                   </button>
                   <button
@@ -4707,7 +4705,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <FrequencyResponseChart
                   v-else-if="impulseView === 'Response'"
                   ref="impulseResponseChart"
-                  run-label="Run"
+                  run-label="Single"
                   v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   :annotation-view="'Response'"

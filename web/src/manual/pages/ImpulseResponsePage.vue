@@ -17,6 +17,13 @@ const { showPage } = useManual()
       stops — a cumulative spectral decay and a burst decay.
     </p>
 
+    <p>
+      <strong>Single</strong> and <strong>Stop</strong> are the only two buttons, where every other
+      measurement screen also offers <strong>Run</strong>. That is deliberate: one pass here is a
+      sweep of a second or more, a deconvolution and — if a decay view is open — a whole surface
+      recomputed, and what each pass replaces is the picture you were reading.
+    </p>
+
     <p class="manual-wiring-links">
       <strong>How to wire it:</strong>
       <button type="button" class="manual-link" @click="showPage('wiring-line-level')">
@@ -392,6 +399,13 @@ const { showPage } = useManual()
       sets how large it is drawn, which is why the two sit in the same section. Unlike the other
       five these rebuild the chart rather than turning it, so they take a moment to land: the box's
       proportions are fixed when the scene is built and cannot be changed after it.
+    </p>
+    <p>
+      <strong>Reset view</strong>, at the foot of the section, puts all ten back where a new
+      measurement starts &mdash; the eight in the section, and Rotation and Tilt above it, which are
+      the camera and so belong to the same view. It is a change like any other slider's: it marks
+      the measurement unsaved and is kept when you save it. Nothing already saved is touched by it,
+      or by a later change to what the defaults are.
     </p>
     <p>
       A <strong>colour key</strong> stands to the right of the box, labelled in dB, showing the

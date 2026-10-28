@@ -78,7 +78,7 @@ const { showPage } = useManual()
       backstop is still live), the Measurements panel says which points were read across it.
     </p>
 
-    <h2>Output impedance sweep settings</h2>
+    <h2>Sweep settings</h2>
     <table>
       <thead>
         <tr>

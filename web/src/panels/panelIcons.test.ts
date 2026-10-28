@@ -64,7 +64,6 @@ describe('panelIconFor', () => {
       'Poles and zeros',
       'Pole/zero range (Hz)',
       'Phase range (°)',
-      'Output impedance sweep',
       'Notes',
       'Level range',
       'History',

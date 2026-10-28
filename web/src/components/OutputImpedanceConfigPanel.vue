@@ -365,7 +365,7 @@ function run() {
 </script>
 
 <template>
-  <CollapsibleSection title="Output impedance sweep">
+  <CollapsibleSection title="Sweep">
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field" title="Lowest frequency measured. The sweep steps upward from here.">
         Start (Hz)

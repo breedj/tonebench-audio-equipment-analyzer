@@ -137,7 +137,6 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   sweep: { icon: 'steps', tone: 'orange' },
   'stepped sweep': { icon: 'steps', tone: 'orange' },
   'crosstalk sweep': { icon: 'steps', tone: 'orange' },
-  'output impedance sweep': { icon: 'steps', tone: 'orange' },
   'fft settings': { icon: 'sliders', tone: 'orange' },
   generator: { icon: 'sine', tone: 'orange' },
   advanced: { icon: 'sliders', tone: 'amber' },

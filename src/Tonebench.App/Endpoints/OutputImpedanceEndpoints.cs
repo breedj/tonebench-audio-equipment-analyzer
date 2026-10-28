@@ -26,7 +26,10 @@ public static class OutputImpedanceEndpoints
             if (!EnumParsing.TryParse(request.Window, WindowType.Hann, out WindowType window, out var windowError))
                 return Results.BadRequest(windowError);
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit, window);
+            if (!EnumParsing.TryParse(request.Stimulus, ImpedanceStimulus.SteppedSine, out ImpedanceStimulus stimulus, out var stimulusError))
+                return Results.BadRequest(stimulusError);
+
+            var measurement = request.ToMeasurement(levelMode, levelUnit, window, stimulus);
 
             try
             {
@@ -121,13 +124,21 @@ public sealed record OutputImpedanceStartRequest(
     bool AdaptiveResolution = true,
     int FftSize = OutputImpedanceRequest.DefaultFftSize,
     string? Window = null,
-    double SampleRateHz = OutputImpedanceRequest.DefaultSampleRateHz)
+    double SampleRateHz = OutputImpedanceRequest.DefaultSampleRateHz,
+    /// <summary>Chirp, PinkNoise or SteppedSine. Absent means the stepped sine, which is what this measurement was before the broadband pair existed.</summary>
+    string? Stimulus = null,
+    double FrequencySpanHz = OutputImpedanceRequest.DefaultFrequencySpanHz,
+    int ResolutionMultiplier = 1,
+    double ChirpStartHz = OutputImpedanceRequest.DefaultChirpStartHz,
+    double NoiseCutoffHz = OutputImpedanceRequest.DefaultNoiseCutoffHz,
+    int SmoothingDenominator = OutputImpedanceRequest.DefaultSmoothingDenominator)
 {
     /// <summary>
     /// The measurement this request asks for, written out field by field so a field left out is a
     /// test failure rather than a silent default — see <see cref="SteppedResponseStartRequest.ToMeasurement"/>.
     /// </summary>
-    public OutputImpedanceRequest ToMeasurement(ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, WindowType window) =>
+    public OutputImpedanceRequest ToMeasurement(
+        ThdSweepLevelMode levelMode, ThdSweepLevelUnit levelUnit, WindowType window, ImpedanceStimulus stimulus) =>
         new(StartFreqHz,
             EndFreqHz,
             StepsPerOctave,
@@ -142,5 +153,11 @@ public sealed record OutputImpedanceStartRequest(
             window,
             AverageCount,
             SampleRateHz,
-            AdaptiveResolution);
+            AdaptiveResolution,
+            stimulus,
+            FrequencySpanHz,
+            ResolutionMultiplier,
+            ChirpStartHz,
+            NoiseCutoffHz,
+            SmoothingDenominator);
 }

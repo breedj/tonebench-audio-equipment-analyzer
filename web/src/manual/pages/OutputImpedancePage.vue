@@ -10,9 +10,9 @@ const { showPage } = useManual()
 
     <p>
       An amplifier's output impedance against frequency, and the damping factor it implies. The
-      amplifier's gain is measured with a stepped sine at a set output level into two different
-      loads, and the difference between the two says how much of the output is being lost across
-      the amplifier's own output impedance. With <code>q = G<sub>2</sub> / G<sub>1</sub></code>:
+      amplifier's gain is measured at a set output level into two different loads, and the
+      difference between the two says how much of the output is being lost across the amplifier's
+      own output impedance. With <code>q = G<sub>2</sub> / G<sub>1</sub></code>:
     </p>
 
     <p class="manual-wiring-links">
@@ -88,12 +88,51 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
+          <td>Stimulus</td>
+          <td>
+            <strong>Chirp sweep</strong> or <strong>Pink noise</strong> measure the whole band from
+            one record per pass — seconds rather than minutes. <strong>Stepped sine</strong> walks a
+            grid of tones, one capture each. See <em>Which stimulus</em> below: on this measurement
+            the choice is not only about speed.
+          </td>
+        </tr>
+        <tr>
+          <td>Frequency span (Hz) · Resolution</td>
+          <td>
+            Broadband only. The span is what is analysed and the sample rate is twice it, so 24 kHz
+            reaches about 22.8 kHz. Resolution multiplies the record length, i.e. divides the bin
+            size, at a proportional cost in time per record.
+          </td>
+        </tr>
+        <tr>
+          <td>Chirp start · Pink noise cut-off (Hz)</td>
+          <td>
+            Where the sweep begins, or where the pink sequence stops rising towards DC. Below either,
+            the stimulus puts no useful energy and nothing is measured.
+          </td>
+        </tr>
+        <tr>
+          <td>Smoothing</td>
+          <td>
+            Broadband only, and on this measurement it is about signal-to-noise rather than looks —
+            see <em>Which stimulus</em>. 1/3 octave by default, which is the widest band offered.
+          </td>
+        </tr>
+        <tr>
+          <td>Records per pass</td>
+          <td>
+            Broadband only — how many whole records each pass folds into one estimate. The label
+            reads <em>Averages per point</em> on a stepped run, where the count is paid at every
+            point of the grid instead.
+          </td>
+        </tr>
+        <tr>
           <td>Start / End (Hz)</td>
-          <td>The frequency range, stepped upward. Anything above 98% of Nyquist is dropped, and the panel warns when that will truncate the run.</td>
+          <td>Stepped sine only. The frequency range, stepped upward. Anything above 98% of Nyquist is dropped, and the panel warns when that will truncate the run.</td>
         </tr>
         <tr>
           <td>Steps per octave</td>
-          <td>Point density. Every point is its own capture, twice over — the estimate underneath is worth reading first. The tutorial uses 3.</td>
+          <td>Stepped sine only. Point density: every point is its own capture, twice over — the estimate underneath is worth reading first. The tutorial uses 3.</td>
         </tr>
         <tr>
           <td>Level mode</td>
@@ -178,6 +217,52 @@ const { showPage } = useManual()
       comes out with its phase: the coil is recovered at its true size, and the Measurements panel
       quotes the series R and L at the top of the band. It costs one cable. Both methods agree on a
       resistive Zout.
+    </p>
+
+    <h2>Which stimulus</h2>
+    <p>
+      This measurement is a <em>difference between two nearly equal numbers</em>, which is what makes
+      the choice here more than a question of speed. Driving 8&nbsp;Ω and then 4&nbsp;Ω, the gain
+      ratio is <code>q ≈ 1 − Zout/8</code> — so <strong>a milliohm is about a millidecibel</strong>,
+      and anything that moves between the two passes lands straight in the answer.
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr>
+          <th>Zout</th>
+          <th>Gain ratio between the passes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>0.028 Ω (a solid-state amplifier)</td><td>−0.030 dB</td></tr>
+        <tr><td>0.94 Ω (a push-pull EL84, DF 8.5)</td><td>−0.868 dB</td></tr>
+      </tbody>
+    </table>
+    <p>
+      A <strong>chirp</strong> or <strong>pink noise</strong> measures each pass in one record, so a
+      pass is seconds rather than minutes. That is worth more than the time it saves: between the two
+      passes you are changing the load by hand on an amplifier held at level, and a stepped sweep
+      leaves it warming for minutes on each side of that change. It also gives every frequency rather
+      than the points on a grid.
+    </p>
+    <p>
+      What it costs is signal per bin. A broadband stimulus spreads its energy over the whole span,
+      where a tone puts all of it on the one bin being read, so a single bin is nowhere near good
+      enough for a millidecibel. <strong>Smoothing is what buys that back</strong> — an RMS over the
+      several hundred bins a 1/3-octave band spans is worth some 28 dB — which is why the smoothing
+      default here is the widest band on offer and why the record count starts at ten. Narrow either
+      and the curve gets noisier in milliohms, not just in looks.
+    </p>
+    <p>
+      So: for a <strong>tube amplifier</strong>, whose Zout is a sizeable fraction of an ohm, the
+      broadband pair are comfortable and much quicker. For a <strong>solid-state amplifier</strong>
+      with a damping factor in the hundreds, the stepped sine's energy-on-one-bin is the better
+      reading, and is what the measurement defaults to on any measurement saved before the broadband
+      pair existed. When in doubt, run both: they measure the same thing and should agree.
+    </p>
+    <p>
+      The <strong>pink sequence is deterministic</strong>, so both passes play an identical stimulus
+      and it cancels exactly in the ratio — it is not a different random noise each time.
     </p>
 
     <h2>What the chart shows</h2>

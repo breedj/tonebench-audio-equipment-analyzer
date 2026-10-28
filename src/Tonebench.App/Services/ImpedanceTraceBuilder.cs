@@ -106,9 +106,27 @@ internal static class ImpedanceTraceBuilder
         ImpedanceTraceKind kind,
         Complex[] values,
         double[] coherence,
+        int displayColumns) =>
+        Build(
+            request.BinHz, request.AnalysisLowHz, request.AnalysisHighHz, request.SmoothingDenominator,
+            kind, values, coherence, displayColumns);
+
+    /// <summary>
+    /// The same build from the four numbers it actually reads, for a caller that is not an
+    /// <see cref="ImpedanceRequest"/> — the output-impedance measurement's broadband path, which
+    /// solves the very same <c>Z</c> from a ratio of two passes and must smooth and decimate it
+    /// identically or the two screens would disagree about one curve.
+    /// </summary>
+    public static ImpedanceTrace Build(
+        double binHz,
+        double analysisLowHz,
+        double analysisHighHz,
+        int smoothingDenominator,
+        ImpedanceTraceKind kind,
+        Complex[] values,
+        double[] coherence,
         int displayColumns)
     {
-        double binHz = request.BinHz;
         int binCount = values.Length;
 
         var magnitude = new double[binCount];
@@ -124,19 +142,19 @@ internal static class ImpedanceTraceBuilder
         // holding one such bin *is* that bin. Measured 2026-10-21 on a 1 Ω fixture: the last columns
         // read 4.37 Ω at 1/3 octave against a true 1.06, while 1/48 — whose band reaches 3 % past
         // each bin rather than 12 % — read 1.07 and smoothing None read 1.14.
-        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
-        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
+        int firstBin = Math.Max(1, (int)Math.Ceiling(analysisLowHz / binHz));
+        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(analysisHighHz / binHz));
         if (lastBin <= firstBin)
             lastBin = Math.Min(binCount - 1, firstBin + 1);
 
         var band = new FractionalOctaveSmoother.Band(firstBin, lastBin);
-        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, request.SmoothingDenominator, band);
+        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, smoothingDenominator, band);
 
         // The angle over the same bands, as a vector mean — see FractionalOctaveSmoother.SmoothPhaseDeg.
         // Smoothed because the magnitude is: a column whose level is an RMS over ten bins and whose
         // angle is the raw centre bin of those ten draws a readable curve beside an unreadable one,
         // from one capture.
-        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, request.SmoothingDenominator, band);
+        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, smoothingDenominator, band);
 
         var traceDb = new double[binCount];
         for (int k = 0; k < binCount; k++)

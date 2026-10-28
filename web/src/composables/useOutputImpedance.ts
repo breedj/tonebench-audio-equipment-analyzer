@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import { api, type ImpedanceTraceJson, type OutputImpedanceStartRequest, type OutputImpedanceStatus } from '../api/client'
 import { ResponsePhase, type ImpedanceFrame, type ImpedanceProgressFrame } from '../streaming/protocol'
+import type { ImpedanceStimulusName } from '../api/client'
 import type { ImpedanceTrace } from './useImpedance'
 
 /**
@@ -17,9 +18,19 @@ import type { ImpedanceTrace } from './useImpedance'
 const running = ref(false)
 const phase = ref<ResponsePhase>(ResponsePhase.Idle)
 const passesCompleted = ref(0)
-const pointsMeasured = ref(0)
-/** Over both passes. */
-const pointCount = ref(0)
+/**
+ * Points on the tone grid, or **null** on a chirp or noise run, which folds whole records into one
+ * estimate and has no grid at all. Null rather than zero, and the progress line branches on that
+ * rather than on the phase: zero is a stepped run that has measured nothing yet.
+ */
+const pointsMeasured = ref<number | null>(null)
+/** Over both passes; null on a broadband run. */
+const pointCount = ref<number | null>(null)
+/** What the run on screen was played with, so the progress line can say records or points. */
+const stimulus = ref<ImpedanceStimulusName>('SteppedSine')
+/** Records folded in so far on a broadband pass, and how many it will take. */
+const averagesTaken = ref(0)
+const averageCount = ref(0)
 const generatorAmpDbv = ref(0)
 const inputRangeDbv = ref<number | null>(null)
 const binHz = ref(0)
@@ -74,24 +85,50 @@ function passOf(points: number, total: number): { pass: 1 | 2; index: number; pe
   return points < perPass ? { pass: 1, index: points, perPass } : { pass: 2, index: points - perPass, perPass }
 }
 
+/** Which load the run is on, from the passes it has finished. */
+function passLabel(): 'First' | 'Second' {
+  return passesCompleted.value === 0 ? 'First' : 'Second'
+}
+
 const progressLabel = computed(() => {
   if (phase.value === ResponsePhase.DeterminingLevel) return 'Determining generator level'
   if (phase.value === ResponsePhase.DeterminingRange) return 'Determining input range'
   if (phase.value === ResponsePhase.WaitingForLoadChange) return 'First pass done · change the load, then press CONTINUE'
 
+  // A broadband run has no grid: it reports the records it has folded into one estimate. Keyed on
+  // the null point count rather than on the stimulus, so a run this browser found already going is
+  // described correctly before any settings have been read.
+  const stepped = pointCount.value !== null
+
   if (phase.value === ResponsePhase.Sweeping) {
-    if (pointCount.value <= 0) return 'Sweeping'
-    const { pass, index, perPass } = passOf(pointsMeasured.value, pointCount.value)
+    if (!stepped) {
+      if (averageCount.value <= 0) return `${passLabel()} load`
+      return `${passLabel()} load · record ${Math.min(averagesTaken.value + 1, averageCount.value)} of ${averageCount.value}`
+    }
+
+    if (pointCount.value! <= 0) return 'Sweeping'
+    const { pass, index, perPass } = passOf(pointsMeasured.value ?? 0, pointCount.value!)
     return `${pass === 1 ? 'First' : 'Second'} load · point ${Math.min(index + 1, perPass)} of ${perPass}`
   }
 
-  if (phase.value === ResponsePhase.Finished && pointCount.value > 0) {
-    return `Finished · ${pointCount.value / 2} points, both passes`
+  if (phase.value === ResponsePhase.Finished) {
+    if (!stepped) {
+      return averageCount.value > 0
+        ? `Finished · ${averageCount.value} ${averageCount.value === 1 ? 'record' : 'records'}, both passes`
+        : 'Finished · both passes'
+    }
+    if (pointCount.value! > 0) return `Finished · ${pointCount.value! / 2} points, both passes`
   }
 
   if (phase.value === ResponsePhase.Cancelled) {
-    if (passesCompleted.value === 0 && pointsMeasured.value === 0) return 'Cancelled'
-    const { pass, index, perPass } = passOf(pointsMeasured.value, pointCount.value)
+    if (!stepped) {
+      return passesCompleted.value === 0
+        ? `Stopped in the first pass after ${averagesTaken.value} of ${averageCount.value} records`
+        : `Stopped in the second pass after ${averagesTaken.value} of ${averageCount.value} records`
+    }
+
+    if (passesCompleted.value === 0 && (pointsMeasured.value ?? 0) === 0) return 'Cancelled'
+    const { pass, index, perPass } = passOf(pointsMeasured.value ?? 0, pointCount.value!)
     return pass === 1
       ? `Stopped in the first pass after ${index} of ${perPass} points`
       : `Stopped in the second pass after ${index} of ${perPass} points`
@@ -137,6 +174,9 @@ function applyStatus(status: OutputImpedanceStatus) {
   passesCompleted.value = status.passesCompleted
   pointsMeasured.value = status.pointsMeasured
   pointCount.value = status.pointCount
+  stimulus.value = status.stimulus ?? 'SteppedSine'
+  averagesTaken.value = status.averagesTaken ?? 0
+  averageCount.value = status.averageCount ?? 0
   generatorAmpDbv.value = status.generatorAmpDbv
   inputRangeDbv.value = status.inputRangeDbv
   binHz.value = status.binHz
@@ -180,8 +220,15 @@ function ingestProgress(frame: ImpedanceProgressFrame) {
   // The level and range probes reuse this frame with counts of their own.
   if (frame.phase === ResponsePhase.DeterminingLevel || frame.phase === ResponsePhase.DeterminingRange) return
 
-  pointsMeasured.value = frame.taken
-  pointCount.value = frame.total
+  if (pointCount.value === null) {
+    // A broadband run: the wire's two ints are records, not points. The grid stays null so the
+    // progress line goes on reading records rather than inventing a point count from them.
+    averagesTaken.value = frame.taken
+    averageCount.value = Math.max(averageCount.value, frame.total)
+  } else {
+    pointsMeasured.value = frame.taken
+    pointCount.value = frame.total
+  }
   if (frame.phase === ResponsePhase.WaitingForLoadChange) passesCompleted.value = Math.max(passesCompleted.value, 1)
 }
 
@@ -193,6 +240,9 @@ export function useOutputImpedance() {
     passesCompleted,
     pointsMeasured,
     pointCount,
+    stimulus,
+    averagesTaken,
+    averageCount,
     generatorAmpDbv,
     inputRangeDbv,
     binHz,
@@ -221,8 +271,13 @@ export function useOutputImpedance() {
       warning.value = null
       trace.value = null
       passesCompleted.value = 0
-      pointsMeasured.value = 0
-      pointCount.value = 0
+      // Null until the start answers, and left null for a broadband run: the point counts are
+      // what the progress line branches on, so a zero here would read as a stepped run.
+      pointsMeasured.value = null
+      pointCount.value = null
+      stimulus.value = req.stimulus ?? 'SteppedSine'
+      averagesTaken.value = 0
+      averageCount.value = req.averageCount
       medianOhms.value = null
       zoutAt1kOhms.value = null
       dampingFactorAt1k.value = null
@@ -239,7 +294,12 @@ export function useOutputImpedance() {
       try {
         const started = await api.startOutputImpedance(req)
         sampleRateHz.value = started.sampleRateHz
-        pointCount.value = started.pointCount * started.passCount
+        averageCount.value = started.averageCount
+        // A broadband run answers with no grid at all, and its point count stays null.
+        if (started.pointCount > 0) {
+          pointsMeasured.value = 0
+          pointCount.value = started.pointCount * started.passCount
+        }
         return started
       } catch (e) {
         running.value = false

@@ -991,6 +991,8 @@ const {
   phase: outputImpedancePhase,
   pointsMeasured: outputImpedancePointsMeasured,
   pointCount: outputImpedancePointCount,
+  averagesTaken: outputImpedanceAveragesTaken,
+  averageCount: outputImpedanceAverageCount,
   waiting: outputImpedanceWaiting,
   trace: outputImpedanceTrace,
   traces: outputImpedanceTraces,
@@ -1013,6 +1015,20 @@ const {
   refresh: refreshOutputImpedance,
   switchOwner: switchOutputImpedanceOwner,
 } = useOutputImpedance()
+
+/**
+ * What the output-impedance progress bar counts. A stepped run has a grid and counts points over
+ * both passes; a chirp or noise run has no grid at all and counts the records it has folded into one
+ * estimate — so the bar follows the same null point count the progress line branches on, rather than
+ * sitting at zero for the whole run the way the impedance bar once did.
+ */
+const outputImpedanceProgressDone = computed(() =>
+  outputImpedancePointCount.value === null ? outputImpedanceAveragesTaken.value : outputImpedancePointsMeasured.value ?? 0,
+)
+
+const outputImpedanceProgressTotal = computed(() =>
+  outputImpedancePointCount.value === null ? outputImpedanceAverageCount.value : outputImpedancePointCount.value,
+)
 
 /**
  * A stepped-sine impedance run is single-shot, so the continuous RUN button goes away and the
@@ -5491,12 +5507,12 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <MeasurementStatusBar
                   :tone="outputImpedanceTone"
                   :label="outputImpedanceStatusHeadline"
-                  :done="outputImpedancePointsMeasured"
-                  :total="outputImpedancePointCount"
+                  :done="outputImpedanceProgressDone"
+                  :total="outputImpedanceProgressTotal"
                 >
-                  <span v-if="outputImpedancePointCount > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
-                    {{ Math.min(outputImpedancePointsMeasured, outputImpedancePointCount) }} /
-                    {{ outputImpedancePointCount }}
+                  <span v-if="outputImpedanceProgressTotal > 0" class="font-mono text-neutral-700 dark:text-neutral-200">
+                    {{ Math.min(outputImpedanceProgressDone, outputImpedanceProgressTotal) }} /
+                    {{ outputImpedanceProgressTotal }}
                   </span>
                   <span v-if="outputImpedanceStatusDetail">{{ outputImpedanceStatusDetail }}</span>
                   <span v-if="Number.isFinite(outputImpedanceGeneratorAmpDbv) && outputImpedanceTrace">

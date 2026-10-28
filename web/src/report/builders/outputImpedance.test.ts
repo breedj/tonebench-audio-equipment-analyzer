@@ -36,6 +36,9 @@ const zout = trace([20, 1000, 20000], [0.028, 0.028, 0.19], [0, 0, 81.5])
 describe('outputImpedanceSettingsRows', () => {
   it('labels the run the way the config panel does, method included', () => {
     expect(rowsToObject(outputImpedanceSettingsRows(params))).toEqual({
+      // Printed on every run now that there is a choice, and a measurement saved before the
+      // broadband pair existed carries no stimulus field at all — which reads as the stepped sine.
+      Stimulus: 'Stepped sine',
       Sweep: '20.00 Hz – 20.0 kHz',
       'Steps per octave': '3',
       Method: 'Complex — right channel is the reference, Zout with phase',
@@ -47,6 +50,31 @@ describe('outputImpedanceSettingsRows', () => {
       'Generator level': '-19.40 dBV',
       'Input range (both passes)': '18 dBV',
     })
+  })
+
+  it('describes a broadband run by its span and band, not by a grid it has not got', () => {
+    const broadband = JSON.stringify({
+      ...JSON.parse(params),
+      stimulus: 'PinkNoise',
+      frequencySpanHz: 24000,
+      resolutionMultiplier: 1,
+      noiseCutoffHz: 5,
+      smoothingDenominator: 3,
+      averageCount: 10,
+    })
+
+    const rows = rowsToObject(outputImpedanceSettingsRows(broadband))
+    expect(rows.Stimulus).toBe('Pink noise')
+    expect(rows.Span).toBe('24.0 kHz')
+    expect(rows['Pink noise cut-off']).toBe('5.00 Hz')
+    expect(rows.Smoothing).toBe('1/3 octave')
+    expect(rows['Records per pass']).toBe('10')
+
+    // The stepped grid's own rows say nothing about a run that never walked one.
+    expect(rows.Sweep).toBeUndefined()
+    expect(rows['Steps per octave']).toBeUndefined()
+    expect(rows.Resolution).toBeUndefined()
+    expect(rows.Averages).toBeUndefined()
   })
 
   it('returns nothing for JSON it cannot read', () => {

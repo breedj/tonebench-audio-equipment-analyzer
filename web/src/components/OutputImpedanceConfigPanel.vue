@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, watch } from 'vue'
 import type {
+  ImpedanceStimulusName,
   OutputImpedanceParameters,
   OutputImpedanceStartRequest,
   WindowType,
 } from '../api/client'
+import {
+  isBroadband,
+  readSettings,
+  STIMULI,
+  STIMULUS_DEFAULTS,
+  toStoredWithActive,
+  defaultsByStimulus,
+} from '../outputImpedance/stimulusSettings'
 import {
   activeLevel,
   applyStoredLevel,
@@ -122,6 +131,20 @@ const form = reactive({
   nominalOhms: 8,
   /** Off by default: the referenced method needs the right output looped to the right input. */
   rightChannelIsReference: false,
+  /**
+   * What to play. The stepped sine is what this measurement could always do; a new measurement is
+   * *seeded* with the broadband default by the server, and a type stored before the pair existed
+   * reads its stimulus back as absent and stays here.
+   */
+  stimulus: 'SteppedSine' as ImpedanceStimulusName,
+  /** The broadband span; the sample rate is twice it. */
+  frequencySpanHz: 24000 as number,
+  resolutionMultiplier: 1,
+  chirpStartHz: 10,
+  noiseCutoffHz: 5,
+  smoothingDenominator: STIMULUS_DEFAULTS.SteppedSine.smoothingDenominator,
+  /** Averaging and smoothing parked per stimulus — see outputImpedance/stimulusSettings.ts. */
+  byStimulus: defaultsByStimulus(),
   averageCount: 1,
   /**
    * On by default, unlike the THD sweep's. A fixed size is chosen for the bottom of the range and
@@ -139,7 +162,8 @@ const form = reactive({
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
 // Suppresses the dirty watcher while applyStoredParams writes the form — loading a type's saved
-// settings is the opposite of an unsaved edit.
+// settings is the opposite of an unsaved edit. Also read by the stimulus watcher, which must not
+// park a pair that belongs to the stimulus being loaded over.
 let restoring = false
 
 function applyStoredParams(paramsJson: string) {
@@ -174,6 +198,29 @@ function applyStoredParams(paramsJson: string) {
   if (typeof stored.rightChannelIsReference === 'boolean') form.rightChannelIsReference = stored.rightChannelIsReference
   if (typeof stored.averageCount === 'number') form.averageCount = stored.averageCount
   if (typeof stored.adaptiveResolution === 'boolean') form.adaptiveResolution = stored.adaptiveResolution
+
+  // Absent or unknown means the stepped sine: a measurement stored before the broadband pair
+  // existed goes on doing exactly what it did, which is the other half of the rule that says a
+  // *new* measurement is seeded with this build's default.
+  form.stimulus = STIMULI.includes(stored.stimulus as ImpedanceStimulusName)
+    ? (stored.stimulus as ImpedanceStimulusName)
+    : 'SteppedSine'
+  if (typeof stored.frequencySpanHz === 'number' && stored.frequencySpanHz > 0) form.frequencySpanHz = stored.frequencySpanHz
+  if (typeof stored.resolutionMultiplier === 'number' && stored.resolutionMultiplier > 0)
+    form.resolutionMultiplier = stored.resolutionMultiplier
+  if (typeof stored.chirpStartHz === 'number' && stored.chirpStartHz > 0) form.chirpStartHz = stored.chirpStartHz
+  if (typeof stored.noiseCutoffHz === 'number' && stored.noiseCutoffHz > 0) form.noiseCutoffHz = stored.noiseCutoffHz
+  if (typeof stored.smoothingDenominator === 'number' && stored.smoothingDenominator > 0)
+    form.smoothingDenominator = stored.smoothingDenominator
+
+  // Defaults, then what was stored, then the authoritative pair overlaid onto the selected slot —
+  // so the two can never disagree about the stimulus that is selected.
+  form.byStimulus = readSettings(stored.byStimulus, form.stimulus, {
+    averageCount: form.averageCount,
+    smoothingDenominator: form.smoothingDenominator,
+  })
+  form.averageCount = form.byStimulus[form.stimulus].averageCount
+  form.smoothingDenominator = form.byStimulus[form.stimulus].smoothingDenominator
 
   // The form writes land in this tick; the watcher runs on the next one, so the flag has to survive
   // until then.
@@ -219,6 +266,48 @@ const levelUnits = computed(() => levelUnitsFor(form.level.mode))
 
 /** Loaded, then open: the grid is always walked twice. */
 const passCount = 2
+
+/** A tone grid rather than one broadband record per pass. */
+const usesStepped = computed(() => form.stimulus === 'SteppedSine')
+const measuresBroadband = computed(() => isBroadband(form.stimulus))
+const usesChirp = computed(() => form.stimulus === 'Chirp')
+const usesNoise = computed(() => form.stimulus === 'PinkNoise')
+
+/**
+ * Parks the stimulus being left and loads the one being arrived at, so each keeps its own averaging
+ * and smoothing — the impedance panel's own watcher. Not under `restoring`, because applyStoredParams
+ * writes the stimulus and the pair together and this would park the wrong pair into the new slot.
+ */
+watch(
+  () => form.stimulus,
+  (next, previous) => {
+    if (restoring || !previous || next === previous) return
+    form.byStimulus[previous] = { averageCount: form.averageCount, smoothingDenominator: form.smoothingDenominator }
+    form.averageCount = form.byStimulus[next].averageCount
+    form.smoothingDenominator = form.byStimulus[next].smoothingDenominator
+  },
+)
+
+/** Mirrors FrequencyResponseRequest's own arithmetic, which OutputImpedanceRequest delegates to. */
+const broadbandSampleRateHz = computed(() => form.frequencySpanHz * 2)
+
+const broadbandFftSize = computed(() =>
+  Math.round(broadbandSampleRateHz.value / (48000 / 32768)) * form.resolutionMultiplier,
+)
+
+const broadbandBinHz = computed(() => broadbandSampleRateHz.value / broadbandFftSize.value)
+
+const broadbandRecordSeconds = computed(() => broadbandFftSize.value / broadbandSampleRateHz.value)
+
+/**
+ * One throwaway record plus the averages, and a short probe — per pass, times the two passes. The
+ * load change in between is the user's own time and is named separately under the badges.
+ */
+const broadbandDurationLabel = computed(() => {
+  const perRecord = broadbandRecordSeconds.value + perPointDiscardSeconds.value
+  const probe = 16384 / broadbandSampleRateHz.value + perPointDiscardSeconds.value
+  return formatDuration(passCount * ((form.averageCount + 1) * perRecord + probe))
+})
 
 /** Mirrors OutputImpedanceRequest.EffectiveSampleRateHz. */
 const effectiveSampleRateHz = computed(() =>
@@ -299,10 +388,20 @@ const minFreqHz = computed(() => {
 const truncated = computed(() => form.endFreqHz > maxFreqHz.value)
 
 const invalid = computed(() => {
-  if (!(form.startFreqHz > 0) || !(form.endFreqHz > form.startFreqHz)) return 'End frequency must be above the start.'
-  if (form.startFreqHz < minFreqHz.value)
-    return `Start frequency must be at least ${minFreqHz.value.toFixed(1)} Hz — below that the tone is too few bins up to read a level from.`
-  if (pointCount.value < 2) return 'An output-impedance curve needs at least two points below Nyquist.'
+  // Gated on the stimulus, the ImpedanceRequest rule: a grid left at a figure a broadband run never
+  // looks at must not refuse that run, or a stimulus becomes unreachable because of a control the
+  // panel has hidden.
+  if (usesStepped.value) {
+    if (!(form.startFreqHz > 0) || !(form.endFreqHz > form.startFreqHz)) return 'End frequency must be above the start.'
+    if (form.startFreqHz < minFreqHz.value)
+      return `Start frequency must be at least ${minFreqHz.value.toFixed(1)} Hz — below that the tone is too few bins up to read a level from.`
+    if (pointCount.value < 2) return 'An output-impedance curve needs at least two points below Nyquist.'
+  } else {
+    if (!(form.frequencySpanHz > 0)) return 'The frequency span must be above 0 Hz.'
+    if (!(form.smoothingDenominator >= 1)) return 'The smoothing band must be 1/1 octave or narrower.'
+    if (usesChirp.value && !(form.chirpStartHz > 0)) return 'The chirp must start above 0 Hz.'
+    if (usesNoise.value && !(form.noiseCutoffHz > 0)) return 'The pink-noise cut-off must be above 0 Hz.'
+  }
   if (!(loadOhms.value > 0)) return 'Load 1 must be above 0 Ω.'
   if (!form.secondPassOpen && !(form.secondLoadOhms > 0)) return 'Load 2 must be above 0 Ω, or the second pass taken open.'
   if (!form.secondPassOpen && Math.abs(form.secondLoadOhms - loadOhms.value) < 1e-6 * Math.max(1, loadOhms.value))
@@ -339,6 +438,18 @@ function buildParamsJson(): string {
     averageCount: form.averageCount,
     sampleRateHz: FIXED_SAMPLE_RATE_HZ,
     adaptiveResolution: form.adaptiveResolution,
+    stimulus: form.stimulus,
+    frequencySpanHz: form.frequencySpanHz,
+    resolutionMultiplier: form.resolutionMultiplier,
+    chirpStartHz: form.chirpStartHz,
+    noiseCutoffHz: form.noiseCutoffHz,
+    smoothingDenominator: form.smoothingDenominator,
+    // The active pair folded into the selected slot, so a figure typed and saved without turning
+    // the dropdown cannot leave a map that contradicts the document's own averageCount.
+    byStimulus: toStoredWithActive(form.byStimulus, form.stimulus, {
+      averageCount: form.averageCount,
+      smoothingDenominator: form.smoothingDenominator,
+    }),
   }
   return JSON.stringify(parameters)
 }
@@ -360,13 +471,84 @@ function run() {
     rightChannelIsReference: form.rightChannelIsReference,
     averageCount: form.averageCount,
     adaptiveResolution: form.adaptiveResolution,
+    stimulus: form.stimulus,
+    frequencySpanHz: form.frequencySpanHz,
+    resolutionMultiplier: form.resolutionMultiplier,
+    chirpStartHz: form.chirpStartHz,
+    noiseCutoffHz: form.noiseCutoffHz,
+    smoothingDenominator: form.smoothingDenominator,
   })
 }
 </script>
 
 <template>
   <CollapsibleSection title="Output impedance sweep">
-    <div class="grid grid-cols-2 gap-2.5">
+    <label
+      class="tb-field"
+      title="What to play. A chirp or pink noise measures the whole band from one record per pass — seconds rather than minutes, which matters here because the answer is the difference between the two passes and an amplifier held at level drifts while you change its load. A stepped sine puts all of its energy on one bin at a time, which is the better reading for a very low output impedance; the two agree on an amplifier whose Zout is a sizeable fraction of an ohm."
+    >
+      Stimulus
+      <select v-model="form.stimulus" :disabled="running" class="tb-input">
+        <option v-for="s in STIMULI" :key="s" :value="s">
+          {{ s === 'Chirp' ? 'Chirp sweep' : s === 'PinkNoise' ? 'Pink noise' : 'Stepped sine' }}
+        </option>
+      </select>
+    </label>
+
+    <div v-if="measuresBroadband" class="grid grid-cols-2 gap-2.5">
+      <label
+        class="tb-field"
+        title="The analysed span. The sample rate is twice it, so a 24 kHz span measures to about 22.8 kHz."
+      >
+        Frequency span (Hz)
+        <input v-model.number="form.frequencySpanHz" type="number" step="1000" :disabled="running" class="tb-input" />
+      </label>
+      <label
+        class="tb-field"
+        title="Multiplies the record length, i.e. divides the bin size. More resolution costs proportionally more time per record."
+      >
+        Resolution
+        <select v-model.number="form.resolutionMultiplier" :disabled="running" class="tb-input">
+          <option :value="1">×1</option>
+          <option :value="2">×2</option>
+          <option :value="4">×4</option>
+        </select>
+      </label>
+    </div>
+
+    <div v-if="measuresBroadband" class="grid grid-cols-2 gap-2.5">
+      <label
+        v-if="usesChirp"
+        class="tb-field"
+        title="Where the sweep starts. Below this the chirp puts no energy, so nothing is measured there."
+      >
+        Chirp start (Hz)
+        <input v-model.number="form.chirpStartHz" type="number" step="1" :disabled="running" class="tb-input" />
+      </label>
+      <label
+        v-if="usesNoise"
+        class="tb-field"
+        title="Where the pink sequence stops rising towards DC: flat below, −3 dB per octave above. A 1/f spectrum keeps climbing all the way down, which is spent headroom and DC into a voice coil."
+      >
+        Pink noise cut-off (Hz)
+        <input v-model.number="form.noiseCutoffHz" type="number" step="1" :disabled="running" class="tb-input" />
+      </label>
+      <label
+        class="tb-field"
+        title="The fractional-octave band the curve is smoothed over, and on this measurement it is about signal-to-noise rather than looks. Zout is the difference between two nearly equal gains — roughly a millidecibel per milliohm — and a broadband stimulus puts a tiny fraction of its energy in any one bin, so a wide band is what makes a milliohm figure readable. Narrow it only if the curve has detail you are losing."
+      >
+        Smoothing
+        <select v-model.number="form.smoothingDenominator" :disabled="running" class="tb-input">
+          <option :value="3">1/3 octave</option>
+          <option :value="6">1/6 octave</option>
+          <option :value="12">1/12 octave</option>
+          <option :value="24">1/24 octave</option>
+          <option :value="48">1/48 octave</option>
+        </select>
+      </label>
+    </div>
+
+    <div v-if="usesStepped" class="grid grid-cols-2 gap-2.5">
       <label class="tb-field" title="Lowest frequency measured. The sweep steps upward from here.">
         Start (Hz)
         <input
@@ -391,6 +573,7 @@ function run() {
 
     <div class="grid grid-cols-2 gap-2.5">
       <label
+        v-if="usesStepped"
         class="tb-field"
         title="How many measurement points per octave. More points resolve narrow features but take proportionally longer — every point is its own capture."
       >
@@ -404,8 +587,13 @@ function run() {
           class="tb-input"
         />
       </label>
-      <label class="tb-field" title="Averages per point. More averages lower the noise floor of every reading, at a proportional cost in time.">
-        Averages per point
+      <label
+        class="tb-field"
+        :title="usesStepped
+          ? 'Averages per point. More averages lower the noise floor of every reading, at a proportional cost in time.'
+          : 'How many whole records each pass folds into one estimate. More records lower the noise on the gain ratio the answer is derived from, and each costs one record length.'"
+      >
+        {{ usesStepped ? 'Averages per point' : 'Records per pass' }}
         <input
           v-model.number="form.averageCount"
           type="number"
@@ -519,6 +707,7 @@ function run() {
     </label>
 
     <label
+      v-if="usesStepped"
       class="tb-check-row"
       title="Sizes the FFT per point instead of holding one size across the whole run, and picks the sample rate from the top of the frequency range. This measurement reads only the tone — no harmonics — so a 20 kHz run needs 48 kHz rather than 192 kHz, a quarter of the work. Turn it off for a fixed 192 kHz / 131072-point reference comparable with a THD sweep: slower, but the same resolution at every frequency."
     >
@@ -531,32 +720,45 @@ function run() {
     <p v-if="invalid" class="text-xs text-red-600 dark:text-red-400">{{ invalid }}</p>
 
     <template #footer>
-      <p
-        v-if="form.adaptiveResolution && adaptiveFftRange"
-        class="leading-snug"
-        title="The FFT size varies per point so each record holds a similar number of cycles of the tone. The largest size is used at the bottom of the sweep, the smallest at the top."
-      >
-        Analysis: {{ effectiveSampleRateHz / 1000 }} kHz ·
-        {{ adaptiveFftRange.max }}–{{ adaptiveFftRange.min }} points ·
-        {{ (effectiveSampleRateHz / adaptiveFftRange.max).toFixed(3) }}–{{
-          (effectiveSampleRateHz / adaptiveFftRange.min).toFixed(2)
-        }}
-        Hz per bin
-      </p>
-      <p v-else class="leading-snug">
-        Analysis: {{ FIXED_SAMPLE_RATE_HZ / 1000 }} kHz · {{ FIXED_FFT_SIZE }} points ·
-        {{ FIXED_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
-      </p>
-      <div class="flex flex-wrap items-center gap-2">
-        <EstimateBadge kind="points" title="How many frequencies each of the two passes will measure.">
-          ≈ {{ pointCount }} points × 2
-        </EstimateBadge>
-        <EstimateBadge kind="time" title="Roughly how long both passes will take — the load change in between is yours.">
-          ≈ {{ durationLabel }}
-        </EstimateBadge>
-      </div>
+      <template v-if="measuresBroadband">
+        <p class="leading-snug">
+          Analysis: {{ broadbandSampleRateHz / 1000 }} kHz · {{ broadbandFftSize }} points ·
+          {{ broadbandBinHz.toFixed(3) }} Hz per bin · {{ broadbandRecordSeconds.toFixed(2) }} s per record
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="time" title="Roughly how long both passes will take — the load change in between is yours.">
+            ≈ {{ broadbandDurationLabel }}
+          </EstimateBadge>
+        </div>
+      </template>
+      <template v-else>
+        <p
+          v-if="form.adaptiveResolution && adaptiveFftRange"
+          class="leading-snug"
+          title="The FFT size varies per point so each record holds a similar number of cycles of the tone. The largest size is used at the bottom of the sweep, the smallest at the top."
+        >
+          Analysis: {{ effectiveSampleRateHz / 1000 }} kHz ·
+          {{ adaptiveFftRange.max }}–{{ adaptiveFftRange.min }} points ·
+          {{ (effectiveSampleRateHz / adaptiveFftRange.max).toFixed(3) }}–{{
+            (effectiveSampleRateHz / adaptiveFftRange.min).toFixed(2)
+          }}
+          Hz per bin
+        </p>
+        <p v-else class="leading-snug">
+          Analysis: {{ FIXED_SAMPLE_RATE_HZ / 1000 }} kHz · {{ FIXED_FFT_SIZE }} points ·
+          {{ FIXED_BIN_SIZE_HZ.toFixed(3) }} Hz per bin
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <EstimateBadge kind="points" title="How many frequencies each of the two passes will measure.">
+            ≈ {{ pointCount }} points × 2
+          </EstimateBadge>
+          <EstimateBadge kind="time" title="Roughly how long both passes will take — the load change in between is yours.">
+            ≈ {{ durationLabel }}
+          </EstimateBadge>
+        </div>
+      </template>
       <span>…plus however long the load change takes.</span>
-      <span v-if="truncated" class="text-amber-600 dark:text-amber-500">
+      <span v-if="usesStepped && truncated" class="text-amber-600 dark:text-amber-500">
         Above {{ maxFreqHz }} Hz is beyond Nyquist — the sweep will stop there.
       </span>
     </template>

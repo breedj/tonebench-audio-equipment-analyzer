@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Json;
@@ -37,7 +37,8 @@ public class OutputImpedanceStartRequestTests
             Window: "FlatTop",
             SampleRateHz: 96_000.0);
 
-        var measurement = wire.ToMeasurement(ThdSweepLevelMode.OutputPower, ThdSweepLevelUnit.Watt, WindowType.FlatTop);
+        var measurement = wire.ToMeasurement(
+            ThdSweepLevelMode.OutputPower, ThdSweepLevelUnit.Watt, WindowType.FlatTop, ImpedanceStimulus.SteppedSine);
 
         Assert.Equal(15.0, measurement.StartFreqHz);
         Assert.Equal(33_000.0, measurement.EndFreqHz);
@@ -59,8 +60,8 @@ public class OutputImpedanceStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(15, ConstructorParameterCount(typeof(OutputImpedanceStartRequest)));
-        Assert.Equal(15, ConstructorParameterCount(typeof(OutputImpedanceRequest)));
+        Assert.Equal(21, ConstructorParameterCount(typeof(OutputImpedanceStartRequest)));
+        Assert.Equal(21, ConstructorParameterCount(typeof(OutputImpedanceRequest)));
     }
 
     [Fact]

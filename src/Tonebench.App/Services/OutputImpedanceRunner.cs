@@ -2,6 +2,7 @@
 using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Dsp;
+using Tonebench.Dsp.Fft;
 
 namespace Tonebench.App.Services;
 
@@ -47,7 +48,18 @@ public sealed class OutputImpedanceRunner(
     /// </summary>
     public const double OpenHeadroomDb = 6.0;
 
+    /// <summary>
+    /// The generator level the broadband probe refuses to go below, in dBV. A two-sided limit like
+    /// <see cref="SteppedCaptureSupport.ProbeStartDbv"/>'s: an amplifier whose gain puts the target
+    /// under this needs less drive than the generator can usefully produce, and the message says so
+    /// rather than reporting the opposite fault.
+    /// </summary>
+    private const double BroadbandMinGeneratorDbv = -60.0;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IFftBackend _fft = new FftFlatBackend();
+
+    private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(20);
     private readonly object _stateLock = new();
 
     private CancellationTokenSource? _cts;
@@ -56,9 +68,11 @@ public sealed class OutputImpedanceRunner(
 
     private FrequencyResponsePhase _phase = FrequencyResponsePhase.Idle;
     private int _passesCompleted;
-    private int _pointsMeasured;
-    private int _pointCount;
+    private int? _pointsMeasured;
+    private int? _pointCount;
     private int _averageCount;
+    private int _averagesTaken;
+    private ImpedanceStimulus _stimulus = ImpedanceStimulus.SteppedSine;
     private double _generatorAmpDbv;
     private double? _inputRangeDbv;
     private double _binHz;
@@ -122,7 +136,8 @@ public sealed class OutputImpedanceRunner(
                     _generatorAmpDbv, _inputRangeDbv, _binHz, _sampleRateHz, _fftSize,
                     _loadOhms, _secondLoadOhms, _nominalOhms, _rightChannelIsReference,
                     _error, _warning, _trace,
-                    _medianOhms, _zoutAt1kOhms, _dampingFactorAt1k, _firstGainAt1kDb, _secondGainAt1kDb);
+                    _medianOhms, _zoutAt1kOhms, _dampingFactorAt1k, _firstGainAt1kDb, _secondGainAt1kDb,
+                    _stimulus, _averagesTaken, _averageCount);
             }
         }
     }
@@ -142,7 +157,9 @@ public sealed class OutputImpedanceRunner(
             if (Running)
                 throw new InvalidOperationException("An output-impedance measurement is already running.");
 
-            var steps = BuildSteps(request);
+            // A broadband run has no tone grid at all, and BuildSteps would read a start/end pair
+            // the panel does not even show it.
+            SteppedStepPlan[] steps = request.IsStepped ? BuildSteps(request) : [];
 
             lock (_stateLock)
             {
@@ -152,14 +169,18 @@ public sealed class OutputImpedanceRunner(
                         ? FrequencyResponsePhase.DeterminingRange
                         : FrequencyResponsePhase.Sweeping;
                 _passesCompleted = 0;
-                _pointsMeasured = 0;
-                _pointCount = steps.Length * OutputImpedanceRequest.PassCount;
+                // Null rather than zero on a broadband run: it has no grid, and the progress line
+                // reads records instead. Zero would read as a stepped run that has measured nothing.
+                _pointsMeasured = request.IsStepped ? 0 : null;
+                _pointCount = request.IsStepped ? steps.Length * OutputImpedanceRequest.PassCount : null;
                 _averageCount = request.AverageCount;
+                _averagesTaken = 0;
+                _stimulus = request.Stimulus;
                 _generatorAmpDbv = request.SolvesGeneratorLevel ? SteppedCaptureSupport.ProbeStartDbv : request.LevelDbv;
                 _inputRangeDbv = null;
                 _sampleRateHz = request.EffectiveSampleRateHz;
-                _fftSize = steps[0].FftSize;
-                _binHz = request.EffectiveSampleRateHz / steps[0].FftSize;
+                _fftSize = request.IsStepped ? steps[0].FftSize : request.BroadbandFftSize;
+                _binHz = request.IsStepped ? request.EffectiveSampleRateHz / steps[0].FftSize : request.BroadbandBinHz;
                 _loadOhms = request.LoadOhms;
                 _secondLoadOhms = request.SecondLoadOhms;
                 _nominalOhms = request.NominalOhms;
@@ -289,6 +310,7 @@ public sealed class OutputImpedanceRunner(
                 ? null
                 : new ParkedRun(
                     _phase, _passesCompleted, _pointsMeasured, _pointCount, _averageCount,
+                    _stimulus, _averagesTaken,
                     _generatorAmpDbv, _inputRangeDbv, _binHz, _sampleRateHz, _fftSize, _loadOhms,
                     _secondLoadOhms, _nominalOhms, _rightChannelIsReference, _error, _warning,
                     _trace, _firstGainTrace, _secondGainTrace, _medianOhms, _zoutAt1kOhms,
@@ -305,6 +327,8 @@ public sealed class OutputImpedanceRunner(
                 _pointsMeasured = parked.PointsMeasured;
                 _pointCount = parked.PointCount;
                 _averageCount = parked.AverageCount;
+                _stimulus = parked.Stimulus;
+                _averagesTaken = parked.AveragesTaken;
                 _generatorAmpDbv = parked.GeneratorAmpDbv;
                 _inputRangeDbv = parked.InputRangeDbv;
                 _binHz = parked.BinHz;
@@ -381,6 +405,8 @@ public sealed class OutputImpedanceRunner(
         _pointsMeasured = 0;
         _pointCount = 0;
         _averageCount = 0;
+        _averagesTaken = 0;
+        _stimulus = ImpedanceStimulus.SteppedSine;
         _generatorAmpDbv = 0.0;
         _inputRangeDbv = null;
         _binHz = 0.0;
@@ -402,8 +428,9 @@ public sealed class OutputImpedanceRunner(
 
     /// <summary>Everything a measurement switch has to carry — <see cref="Status"/>'s own fields plus the two gain passes and the as-run request the save path reads.</summary>
     private sealed record ParkedRun(
-        FrequencyResponsePhase Phase, int PassesCompleted, int PointsMeasured, int PointCount,
-        int AverageCount, double GeneratorAmpDbv, double? InputRangeDbv, double BinHz,
+        FrequencyResponsePhase Phase, int PassesCompleted, int? PointsMeasured, int? PointCount,
+        int AverageCount, ImpedanceStimulus Stimulus, int AveragesTaken,
+        double GeneratorAmpDbv, double? InputRangeDbv, double BinHz,
         double SampleRateHz, int FftSize, double LoadOhms, double? SecondLoadOhms,
         double NominalOhms, bool RightChannelIsReference, string? Error, string? Warning,
         ImpedanceTrace? Trace, FrequencyResponseTrace? FirstGainTrace,
@@ -425,25 +452,33 @@ public sealed class OutputImpedanceRunner(
 
         var first = new List<GainPoint>(steps.Length);
         var second = new List<GainPoint>(steps.Length);
+        FrequencyResponseResult? firstBroadband = null;
+        FrequencyResponseResult? secondBroadband = null;
 
         try
         {
             logger.LogInformation(
-                "Output impedance starting: {StartHz:0.##}-{EndHz:0.##} Hz, {StepsPerOctave}/octave, {Points} points per pass, "
-                    + "{SampleRateHz:0} Hz, adaptive {Adaptive} ({FftDescription}), {Averages} averages, "
-                    + "level {LevelValue:0.##} {LevelUnit} ({LevelMode}), loads {LoadOhms:0.##} ohm then {SecondLoad}, nominal {NominalOhms:0.##} ohm, "
-                    + "{Method}",
-                request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, steps.Length,
-                request.EffectiveSampleRateHz, request.AdaptiveResolution,
-                request.AdaptiveResolution
-                    ? $"{steps.Max(s => s.FftSize)}-{steps.Min(s => s.FftSize)} points"
-                    : $"fixed {request.FftSize} points",
+                "Output impedance starting: {Stimulus}, {Grid}, {SampleRateHz:0} Hz, {Averages} averages, "
+                    + "level {LevelValue:0.##} {LevelUnit} ({LevelMode}), loads {LoadOhms:0.##} ohm then {SecondLoad}, "
+                    + "nominal {NominalOhms:0.##} ohm, {Method}",
+                request.Stimulus,
+                request.IsStepped
+                    ? $"{request.StartFreqHz:0.##}-{request.EndFreqHz:0.##} Hz, {request.StepsPerOctave}/octave, "
+                        + $"{steps.Length} points per pass, adaptive {request.AdaptiveResolution} ("
+                        + (request.AdaptiveResolution
+                            ? $"{steps.Max(s => s.FftSize)}-{steps.Min(s => s.FftSize)} points)"
+                            : $"fixed {request.FftSize} points)")
+                    : $"{request.FrequencySpanHz:0.##} Hz span, {request.BroadbandFftSize} points "
+                        + $"({request.BroadbandBinHz:0.###} Hz/bin), 1/{request.SmoothingDenominator} octave smoothing",
+                request.EffectiveSampleRateHz,
                 request.AverageCount, request.LevelValue, request.LevelUnit, request.LevelMode,
                 request.LoadOhms, request.SecondLoadOhms is { } sl ? $"{sl:0.##} ohm" : "open", request.NominalOhms,
                 request.RightChannelIsReference ? "complex (right channel is the reference)" : "magnitude only");
 
-            pipeline.Options = SteppedCaptureSupport.BuildSteppedOptions(
-                savedOptions, request.FftSize, request.Window, request.AverageCount, request.StartFreqHz, request.EffectiveSampleRateHz);
+            pipeline.Options = request.IsStepped
+                ? SteppedCaptureSupport.BuildSteppedOptions(
+                    savedOptions, request.FftSize, request.Window, request.AverageCount, request.StartFreqHz, request.EffectiveSampleRateHz)
+                : BuildBroadbandOptions(savedOptions, request);
 
             if (!session.Acquiring)
             {
@@ -485,7 +520,10 @@ public sealed class OutputImpedanceRunner(
             }
 
             SetPhase(FrequencyResponsePhase.Sweeping);
-            await MeasurePassAsync(request, steps, generatorAmpDbv, first, "first-load", pointBase: 0, publishZout: null, ct);
+            if (request.IsStepped)
+                await MeasurePassAsync(request, steps, generatorAmpDbv, first, "first-load", pointBase: 0, publishZout: null, ct);
+            else
+                firstBroadband = await MeasureBroadbandPassAsync(request, generatorAmpDbv, "first-load", ct);
 
             lock (_stateLock)
                 _passesCompleted = 1;
@@ -497,8 +535,13 @@ public sealed class OutputImpedanceRunner(
             lock (_stateLock)
                 _continue = waiter;
             SetPhase(FrequencyResponsePhase.WaitingForLoadChange);
-            BroadcastProgress(steps.Length, _pointCount, FrequencyResponsePhase.WaitingForLoadChange);
-            logger.LogInformation("Output impedance: first pass done ({Points} points); waiting for the load to be changed", first.Count);
+            BroadcastProgress(
+                request.IsStepped ? steps.Length : request.AverageCount,
+                request.IsStepped ? _pointCount : request.AverageCount,
+                FrequencyResponsePhase.WaitingForLoadChange);
+            logger.LogInformation(
+                "Output impedance: first pass done ({Measured}); waiting for the load to be changed",
+                request.IsStepped ? $"{first.Count} points" : $"{request.AverageCount} records");
 
             await waiter.Task.WaitAsync(ct);
 
@@ -506,15 +549,30 @@ public sealed class OutputImpedanceRunner(
                 _continue = null;
 
             SetPhase(FrequencyResponsePhase.Sweeping);
-            await MeasurePassAsync(
-                request, steps, generatorAmpDbv, second, "second-load", pointBase: steps.Length,
-                publishZout: () => PublishZout(request, first, second, final: false), ct);
+            if (request.IsStepped)
+            {
+                await MeasurePassAsync(
+                    request, steps, generatorAmpDbv, second, "second-load", pointBase: steps.Length,
+                    publishZout: () => PublishZout(request, first, second, final: false), ct);
+            }
+            else
+            {
+                secondBroadband = await MeasureBroadbandPassAsync(request, generatorAmpDbv, "second-load", ct);
+            }
 
             lock (_stateLock)
                 _passesCompleted = 2;
 
-            PublishZout(request, first, second, final: true);
-            BroadcastProgress(_pointCount, _pointCount, FrequencyResponsePhase.Sweeping);
+            if (request.IsStepped)
+            {
+                PublishZout(request, first, second, final: true);
+                BroadcastProgress(_pointCount, _pointCount, FrequencyResponsePhase.Sweeping);
+            }
+            else
+            {
+                PublishZoutBroadband(request, firstBroadband!, secondBroadband!);
+                BroadcastProgress(request.AverageCount, request.AverageCount, FrequencyResponsePhase.Sweeping);
+            }
             terminalPhase = FrequencyResponsePhase.Finished;
         }
         catch (OperationCanceledException)
@@ -631,6 +689,28 @@ public sealed class OutputImpedanceRunner(
             passLabel, points.Count, generatorAmpDbv, session.InputRangeDbv);
     }
 
+    /// <summary>
+    /// What the pipeline does for a chirp or noise run: one whole, rectangular-windowed record at a
+    /// time with no averaging of its own. <see cref="ImpedanceRunner"/>'s own options, for the same
+    /// reasons - the runner averages complex spectra itself, because the pipeline's averager works on
+    /// magnitudes and would throw away the phase half the referenced method is about.
+    /// </summary>
+    private static SpectrumPipelineOptions BuildBroadbandOptions(SpectrumPipelineOptions current, OutputImpedanceRequest request) =>
+        current with
+        {
+            FftSize = request.BroadbandFftSize,
+            Window = WindowType.Rectangular,
+            Averaging = AveragingMode.Off,
+            AverageCount = 1,
+            AverageHopFraction = 0.0,
+            ProcessLeft = true,
+            ProcessRight = true,
+            SingleShot = true,
+            RetainComplexSpectrum = true,
+            CapturePreview = false,
+            Weighting = WeightingSpec.None,
+        };
+
     private static SteppedStepPlan[] BuildSteps(OutputImpedanceRequest request) =>
         SteppedCaptureSupport.BuildSteps(
             request.StartFreqHz, request.EndFreqHz, request.StepsPerOctave, request.EffectiveSampleRateHz,
@@ -641,6 +721,17 @@ public sealed class OutputImpedanceRunner(
     {
         if (!request.SolvesGeneratorLevel)
             return (request.LevelDbv, double.NegativeInfinity, request.LevelDbv);
+
+        // A broadband run probes with the stimulus it is about to play, over the band the target is
+        // defined on. Its peak is deliberately *not* returned: the range is probed from the widest
+        // setting afterwards, which is the frequency-response runner's documented order and the one
+        // thing that stops a range left too sensitive by the previous measurement from clipping the
+        // probe's own captures and reading as missing gain.
+        if (!request.IsStepped)
+        {
+            double broadbandGenDbv = await ResolveBroadbandAmplitudeAsync(request, ct);
+            return (broadbandGenDbv, double.NegativeInfinity, broadbandGenDbv);
+        }
 
         SetPhase(FrequencyResponsePhase.DeterminingLevel);
 
@@ -667,6 +758,9 @@ public sealed class OutputImpedanceRunner(
         SetPhase(FrequencyResponsePhase.DeterminingRange);
         BroadcastProgress(0, 1, FrequencyResponsePhase.DeterminingRange);
 
+        if (!request.IsStepped)
+            return await ProbeBroadbandInputRangeAsync(request, generatorAmpDbv, ct);
+
         double probeFreqHz = Math.Clamp(
             SteppedCaptureSupport.ProbeFrequencyHz, request.StartFreqHz, Math.Min(request.EndFreqHz, request.MaxFrequencyHz));
         int probeFftSize = Math.Min(request.FftSizeAt(probeFreqHz), SteppedCaptureSupport.MaxProbeFftSize);
@@ -681,8 +775,22 @@ public sealed class OutputImpedanceRunner(
     private TimeSpan CaptureTimeout(OutputImpedanceRequest request, int fftSize) =>
         SteppedCaptureSupport.CaptureTimeout(fftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0, session.StreamSettleMs);
 
-    private double EstimateSeconds(OutputImpedanceRequest request, SteppedStepPlan[] steps) =>
-        steps.Sum(s => SteppedCaptureSupport.PointSeconds(s.FftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0));
+    private double EstimateSeconds(OutputImpedanceRequest request, SteppedStepPlan[] steps)
+    {
+        if (request.IsStepped)
+        {
+            return steps.Sum(s => SteppedCaptureSupport.PointSeconds(
+                s.FftSize, request.EffectiveSampleRateHz, request.AverageCount, session.CaptureDelayMs / 1000.0));
+        }
+
+        // One throwaway record plus the averages, and a short probe - the impedance panel's own
+        // arithmetic. Per pass; the caller multiplies by the two passes, and the load change in
+        // between is the user's own time.
+        double recordSeconds = request.BroadbandFftSize / request.EffectiveSampleRateHz;
+        double discardSeconds = session.CaptureDelayMs / 1000.0 + 0.065;
+        double probeSeconds = SteppedCaptureSupport.MaxProbeFftSize / request.EffectiveSampleRateHz + discardSeconds;
+        return ((request.AverageCount + 1) * (recordSeconds + discardSeconds)) + probeSeconds;
+    }
 
     /// <summary>
     /// One measured point: the DUT's gain at the commanded bin. The magnitude is the averaged level on
@@ -801,6 +909,357 @@ public sealed class OutputImpedanceRunner(
         hub.Broadcast(StreamFrame.EncodeImpedance(trace, StreamFlags.OutputImpedance));
     }
 
+    // ----------------------------------------------------------------------------------------
+    // The broadband path. One record per pass instead of a grid, with everything else about the
+    // run - the held input range, the pause, the solve - exactly as it is for a stepped sweep.
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// One pass's deconvolved gain against frequency, from <see cref="OutputImpedanceRequest.AverageCount"/>
+    /// whole records of the chirp or the pink sequence.
+    ///
+    /// <para><b>The reference depends on the method, and only one of the two carries a phase.</b>
+    /// Referenced, H = L/R comes from a single record, so the periodic stimulus's arbitrary
+    /// rotation is common to both channels and cancels inside the pass - the rule
+    /// <see cref="ImpedanceRunner"/> rests on, and why the estimator is built with
+    /// <c>removeLatency: false</c>. Unreferenced, the left channel is deconvolved against the
+    /// stimulus this run is playing, and each pass starts at its own arbitrary point in that
+    /// stimulus, so the two passes' phases are not comparable and the ratio is taken on magnitudes
+    /// alone - which is exactly what the stepped path already does without a reference.</para>
+    /// </summary>
+    private async Task<FrequencyResponseResult> MeasureBroadbandPassAsync(
+        OutputImpedanceRequest request,
+        double generatorAmpDbv,
+        string passLabel,
+        CancellationToken ct)
+    {
+        var acquisition = request.AsBroadbandAcquisition();
+        int fftSize = acquisition.FftSize;
+
+        // No sweep gate, as ImpedanceRunner's own measurement path takes none by default: gating
+        // costs a factor of two in resolution to delete harmonic packets that this curve - smoothed
+        // over a fractional octave and then divided by the other pass - is already insensitive to.
+        var estimator = new FrequencyResponseEstimator(
+            fftSize, _fft, gate: null, removeLatency: false,
+            regularisationFraction: request.IsNoise
+                ? FrequencyResponseEstimator.BroadbandRegularisationFraction
+                : FrequencyResponseEstimator.RegularisationFraction);
+
+        var syntheticReference = request.RightChannelIsReference
+            ? null
+            : ResponseCaptureSupport.BuildReferenceSpectrum(_fft, acquisition, generatorAmpDbv, fftSize);
+
+        long dropsBefore = session.DroppedRxChunks;
+        double inputRangeBefore = session.InputRangeDbv;
+
+        await session.ConfigureGeneratorAsync(
+            ResponseCaptureSupport.BuildGenerator(acquisition, generatorAmpDbv, fftSize), ct);
+
+        lock (_stateLock)
+            _averagesTaken = 0;
+        BroadcastProgress(0, request.AverageCount, FrequencyResponsePhase.Sweeping);
+
+        // The record armed by the stimulus change is thrown away rather than measured: the generator
+        // configure discards the audio already queued for the DAC but not the round trip back
+        // through the amplifier, and a rectangular window over a record that is part silence and
+        // part stimulus is a period of nothing. FrequencyResponseRunner's rule, and it matters more
+        // here than anywhere, since each pass gets exactly one chance at a clean set of records.
+        await WaitForBroadbandCaptureAsync(request, fftSize, ct);
+
+        for (int record = 0; record < request.AverageCount; record++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // Emptied but nothing discarded: the stimulus has not changed since the throwaway
+            // record above, so a non-zero discard would throw away good samples for nothing.
+            pipeline.Flush(0);
+            await WaitForBroadbandCaptureAsync(request, fftSize, ct);
+
+            var snapshots = pipeline.LatestSnapshots();
+            var (left, right) = ResponseCaptureSupport.RequireBothChannels(snapshots, fftSize, "output-impedance");
+            estimator.Add(syntheticReference ?? right, left);
+
+            lock (_stateLock)
+                _averagesTaken = estimator.Records;
+            BroadcastProgress(estimator.Records, request.AverageCount, FrequencyResponsePhase.Sweeping);
+        }
+
+        long dropsDuring = session.DroppedRxChunks - dropsBefore;
+        if (dropsDuring > 0)
+        {
+            logger.LogWarning(
+                "Output impedance {Pass} pass captured across {Drops} dropped RX chunks - its records are "
+                    + "spliced and its gain is not trustworthy",
+                passLabel, dropsDuring);
+        }
+
+        double inputRangeAfter = session.InputRangeDbv;
+        if (Math.Abs(inputRangeAfter - inputRangeBefore) > SteppedCaptureSupport.RangeEpsilonDb)
+        {
+            // Only the step-up backstop can do this, and it means the two passes no longer share one
+            // range - which is the whole thing this measurement rests on.
+            logger.LogWarning(
+                "Output impedance {Pass} pass: the input range moved {FromDbv:0.#} -> {ToDbv:0.#} dBV during the "
+                    + "capture; the passes no longer share one range",
+                passLabel, inputRangeBefore, inputRangeAfter);
+        }
+
+        logger.LogInformation(
+            "Output impedance {Pass} pass measured: {Records} records of {FftSize} points at {GenDbv:0.##} dBV generator, "
+                + "range {RangeDbv:0.#} dBV",
+            passLabel, estimator.Records, fftSize, generatorAmpDbv, session.InputRangeDbv);
+
+        return estimator.Complete();
+    }
+
+    /// <summary>
+    /// The generator level that puts the DUT's output at an output-referred target, measured with
+    /// the broadband stimulus itself. <see cref="FrequencyResponseRunner"/>'s probe, one measurement
+    /// along: a short record, the deconvolved gain at the bandwidth reference, correct, repeat.
+    ///
+    /// <para><b>Deconvolving is what makes this a level rather than a bin.</b> A chirp spreads its
+    /// energy over thousands of bins, so any single bin of the raw spectrum sits far below the
+    /// sweep's own amplitude; reading one and correcting toward the target drives the generator up
+    /// by that whole difference, which measured 14 dB on the frequency-response screen before it was
+    /// fixed there.</para>
+    /// </summary>
+    private async Task<double> ResolveBroadbandAmplitudeAsync(OutputImpedanceRequest request, CancellationToken ct)
+    {
+        SetPhase(FrequencyResponsePhase.DeterminingLevel);
+
+        var acquisition = request.AsBroadbandAcquisition();
+        double target = request.LevelDbv;
+        double amplitude = SteppedCaptureSupport.ProbeStartDbv;
+
+        double maxGenDbv = session.Capabilities.OutputRangesDbv.Count > 0
+            ? session.Capabilities.OutputRangesDbv.Max()
+            : 18.0;
+
+        // A short record: the probe wants a level, not resolution, and at the full size each pass
+        // would cost seconds of a measurement the user is standing over with a load in their hand.
+        int probeFftSize = Math.Min(SteppedCaptureSupport.MaxProbeFftSize, acquisition.FftSize);
+        var savedFftSize = pipeline.Options.FftSize;
+        bool ceilingAsked = false;
+
+        try
+        {
+            for (int pass = 0; pass < SteppedCaptureSupport.MaxProbeIterations; pass++)
+            {
+                ct.ThrowIfCancellationRequested();
+                SetGeneratorAmpDbv(amplitude);
+                BroadcastProgress(pass, SteppedCaptureSupport.MaxProbeIterations, FrequencyResponsePhase.DeterminingLevel);
+
+                pipeline.Options = pipeline.Options with { FftSize = probeFftSize };
+                await session.ConfigureGeneratorAsync(
+                    ResponseCaptureSupport.BuildGenerator(acquisition, amplitude, probeFftSize), ct);
+                await WaitForBroadbandCaptureAsync(request, probeFftSize, ct);
+
+                var probeReference = ResponseCaptureSupport.BuildReferenceSpectrum(_fft, acquisition, amplitude, probeFftSize);
+                var (probeLeft, _) = ResponseCaptureSupport.RequireBothChannels(pipeline.LatestSnapshots(), probeFftSize, "output-impedance");
+
+                double gainDb = ResponseCaptureSupport.ProbeGainDb(probeReference, probeLeft, probeFftSize, acquisition, out bool fellBack);
+                if (double.IsNaN(gainDb))
+                {
+                    throw new InvalidOperationException(
+                        "The level probe measured no signal - check the amplifier is powered, connected and loaded as the measurement expects.");
+                }
+
+                if (fellBack && pass == 0)
+                {
+                    logger.LogWarning(
+                        "The reference band {LowHz:0}-{HighHz:0} Hz holds no bin of the level probe's record; "
+                            + "the output level is being set against the whole-band median instead",
+                        acquisition.BandwidthReferenceLowHz, acquisition.BandwidthReferenceHighHz);
+                }
+
+                double measuredDbv = amplitude + gainDb;
+                logger.LogInformation(
+                    "Output impedance level probe iteration {Pass}: generator {Amplitude:0.##} dBV, gain {GainDb:0.##} dB, "
+                        + "measured {MeasuredDbv:0.##} dBV against a target of {Target:0.##} dBV",
+                    pass, amplitude, gainDb, measuredDbv, target);
+
+                double shortfall = target - measuredDbv;
+                if (Math.Abs(shortfall) <= SteppedCaptureSupport.ProbeToleranceDb)
+                    break;
+
+                var (corrected, outcome) = ResponseCaptureSupport.CorrectProbeAmplitude(
+                    amplitude, shortfall, ceilingAsked, maxGenDbv, BroadbandMinGeneratorDbv);
+                amplitude = corrected;
+
+                if (outcome == ResponseCaptureSupport.ProbeCorrection.BelowFloor)
+                {
+                    throw new InvalidOperationException(
+                        $"The requested output level of {target:0.##} dBV would need a generator level below "
+                            + $"{BroadbandMinGeneratorDbv:0.##} dBV. The amplifier's gain looks too high to measure this way.");
+                }
+
+                if (outcome == ResponseCaptureSupport.ProbeCorrection.AcceptCeiling)
+                {
+                    // At the ceiling with nothing left to correct with, so the shortfall is a fact
+                    // about the amplifier rather than about the probe. See OutputLevelReach.
+                    if (!OutputLevelReach.Reached(target, measuredDbv, request.LevelUnit))
+                    {
+                        throw new InvalidOperationException(
+                            OutputLevelReach.Message(target, measuredDbv, request.LevelUnit, request.LoadOhms, maxGenDbv));
+                    }
+
+                    logger.LogWarning(
+                        "The requested output level of {Target:0.##} dBV needs more than the {Max:0.##} dBV the generator can "
+                            + "produce; measuring at {Max:0.##} dBV instead",
+                        target, maxGenDbv, maxGenDbv);
+                    break;
+                }
+
+                ceilingAsked = outcome == ResponseCaptureSupport.ProbeCorrection.ConfirmCeiling;
+            }
+        }
+        finally
+        {
+            pipeline.Options = pipeline.Options with { FftSize = savedFftSize };
+        }
+
+        SetGeneratorAmpDbv(amplitude);
+        return amplitude;
+    }
+
+    /// <summary>
+    /// The peak the input range is chosen from, measured from the <b>widest</b> rung with the
+    /// stimulus playing - so a range left too sensitive by whatever ran before cannot clip the
+    /// reading the whole run's range is then derived from.
+    /// </summary>
+    private async Task<double> ProbeBroadbandInputRangeAsync(
+        OutputImpedanceRequest request, double generatorAmpDbv, CancellationToken ct)
+    {
+        var acquisition = request.AsBroadbandAcquisition();
+        int probeFftSize = Math.Min(SteppedCaptureSupport.MaxProbeFftSize, acquisition.FftSize);
+        var savedFftSize = pipeline.Options.FftSize;
+
+        try
+        {
+            await SteppedCaptureSupport.ApplyInputRangeAsync(session, session.Capabilities.InputRangesDbv.Max(), ct);
+
+            pipeline.Options = pipeline.Options with { FftSize = probeFftSize };
+            await session.ConfigureGeneratorAsync(
+                ResponseCaptureSupport.BuildGenerator(acquisition, generatorAmpDbv, probeFftSize), ct);
+            await WaitForBroadbandCaptureAsync(request, probeFftSize, ct);
+
+            double peakDbv = ResponseCaptureSupport.PeakDbv(pipeline.LatestSnapshots());
+            logger.LogInformation(
+                "Output impedance input-range probe: peak {PeakDbv:0.##} dBV read from the {RangeDbv:0.#} dBV rung",
+                peakDbv, session.InputRangeDbv);
+            return peakDbv;
+        }
+        finally
+        {
+            pipeline.Options = pipeline.Options with { FftSize = savedFftSize };
+        }
+    }
+
+    /// <summary>
+    /// Zout from the two broadband passes: one bin at a time, then smoothed and decimated by the
+    /// impedance screen's own builder so the two measurements cannot disagree about one curve.
+    /// </summary>
+    private void PublishZoutBroadband(
+        OutputImpedanceRequest request,
+        FrequencyResponseResult first,
+        FrequencyResponseResult second)
+    {
+        var h1 = ImpedanceTraceBuilder.ToComplex(first);
+        var h2 = ImpedanceTraceBuilder.ToComplex(second);
+
+        int n = Math.Min(h1.Length, h2.Length);
+        var zout = new Complex[n];
+        var coherence = new double[n];
+
+        for (int k = 0; k < n; k++)
+        {
+            // The weaker of the two passes: a bin either of them measured badly is a bin the ratio
+            // cannot be trusted at, and reporting the better one would flatter it.
+            coherence[k] = Math.Min(first.Coherence[k], second.Coherence[k]);
+
+            if (h1[k] == Complex.Zero)
+            {
+                zout[k] = Complex.Zero;
+                continue;
+            }
+
+            var ratio = h2[k] / h1[k];
+            if (request.RightChannelIsReference)
+            {
+                zout[k] = OutputImpedanceMath.Solve(ratio, request.LoadOhms, request.SecondLoadOhms);
+            }
+            else
+            {
+                // Magnitudes only, and floored at zero, exactly as the stepped path does it: without
+                // a measured reference the two passes' phases are not comparable at all.
+                var z = OutputImpedanceMath.Solve(new Complex(ratio.Magnitude, 0.0), request.LoadOhms, request.SecondLoadOhms);
+                zout[k] = new Complex(Math.Max(0.0, z.Real), 0.0);
+            }
+        }
+
+        double binHz = request.BroadbandBinHz;
+        var trace = ImpedanceTraceBuilder.Build(
+            binHz, request.AnalysisLowHz, request.AnalysisHighHz, request.SmoothingDenominator,
+            ImpedanceTraceKind.Impedance, zout, coherence, ImpedanceRunner.DisplayColumns);
+
+        var acquisition = request.AsBroadbandAcquisition();
+
+        // The readings are taken inside the analysed band and nowhere else. Outside it the ratio is
+        // noise over nothing, and Z = R1*R2*(q - 1)/(R2 - R1*q) of a ratio wandering near the
+        // denominator's zero is clamped at ImpedanceMath.MaxOhms - one such bin would be the median.
+        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
+        int lastBin = Math.Min(n - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
+        if (lastBin <= firstBin)
+            lastBin = Math.Min(n - 1, firstBin + 1);
+
+        int at1k = Math.Clamp((int)Math.Round(1000.0 / binHz), firstBin, lastBin);
+
+        lock (_stateLock)
+        {
+            _trace = trace;
+            _warning = null;
+
+            _firstGainTrace = ResponseCaptureSupport.BuildTrace(
+                acquisition, ImpedanceRunner.DisplayColumns, FrequencyResponseTraceKind.GainLoad1, first,
+                offsetDb: 0.0, addBackDelayS: 0.0);
+            _secondGainTrace = ResponseCaptureSupport.BuildTrace(
+                acquisition, ImpedanceRunner.DisplayColumns, FrequencyResponseTraceKind.GainLoad2, second,
+                offsetDb: 0.0, addBackDelayS: 0.0);
+
+            double median = ImpedanceMath.MedianOhms(zout, firstBin, lastBin);
+            _medianOhms = double.IsNaN(median) ? null : median;
+
+            double z1k = zout[at1k].Magnitude;
+            _zoutAt1kOhms = z1k;
+            _dampingFactorAt1k = z1k > 0.0 ? request.NominalOhms / z1k : null;
+            _firstGainAt1kDb = FrequencyResponseEstimator.ToDb(first.Magnitude[at1k]);
+            _secondGainAt1kDb = FrequencyResponseEstimator.ToDb(second.Magnitude[at1k]);
+        }
+
+        hub.Broadcast(StreamFrame.EncodeImpedance(trace, StreamFlags.OutputImpedance));
+    }
+
+    private async Task WaitForBroadbandCaptureAsync(OutputImpedanceRequest request, int fftSize, CancellationToken ct)
+    {
+        var timeout = ResponseCaptureSupport.CaptureTimeout(
+            request.EffectiveSampleRateHz, fftSize, session.CaptureDelayMs, session.StreamSettleMs);
+        long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+
+        while (!pipeline.SingleShotComplete)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (Environment.TickCount64 > deadline)
+            {
+                throw new TimeoutException(
+                    $"An output-impedance record did not complete within {timeout.TotalSeconds:0.0} s. "
+                        + "The device may have stopped streaming.");
+            }
+
+            await Task.Delay(CapturePollInterval, ct).ConfigureAwait(false);
+        }
+    }
+
     private static FrequencyResponseTrace BuildGainTrace(FrequencyResponseTraceKind kind, List<GainPoint> points)
     {
         var freqHz = new double[points.Count];
@@ -857,13 +1316,15 @@ public sealed class OutputImpedanceRunner(
             _generatorAmpDbv = dbv;
     }
 
-    private void BroadcastProgress(int done, int total, FrequencyResponsePhase phase)
+    private void BroadcastProgress(int? done, int? total, FrequencyResponsePhase phase)
     {
         double generatorAmpDbv;
         lock (_stateLock)
             generatorAmpDbv = _generatorAmpDbv;
 
-        hub.Broadcast(StreamFrame.EncodeImpedanceProgress(done, total, phase, generatorAmpDbv, StreamFlags.OutputImpedance));
+        // The wire carries two ints; a broadband pass has no grid, so it sends its record counts
+        // and the client tells the two apart by the status's own null point count.
+        hub.Broadcast(StreamFrame.EncodeImpedanceProgress(done ?? 0, total ?? 0, phase, generatorAmpDbv, StreamFlags.OutputImpedance));
     }
 
     /// <summary>One measured point of one pass: the DUT's gain, and the range it was read at.</summary>

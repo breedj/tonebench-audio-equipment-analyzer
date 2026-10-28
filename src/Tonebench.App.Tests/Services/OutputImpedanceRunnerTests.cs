@@ -25,9 +25,16 @@ public class OutputImpedanceRunnerTests
         int averages = 1,
         bool adaptiveResolution = true,
         int fftSize = 16384,
-        double sampleRateHz = 48_000.0) =>
+        double sampleRateHz = 48_000.0,
+        ImpedanceStimulus stimulus = ImpedanceStimulus.SteppedSine,
+        double frequencySpanHz = 24_000.0,
+        int resolutionMultiplier = 1,
+        double chirpStartHz = 10.0,
+        int smoothingDenominator = 12) =>
         new(startFreqHz, endFreqHz, stepsPerOctave, levelMode, levelValue, levelUnit, loadOhms, secondLoadOhms, nominalOhms,
-            rightChannelIsReference, fftSize, WindowType.Hann, averages, sampleRateHz, adaptiveResolution);
+            rightChannelIsReference, fftSize, WindowType.Hann, averages, sampleRateHz, adaptiveResolution,
+            stimulus, frequencySpanHz, resolutionMultiplier, chirpStartHz,
+            OutputImpedanceRequest.DefaultNoiseCutoffHz, smoothingDenominator);
 
     private sealed record Harness(OutputImpedanceRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
@@ -293,6 +300,196 @@ public class OutputImpedanceRunnerTests
         Assert.InRange(status.DampingFactorAt1k!.Value, 3.5, 4.5);
     }
 
+    /// <summary>
+    /// The chirp and the pink sequence measure the same output impedance the stepped sine does.
+    /// Asserted against <see cref="SimulatedOutputStage.ZoutAt"/> - the model's own divider at the
+    /// run's own sample rate - rather than against the stepped path, so a fault shared by both
+    /// cannot pass.
+    ///
+    /// <para>Referenced, because that is the method whose answer is |Z| itself. The magnitude-only
+    /// case has its own test below, and reads the smaller figure its own formula predicts.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ImpedanceStimulus.Chirp)]
+    [InlineData(ImpedanceStimulus.PinkNoise)]
+    public async Task ABroadbandRun_ReadsTheSameOutputImpedanceTheModelHas(ImpedanceStimulus stimulus)
+    {
+        const double rate = 48_000.0;
+        var trace = await RunBroadbandAgainstSimulatorAsync(
+            Request(stimulus: stimulus, rightChannelIsReference: true, averages: 4, smoothingDenominator: 12),
+            SimulatedOutputStageModel.SolidState);
+
+        int checked_ = 0;
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double f = trace.FreqHz[i];
+
+            // The band the figures are worth reading over: below a few hundred hertz the solid-state
+            // model is 28 milliohms of pure resistance, which is a 30 millidecibel gain ratio, and
+            // the top of the analysed band is where the chirp's own energy runs out.
+            if (f < 300.0 || f > 15_000.0)
+                continue;
+
+            var z = SimulatedOutputStage.ZoutAt(SimulatedOutputStageModel.SolidState, 8.0, f, rate);
+            Assert.True(
+                Math.Abs(OhmsAt(trace, i) - z.Magnitude) <= (0.05 * z.Magnitude) + 0.0015,
+                $"{stimulus} at {f:0} Hz read {OhmsAt(trace, i):0.0000} ohm, the model says {z.Magnitude:0.0000}");
+            checked_++;
+        }
+
+        Assert.True(checked_ > 20, $"only {checked_} columns fell inside the band worth checking");
+    }
+
+    /// <summary>
+    /// Without a measured reference a broadband run reads magnitudes only, exactly as the stepped
+    /// path does - each pass starts at its own arbitrary point in the periodic stimulus, so the two
+    /// passes' phases are not comparable. It therefore under-reads a reactive Zout by the same
+    /// formula, which is what this pins: the same answer, not a better or a worse one.
+    /// </summary>
+    [Fact]
+    public async Task ABroadbandRun_WithNoReference_UnderReadsAReactiveZoutByItsOwnFormula()
+    {
+        const double rate = 48_000.0;
+        var trace = await RunBroadbandAgainstSimulatorAsync(
+            Request(stimulus: ImpedanceStimulus.Chirp, averages: 4, smoothingDenominator: 12),
+            SimulatedOutputStageModel.SolidState);
+
+        int checked_ = 0;
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double f = trace.FreqHz[i];
+            if (f < 300.0 || f > 15_000.0)
+                continue;
+
+            var z = SimulatedOutputStage.ZoutAt(SimulatedOutputStageModel.SolidState, 8.0, f, rate);
+            double expected = 8.0 * ((Complex.One + (z / 8.0)).Magnitude - 1.0);
+            Assert.True(
+                Math.Abs(OhmsAt(trace, i) - expected) <= (0.05 * expected) + 0.0015,
+                $"magnitude-only at {f:0} Hz read {OhmsAt(trace, i):0.0000} ohm, its own formula says {expected:0.0000}");
+            checked_++;
+        }
+
+        Assert.True(checked_ > 20, $"only {checked_} columns fell inside the band worth checking");
+    }
+
+    /// <summary>
+    /// The tube model's two ohms, measured broadband into 8 ohm then 4 ohm - the pairing the panel
+    /// defaults to, where every other test here takes the second pass open. The denominator
+    /// R2 - R1*q is the thing that changes with it, and it is the half of the solve a single pairing
+    /// cannot exercise.
+    /// </summary>
+    [Fact]
+    public async Task ABroadbandRun_IntoTwoLoads_SolvesTheSameImpedanceAnOpenSecondPassDoes()
+    {
+        const double rate = 48_000.0;
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with
+        {
+            OutputStage = SimulatedOutputStageModel.TubeAmp,
+            Load = SimulatedLoad.EightOhms,
+        };
+        var harness = await CreateAsync(device);
+
+        var status = await RunBothPassesAsync(
+            harness,
+            Request(stimulus: ImpedanceStimulus.PinkNoise, rightChannelIsReference: true, averages: 4,
+                secondLoadOhms: 4.0, smoothingDenominator: 12),
+            () => device.SignalProfile = device.SignalProfile with { Load = SimulatedLoad.FourOhms });
+
+        AssertFinished(status);
+        var trace = Assert.IsType<ImpedanceTrace>(status.Trace);
+
+        int checked_ = 0;
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double f = trace.FreqHz[i];
+            if (f < 300.0 || f > 15_000.0)
+                continue;
+
+            var z = SimulatedOutputStage.ZoutAt(SimulatedOutputStageModel.TubeAmp, 8.0, f, rate);
+            Assert.True(
+                Math.Abs(OhmsAt(trace, i) - z.Magnitude) <= (0.05 * z.Magnitude) + 0.004,
+                $"two-load at {f:0} Hz read {OhmsAt(trace, i):0.0000} ohm, the model says {z.Magnitude:0.0000}");
+            checked_++;
+        }
+
+        Assert.True(checked_ > 20, $"only {checked_} columns fell inside the band worth checking");
+
+        // Against the model rather than a hand-written range, and note it is NOT the figure
+        // AgainstTheSimulatorsTubeModel_ReadsItsTwoOhms asserts: that run is magnitude-only, which
+        // under-reads a 0.3 mH coil to 2.18 ohm and so reports a damping factor near 3.7. This one
+        // is referenced, so it recovers the true |Z| of 2.75 ohm and reads 2.91.
+        double zAt1k = SimulatedOutputStage.ZoutAt(SimulatedOutputStageModel.TubeAmp, 8.0, 1000.0, rate).Magnitude;
+        Assert.InRange(status.DampingFactorAt1k!.Value, (8.0 / zAt1k) * 0.97, (8.0 / zAt1k) * 1.03);
+    }
+
+    /// <summary>
+    /// A broadband run counts records, not points - the status says so by leaving the point counts
+    /// null, which is what the progress line branches on. Zero would read as a stepped run that has
+    /// measured nothing yet.
+    /// </summary>
+    [Fact]
+    public async Task ABroadbandRun_ReportsRecordsRatherThanPoints()
+    {
+        var (trace, status) = await RunBroadbandWithStatusAsync(
+            Request(stimulus: ImpedanceStimulus.Chirp, rightChannelIsReference: true, averages: 2),
+            SimulatedOutputStageModel.SolidState);
+
+        Assert.NotNull(trace);
+        Assert.Null(status.PointsMeasured);
+        Assert.Null(status.PointCount);
+        Assert.Equal(ImpedanceStimulus.Chirp, status.Stimulus);
+        Assert.Equal(2, status.AverageCount);
+        Assert.Equal(2, status.AveragesTaken);
+    }
+
+    /// <summary>A stepped run still counts points, and still says which stimulus it was.</summary>
+    [Fact]
+    public async Task ASteppedRun_StillCountsPoints()
+    {
+        var device = new OutputStageDevice(CleanDevice(), outputOhms: 0.5) { LoadOhms = 8.0 };
+        var harness = await CreateAsync(device);
+
+        var status = await RunBothPassesAsync(
+            harness, Request(startFreqHz: 1000.0, endFreqHz: 2000.0, stepsPerOctave: 1),
+            () => device.LoadOhms = null);
+
+        AssertFinished(status);
+        Assert.NotNull(status.PointCount);
+        Assert.Equal(status.PointCount, status.PointsMeasured);
+        Assert.Equal(ImpedanceStimulus.SteppedSine, status.Stimulus);
+    }
+
+    private static async Task<ImpedanceTrace> RunBroadbandAgainstSimulatorAsync(
+        OutputImpedanceRequest request, SimulatedOutputStageModel model)
+    {
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with { OutputStage = model, Load = SimulatedLoad.EightOhms };
+        var harness = await CreateAsync(device);
+
+        var status = await RunBothPassesAsync(
+            harness, request,
+            () => device.SignalProfile = device.SignalProfile with { Load = SimulatedLoad.Open });
+
+        AssertFinished(status);
+        return Assert.IsType<ImpedanceTrace>(status.Trace);
+    }
+
+    private static async Task<(ImpedanceTrace Trace, OutputImpedanceStatus Status)> RunBroadbandWithStatusAsync(
+        OutputImpedanceRequest request, SimulatedOutputStageModel model)
+    {
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with { OutputStage = model, Load = SimulatedLoad.EightOhms };
+        var harness = await CreateAsync(device);
+
+        var status = await RunBothPassesAsync(
+            harness, request,
+            () => device.SignalProfile = device.SignalProfile with { Load = SimulatedLoad.Open });
+
+        AssertFinished(status);
+        return (Assert.IsType<ImpedanceTrace>(status.Trace), status);
+    }
+
     [Fact]
     public async Task TheWait_IsARunningPhase_AndContinueResumesIt()
     {
@@ -362,7 +559,7 @@ public class OutputImpedanceRunnerTests
         device.LoadOhms = null;
         harness.Runner.Continue();
 
-        int perPass = harness.Runner.Status.PointCount / 2;
+        int perPass = harness.Runner.Status.PointCount!.Value / 2;
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (harness.Runner.Status.PointsMeasured < perPass + 2)
         {

@@ -1248,6 +1248,21 @@ public sealed record OutputImpedanceParameters(
     bool? ChartThickLines = null,
     bool? ChartShowDataPoints = null,
     bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// What was played: an <c>ImpedanceStimulus</c> name ("Chirp", "PinkNoise", "SteppedSine"), or
+    /// <b>null</b> for a measurement stored before the broadband pair existed — which reads back as
+    /// the stepped sine, so nothing already on a bench changes what it does. A string because that
+    /// enum lives in Tonebench.App, which this assembly does not reference; the
+    /// <c>ImpedanceParameters.Stimulus</c> reason.
+    /// </summary>
+    string? Stimulus = null,
+    /// <summary>The broadband analysed span in Hz. Null on a stepped measurement, which has a start/end grid instead.</summary>
+    double? FrequencySpanHz = null,
+    int? ResolutionMultiplier = null,
+    double? ChirpStartHz = null,
+    double? NoiseCutoffHz = null,
+    /// <summary>The fractional-octave band a broadband curve was smoothed over. Inert on a stepped run.</summary>
+    int? SmoothingDenominator = null,
     /// <summary>The settle time the run discarded after each stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>
@@ -1290,7 +1305,15 @@ public sealed record OutputImpedanceParameters(
     /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
     /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
     /// </remarks>
-    IReadOnlyList<JsonElement>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null)
+{
+    /// <summary>
+    /// What each stimulus was last set to on this measurement — see
+    /// <see cref="OutputImpedanceStimulusSettings"/>. Null on a result and on a type stored before
+    /// it existed.
+    /// </summary>
+    public OutputImpedanceStimulusSettings? ByStimulus { get; init; }
+}
 
 /// <summary>
 /// An impedance measurement type's <c>params_json</c>.
@@ -1309,6 +1332,65 @@ public sealed record OutputImpedanceParameters(
 /// cannot see <c>Tonebench.App</c>'s copy. Pinned to it by
 /// <c>ImpedanceCalibrationLevelTests.TheStoredDefaultMatchesTheRequestsOwn</c>.
 /// </summary>
+/// <summary>
+/// Averaging and smoothing kept per output-impedance stimulus — the same shape as
+/// <see cref="ImpedanceStimulusSettings"/>, and there for the same reason: a stepped sweep pays its
+/// average count at <i>every point</i> of a grid, where a broadband run folds whole records into one
+/// estimate and can afford ten of them in seconds.
+///
+/// <para><b>Two fields rather than that one's four, and the drive level is deliberately not among
+/// them.</b> An output-impedance target is output-referred — "1 W into 8 Ω" is a property of the
+/// amplifier being driven, not of what it is driven with — and this kind already keeps a value per
+/// level <i>mode</i> in <c>LevelByMode</c>. A slot per stimulus on top of that would be a matrix,
+/// and the two memories would disagree about the figure the panel is showing.</para>
+/// </summary>
+public sealed record OutputImpedanceStimulusSlot(int? AverageCount, int? SmoothingDenominator);
+
+/// <summary>One slot per stimulus, as a measurement type stores them.</summary>
+public sealed record OutputImpedanceStimulusSettings(
+    OutputImpedanceStimulusSlot? Chirp,
+    OutputImpedanceStimulusSlot? PinkNoise,
+    OutputImpedanceStimulusSlot? SteppedSine);
+
+/// <summary>
+/// What each output-impedance stimulus starts a new measurement at. The same table as
+/// <c>web/src/outputImpedance/stimulusSettings.ts</c>, where the reasoning is written down.
+/// </summary>
+public static class OutputImpedanceStimulusDefaults
+{
+    /// <summary>
+    /// Ten records and 1/3 octave for the broadband pair. Both figures are about signal-to-noise
+    /// rather than looks: Zout is a difference of two nearly equal gains — with 8 Ω then 4 Ω the
+    /// ratio is q ≈ 1 − Zout/8, about a millidecibel per milliohm — and a broadband stimulus puts a
+    /// tiny fraction of its energy in any one bin. The record count and the smoothing band are the
+    /// two levers that buy that back.
+    /// </summary>
+    public static readonly OutputImpedanceStimulusSlot Chirp = new(AverageCount: 10, SmoothingDenominator: 3);
+
+    public static readonly OutputImpedanceStimulusSlot PinkNoise = new(AverageCount: 10, SmoothingDenominator: 3);
+
+    /// <summary>
+    /// One average per point, and a smoothing figure nothing reads: a stepped sweep's every sample
+    /// is already a measurement, on a grid coarser than the narrowest band on offer.
+    /// </summary>
+    public static readonly OutputImpedanceStimulusSlot SteppedSine = new(AverageCount: 1, SmoothingDenominator: 48);
+
+    /// <summary>All three, as a new type stores them.</summary>
+    public static OutputImpedanceStimulusSettings All => new(Chirp, PinkNoise, SteppedSine);
+
+    /// <summary>
+    /// The stimulus a brand-new measurement opens on. Pink noise, as the impedance screen's own new
+    /// measurements are: a pass is seconds rather than minutes, which on a two-pass measurement with
+    /// a hand-made load change in the middle is worth more than speed alone — the amplifier drifts
+    /// less between the two readings whose difference is the answer. A measurement stored before
+    /// this existed reads its stimulus back as null and stays on the stepped sine.
+    /// </summary>
+    public const string ForNewMeasurement = "PinkNoise";
+
+    /// <summary>The slot <see cref="ForNewMeasurement"/> names, so the pair and the map cannot be seeded from different rows of this table.</summary>
+    public static OutputImpedanceStimulusSlot ForNewMeasurementSlot => PinkNoise;
+}
+
 public static class ImpedanceParametersDefaults
 {
     public const double CalibrationLevelDbv = 0.0;

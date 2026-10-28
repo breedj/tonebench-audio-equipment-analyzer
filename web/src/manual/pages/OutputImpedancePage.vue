@@ -10,9 +10,9 @@ const { showPage } = useManual()
 
     <p>
       An amplifier's output impedance against frequency, and the damping factor it implies. The
-      amplifier's gain is measured at a set output level into two different loads, and the
-      difference between the two says how much of the output is being lost across the amplifier's
-      own output impedance. With <code>q = G<sub>2</sub> / G<sub>1</sub></code>:
+      amplifier's gain is measured with a stepped sine at a set output level into two different
+      loads, and the difference between the two says how much of the output is being lost across
+      the amplifier's own output impedance. With <code>q = G<sub>2</sub> / G<sub>1</sub></code>:
     </p>
 
     <p class="manual-wiring-links">
@@ -88,51 +88,12 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>Stimulus</td>
-          <td>
-            <strong>Chirp sweep</strong> or <strong>Pink noise</strong> measure the whole band from
-            one record per pass — seconds rather than minutes. <strong>Stepped sine</strong> walks a
-            grid of tones, one capture each. See <em>Which stimulus</em> below: on this measurement
-            the choice is not only about speed.
-          </td>
-        </tr>
-        <tr>
-          <td>Frequency span (Hz) · Resolution</td>
-          <td>
-            Broadband only. The span is what is analysed and the sample rate is twice it, so 24 kHz
-            reaches about 22.8 kHz. Resolution multiplies the record length, i.e. divides the bin
-            size, at a proportional cost in time per record.
-          </td>
-        </tr>
-        <tr>
-          <td>Chirp start · Pink noise cut-off (Hz)</td>
-          <td>
-            Where the sweep begins, or where the pink sequence stops rising towards DC. Below either,
-            the stimulus puts no useful energy and nothing is measured.
-          </td>
-        </tr>
-        <tr>
-          <td>Smoothing</td>
-          <td>
-            Broadband only, and on this measurement it is about signal-to-noise rather than looks —
-            see <em>Which stimulus</em>. 1/3 octave by default, which is the widest band offered.
-          </td>
-        </tr>
-        <tr>
-          <td>Records per pass</td>
-          <td>
-            Broadband only — how many whole records each pass folds into one estimate. The label
-            reads <em>Averages per point</em> on a stepped run, where the count is paid at every
-            point of the grid instead.
-          </td>
-        </tr>
-        <tr>
           <td>Start / End (Hz)</td>
-          <td>Stepped sine only. The frequency range, stepped upward. Anything above 98% of Nyquist is dropped, and the panel warns when that will truncate the run.</td>
+          <td>The frequency range, stepped upward. Anything above 98% of Nyquist is dropped, and the panel warns when that will truncate the run.</td>
         </tr>
         <tr>
           <td>Steps per octave</td>
-          <td>Stepped sine only. Point density: every point is its own capture, twice over — the estimate underneath is worth reading first. The tutorial uses 3.</td>
+          <td>Point density. Every point is its own capture, twice over — the estimate underneath is worth reading first. The tutorial uses 3.</td>
         </tr>
         <tr>
           <td>Level mode</td>
@@ -201,6 +162,55 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
+    <h2>Why there is no stimulus choice here</h2>
+    <p>
+      The <button type="button" class="manual-link" @click="showPage('impedance')">impedance</button>
+      screen offers a chirp and pink noise beside its stepped sine, and this one deliberately does
+      not. Both were built here and measured on a real amplifier on 2026-10-28, and they were
+      removed again — not because they are wrong, but because of <em>where</em> they are weak.
+    </p>
+    <p>
+      <strong>This measurement is a difference between two nearly equal gains.</strong> With
+      8&nbsp;&Omega; then 4&nbsp;&Omega; and an amplifier of about 0.9&nbsp;&Omega;, the two passes
+      differ by only 0.84&nbsp;dB — roughly <strong>a millidecibel of gain error per
+      milliohm</strong>, so a tenth of a decibel is 0.125&nbsp;&Omega;. A stepped sine puts the whole
+      drive into one bin at a time; a chirp or a noise sequence spreads the same energy over some
+      sixteen thousand, which is about <strong>40&nbsp;dB less signal per measured point</strong>.
+      Averaging and smoothing claw a good deal of that back, but not forty decibels of it.
+    </p>
+    <p>
+      Measured on a push-pull EL84 at 1&nbsp;W, as the column-to-column spread inside each band:
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr><th>Band</th><th>Chirp</th><th>Pink noise</th><th>Stepped sine</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>20 – 50 Hz</td><td>&plusmn; 0.281 &Omega;</td><td>&plusmn; 0.604 &Omega;</td><td><strong>&plusmn; 0.007 &Omega;</strong></td></tr>
+        <tr><td>50 – 200 Hz</td><td>&plusmn; 0.071</td><td>&plusmn; 0.313</td><td><strong>&plusmn; 0.001</strong></td></tr>
+        <tr><td>200 Hz – 1 kHz</td><td>&plusmn; 0.013</td><td>&plusmn; 0.078</td><td><strong>&plusmn; 0.001</strong></td></tr>
+        <tr><td>1 – 5 kHz</td><td>&plusmn; 0.008</td><td>&plusmn; 0.027</td><td>&plusmn; 0.048</td></tr>
+      </tbody>
+    </table>
+    <p>
+      All three agreed on the <em>answer</em> — the underlying gain step came out within
+      1.4&nbsp;% on every one of them — so the broadband pair was measuring correctly; it simply
+      scattered. And the scatter falls where it hurts most: <strong>damping factor is read for what
+      an amplifier does at the bottom of the band</strong>, and that is exactly where a broadband
+      stimulus is weakest and the stepped sine is near-perfect. Above a kilohertz the chirp is
+      actually the tighter of the two, which is of no use to anybody. So the stepped sine is the
+      only stimulus offered, and its cost is honest: two sweeps of a minute or more with a load
+      change by hand in between.
+    </p>
+    <p class="manual-note">
+      One thing the removed pair taught that is worth keeping: <strong>coherence cannot warn you
+      about this.</strong> Both passes of a broadband run reported a coherence of 0.99999 while the
+      impedance solved from their difference was visibly wrong — each <em>gain</em> really was
+      measured that well, and it is their difference that is delicate. The same holds for the
+      stepped sine, which is why the two-load comparison below is the check worth making rather
+      than any single quality figure.
+    </p>
+
     <h2>Magnitude or complex</h2>
     <p>
       With <strong>Right channel is reference</strong> off, each pass reads the tone's <em>level</em>
@@ -217,128 +227,6 @@ const { showPage } = useManual()
       comes out with its phase: the coil is recovered at its true size, and the Measurements panel
       quotes the series R and L at the top of the band. It costs one cable. Both methods agree on a
       resistive Zout.
-    </p>
-
-    <h2>Which stimulus</h2>
-    <p>
-      This measurement is a <em>difference between two nearly equal numbers</em>, which is what makes
-      the choice here more than a question of speed. Driving 8&nbsp;Ω and then 4&nbsp;Ω, the gain
-      ratio is <code>q ≈ 1 − Zout/8</code> — so <strong>a milliohm is about a millidecibel</strong>,
-      and anything that moves between the two passes lands straight in the answer.
-    </p>
-    <table class="manual-table">
-      <thead>
-        <tr>
-          <th>Zout</th>
-          <th>Gain ratio between the passes</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td>0.028 Ω (a solid-state amplifier)</td><td>−0.030 dB</td></tr>
-        <tr><td>0.94 Ω (a push-pull EL84, DF 8.5)</td><td>−0.868 dB</td></tr>
-      </tbody>
-    </table>
-    <p>
-      A <strong>chirp</strong> or <strong>pink noise</strong> measures each pass in one record, so a
-      pass is seconds rather than minutes. That is worth more than the time it saves: between the two
-      passes you are changing the load by hand on an amplifier held at level, and a stepped sweep
-      leaves it warming for minutes on each side of that change. It also gives every frequency rather
-      than the points on a grid.
-    </p>
-    <p>
-      What it costs is signal per bin. A broadband stimulus spreads its energy over the whole span,
-      where a tone puts all of it on the one bin being read, so a single bin is nowhere near good
-      enough for a millidecibel. <strong>Smoothing is what buys that back</strong> — an RMS over the
-      several hundred bins a 1/3-octave band spans is worth some 28 dB — which is why the smoothing
-      default here is the widest band on offer and why the record count starts at ten. Narrow either
-      and the curve gets noisier in milliohms, not just in looks.
-    </p>
-    <p>
-      So: for a <strong>tube amplifier</strong>, whose Zout is a sizeable fraction of an ohm, the
-      broadband pair are comfortable and much quicker. For a <strong>solid-state amplifier</strong>
-      with a damping factor in the hundreds, the stepped sine's energy-on-one-bin is the better
-      reading, and is what the measurement defaults to on any measurement saved before the broadband
-      pair existed. When in doubt, run both: they measure the same thing and should agree.
-    </p>
-    <p>
-      The <strong>pink sequence is deterministic</strong>, so both passes play an identical stimulus
-      and it cancels exactly in the ratio — it is not a different random noise each time.
-    </p>
-
-    <h3>How accurate each one is</h3>
-    <p>
-      Measured against the simulator's tube output stage — 2 Ω + 0.3 mH, whose impedance at every
-      frequency is known exactly — with its noise, hum and harmonics switched off. That is the
-      point of the table: with no noise in the path, what is left is the <em>method's</em> own
-      error, so these figures separate the deconvolution, the solve and the smoothing from the
-      analyzer's noise floor. Each run is 8&nbsp;Ω then 4&nbsp;Ω with the right channel as
-      reference; the error is on |Z| over 30&nbsp;Hz – 15&nbsp;kHz.
-    </p>
-    <table class="manual-table">
-      <thead>
-        <tr>
-          <th>Stimulus</th>
-          <th>Smoothing</th>
-          <th>Mean error</th>
-          <th>Worst</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td>Stepped sine</td><td>—</td><td>0.00 %</td><td>0.00 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/48 octave</td><td>0.00 %</td><td>0.03 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/12 octave</td><td>0.02 %</td><td>0.06 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/3 octave</td><td>0.33 %</td><td>0.85 %</td></tr>
-      </tbody>
-    </table>
-    <p>
-      Three things to take from it. <strong>Chirp and pink noise are the same measurement</strong> —
-      at equal smoothing they agree to the second decimal, so choose between them on stimulus, not
-      on accuracy. <strong>The stepped sine is exact here</strong>, because a coherent tone on a
-      noise-free model has nothing to be wrong about; that is its advantage, and on a real bench it
-      is what remains of it. And <strong>the 1/3-octave row is the smoothing band itself</strong>,
-      not noise: it reads 0.02&nbsp;% below 300&nbsp;Hz and 0.48&nbsp;% above 3&nbsp;kHz, which is
-      exactly where the coil makes |Z| climb steeply. Narrowing to 1/12 octave costs almost nothing
-      and takes the worst case to 0.06&nbsp;%.
-    </p>
-
-    <h3>What limits it on a real amplifier</h3>
-    <p>
-      The figures above are the method's, with nothing noisy in the path. On a bench what limits a
-      broadband run is something the table cannot show, and it is worth understanding because
-      <strong>no quality figure on this screen will warn you about it</strong>.
-    </p>
-    <p>
-      This measurement is a <strong>difference between two nearly equal gains</strong>. With
-      8&nbsp;Ω then 4&nbsp;Ω and an amplifier of about 0.9&nbsp;Ω, the two passes differ by only
-      0.84&nbsp;dB — so roughly <strong>a millidecibel of gain error per milliohm</strong>, and a
-      tenth of a decibel of error is 0.125&nbsp;Ω. A stepped sine puts all of its energy on one bin
-      at a time and measures that difference easily. A chirp or a noise sequence spreads the same
-      energy over the whole span, so each bin is far quieter, and the <strong>smoothing band is what
-      buys it back</strong>: that is what the 1/3-octave default is for, and why narrowing it is not
-      free here the way it is on the impedance screen.
-    </p>
-    <p>
-      <strong>Coherence will read 1.000 and tell you nothing about this.</strong> Measured on a real
-      EL84 push-pull at 1&nbsp;W, both passes of a pink-noise run reported a coherence of
-      <strong>0.99999</strong> — each gain really was measured that well — while the impedance
-      solved from their difference was wrong. Coherence describes each pass; it cannot describe the
-      delicate thing done with the pair afterwards. The honest check is the one below.
-    </p>
-    <p>
-      <strong>Run the stepped sine once and compare.</strong> On that same amplifier the stepped
-      sine read 0.894&nbsp;Ω and the two broadband runs 0.882 and 0.888&nbsp;Ω — agreement to
-      1.4&nbsp;%, which is what a healthy broadband run looks like. If your broadband curve sits
-      well <em>above</em> the stepped one, especially at the bottom of the band, that is the
-      signature of too little signal per bin, and the answers are more records, a wider smoothing
-      band, or more drive.
-    </p>
-    <p>
-      One practical difference between the two broadband stimuli, which is the opposite of the
-      impedance screen's advice: <strong>the chirp is the better-conditioned choice here.</strong>
-      Its crest factor is 3.0&nbsp;dB against the pink sequence's 8.5, so at the same drive the
-      analyzer's input range lands one 6&nbsp;dB rung lower — and 6&nbsp;dB of analyzer noise
-      matters in a quantity this sensitive. On the bench run above the chirp took the 24&nbsp;dBV
-      rung where the pink noise took 30, and the chirp's curve was visibly the cleaner of the two.
     </p>
 
     <h2>What the chart shows</h2>

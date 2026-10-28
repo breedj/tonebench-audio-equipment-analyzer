@@ -1,4 +1,4 @@
-﻿// Hand-written client for the endpoints in docs/tonebench-stack-spec.md §4.1.
+// Hand-written client for the endpoints in docs/tonebench-stack-spec.md §4.1.
 // Wire shapes must stay in sync with Tonebench.App/Endpoints/*.cs by hand — no codegen.
 
 import { apiErrorMessage } from './errorMessage'
@@ -1221,15 +1221,6 @@ export interface OutputImpedanceStartRequest {
   rightChannelIsReference: boolean
   averageCount: number
   adaptiveResolution: boolean
-  /** Chirp, PinkNoise or SteppedSine. Omitted means the stepped sine, which is all this measurement could play before. */
-  stimulus?: ImpedanceStimulusName
-  /** The broadband analysed span; the sample rate is twice it. Read only by a chirp or noise run. */
-  frequencySpanHz?: number
-  resolutionMultiplier?: number
-  chirpStartHz?: number
-  noiseCutoffHz?: number
-  /** The fractional-octave band the broadband curve is smoothed over. Inert on a stepped run. */
-  smoothingDenominator?: number
 }
 
 export interface OutputImpedanceStarted {
@@ -1247,14 +1238,9 @@ export interface OutputImpedanceStatus {
   running: boolean
   phase: ResponsePhaseName
   passesCompleted: number
-  /**
-   * Points on the tone grid, or **null** on a chirp or noise run — which folds whole records into
-   * one estimate and has no grid at all. Null, never zero: zero is a stepped run that has measured
-   * nothing yet, and the progress line branches on this rather than on the phase.
-   */
-  pointsMeasured: number | null
-  /** Over both passes; null on a broadband run. */
-  pointCount: number | null
+  pointsMeasured: number
+  /** Over both passes. */
+  pointCount: number
   generatorAmpDbv: number
   /** The one input range both passes were read at. */
   inputRangeDbv: number | null
@@ -1267,11 +1253,6 @@ export interface OutputImpedanceStatus {
   rightChannelIsReference: boolean
   error: string | null
   warning: string | null
-  /** What the run on screen was played with. Absent on a response from a build that predates the broadband pair. */
-  stimulus?: ImpedanceStimulusName
-  /** Records folded in so far on a broadband pass, and how many it will take. Both 0 on a stepped run. */
-  averagesTaken?: number
-  averageCount?: number
   /** The Zout curve — an impedance trace in every respect; null until the second pass has two points. */
   trace: ImpedanceTraceJson | null
   medianOhms: number | null
@@ -1318,33 +1299,7 @@ export interface OutputImpedanceParameters {
   chartThickLines?: boolean | null
   chartShowDataPoints?: boolean | null
   chartAutofitOnDone?: boolean | null
-  /**
-   * What was played. **Absent or null means the stepped sine** — a measurement stored before the
-   * broadband pair existed keeps doing exactly what it did, which is the other half of the rule
-   * that a new measurement is *seeded* with this build's default.
-   */
-  stimulus?: ImpedanceStimulusName | null
-  frequencySpanHz?: number | null
-  resolutionMultiplier?: number | null
-  chirpStartHz?: number | null
-  noiseCutoffHz?: number | null
-  smoothingDenominator?: number | null
-  /** Averaging and smoothing kept per stimulus — see outputImpedance/stimulusSettings.ts. */
-  byStimulus?: OutputImpedanceSettingsByStimulus | null
   captureDelayMs?: number | null
-}
-
-/** One stimulus's remembered averaging and smoothing on an output-impedance measurement. */
-export interface OutputImpedanceStimulusSlot {
-  averageCount?: number | null
-  smoothingDenominator?: number | null
-}
-
-/** One slot per stimulus, keyed camelCase because the server's serializer writes params_json. */
-export interface OutputImpedanceSettingsByStimulus {
-  chirp?: OutputImpedanceStimulusSlot | null
-  pinkNoise?: OutputImpedanceStimulusSlot | null
-  steppedSine?: OutputImpedanceStimulusSlot | null
 }
 
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */

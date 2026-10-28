@@ -20,13 +20,6 @@ const LEVEL_MODE_LABELS: Record<SweepLevelMode, string> = {
   OutputPower: 'DUT output power (first pass)',
 }
 
-/** The on-screen names, so a report and the panel call one stimulus the same thing. */
-const STIMULUS_LABELS: Record<string, string> = {
-  Chirp: 'Chirp sweep',
-  PinkNoise: 'Pink noise',
-  SteppedSine: 'Stepped sine',
-}
-
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)))
@@ -58,34 +51,10 @@ export function outputImpedanceSettingsRows(paramsJson: string): ReportRow[] {
   if (!params || typeof params !== 'object') return []
 
   const rows: ReportRow[] = []
-
-  // Absent means the stepped sine — a measurement saved before the broadband pair existed.
-  const stimulus = params.stimulus ?? 'SteppedSine'
-  const broadband = stimulus === 'Chirp' || stimulus === 'PinkNoise'
-  rows.push({ label: 'Stimulus', value: STIMULUS_LABELS[stimulus] ?? String(stimulus) })
-
-  if (broadband) {
-    if (typeof params.frequencySpanHz === 'number') {
-      rows.push({ label: 'Span', value: formatHz(params.frequencySpanHz) })
-    }
-    if (typeof params.resolutionMultiplier === 'number' && params.resolutionMultiplier > 1) {
-      rows.push({ label: 'Resolution', value: `×${params.resolutionMultiplier}` })
-    }
-    if (stimulus === 'Chirp' && typeof params.chirpStartHz === 'number') {
-      rows.push({ label: 'Chirp start', value: formatHz(params.chirpStartHz) })
-    }
-    if (stimulus === 'PinkNoise' && typeof params.noiseCutoffHz === 'number') {
-      rows.push({ label: 'Pink noise cut-off', value: formatHz(params.noiseCutoffHz) })
-    }
-    if (typeof params.smoothingDenominator === 'number') {
-      rows.push({ label: 'Smoothing', value: `1/${params.smoothingDenominator} octave` })
-    }
-  } else if (typeof params.startFreqHz === 'number' && typeof params.endFreqHz === 'number') {
+  if (typeof params.startFreqHz === 'number' && typeof params.endFreqHz === 'number') {
     rows.push({ label: 'Sweep', value: `${formatHz(params.startFreqHz)} – ${formatHz(params.endFreqHz)}` })
   }
-  if (!broadband && typeof params.stepsPerOctave === 'number') {
-    rows.push({ label: 'Steps per octave', value: String(params.stepsPerOctave) })
-  }
+  if (typeof params.stepsPerOctave === 'number') rows.push({ label: 'Steps per octave', value: String(params.stepsPerOctave) })
   if (typeof params.rightChannelIsReference === 'boolean') {
     rows.push({
       label: 'Method',
@@ -104,9 +73,7 @@ export function outputImpedanceSettingsRows(paramsJson: string): ReportRow[] {
     rows.push({ label: 'Loads', value: `${formatNumber(params.loadOhms)} Ω, then ${second}` })
   }
   if (typeof params.nominalOhms === 'number') rows.push({ label: 'Damping factor against', value: `${formatNumber(params.nominalOhms)} Ω` })
-  if (broadband) {
-    // Its span and smoothing are already above; the stepped grid's FFT and window say nothing here.
-  } else if (params.adaptiveResolution === true) {
+  if (params.adaptiveResolution === true) {
     rows.push({ label: 'Resolution', value: 'Adaptive per point' })
   } else if (typeof params.fftSize === 'number' || typeof params.sampleRateHz === 'number' || params.window) {
     const parts = [
@@ -116,9 +83,7 @@ export function outputImpedanceSettingsRows(paramsJson: string): ReportRow[] {
     ].filter(Boolean)
     rows.push({ label: 'Resolution', value: parts.join(' ') })
   }
-  if (typeof params.averageCount === 'number') {
-    rows.push({ label: broadband ? 'Records per pass' : 'Averages', value: String(params.averageCount) })
-  }
+  if (typeof params.averageCount === 'number') rows.push({ label: 'Averages', value: String(params.averageCount) })
   if (typeof params.generatorAmpDbv === 'number') rows.push({ label: 'Generator level', value: `${params.generatorAmpDbv.toFixed(2)} dBV` })
   if (typeof params.inputRangeDbv === 'number') rows.push({ label: 'Input range (both passes)', value: `${params.inputRangeDbv.toFixed(0)} dBV` })
   if (typeof params.captureDelayMs === 'number' && params.captureDelayMs > 0) {

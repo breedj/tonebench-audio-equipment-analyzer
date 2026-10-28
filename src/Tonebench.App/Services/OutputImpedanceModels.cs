@@ -42,27 +42,7 @@ public sealed record OutputImpedanceRequest(
     WindowType Window,
     int AverageCount,
     double SampleRateHz,
-    bool AdaptiveResolution,
-    /// <summary>
-    /// What to play. <see cref="ImpedanceStimulus.SteppedSine"/> by default, so every caller and
-    /// every measurement stored before the broadband pair existed measures exactly what it did.
-    /// </summary>
-    ImpedanceStimulus Stimulus = ImpedanceStimulus.SteppedSine,
-    // The literals, not the consts below: a primary constructor's default value cannot reference a
-    // member of the type it is declaring. Kept equal to them by OutputImpedanceStartRequestTests.
-    /// <summary>The broadband analysed span in Hz; the sample rate is twice it. Read only by a chirp or noise run.</summary>
-    double FrequencySpanHz = 24_000.0,
-    /// <summary>Multiplies the broadband record length, i.e. divides the bin size. Read only by a chirp or noise run.</summary>
-    int ResolutionMultiplier = 1,
-    /// <summary>Where the chirp starts. Read only by a chirp run.</summary>
-    double ChirpStartHz = 10.0,
-    /// <summary>Where the pink sequence stops rising towards DC. Read only by a noise run.</summary>
-    double NoiseCutoffHz = 5.0,
-    /// <summary>
-    /// The fractional-octave band the broadband curve is smoothed over. Inert on a stepped run,
-    /// whose every sample is a measurement on a grid already coarser than the narrowest band.
-    /// </summary>
-    int SmoothingDenominator = 3)
+    bool AdaptiveResolution)
 {
     public const int DefaultFftSize = SteppedResponseRequest.DefaultFftSize;
 
@@ -79,55 +59,6 @@ public sealed record OutputImpedanceRequest(
     /// <summary>The passes a run makes, in order: the first load (the level target is defined into it), then the second load or open.</summary>
     public const int PassCount = 2;
 
-    public const double DefaultFrequencySpanHz = 24_000.0;
-
-    public const double DefaultChirpStartHz = 10.0;
-
-    public const double DefaultNoiseCutoffHz = 5.0;
-
-    /// <summary>
-    /// 1/3 octave, the widest band on offer, and chosen for signal-to-noise rather than for looks.
-    /// Zout is a <i>difference</i> of two nearly equal gains — with 8 Ω then 4 Ω the ratio is
-    /// q ≈ 1 − Zout/8, i.e. about a millidecibel per milliohm — and a broadband stimulus spreads
-    /// its energy over the whole span, so a single bin is nowhere near that good. The smoothing band
-    /// is what buys it back: an RMS over the ~600 bins a 1/3-octave band spans at 1 kHz is worth
-    /// some 28 dB, which is the difference between a readable milliohm figure and noise.
-    /// </summary>
-    public const int DefaultSmoothingDenominator = 3;
-
-    /// <summary>Whether the run is a tone grid rather than one broadband record per pass.</summary>
-    public bool IsStepped => Stimulus == ImpedanceStimulus.SteppedSine;
-
-    /// <summary>Whether the broadband stimulus is the periodic pink sequence rather than the chirp.</summary>
-    public bool IsNoise => Stimulus == ImpedanceStimulus.PinkNoise;
-
-    /// <summary>
-    /// The acquisition half of a broadband run, as the frequency-response measurement would express
-    /// it — the one place the sweep's rules and arithmetic live, borrowed exactly as
-    /// <see cref="ImpulseResponseRequest.AsAcquisition"/> borrows them.
-    ///
-    /// <para><b>The bandwidth reference is left at its default</b> (200 Hz – 2 kHz), because this
-    /// screen has no reference control and the impulse-response screen is in the same position for
-    /// the same reason. It decides one thing here: the band an output-referred target — "1 W into
-    /// 8 Ω" — is measured over, which on an amplifier flat through the midband is the figure anyone
-    /// would have meant. Nonsense on a stepped run, which has no span and probes one tone, so
-    /// nothing may call this without checking <see cref="IsStepped"/> first.</para>
-    /// </summary>
-    public FrequencyResponseRequest AsBroadbandAcquisition() =>
-        new(FrequencySpanHz,
-            ResolutionMultiplier,
-            LevelMode,
-            LevelValue,
-            LevelUnit,
-            RightChannelIsReference,
-            SmoothingDenominator,
-            AverageCount,
-            Continuous: false,
-            ChirpStartHz: ChirpStartHz,
-            LoadOhms: LoadOhms,
-            Stimulus: IsNoise ? ResponseStimulus.PinkNoise : ResponseStimulus.Chirp,
-            NoiseCutoffHz: NoiseCutoffHz);
-
     /// <summary>True when the second pass is taken with nothing on the output — the tutorial's arrangement.</summary>
     public bool SecondPassIsOpen => SecondLoadOhms is null;
 
@@ -137,28 +68,9 @@ public sealed record OutputImpedanceRequest(
     /// <summary>True when the generator amplitude has to be found by probing the DUT's output at 1 kHz, in the loaded pass.</summary>
     public bool SolvesGeneratorLevel => LevelMode != ThdSweepLevelMode.GeneratorVoltage;
 
-    /// <summary>
-    /// What the acquisition is clocked at, whichever stimulus is playing: the broadband span's own
-    /// rate on a chirp or noise run, the grid's on a stepped one. The runner starts the stream with
-    /// this, so a branch missing here is a broadband run measured on a stepped sweep's rate.
-    /// </summary>
-    public double EffectiveSampleRateHz => !IsStepped
-        ? AsBroadbandAcquisition().SampleRateHz
-        : AdaptiveResolution
-            ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
-            : SampleRateHz;
-
-    /// <summary>The broadband record length in samples. Meaningless on a stepped run.</summary>
-    public int BroadbandFftSize => AsBroadbandAcquisition().FftSize;
-
-    /// <summary>The broadband bin size in Hz. Meaningless on a stepped run.</summary>
-    public double BroadbandBinHz => AsBroadbandAcquisition().BinHz;
-
-    /// <summary>The bottom of the analysed band on a broadband run.</summary>
-    public double AnalysisLowHz => AsBroadbandAcquisition().AnalysisLowHz;
-
-    /// <summary>The top of the analysed band on a broadband run.</summary>
-    public double AnalysisHighHz => AsBroadbandAcquisition().AnalysisHighHz;
+    public double EffectiveSampleRateHz => AdaptiveResolution
+        ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+        : SampleRateHz;
 
     public double MaxFrequencyHz => MaxFrequencyNyquistFraction * EffectiveSampleRateHz / 2.0;
 
@@ -181,29 +93,14 @@ public sealed record OutputImpedanceRequest(
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> for anything the runner cannot act on.</summary>
     public void Validate()
     {
-        // Only the settings some run will actually read, the ImpedanceRequest rule: a stepped grid
-        // left at a figure a broadband run never looks at must not refuse that run, or a stimulus
-        // becomes unreachable because of a control the panel has hidden.
-        if (IsStepped)
-        {
-            if (StartFreqHz <= 0.0)
-                throw new ArgumentOutOfRangeException(nameof(StartFreqHz), StartFreqHz, "Start frequency must be greater than 0 Hz.");
-            if (EndFreqHz <= StartFreqHz)
-                throw new ArgumentOutOfRangeException(nameof(EndFreqHz), EndFreqHz, "End frequency must be above the start frequency.");
-            if (StepsPerOctave is < 1 or > 48)
-                throw new ArgumentOutOfRangeException(nameof(StepsPerOctave), StepsPerOctave, "Steps per octave must be between 1 and 48.");
-            if (FftSize <= 0 || (FftSize & (FftSize - 1)) != 0)
-                throw new ArgumentOutOfRangeException(nameof(FftSize), FftSize, "FFT size must be a power of two.");
-        }
-        else
-        {
-            // Delegated whole: the span, the resolution and the chirp start are the frequency
-            // response's rules, and a second copy of them here is a second thing to keep in step.
-            AsBroadbandAcquisition().Validate();
-
-            if (SmoothingDenominator < 1)
-                throw new ArgumentOutOfRangeException(nameof(SmoothingDenominator), SmoothingDenominator, "The smoothing band's denominator must be at least 1.");
-        }
+        if (StartFreqHz <= 0.0)
+            throw new ArgumentOutOfRangeException(nameof(StartFreqHz), StartFreqHz, "Start frequency must be greater than 0 Hz.");
+        if (EndFreqHz <= StartFreqHz)
+            throw new ArgumentOutOfRangeException(nameof(EndFreqHz), EndFreqHz, "End frequency must be above the start frequency.");
+        if (StepsPerOctave is < 1 or > 48)
+            throw new ArgumentOutOfRangeException(nameof(StepsPerOctave), StepsPerOctave, "Steps per octave must be between 1 and 48.");
+        if (FftSize <= 0 || (FftSize & (FftSize - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(FftSize), FftSize, "FFT size must be a power of two.");
 
         if (AverageCount is < MinAverageCount or > MaxAverageCount)
         {
@@ -254,9 +151,7 @@ public sealed record OutputImpedanceRequest(
                 LevelUnit.IsPower() ? "A target power must be positive." : "A voltage amplitude must be positive.");
         }
 
-        // A broadband run has no tone to resolve; its own band check is AsBroadbandAcquisition's.
-        if (IsStepped)
-            RequireResolvableTone();
+        RequireResolvableTone();
     }
 
     private void RequireResolvableTone()
@@ -345,14 +240,8 @@ public sealed record OutputImpedanceStatus(
     bool Running,
     FrequencyResponsePhase Phase,
     int PassesCompleted,
-    /// <summary>
-    /// Points on the tone grid, or <b>null</b> on a chirp or noise run, which folds whole records
-    /// into one estimate and has no grid at all — the <see cref="ImpedanceStatus"/> convention, and
-    /// what the progress line branches on rather than on the phase. Null, never zero: zero is a
-    /// stepped run that has measured nothing yet.
-    /// </summary>
-    int? PointsMeasured,
-    int? PointCount,
+    int PointsMeasured,
+    int PointCount,
     double GeneratorAmpDbv,
     double? InputRangeDbv,
     double BinHz,
@@ -369,9 +258,4 @@ public sealed record OutputImpedanceStatus(
     double? ZoutAt1kOhms,
     double? DampingFactorAt1k,
     double? FirstGainAt1kDb,
-    double? SecondGainAt1kDb,
-    /// <summary>What the run on screen was played with. Defaulted so a caller that predates the broadband pair still compiles and still means what it said.</summary>
-    ImpedanceStimulus Stimulus = ImpedanceStimulus.SteppedSine,
-    /// <summary>Records folded in so far on a broadband pass, and how many it will take. Both 0 on a stepped run, which counts points instead.</summary>
-    int AveragesTaken = 0,
-    int AverageCount = 0);
+    double? SecondGainAt1kDb);

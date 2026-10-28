@@ -301,11 +301,17 @@ public static class FractionalOctaveSmoother
     /// amount of later averaging can bring it back, because there is nothing left to cancel
     /// against. Smooth first, map afterwards.</para>
     ///
-    /// <para>The output-impedance measurement is what forced it and is the worst case available:
-    /// <c>Z = R₁·R₂·(q − 1)/(R₂ − R₁·q)</c> recovers ohms from a gain ratio <c>q</c> that sits
-    /// within a decibel of one, so about 12 Ω of Z per unit of q. Solving per bin and smoothing
-    /// <c>|Z|</c> afterwards read <b>1.24 Ω for a 0.88 Ω amplifier</b> on a real bench
-    /// (2026-10-28); smoothing q over the same bands and solving once read 0.87.</para>
+    /// <para>The impedance screen is what uses it: <c>Z = R·H/(1 − H)</c> is solved per bin and the
+    /// complex Z averaged here, so the magnitude is taken last. On a sub-ohm DUT read at a low
+    /// drive that took the band median from <b>+2.1 % to −0.1 %</b> and the share of columns
+    /// reading high from 73 % to 53 % — 50 % being none at all.</para>
+    ///
+    /// <para>It was <i>found</i> on the output-impedance measurement, which amplified the same
+    /// fault twelvefold: <c>Z = R₁·R₂·(q − 1)/(R₂ − R₁·q)</c> recovers ohms from a gain ratio
+    /// sitting within a decibel of one, and solving per bin read <b>1.24 Ω for a 0.88 Ω
+    /// amplifier</b> on a real bench (2026-10-28). That measurement is the stepped sine only now,
+    /// so this has one caller — but the <i>reason</i> is general, and any future code that takes a
+    /// magnitude of something it averaged wants this rather than <see cref="Smooth"/>.</para>
     ///
     /// <para>A band narrower than one bin leaves that bin alone, and a
     /// <paramref name="denominator"/> of 0 means no smoothing at all, both as the other smoothers

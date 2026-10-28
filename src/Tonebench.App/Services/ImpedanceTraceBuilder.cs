@@ -119,18 +119,16 @@ internal static class ImpedanceTraceBuilder
     }
 
     /// <summary>
-    /// A trace from a curve that has <b>already</b> been averaged. Both impedance screens build
-    /// theirs this way, and nothing here may smooth a second time.
+    /// A trace from a curve that has <b>already</b> been averaged, and nothing here may smooth it
+    /// a second time.
     ///
     /// <para>The reason is not a preference about where a loop lives. <c>|Z|</c> is a magnitude, so
     /// noise that moved a bin in any direction at all can only push it <i>up</i>, and an RMS over a
-    /// fractional-octave band of already-rectified values keeps every bit of that bias. So both
-    /// callers average as a <b>vector</b> first — see
-    /// <see cref="FractionalOctaveSmoother.SmoothComplex"/> — the output-impedance runner on the
-    /// gain ratio, before a solve that is divergent, and the impedance runner on the solved Z,
-    /// after a solve that is nearly linear and that subtracts the short standard as a complex
-    /// value. Everything from here on is shared, so the two screens cannot disagree about how one
-    /// curve is drawn, decimated or searched for its peak.</para>
+    /// fractional-octave band of already-rectified values keeps every bit of that bias. So
+    /// <c>ImpedanceRunner</c> solves per bin, averages the complex Z as a <b>vector</b> — see
+    /// <see cref="FractionalOctaveSmoother.SmoothComplex"/> — and arrives here with the magnitude
+    /// still untaken. Everything from this point is shared with <see cref="BuildPoints"/>'s own
+    /// rendering conventions, so a stepped curve and a broadband one are drawn alike.</para>
     /// </summary>
     public static ImpedanceTrace BuildSmoothed(
         double binHz,

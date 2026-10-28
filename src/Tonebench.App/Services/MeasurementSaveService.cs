@@ -355,22 +355,9 @@ public sealed class MeasurementSaveService(
             RightChannelIsReference: false,
             FftSize: OutputImpedanceRequest.DefaultFftSize,
             Window: WindowType.Hann,
-            // The authoritative pair, read from the slot the selected stimulus names rather than
-            // typed beside the map: a default written in two places is how a brand-new measurement
-            // comes to change its own settings the first time the dropdown is turned and back.
-            AverageCount: OutputImpedanceStimulusDefaults.ForNewMeasurementSlot.AverageCount ?? 1,
+            AverageCount: 1,
             SampleRateHz: OutputImpedanceRequest.DefaultSampleRateHz,
-            AdaptiveResolution: true,
-            Stimulus: OutputImpedanceStimulusDefaults.ForNewMeasurement,
-            FrequencySpanHz: OutputImpedanceRequest.DefaultFrequencySpanHz,
-            ResolutionMultiplier: 1,
-            ChirpStartHz: OutputImpedanceRequest.DefaultChirpStartHz,
-            NoiseCutoffHz: OutputImpedanceRequest.DefaultNoiseCutoffHz,
-            SmoothingDenominator: OutputImpedanceStimulusDefaults.ForNewMeasurementSlot.SmoothingDenominator
-                ?? OutputImpedanceRequest.DefaultSmoothingDenominator)
-        {
-            ByStimulus = OutputImpedanceStimulusDefaults.All,
-        }, SerializerOptions);
+            AdaptiveResolution: true), SerializerOptions);
 
     /// <summary>
     /// A brand-new crosstalk type's <c>params_json</c>, kept in step with
@@ -1056,12 +1043,6 @@ public sealed class MeasurementSaveService(
                 request.LoadOhms, request.SecondLoadOhms, request.NominalOhms, request.RightChannelIsReference,
                 request.FftSize, request.Window, request.AverageCount, request.SampleRateHz,
                 request.AdaptiveResolution,
-                Stimulus: request.Stimulus.ToString(),
-                FrequencySpanHz: request.FrequencySpanHz,
-                ResolutionMultiplier: request.ResolutionMultiplier,
-                ChirpStartHz: request.ChirpStartHz,
-                NoiseCutoffHz: request.NoiseCutoffHz,
-                SmoothingDenominator: request.SmoothingDenominator,
                 GeneratorAmpDbv: status.GeneratorAmpDbv,
                 InputRangeDbv: status.InputRangeDbv,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,

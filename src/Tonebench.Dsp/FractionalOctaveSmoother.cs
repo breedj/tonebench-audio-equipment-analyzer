@@ -289,6 +289,66 @@ public static class FractionalOctaveSmoother
     private const double CancelledResultant = 1e-12;
 
     /// <summary>
+    /// The complex <b>arithmetic mean</b> over the same 1/N-octave bands.
+    ///
+    /// <para><b>A mean, where every other smoother here takes an RMS or a magnitude-weighted
+    /// average — and that difference is the whole reason this exists.</b> It is for a quantity
+    /// something downstream will put through a <i>nonlinear</i> map, where the averaging has to
+    /// happen first or it cannot help at all. Noise on a measured complex quantity is additive and
+    /// zero mean, so summing it as a vector cancels it; once that quantity has been mapped to
+    /// something a magnitude is then taken of, the noise has been <i>rectified</i> — it pushed the
+    /// value away from the truth in every direction and the magnitude kept the distance — and no
+    /// amount of later averaging can bring it back, because there is nothing left to cancel
+    /// against. Smooth first, map afterwards.</para>
+    ///
+    /// <para>The output-impedance measurement is what forced it and is the worst case available:
+    /// <c>Z = R₁·R₂·(q − 1)/(R₂ − R₁·q)</c> recovers ohms from a gain ratio <c>q</c> that sits
+    /// within a decibel of one, so about 12 Ω of Z per unit of q. Solving per bin and smoothing
+    /// <c>|Z|</c> afterwards read <b>1.24 Ω for a 0.88 Ω amplifier</b> on a real bench
+    /// (2026-10-28); smoothing q over the same bands and solving once read 0.87.</para>
+    ///
+    /// <para>A band narrower than one bin leaves that bin alone, and a
+    /// <paramref name="denominator"/> of 0 means no smoothing at all, both as the other smoothers
+    /// do it.</para>
+    /// </summary>
+    public static Complex[] SmoothComplex(
+        ReadOnlySpan<Complex> values, double binHz, int denominator, Band? band = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(denominator);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(binHz);
+
+        int n = values.Length;
+        var result = values.ToArray();
+        if (denominator == 0 || n < 3) return result;
+
+        var realBins = new double[n];
+        var imagBins = new double[n];
+        for (int k = 0; k < n; k++)
+        {
+            realBins[k] = values[k].Real;
+            imagBins[k] = values[k].Imaginary;
+        }
+
+        var realBlocks = BlockTotals(realBins);
+        var imagBlocks = BlockTotals(imagBins);
+
+        double halfWidthRatio = HalfWidthRatio(denominator);
+        var limit = (band ?? Band.Whole(n)).ClampedTo(n);
+
+        for (int k = 1; k < n; k++)
+        {
+            if (!TryBandBins(k, limit, halfWidthRatio, out int low, out int high)) continue;
+
+            double count = high - low + 1;
+            result[k] = new Complex(
+                BandSum(realBins, realBlocks, low, high) / count,
+                BandSum(imagBins, imagBlocks, low, high) / count);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// An <b>unwrapped</b> phase smoothed over the same bands, weighted by magnitude, in degrees —
     /// the frequency response's counterpart to <see cref="SmoothPhaseDeg"/>.
     ///

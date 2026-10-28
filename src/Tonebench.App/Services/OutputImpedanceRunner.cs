@@ -1156,8 +1156,25 @@ public sealed class OutputImpedanceRunner(
     }
 
     /// <summary>
-    /// Zout from the two broadband passes: one bin at a time, then smoothed and decimated by the
-    /// impedance screen's own builder so the two measurements cannot disagree about one curve.
+    /// Zout from the two broadband passes: the gain <b>ratio</b> is averaged over the smoothing
+    /// bands, and the solve happens once afterwards.
+    ///
+    /// <para><b>That order is the measurement, not a detail of it, and getting it the other way
+    /// round is a wrong answer rather than a noisy one.</b> With 8 Ω then 4 Ω the ratio
+    /// q = G₂/G₁ sits within a decibel of one — about 12 Ω of Z per unit of q, or a millidecibel
+    /// per milliohm — so a single bin's noise is ohms, and |Z| is a <i>magnitude</i>: noise that
+    /// moved q in any direction at all can only push it <i>up</i>. Smoothing |Z| afterwards averages
+    /// numbers that are already biased, and an average of biased numbers is biased. Averaging q
+    /// first instead removes the noise while it is still additive and zero mean, and one solve of a
+    /// clean q is clean.</para>
+    ///
+    /// <para>Measured on Joost's EL84 push-pull at 1 W (2026-10-28), 1/3 octave, 10 records, where
+    /// the stepped sine reads 0.894 Ω and all three stimuli agree on the underlying gain step to
+    /// 1.4 %: solving per bin drew <b>1.24 Ω over 200 Hz – 1 kHz on the pink-noise run and 1.67 Ω
+    /// at the bottom</b>, and re-solving the very same capture from its smoothed gains gave 0.87 and
+    /// 1.02. <b>Coherence cannot catch it</b> — it read 0.99999 throughout, because each gain pass
+    /// really was measured that well. It is their difference that is delicate, and nothing on the
+    /// chart says so.</para>
     /// </summary>
     private void PublishZoutBroadband(
         OutputImpedanceRequest request,
@@ -1168,7 +1185,7 @@ public sealed class OutputImpedanceRunner(
         var h2 = ImpedanceTraceBuilder.ToComplex(second);
 
         int n = Math.Min(h1.Length, h2.Length);
-        var zout = new Complex[n];
+        var ratio = new Complex[n];
         var coherence = new double[n];
 
         for (int k = 0; k < n; k++)
@@ -1177,40 +1194,46 @@ public sealed class OutputImpedanceRunner(
             // cannot be trusted at, and reporting the better one would flatter it.
             coherence[k] = Math.Min(first.Coherence[k], second.Coherence[k]);
 
-            if (h1[k] == Complex.Zero)
-            {
-                zout[k] = Complex.Zero;
-                continue;
-            }
+            // A pass with nothing in a bin reads as unity, i.e. no impedance, which is what the
+            // per-bin version returned there too - and a value rather than a hole, because this
+            // array is about to be averaged over bands.
+            ratio[k] = h1[k] == Complex.Zero ? Complex.One : h2[k] / h1[k];
 
-            var ratio = h2[k] / h1[k];
-            if (request.RightChannelIsReference)
-            {
-                zout[k] = OutputImpedanceMath.Solve(ratio, request.LoadOhms, request.SecondLoadOhms);
-            }
-            else
-            {
-                // Magnitudes only, and floored at zero, exactly as the stepped path does it: without
-                // a measured reference the two passes' phases are not comparable at all.
-                var z = OutputImpedanceMath.Solve(new Complex(ratio.Magnitude, 0.0), request.LoadOhms, request.SecondLoadOhms);
-                zout[k] = new Complex(Math.Max(0.0, z.Real), 0.0);
-            }
+            // Magnitudes only where there is no measured reference, exactly as the stepped path does
+            // it: without one the two passes' phases are not comparable at all.
+            if (!request.RightChannelIsReference)
+                ratio[k] = new Complex(ratio[k].Magnitude, 0.0);
         }
 
         double binHz = request.BroadbandBinHz;
-        var trace = ImpedanceTraceBuilder.Build(
-            binHz, request.AnalysisLowHz, request.AnalysisHighHz, request.SmoothingDenominator,
-            ImpedanceTraceKind.Impedance, zout, coherence, ImpedanceRunner.DisplayColumns);
+
+        // The readings and the curve are taken inside the analysed band and nowhere else. Outside it
+        // the ratio is noise over nothing, and Z = R1*R2*(q - 1)/(R2 - R1*q) of a ratio wandering
+        // near the denominator's zero is clamped at ImpedanceMath.MaxOhms - one such bin would be
+        // the median, and a smoothing band reaching past the top would carry it inward.
+        var band = ImpedanceTraceBuilder.AnalysisBand(binHz, request.AnalysisLowHz, request.AnalysisHighHz, n);
+        int firstBin = band.FirstBin;
+        int lastBin = band.LastBin;
+
+        var smoothedRatio = FractionalOctaveSmoother.SmoothComplex(
+            ratio, binHz, request.SmoothingDenominator, band);
+
+        var zout = new Complex[n];
+        for (int k = 0; k < n; k++)
+        {
+            var z = OutputImpedanceMath.Solve(smoothedRatio[k], request.LoadOhms, request.SecondLoadOhms);
+
+            // Floored at zero without a reference, as the stepped path does: a magnitude-only ratio
+            // that lands the wrong side of unity is noise, not a negative resistance.
+            zout[k] = request.RightChannelIsReference ? z : new Complex(Math.Max(0.0, z.Real), 0.0);
+        }
+
+        // Already averaged, so this must not smooth again - everything else about the trace is the
+        // impedance screen's own, so the two measurements cannot disagree about one curve.
+        var trace = ImpedanceTraceBuilder.BuildSmoothed(
+            binHz, band, ImpedanceTraceKind.Impedance, zout, coherence, ImpedanceRunner.DisplayColumns);
 
         var acquisition = request.AsBroadbandAcquisition();
-
-        // The readings are taken inside the analysed band and nowhere else. Outside it the ratio is
-        // noise over nothing, and Z = R1*R2*(q - 1)/(R2 - R1*q) of a ratio wandering near the
-        // denominator's zero is clamped at ImpedanceMath.MaxOhms - one such bin would be the median.
-        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
-        int lastBin = Math.Min(n - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
-        if (lastBin <= firstBin)
-            lastBin = Math.Min(n - 1, firstBin + 1);
 
         int at1k = Math.Clamp((int)Math.Round(1000.0 / binHz), firstBin, lastBin);
 

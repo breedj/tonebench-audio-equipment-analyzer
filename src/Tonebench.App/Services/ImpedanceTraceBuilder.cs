@@ -127,27 +127,12 @@ internal static class ImpedanceTraceBuilder
         double[] coherence,
         int displayColumns)
     {
-        int binCount = values.Length;
+        var band = AnalysisBand(binHz, analysisLowHz, analysisHighHz, values.Length);
 
-        var magnitude = new double[binCount];
-        for (int k = 0; k < binCount; k++)
+        var magnitude = new double[values.Length];
+        for (int k = 0; k < values.Length; k++)
             magnitude[k] = values[k].Magnitude;
 
-        // Only where the sweep put energy. Outside it the ratio is noise over nothing and the peak
-        // search would lock onto whichever out-of-band bin happened to be loudest — and, which is why
-        // this is computed *before* the smoothing rather than after it, a smoothing band reaching
-        // past the top of it drags the last columns toward whatever an out-of-band ratio inverts to.
-        // This measurement has the worst arithmetic for that of any of them: Z = R·H/(1 − H) of a
-        // noise ratio wandering near 1 is clamped at ImpedanceMath.MaxOhms, and an RMS over a band
-        // holding one such bin *is* that bin. Measured 2026-10-21 on a 1 Ω fixture: the last columns
-        // read 4.37 Ω at 1/3 octave against a true 1.06, while 1/48 — whose band reaches 3 % past
-        // each bin rather than 12 % — read 1.07 and smoothing None read 1.14.
-        int firstBin = Math.Max(1, (int)Math.Ceiling(analysisLowHz / binHz));
-        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(analysisHighHz / binHz));
-        if (lastBin <= firstBin)
-            lastBin = Math.Min(binCount - 1, firstBin + 1);
-
-        var band = new FractionalOctaveSmoother.Band(firstBin, lastBin);
         var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, smoothingDenominator, band);
 
         // The angle over the same bands, as a vector mean — see FractionalOctaveSmoother.SmoothPhaseDeg.
@@ -155,6 +140,83 @@ internal static class ImpedanceTraceBuilder
         // angle is the raw centre bin of those ten draws a readable curve beside an unreadable one,
         // from one capture.
         var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, smoothingDenominator, band);
+
+        return Render(binHz, band, kind, smoothed, smoothedPhaseDeg, coherence, displayColumns);
+    }
+
+    /// <summary>
+    /// The bins a curve of this bin size may be smoothed, searched and drawn over.
+    ///
+    /// <para>Only where the stimulus put energy. Outside it the ratio is noise over nothing and the
+    /// peak search would lock onto whichever out-of-band bin happened to be loudest — and, which is
+    /// why this is settled <i>before</i> any smoothing rather than after it, a smoothing band
+    /// reaching past the top of it drags the last columns toward whatever an out-of-band ratio
+    /// inverts to. This family has the worst arithmetic for that of any measurement here:
+    /// <c>Z = R·H/(1 − H)</c> of a noise ratio wandering near 1 is clamped at
+    /// <see cref="ImpedanceMath.MaxOhms"/>, and an RMS over a band holding one such bin <i>is</i>
+    /// that bin. Measured 2026-10-21 on a 1 Ω fixture: the last columns read 4.37 Ω at 1/3 octave
+    /// against a true 1.06, while 1/48 — whose band reaches 3 % past each bin rather than 12 % —
+    /// read 1.07 and smoothing None read 1.14.</para>
+    /// </summary>
+    public static FractionalOctaveSmoother.Band AnalysisBand(
+        double binHz, double analysisLowHz, double analysisHighHz, int binCount)
+    {
+        int firstBin = Math.Max(1, (int)Math.Ceiling(analysisLowHz / binHz));
+        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(analysisHighHz / binHz));
+        if (lastBin <= firstBin)
+            lastBin = Math.Min(binCount - 1, firstBin + 1);
+
+        return new FractionalOctaveSmoother.Band(firstBin, lastBin);
+    }
+
+    /// <summary>
+    /// The same trace from a curve that has <b>already</b> been smoothed, for a caller that had to
+    /// do its own averaging earlier in the arithmetic.
+    ///
+    /// <para>The output-impedance measurement is that caller, and the reason is not a preference
+    /// about where a loop lives. Its Z is solved from a gain ratio sitting within a decibel of one,
+    /// so a bin's worth of noise becomes ohms; <c>|Z|</c> is a magnitude, so that noise rectifies,
+    /// and an RMS of already-rectified values keeps every bit of the bias. It therefore averages
+    /// the <i>ratio</i> — see <see cref="FractionalOctaveSmoother.SmoothComplex"/> — and solves
+    /// once, and what arrives here must not be smoothed a second time. Everything after the
+    /// averaging is shared with <see cref="Build"/>, so the two screens still draw, decimate and
+    /// find their peak identically.</para>
+    /// </summary>
+    public static ImpedanceTrace BuildSmoothed(
+        double binHz,
+        FractionalOctaveSmoother.Band band,
+        ImpedanceTraceKind kind,
+        Complex[] values,
+        double[] coherence,
+        int displayColumns)
+    {
+        var magnitude = new double[values.Length];
+        var phaseDeg = new double[values.Length];
+        for (int k = 0; k < values.Length; k++)
+        {
+            magnitude[k] = values[k].Magnitude;
+            phaseDeg[k] = values[k].Phase * 180.0 / Math.PI;
+        }
+
+        return Render(binHz, band, kind, magnitude, phaseDeg, coherence, displayColumns);
+    }
+
+    /// <summary>
+    /// dB, the peak, and the decimation onto display columns — everything both builds do once their
+    /// curve has been averaged, so that the only thing they differ in is the averaging.
+    /// </summary>
+    private static ImpedanceTrace Render(
+        double binHz,
+        FractionalOctaveSmoother.Band band,
+        ImpedanceTraceKind kind,
+        double[] smoothed,
+        double[] smoothedPhaseDeg,
+        double[] coherence,
+        int displayColumns)
+    {
+        int binCount = smoothed.Length;
+        int firstBin = band.FirstBin;
+        int lastBin = band.LastBin;
 
         var traceDb = new double[binCount];
         for (int k = 0; k < binCount; k++)

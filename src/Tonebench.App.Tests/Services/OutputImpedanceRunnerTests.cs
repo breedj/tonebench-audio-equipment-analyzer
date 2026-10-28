@@ -428,6 +428,69 @@ public class OutputImpedanceRunnerTests
     /// null, which is what the progress line branches on. Zero would read as a stepped run that has
     /// measured nothing yet.
     /// </summary>
+    /// <summary>
+    /// The widest smoothing band on the steepest impedance the simulator has — which is the one
+    /// case where solving per bin and averaging the <i>ohms</i> is wrong even with no noise at all,
+    /// and so the only call-site test that can tell the two orders apart here.
+    ///
+    /// <para>A 1/3-octave band at 10 kHz spans 2.4 kHz, over which the tube stage's 0.3 mH coil
+    /// takes |Z| from 15 to 20 Ω — a factor of 14 across the measured band — while the gain ratio
+    /// it is solved from moves by a factor of under 2. Averaging the <i>ratio</i> therefore costs
+    /// almost nothing where averaging |Z| cost a great deal: measured end to end against
+    /// <see cref="SimulatedOutputStage.ZoutAt"/>, the same run read <b>0.60 % mean and 3.93 % worst
+    /// before the order was fixed and 0.33 % / 0.85 % after</b>. The bound below sits between those
+    /// two, so this fails against the old order rather than merely documenting the new one.</para>
+    ///
+    /// <para><see cref="OutputImpedanceOrderingTests"/> pins the arithmetic; this pins that the
+    /// runner asks for it. Both are needed — the smoothing-band clamp of 2026-10-21 was correct in
+    /// the smoother and missing at a call site for a day, with every test still green.</para>
+    /// </summary>
+    [Fact]
+    public async Task ABroadbandRun_AtTheWidestSmoothing_AveragesTheRatioRatherThanTheOhms()
+    {
+        const double rate = 48_000.0;
+        var device = CleanDevice();
+        device.SignalProfile = device.SignalProfile with
+        {
+            OutputStage = SimulatedOutputStageModel.TubeAmp,
+            Load = SimulatedLoad.EightOhms,
+        };
+        var harness = await CreateAsync(device);
+
+        var status = await RunBothPassesAsync(
+            harness,
+            Request(stimulus: ImpedanceStimulus.Chirp, rightChannelIsReference: true, averages: 4,
+                secondLoadOhms: 4.0, smoothingDenominator: 3),
+            () => device.SignalProfile = device.SignalProfile with { Load = SimulatedLoad.FourOhms });
+
+        AssertFinished(status);
+        var trace = Assert.IsType<ImpedanceTrace>(status.Trace);
+
+        double worst = 0.0;
+        double total = 0.0;
+        int checked_ = 0;
+        for (int i = 0; i < trace.FreqHz.Length; i++)
+        {
+            double f = trace.FreqHz[i];
+            if (f < 300.0 || f > 15_000.0)
+                continue;
+
+            var z = SimulatedOutputStage.ZoutAt(SimulatedOutputStageModel.TubeAmp, 8.0, f, rate);
+            double error = Math.Abs(OhmsAt(trace, i) - z.Magnitude) / z.Magnitude;
+            worst = Math.Max(worst, error);
+            total += error;
+            checked_++;
+        }
+
+        Assert.True(checked_ > 20, $"only {checked_} columns fell inside the band worth checking");
+        // The worst column is the discriminating bound - 0.85 % now against 3.93 % before, so
+        // this is set between them with room on both sides. The mean is a looser sanity check;
+        // it is higher than the 0.33 % quoted in the manual only because that figure runs from
+        // 30 Hz, where the coil has not started to climb and every order agrees.
+        Assert.True(worst < 0.015, $"worst column was {worst * 100.0:0.00} % off the model");
+        Assert.True(total / checked_ < 0.006, $"mean error was {total / checked_ * 100.0:0.00} %");
+    }
+
     [Fact]
     public async Task ABroadbandRun_ReportsRecordsRatherThanPoints()
     {

@@ -285,9 +285,9 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr><td>Stepped sine</td><td>—</td><td>0.00 %</td><td>0.00 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/48 octave</td><td>0.00 %</td><td>0.04 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/12 octave</td><td>0.04 %</td><td>0.24 %</td></tr>
-        <tr><td>Chirp or pink noise</td><td>1/3 octave</td><td>0.60 %</td><td>3.93 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/48 octave</td><td>0.00 %</td><td>0.03 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/12 octave</td><td>0.02 %</td><td>0.06 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/3 octave</td><td>0.33 %</td><td>0.85 %</td></tr>
       </tbody>
     </table>
     <p>
@@ -295,21 +295,50 @@ const { showPage } = useManual()
       at equal smoothing they agree to the second decimal, so choose between them on stimulus, not
       on accuracy. <strong>The stepped sine is exact here</strong>, because a coherent tone on a
       noise-free model has nothing to be wrong about; that is its advantage, and on a real bench it
-      is what remains of it.
+      is what remains of it. And <strong>the 1/3-octave row is the smoothing band itself</strong>,
+      not noise: it reads 0.02&nbsp;% below 300&nbsp;Hz and 0.48&nbsp;% above 3&nbsp;kHz, which is
+      exactly where the coil makes |Z| climb steeply. Narrowing to 1/12 octave costs almost nothing
+      and takes the worst case to 0.06&nbsp;%.
+    </p>
+
+    <h3>What limits it on a real amplifier</h3>
+    <p>
+      The figures above are the method's, with nothing noisy in the path. On a bench what limits a
+      broadband run is something the table cannot show, and it is worth understanding because
+      <strong>no quality figure on this screen will warn you about it</strong>.
     </p>
     <p>
-      And <strong>the 1/3-octave figure is not noise — it is the smoothing band itself.</strong>
-      Broken down, that run reads 0.03&nbsp;% below 300&nbsp;Hz, 0.42&nbsp;% from 300&nbsp;Hz to
-      3&nbsp;kHz and 1.42&nbsp;% above 3&nbsp;kHz: the error appears exactly where the coil makes
-      |Z| climb steeply, because an RMS over a third of an octave of a rising curve sits above the
-      curve's own value at the middle of that band. So <strong>the default is right for a flat
-      impedance and worth narrowing for a steep one</strong> — on this amplifier 1/12 octave costs
-      almost nothing in noise and takes the worst case to 0.24&nbsp;%.
+      This measurement is a <strong>difference between two nearly equal gains</strong>. With
+      8&nbsp;Ω then 4&nbsp;Ω and an amplifier of about 0.9&nbsp;Ω, the two passes differ by only
+      0.84&nbsp;dB — so roughly <strong>a millidecibel of gain error per milliohm</strong>, and a
+      tenth of a decibel of error is 0.125&nbsp;Ω. A stepped sine puts all of its energy on one bin
+      at a time and measures that difference easily. A chirp or a noise sequence spreads the same
+      energy over the whole span, so each bin is far quieter, and the <strong>smoothing band is what
+      buys it back</strong>: that is what the 1/3-octave default is for, and why narrowing it is not
+      free here the way it is on the impedance screen.
     </p>
-    <p class="manual-note">
-      These are the method's figures, not a bench's. On real hardware the broadband pair are limited
-      by noise per bin rather than by anything above, which is what the smoothing default is sized
-      for and why a very low output impedance still reads better on the stepped sine.
+    <p>
+      <strong>Coherence will read 1.000 and tell you nothing about this.</strong> Measured on a real
+      EL84 push-pull at 1&nbsp;W, both passes of a pink-noise run reported a coherence of
+      <strong>0.99999</strong> — each gain really was measured that well — while the impedance
+      solved from their difference was wrong. Coherence describes each pass; it cannot describe the
+      delicate thing done with the pair afterwards. The honest check is the one below.
+    </p>
+    <p>
+      <strong>Run the stepped sine once and compare.</strong> On that same amplifier the stepped
+      sine read 0.894&nbsp;Ω and the two broadband runs 0.882 and 0.888&nbsp;Ω — agreement to
+      1.4&nbsp;%, which is what a healthy broadband run looks like. If your broadband curve sits
+      well <em>above</em> the stepped one, especially at the bottom of the band, that is the
+      signature of too little signal per bin, and the answers are more records, a wider smoothing
+      band, or more drive.
+    </p>
+    <p>
+      One practical difference between the two broadband stimuli, which is the opposite of the
+      impedance screen's advice: <strong>the chirp is the better-conditioned choice here.</strong>
+      Its crest factor is 3.0&nbsp;dB against the pink sequence's 8.5, so at the same drive the
+      analyzer's input range lands one 6&nbsp;dB rung lower — and 6&nbsp;dB of analyzer noise
+      matters in a quantity this sensitive. On the bench run above the chirp took the 24&nbsp;dBV
+      rung where the pink noise took 30, and the chirp's curve was visibly the cleaner of the two.
     </p>
 
     <h2>What the chart shows</h2>

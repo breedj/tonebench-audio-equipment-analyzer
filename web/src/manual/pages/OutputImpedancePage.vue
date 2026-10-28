@@ -265,6 +265,53 @@ const { showPage } = useManual()
       and it cancels exactly in the ratio — it is not a different random noise each time.
     </p>
 
+    <h3>How accurate each one is</h3>
+    <p>
+      Measured against the simulator's tube output stage — 2 Ω + 0.3 mH, whose impedance at every
+      frequency is known exactly — with its noise, hum and harmonics switched off. That is the
+      point of the table: with no noise in the path, what is left is the <em>method's</em> own
+      error, so these figures separate the deconvolution, the solve and the smoothing from the
+      analyzer's noise floor. Each run is 8&nbsp;Ω then 4&nbsp;Ω with the right channel as
+      reference; the error is on |Z| over 30&nbsp;Hz – 15&nbsp;kHz.
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr>
+          <th>Stimulus</th>
+          <th>Smoothing</th>
+          <th>Mean error</th>
+          <th>Worst</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Stepped sine</td><td>—</td><td>0.00 %</td><td>0.00 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/48 octave</td><td>0.00 %</td><td>0.04 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/12 octave</td><td>0.04 %</td><td>0.24 %</td></tr>
+        <tr><td>Chirp or pink noise</td><td>1/3 octave</td><td>0.60 %</td><td>3.93 %</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Three things to take from it. <strong>Chirp and pink noise are the same measurement</strong> —
+      at equal smoothing they agree to the second decimal, so choose between them on stimulus, not
+      on accuracy. <strong>The stepped sine is exact here</strong>, because a coherent tone on a
+      noise-free model has nothing to be wrong about; that is its advantage, and on a real bench it
+      is what remains of it.
+    </p>
+    <p>
+      And <strong>the 1/3-octave figure is not noise — it is the smoothing band itself.</strong>
+      Broken down, that run reads 0.03&nbsp;% below 300&nbsp;Hz, 0.42&nbsp;% from 300&nbsp;Hz to
+      3&nbsp;kHz and 1.42&nbsp;% above 3&nbsp;kHz: the error appears exactly where the coil makes
+      |Z| climb steeply, because an RMS over a third of an octave of a rising curve sits above the
+      curve's own value at the middle of that band. So <strong>the default is right for a flat
+      impedance and worth narrowing for a steep one</strong> — on this amplifier 1/12 octave costs
+      almost nothing in noise and takes the worst case to 0.24&nbsp;%.
+    </p>
+    <p class="manual-note">
+      These are the method's figures, not a bench's. On real hardware the broadband pair are limited
+      by noise per bin rather than by anything above, which is what the smoothing default is sized
+      for and why a very low output impedance still reads better on the stepped sine.
+    </p>
+
     <h2>What the chart shows</h2>
     <p>
       The impedance chart, in ohms against frequency, with a <strong>damping factor</strong> axis on

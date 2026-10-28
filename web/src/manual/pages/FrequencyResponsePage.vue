@@ -137,10 +137,11 @@ const { showPage } = useManual()
             with one there. <strong>Pink PN</strong> has equal energy per octave and the best
             signal-to-noise at the bottom of the band; <strong>White PN</strong> has equal energy
             per bin, which is what ARTA recommends for electronic systems; the three speech shapes
-            follow IEC 60268-16 and are for speech-intelligibility work. Against a linear DUT every
-            one of them measures the same response. Against a distorting one the sweep is the better
-            measurement: noise spreads its distortion evenly over the record as a raised floor, and
-            nothing can separate that from the response.
+            follow IEC 60268-16 and are for speech-intelligibility work — <em>not</em> for measuring
+            a response, for the reason the accuracy table below gives. Against a distorting DUT the
+            sweep is the better measurement whichever you would otherwise pick: noise spreads its
+            distortion evenly over the record as a raised floor, and nothing can separate that from
+            the response.
           </td>
         </tr>
         <tr>
@@ -261,6 +262,59 @@ const { showPage } = useManual()
       If the reference band holds no bin of the probe's short record — a band a few hertz wide at
       the bottom of a 96 kHz span, say — the level is set against the median of the whole sweep
       instead, and the log warns. Widen the band.
+    </p>
+
+    <h3>How accurate each signal is</h3>
+    <p>
+      Measured against a <strong>straight wire</strong> — the one DUT whose answer is known exactly,
+      0.000&nbsp;dB at every frequency — with noise, hum, harmonics and crosstalk switched off, at
+      1/12-octave smoothing and eight records. With nothing noisy in the path, what is left is what
+      each signal can and cannot measure.
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>30 Hz – 3 kHz</th>
+          <th>3 – 8 kHz</th>
+          <th>8 – 15 kHz</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>White PN</td><td>0.000 dB</td><td>0.000 dB</td><td>0.000 dB</td></tr>
+        <tr><td>Sweep (chirp)</td><td>0.001 dB</td><td>0.003 dB</td><td>0.006 dB</td></tr>
+        <tr><td>Pink PN</td><td>0.002 dB</td><td>0.009 dB</td><td>0.019 dB</td></tr>
+        <tr><td>Female PN [2011]</td><td>0.005 dB</td><td>0.059 dB</td><td>0.187 dB</td></tr>
+        <tr><td>Male PN [2020]</td><td>0.001 dB</td><td>0.032 dB</td><td>0.284 dB</td></tr>
+        <tr><td>Male PN [2011]</td><td>0.027 dB</td><td>1.456 dB</td><td>8.311 dB</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Every one of them is exact below 3 kHz</strong>, and the error at the top is in
+      proportion to how little energy the signal puts there. White PN is flat and is therefore
+      perfect everywhere; the sweep's constant envelope is next; pink's −3 dB per octave costs two
+      hundredths of a decibel at the top. The speech shapes fall off a cliff above a few kilohertz
+      because speech does, so there is almost nothing up there to divide the measured response by,
+      and what comes back is the deconvolution's floor rather than the DUT.
+    </p>
+    <p>
+      The <strong>male 2011 and male 2020 pair is the proof of that mechanism</strong>, and the
+      reason it is worth stating rather than hand-waving: the 2020 shape is the 2011 one with
+      6&nbsp;dB taken off 125&nbsp;Hz and 3&nbsp;dB off 250&nbsp;Hz — a change at the <em>bottom</em>
+      — and yet it measures nearly thirty times better at the <em>top</em>. Lowering the loudest part
+      of the spectrum narrows the range between the loudest bin and the quietest, and it is that
+      range, not the absolute level, that decides whether the treble survives the inversion.
+    </p>
+    <p>
+      In practice: <strong>measure a response with the sweep, White PN or Pink PN.</strong> Use a
+      speech shape when you want the DUT driven with a speech-like spectrum — intelligibility work,
+      or checking behaviour under a realistic crest factor — and read its top octave knowing it is
+      the signal's limit and not the DUT's.
+    </p>
+    <p class="manual-note">
+      These are the signals' own figures, with no noise in the path. On a real bench every one of
+      them is further limited by the analyzer's noise floor, which hurts the quiet end of whichever
+      spectrum you chose — pink at the top, white at the bottom.
     </p>
 
     <h2>What the views show</h2>

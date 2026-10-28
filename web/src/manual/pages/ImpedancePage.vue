@@ -106,6 +106,41 @@ const { showPage } = useManual()
       what a shorted fixture's bottom end looks like when the drive is too low.
     </p>
 
+    <h3>How accurate each one is</h3>
+    <p>
+      Measured against the simulator's <em>resistive</em> fixture — a flat 8.000&nbsp;Ω load on a
+      100&nbsp;Ω reference, with no reactance at all, so the right answer is 8.000&nbsp;Ω at every
+      frequency — with noise, hum and harmonics switched off. With nothing noisy in the path what is
+      left is the <em>method's</em> own error, so these figures separate the deconvolution and the
+      divider inversion from the analyzer's noise floor. The error is on |Z| over 30&nbsp;Hz –
+      15&nbsp;kHz, as a percentage of 8&nbsp;Ω.
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr><th>Stimulus</th><th>Smoothing</th><th>Mean error</th><th>Worst</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Stepped sine</td><td>—</td><td>0.000 %</td><td>0.000 %</td></tr>
+        <tr><td>Pink noise</td><td>1/3 or 1/12 octave</td><td>0.000 %</td><td>0.000 %</td></tr>
+        <tr><td>Chirp</td><td>1/3, 1/12 or 1/48 octave</td><td>0.018 %</td><td>0.107 %</td></tr>
+      </tbody>
+    </table>
+    <p>
+      So on a fixture this measurement can actually be checked against, <strong>all three agree to
+      about a tenth of a percent</strong> and the choice between them is not an accuracy question.
+      Note that <strong>the smoothing setting changes nothing here</strong>, which is worth
+      understanding rather than assuming: smoothing is an RMS over a band, and a band of a flat
+      curve is that curve. It only costs accuracy where the impedance is <em>steep</em> — a driver's
+      resonance, or the coil in an amplifier's output impedance — which is the case the
+      <button type="button" class="manual-link" @click="showPage('output-impedance')">output
+      impedance</button> page measures.
+    </p>
+    <p class="manual-note">
+      These are the method's figures, not a bench's. On real hardware a chirp or pink-noise run is
+      limited by how much signal lands in each bin, which is why the stepped sine still reads better
+      on a sub-ohm DUT, at the bottom of the band, and on a shorted standard.
+    </p>
+
     <h2>Calibration</h2>
     <p>
       Two standards, measured in this order, and both stored with the measurement so they survive a

@@ -232,6 +232,13 @@ const { showPage } = useManual()
       and speech signals, and neither is shown for White PN.
     </p>
     <p>
+      The <strong>accuracy table</strong> on that page applies here unchanged, because this screen
+      deconvolves the same way: every signal is exact below 3 kHz, and at the top of the band each
+      one is only as good as the energy it puts there. The short version is to measure with the
+      sweep, White PN or Pink PN, and to treat the three speech shapes as drive signals rather than
+      as measurement signals — the male 2011 spectrum is more than 8 dB adrift above 8 kHz.
+    </p>
+    <p>
       <strong>Comparing with ARTA.</strong> The window is ARTA's, to the letter, and so is what a
       new measurement opens on — a 5.33 ms window resolving 188 Hz over 2.46 ms of decay, which is
       what ARTA's own 256 / 2 / 60 come to off a 48 kHz sound card. The numbers in the boxes differ

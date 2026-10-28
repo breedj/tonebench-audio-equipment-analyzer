@@ -129,11 +129,27 @@ const { showPage } = useManual()
       So on a fixture this measurement can actually be checked against, <strong>all three agree to
       about a tenth of a percent</strong> and the choice between them is not an accuracy question.
       Note that <strong>the smoothing setting changes nothing here</strong>, which is worth
-      understanding rather than assuming: smoothing is an RMS over a band, and a band of a flat
-      curve is that curve. It only costs accuracy where the impedance is <em>steep</em> — a driver's
-      resonance, or the coil in an amplifier's output impedance — which is the case the
+      understanding rather than assuming: a band of a flat curve is that curve, whatever average is
+      taken over it. It only costs accuracy where the impedance is <em>steep</em> — a driver's
+      resonance, or the coil in an amplifier's output impedance, which is the case the
       <button type="button" class="manual-link" @click="showPage('output-impedance')">output
       impedance</button> page measures.
+    </p>
+    <p>
+      <strong>On a resonance it costs a great deal, and that is worth knowing before reading
+      Thiele-Small figures off a broadband run.</strong> The smoothing band is a fixed fraction of
+      an octave, so against a peak only a fraction of an octave wide it averages the peak away.
+      Computed against the simulator's loudspeaker — a 45&nbsp;Hz resonance peaking at 60&nbsp;&Omega;
+      with a Q of 2.5 — the peak reads <strong>0.7&nbsp;% low at 1/12 octave and 8&nbsp;% low at
+      1/3 octave</strong>; on a ported box, whose two peaks are sharper, <strong>1.6&nbsp;% and
+      15&nbsp;%</strong>. An impedance <em>minimum</em> is barely touched either way, and a flat
+      curve not at all — it is the sharp peak that suffers, which is exactly the feature every
+      driver parameter is derived from.
+    </p>
+    <p>
+      The 1/3-octave default was chosen for a sub-ohm fixture, where too little signal per bin is
+      the whole problem. <strong>For a driver, narrow it to 1/12 or 1/48 octave</strong>, or measure
+      it with the stepped sine, which smooths nothing at all.
     </p>
     <p class="manual-note">
       These are the method's figures, not a bench's. On real hardware a chirp or pink-noise run is
@@ -438,10 +454,19 @@ const { showPage } = useManual()
       with pink noise within a few hundredths of the chirp at every level.
     </p>
     <p>
-      Two limits are worth knowing, in both directions. Too <em>little</em> drive does not merely
-      add scatter, it reads <strong>high</strong>: the same fixture measured 1.07 &Omega; at
-      −30 dBV against a settled 1.02 from −20 dBV upward, because noise on the measured ratio
-      inflates the impedance it is inverted into. And pink noise still cannot be driven quite as
+      Two limits are worth knowing, in both directions. Too <em>little</em> drive costs coherence
+      and adds scatter — and it used to read <strong>high</strong> as well: the same fixture
+      measured 1.07 &Omega; at −30 dBV against a settled 1.02 from −20 dBV upward. <strong>That
+      part was this app's own arithmetic rather than the fixture.</strong> The broadband curve was
+      averaged over the smoothing band as a <em>magnitude</em>, after the divider had been inverted,
+      and a magnitude keeps the distance noise moved a bin in any direction — so every bin was
+      pushed up, and averaging more of them could not take it back out. It is averaged as a vector
+      now, with the magnitude taken last, which on the simulator's shorted-leads fixture
+      (0.12 &Omega; + 0.6 µH on 100 &Omega;, its noise and hum on) takes the band median at
+      −30 dBV from <strong>+2.1 % to −0.1 %</strong> and the share of columns reading high from
+      73 % to 53 % — 50 % being none at all. Drive it properly even so: what is left at low drive
+      is real scatter, and the coherence figures above are unchanged. And pink noise still
+      cannot be driven quite as
       hard as a chirp: its crest factor is 8.5 dB against the chirp's 3 dB, so it clips the generator
       about 5 dB lower — above roughly <strong>12.5 dBV</strong> at the default span, where a chirp
       is clean all the way to the 18 dBV maximum. (It was 8.5 dBV until the phases were optimised.)

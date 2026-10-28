@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Tonebench.App.Services;
 using Tonebench.Dsp;
 
@@ -16,6 +16,24 @@ namespace Tonebench.App.Tests.Services;
 /// </summary>
 public class SmoothedTracePhaseTests
 {
+    /// <summary>
+    /// Exactly what <c>ImpedanceRunner.BuildPass</c> does with a solved curve: average the complex
+    /// Z over the analysed band and let the builder render what is already averaged. Written out
+    /// here rather than calling a builder overload that smooths for itself, because the thing worth
+    /// guarding is that the <i>live path</i> asks for the band - the 2026-10-21 lesson, where the
+    /// smoother's own clamp was tested and the call site that had to use it was not.
+    /// </summary>
+    private static ImpedanceTrace BuildLive(ImpedanceRequest request, Complex[] values, double[] coherence)
+    {
+        var band = ImpedanceTraceBuilder.AnalysisBand(
+            request.BinHz, request.AnalysisLowHz, request.AnalysisHighHz, values.Length);
+        var smoothed = FractionalOctaveSmoother.SmoothComplex(
+            values, request.BinHz, request.SmoothingDenominator, band);
+
+        return ImpedanceTraceBuilder.BuildSmoothed(
+            request.BinHz, band, ImpedanceTraceKind.Impedance, smoothed, coherence, displayColumns: 1600);
+    }
+
     private const int BinCount = 4097;
 
     /// <summary>A curve with a steady angle under noise that swings it by tens of degrees per bin.</summary>
@@ -64,10 +82,8 @@ public class SmoothedTracePhaseTests
         var coherence = new double[BinCount];
         Array.Fill(coherence, 0.3);
 
-        var raw = ImpedanceTraceBuilder.Build(
-            ImpedanceAt(0), ImpedanceTraceKind.Impedance, values, coherence, displayColumns: 1600);
-        var smoothed = ImpedanceTraceBuilder.Build(
-            ImpedanceAt(48), ImpedanceTraceKind.Impedance, values, coherence, displayColumns: 1600);
+        var raw = BuildLive(ImpedanceAt(0), values, coherence);
+        var smoothed = BuildLive(ImpedanceAt(48), values, coherence);
 
         int from = raw.PhaseDeg.Length / 4;
         int to = raw.PhaseDeg.Length - 2;
@@ -92,8 +108,7 @@ public class SmoothedTracePhaseTests
         var values = NoisyImpedance(trueDeg: -40.0, ohms: 2.0, seed: 60);
         var coherence = new double[BinCount];
 
-        var trace = ImpedanceTraceBuilder.Build(
-            ImpedanceAt(0), ImpedanceTraceKind.Impedance, values, coherence, displayColumns: 1600);
+        var trace = BuildLive(ImpedanceAt(0), values, coherence);
 
         // Every column is one bin's own angle, unchanged, which is what "None" has always meant.
         for (int c = 0; c < trace.PhaseDeg.Length; c++)
@@ -171,8 +186,7 @@ public class SmoothedTracePhaseTests
         var coherence = new double[binCount];
         Array.Fill(coherence, 0.99);
 
-        var trace = ImpedanceTraceBuilder.Build(
-            request, ImpedanceTraceKind.Impedance, values, coherence, displayColumns: 1600);
+        var trace = BuildLive(request, values, coherence);
 
         for (int c = trace.FreqHz.Length - 20; c < trace.FreqHz.Length; c++)
         {

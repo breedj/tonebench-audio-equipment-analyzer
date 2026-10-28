@@ -94,57 +94,6 @@ internal static class ImpedanceTraceBuilder
     }
 
     /// <summary>
-    /// One trace from a complex curve.
-    ///
-    /// <para>The magnitude columns are <c>20 log10</c> of <paramref name="values"/>'s magnitude,
-    /// which makes them <b>dB relative to 1 ohm</b> for an impedance curve and a plain dB ratio for a
-    /// calibration standard. Both ride the same columns; which one a trace holds is
-    /// <see cref="ImpedanceTrace.Kind"/>'s job to say.</para>
-    /// </summary>
-    public static ImpedanceTrace Build(
-        ImpedanceRequest request,
-        ImpedanceTraceKind kind,
-        Complex[] values,
-        double[] coherence,
-        int displayColumns) =>
-        Build(
-            request.BinHz, request.AnalysisLowHz, request.AnalysisHighHz, request.SmoothingDenominator,
-            kind, values, coherence, displayColumns);
-
-    /// <summary>
-    /// The same build from the four numbers it actually reads, for a caller that is not an
-    /// <see cref="ImpedanceRequest"/> — the output-impedance measurement's broadband path, which
-    /// solves the very same <c>Z</c> from a ratio of two passes and must smooth and decimate it
-    /// identically or the two screens would disagree about one curve.
-    /// </summary>
-    public static ImpedanceTrace Build(
-        double binHz,
-        double analysisLowHz,
-        double analysisHighHz,
-        int smoothingDenominator,
-        ImpedanceTraceKind kind,
-        Complex[] values,
-        double[] coherence,
-        int displayColumns)
-    {
-        var band = AnalysisBand(binHz, analysisLowHz, analysisHighHz, values.Length);
-
-        var magnitude = new double[values.Length];
-        for (int k = 0; k < values.Length; k++)
-            magnitude[k] = values[k].Magnitude;
-
-        var smoothed = FractionalOctaveSmoother.Smooth(magnitude, binHz, smoothingDenominator, band);
-
-        // The angle over the same bands, as a vector mean — see FractionalOctaveSmoother.SmoothPhaseDeg.
-        // Smoothed because the magnitude is: a column whose level is an RMS over ten bins and whose
-        // angle is the raw centre bin of those ten draws a readable curve beside an unreadable one,
-        // from one capture.
-        var smoothedPhaseDeg = FractionalOctaveSmoother.SmoothPhaseDeg(values, binHz, smoothingDenominator, band);
-
-        return Render(binHz, band, kind, smoothed, smoothedPhaseDeg, coherence, displayColumns);
-    }
-
-    /// <summary>
     /// The bins a curve of this bin size may be smoothed, searched and drawn over.
     ///
     /// <para>Only where the stimulus put energy. Outside it the ratio is noise over nothing and the
@@ -170,17 +119,18 @@ internal static class ImpedanceTraceBuilder
     }
 
     /// <summary>
-    /// The same trace from a curve that has <b>already</b> been smoothed, for a caller that had to
-    /// do its own averaging earlier in the arithmetic.
+    /// A trace from a curve that has <b>already</b> been averaged. Both impedance screens build
+    /// theirs this way, and nothing here may smooth a second time.
     ///
-    /// <para>The output-impedance measurement is that caller, and the reason is not a preference
-    /// about where a loop lives. Its Z is solved from a gain ratio sitting within a decibel of one,
-    /// so a bin's worth of noise becomes ohms; <c>|Z|</c> is a magnitude, so that noise rectifies,
-    /// and an RMS of already-rectified values keeps every bit of the bias. It therefore averages
-    /// the <i>ratio</i> — see <see cref="FractionalOctaveSmoother.SmoothComplex"/> — and solves
-    /// once, and what arrives here must not be smoothed a second time. Everything after the
-    /// averaging is shared with <see cref="Build"/>, so the two screens still draw, decimate and
-    /// find their peak identically.</para>
+    /// <para>The reason is not a preference about where a loop lives. <c>|Z|</c> is a magnitude, so
+    /// noise that moved a bin in any direction at all can only push it <i>up</i>, and an RMS over a
+    /// fractional-octave band of already-rectified values keeps every bit of that bias. So both
+    /// callers average as a <b>vector</b> first — see
+    /// <see cref="FractionalOctaveSmoother.SmoothComplex"/> — the output-impedance runner on the
+    /// gain ratio, before a solve that is divergent, and the impedance runner on the solved Z,
+    /// after a solve that is nearly linear and that subtracts the short standard as a complex
+    /// value. Everything from here on is shared, so the two screens cannot disagree about how one
+    /// curve is drawn, decimated or searched for its peak.</para>
     /// </summary>
     public static ImpedanceTrace BuildSmoothed(
         double binHz,
@@ -202,8 +152,9 @@ internal static class ImpedanceTraceBuilder
     }
 
     /// <summary>
-    /// dB, the peak, and the decimation onto display columns — everything both builds do once their
-    /// curve has been averaged, so that the only thing they differ in is the averaging.
+    /// dB, the peak, and the decimation onto display columns — everything that happens to a curve
+    /// once it has been averaged. Shared so that the impedance and output-impedance screens cannot
+    /// disagree about how one curve is drawn, decimated or searched for its peak.
     /// </summary>
     private static ImpedanceTrace Render(
         double binHz,

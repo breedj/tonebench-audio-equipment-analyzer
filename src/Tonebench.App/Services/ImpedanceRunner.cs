@@ -730,8 +730,21 @@ public sealed class ImpedanceRunner(
                 ? ImpedanceTraceKind.OpenCal
                 : ImpedanceTraceKind.ShortCal;
 
+            // The curve is averaged as a VECTOR and only then given a magnitude, for the reason
+            // BuildPass states at length. It matters most here: a short reads |H| ~ 0.001, the
+            // worst-conditioned thing this measurement is ever pointed at, so an RMS of its
+            // per-bin magnitudes draws a standard that reads systematically above the leads it
+            // measured. Note the *stored* calibration is still captured from the raw per-bin h
+            // above - Solve subtracts it as a complex value, which is unbiased, and smoothing a
+            // stored standard would be a change to what a bench keeps rather than to what it sees.
+            var calBand = ImpedanceTraceBuilder.AnalysisBand(
+                request.BinHz, request.AnalysisLowHz, request.AnalysisHighHz, h.Length);
+            var smoothedH = FractionalOctaveSmoother.SmoothComplex(
+                h, request.BinHz, request.SmoothingDenominator, calBand);
+
             return new PassResult(
-                [ImpedanceTraceBuilder.Build(request, kind, h, result.Coherence, DisplayColumns)],
+                [ImpedanceTraceBuilder.BuildSmoothed(
+                    request.BinHz, calBand, kind, smoothedH, result.Coherence, DisplayColumns)],
                 peakDbv, calibration, MedianOhms: null, DriveCurrentAmps: null,
                 Warning: MislabelledStandardWarning(request.CalTarget, calibration));
         }
@@ -740,17 +753,47 @@ public sealed class ImpedanceRunner(
     }
 
     /// <summary>
-    /// The solved half of a pass: invert the divider, take the band median, and build the curve the
-    /// chart draws. Separate from the capture loop only so a noise run can call it after each record
-    /// as well as at the end.
+    /// The solved half of a pass: invert the divider, average the band as a <b>vector</b>, take the
+    /// median and build the curve the chart draws. Separate from the capture loop only so a noise
+    /// run can call it after each record as well as at the end.
+    ///
+    /// <para><b>The smoothing happens on the complex Z and the magnitude is taken last</b>, which
+    /// is the output-impedance measurement's rule arriving here. <c>|Z|</c> is a magnitude, so
+    /// noise that moved a bin in any direction at all can only push it <i>up</i>; an RMS over a
+    /// fractional-octave band of values that have already been rectified keeps the whole of that
+    /// bias, while a vector mean removes it while the noise is still additive and zero mean.</para>
+    ///
+    /// <para>Measured on the simulator's shorted-leads fixture - 0.12 ohm + 0.6 uH on a 100 ohm
+    /// reference, so |H| ~ 0.0012 and the worst-conditioned thing this screen can be pointed at -
+    /// with its own noise and hum on, at 1/12 octave and eight records. Before, the mean error ran
+    /// +0.01 % at 0 dBV, +0.13 % at -20 and <b>+0.72 % at -30</b>, with <b>72.6 % of columns reading
+    /// high</b>, a worst column of 161 % and the band median 0.1340 against a true 0.1313. Widening
+    /// the band to 1/3 octave - four times the bins - moved the mean only to +0.48 %, which is what
+    /// says it is a bias rather than scatter: averaging cannot undo a rectification.</para>
+    ///
+    /// <para>It is smoothed <i>after</i> the solve rather than before it, unlike the Zout path,
+    /// and that is deliberate: <c>Solve</c> subtracts the short standard as a complex value, so
+    /// averaging afterwards averages the standard's own per-bin noise too. Z = R*H/(1 - H) is also
+    /// nearly linear for a DUT well below the reference resistor, so the two orders agree there,
+    /// where the Zout solve is divergent and had to be averaged first.</para>
     /// </summary>
     private static PassResult BuildPass(ImpedanceRequest request, FrequencyResponseResult result, double peakDbv)
     {
         var h = ImpedanceTraceBuilder.ToComplex(result);
-        var z = ImpedanceMath.Solve(h, request.SolveOptions());
+        var solved = ImpedanceMath.Solve(h, request.SolveOptions());
 
-        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / request.BinHz));
-        int lastBin = Math.Min(z.Length - 1, (int)Math.Floor(request.AnalysisHighHz / request.BinHz));
+        var band = ImpedanceTraceBuilder.AnalysisBand(
+            request.BinHz, request.AnalysisLowHz, request.AnalysisHighHz, solved.Length);
+        var z = FractionalOctaveSmoother.SmoothComplex(
+            solved, request.BinHz, request.SmoothingDenominator, band);
+
+        // Both readings come off the averaged curve, not the raw bins: they are the two figures a
+        // user writes down, and a median of biased values is biased. The swapped-channel test is
+        // better informed for it as well - a genuine swap is a flat negative real part that
+        // averaging preserves, where the odd negative bin that noise produces on a sub-ohm DUT is
+        // exactly what it removes.
+        int firstBin = band.FirstBin;
+        int lastBin = band.LastBin;
         double median = ImpedanceMath.MedianOhms(z, firstBin, lastBin);
         double? medianOhms = double.IsNaN(median) ? null : median;
 
@@ -762,7 +805,8 @@ public sealed class ImpedanceRunner(
             : null;
 
         return new PassResult(
-            [ImpedanceTraceBuilder.Build(request, ImpedanceTraceKind.Impedance, z, result.Coherence, DisplayColumns)],
+            [ImpedanceTraceBuilder.BuildSmoothed(
+                request.BinHz, band, ImpedanceTraceKind.Impedance, z, result.Coherence, DisplayColumns)],
             peakDbv, null, medianOhms, driveCurrentAmps,
             SwappedChannelWarning(request, ImpedanceMath.NegativeRealFraction(z, firstBin, lastBin)));
     }

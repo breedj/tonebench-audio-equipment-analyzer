@@ -5,6 +5,7 @@ import { useMeasurements } from '../composables/useMeasurements'
 import { RESPONSE_X_FROM_OPTIONS, RESPONSE_X_TO_OPTIONS, snapResponseXWindow } from '../response/display'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { CROSSTALK_ANNOTATION_VIEW } from '../charts/annotationViews'
+import { fitDbWindow, type DbWindowBounds } from '../charts/dbWindow'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -24,10 +25,19 @@ const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const { traces, running } = useFrequencyResponse()
 const { overlays } = useMeasurements()
 
+// The same ±200 dB the Bode panel's gain window allows, and not the 40 dB ceiling this panel
+// shipped with: a crosstalk point is `victim − aggressor`, which is *normally* negative, so a
+// ceiling of 40 looked like generous headroom over 0 — but it is a measured difference and nothing
+// stops it reading positive (an aggressor that is not actually driving, a DUT whose victim channel
+// is the loud one, a reversed Direction). Measured 2026-10-28: a sweep reading +27 to +60 dB sat
+// almost entirely above the window, and Autofit — which clamps its own answer to DB_MAX — could not
+// bring it back, so the ceiling read as two separate faults, a Top box that refused to be typed
+// into and an Autofit that did nothing.
 const DB_MIN = -200
-const DB_MAX = 40
+const DB_MAX = 200
 const DB_STEP = 5
 const DB_MIN_SPAN = 10
+const DB_WINDOW: DbWindowBounds = { step: DB_STEP, pad: 2, minSpan: DB_MIN_SPAN, min: DB_MIN, max: DB_MAX }
 
 // The dropdowns' own values and the outward snap both live in response/display.ts: this panel and
 // the crosstalk one offer the same window, and "Set axis" has to land on a value a select can show.
@@ -72,12 +82,12 @@ function autofitDb() {
       hi = Math.max(hi, trace.magnitudeMaxDb[i])
     }
   }
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
-
-  const top = Math.ceil((hi + 2) / DB_STEP) * DB_STEP
-  const bottom = Math.floor((lo - 2) / DB_STEP) * DB_STEP
-  yTopDb.value = Math.min(DB_MAX, Math.max(top, bottom + DB_MIN_SPAN))
-  yBottomDb.value = Math.max(DB_MIN, Math.min(bottom, yTopDb.value - DB_MIN_SPAN))
+  // Settled as one value and only then written: see charts/dbWindow.ts for what reading a
+  // `defineModel` back on the line after writing it costs.
+  const fitted = fitDbWindow(lo, hi, DB_WINDOW)
+  if (!fitted) return
+  yTopDb.value = fitted.top
+  yBottomDb.value = fitted.bottom
 }
 
 function autofitX() {
@@ -121,17 +131,10 @@ watch(running, (isRunning, wasRunning) => {
   </button>
 
   <CollapsibleSection title="Crosstalk range (dB)" size="xs">
+    <!-- Bottom first, then Top (Joost, 2026-10-28) — the one panel in the app with that order, and
+         deliberately so: crosstalk is read as "how far down", so the pair reads as a span from the
+         figure that matters outward. -->
     <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Top
-        <input
-          :value="yTopDb"
-          type="number"
-          :step="DB_STEP"
-          class="tb-input"
-          @change="onTopChange"
-        />
-      </label>
       <label class="tb-field">
         Bottom
         <input
@@ -140,6 +143,16 @@ watch(running, (isRunning, wasRunning) => {
           :step="DB_STEP"
           class="tb-input"
           @change="onBottomChange"
+        />
+      </label>
+      <label class="tb-field">
+        Top
+        <input
+          :value="yTopDb"
+          type="number"
+          :step="DB_STEP"
+          class="tb-input"
+          @change="onTopChange"
         />
       </label>
     </div>

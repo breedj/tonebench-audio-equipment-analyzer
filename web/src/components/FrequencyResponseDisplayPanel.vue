@@ -13,6 +13,7 @@ import { PALETTE_NAMES } from '../measurements/decay'
 import { useFrequencyResponse, type ResponseTrace } from '../composables/useFrequencyResponse'
 import { useMeasurements, type OverlayEntry } from '../composables/useMeasurements'
 import { autofitRange } from '../measurements/autofitRange'
+import { fitDbWindow, type DbWindowBounds } from '../charts/dbWindow'
 import { RESPONSE_X_FROM_OPTIONS, RESPONSE_X_TO_OPTIONS, snapResponseXWindow } from '../response/display'
 import {
   DELAY_MAX_US,
@@ -204,6 +205,7 @@ const DB_MIN = -200
 const DB_MAX = 200
 const DB_STEP = 2
 const DB_MIN_SPAN = 4
+const DB_WINDOW: DbWindowBounds = { step: DB_STEP, pad: 1, minSpan: DB_MIN_SPAN, min: DB_MIN, max: DB_MAX }
 
 // The dropdowns' own values and the outward snap both live in response/display.ts: this panel and
 // the crosstalk one offer the same window, and "Set axis" has to land on a value a select can show.
@@ -438,11 +440,12 @@ function autofitDb() {
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) return
 
-  const top = Math.ceil((hi + 1) / DB_STEP) * DB_STEP
-  const bottom = Math.floor((lo - 1) / DB_STEP) * DB_STEP
-
-  yTopDb.value = Math.min(DB_MAX, Math.max(top, bottom + DB_MIN_SPAN))
-  yBottomDb.value = Math.max(DB_MIN, Math.min(bottom, yTopDb.value - DB_MIN_SPAN))
+  // Settled as one value and only then written: see charts/dbWindow.ts for what reading a
+  // `defineModel` back on the line after writing it costs.
+  const fitted = fitDbWindow(lo, hi, DB_WINDOW)
+  if (!fitted) return
+  yTopDb.value = fitted.top
+  yBottomDb.value = fitted.bottom
 }
 
 /**

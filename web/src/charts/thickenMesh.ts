@@ -9,10 +9,11 @@
  * <c>PeConfigure.DxMSAA</c> all render byte for byte the same picture. Only the colour
  * (<c>PeColor.BarBorderColor</c>) and the line count (<c>ShowWireframeMaxLines</c>) respond.</p>
  *
- * <p>So the line is widened after the fact, in the composited image: every pixel next to a mesh
- * pixel becomes one. Measured, that takes a one-pixel line to three — <b>11 582 mesh pixels to
- * 41 753</b> on a 60-slice surface — and closes the gaps the engine leaves in a line that runs
- * nearly along the view, which is half of what makes them hard to follow.</p>
+ * <p>So the line is widened after the fact, in the composited image. <b>By one pixel, to two, and
+ * only for a pixel that is part of a line.</b> It was a full ring to begin with, which takes a line
+ * to three and every isolated speck to a nine-pixel blob — reported the same day as too thick, and
+ * the engine leaves a great many specks where an iso line crosses a steep facet. Two pixels is
+ * twice the engine's line and reads as one; a speck with no neighbour is left exactly as it was.</p>
  *
  * <p><b>Black is what identifies a mesh pixel, and that is safe by construction rather than by
  * luck.</b> The engine lights the mesh along with the surface, and lighting multiplies: black
@@ -72,16 +73,9 @@ export function thickenMeshLines(image: ImageData): number {
   const grown = new Uint8Array(mesh)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (!mesh[y * width + x]) continue
-      for (let dy = -1; dy <= 1; dy++) {
-        const yy = y + dy
-        if (yy < 0 || yy >= height) continue
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx
-          if (xx < 0 || xx >= width) continue
-          grown[yy * width + xx] = 1
-        }
-      }
+      if (!mesh[y * width + x] || !hasNeighbour(mesh, width, height, x, y)) continue
+      if (x + 1 < width) grown[y * width + x + 1] = 1
+      if (y + 1 < height) grown[(y + 1) * width + x] = 1
     }
   }
 
@@ -125,4 +119,24 @@ function hasRoom(mesh: Uint8Array, width: number, height: number): boolean {
   if (gaps.length === 0) return true
   gaps.sort((a, b) => a - b)
   return gaps[gaps.length >> 1] >= MESH_MIN_SPACING_PX
+}
+
+/**
+ * Whether this mesh pixel is part of a line rather than a speck on its own.
+ *
+ * <p>The engine leaves a great many single pixels where an iso line crosses a facet turned away
+ * from the camera, and widening those is what made the mesh read as blobs rather than lines.</p>
+ */
+function hasNeighbour(mesh: Uint8Array, width: number, height: number, x: number, y: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    const yy = y + dy
+    if (yy < 0 || yy >= height) continue
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue
+      const xx = x + dx
+      if (xx < 0 || xx >= width) continue
+      if (mesh[yy * width + xx]) return true
+    }
+  }
+  return false
 }

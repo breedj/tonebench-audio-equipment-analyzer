@@ -344,8 +344,16 @@ function configure() {
 
   // The hit test the readout needs. Without `HotSpot.Data` the engine never builds its octree and
   // every GetHotSpot answers type -1 — which reads as "the pointer is never over the surface".
-  // `HighlightColor` is also what marks the point under the pointer, the engine's own answer to
-  // the Canvas 2D chart's ring; it is its own enabler and needs no prompt tracking.
+  //
+  // <p><b>There is no highlight under the pointer, and that is what keeps the mesh.</b>
+  // `HighlightColor` marks the point the engine's own way, and drawing it repaints the whole
+  // surface — which throws away the wider mesh `thickenMeshLines` left in the composited image, so
+  // the lines went thin the moment the pointer crossed the chart (reported 2026-10-29). Measured:
+  // with a colour set, a real mouse move takes the mesh from 41 753 pixels back to 11 582; with it
+  // transparent the move changes nothing, and `GetHotSpot` still answers `DataPoint` with the
+  // subset and point. So the marker goes and the readout stays, which is the half that carries the
+  // numbers. <b>Only a real pointer reproduces this</b> — a dispatched `PointerEvent` or
+  // `MouseEvent` leaves the picture alone, which is why the first measurement of it was wrong.</p>
   //
   // **`PromptTracking` is off, and `PromptStyle = None` was not enough.** Tracking is what makes
   // the engine prompt the value under the pointer, and with the style set to None it printed the
@@ -356,7 +364,7 @@ function configure() {
   // onPointerMove, and the docs make those a separate enabler from tracking.
   C.PeUserInterface.HotSpot.Data = true
   C.PeUserInterface.Cursor.PromptTracking = false
-  C.PeUserInterface.Cursor.HighlightColor = peColor(248, 250, 252)
+  C.PeUserInterface.Cursor.HighlightColor = 0
   C.PeUserInterface.Cursor.PromptStyle = E.CursorPromptStyle.None
 
   C.PeData.DuplicateDataX = E.DuplicateData.PointIncrement

@@ -35,25 +35,32 @@ describe('thickenMeshLines', () => {
    * changes that, so the line is widened in the composited image instead. Measured on the engine,
    * this takes a mesh from 11 582 pixels to 41 753.
    */
-  it('takes a one-pixel line to three', () => {
+  it('takes a one-pixel line to two', () => {
     const image = field(21, 21, DARKEST_SURFACE)
     for (let y = 0; y < 21; y++) paint(image, 10, y, BLACK)
 
-    expect(thickenMeshLines(image)).toBe(3 * 21)
-    expect(at(image, 9, 5)).toEqual([0, 0, 0, 255])
+    expect(thickenMeshLines(image)).toBe(2 * 21)
+    expect(at(image, 10, 5)).toEqual([0, 0, 0, 255])
     expect(at(image, 11, 5)).toEqual([0, 0, 0, 255])
-    expect(at(image, 8, 5)).toEqual([...DARKEST_SURFACE, 255])
+    expect(at(image, 9, 5)).toEqual([...DARKEST_SURFACE, 255])
+    expect(at(image, 12, 5)).toEqual([...DARKEST_SURFACE, 255])
   })
 
-  /** A line the engine has left gaps in comes back joined, which is half of why they read badly. */
-  it('closes the gaps the engine leaves along a line', () => {
-    const image = field(9, 21, DARKEST_SURFACE)
-    for (let y = 0; y < 21; y += 3) paint(image, 4, y, BLACK)
+  /**
+   * <b>A speck is left exactly as it was.</b> The engine leaves a great many single pixels where an
+   * iso line crosses a facet turned away from the camera, and a widening that did not know the
+   * difference turned every one of them into a blob — which is what the mesh was reported as on
+   * 2026-10-29, the same day it was widened at all.
+   */
+  it('widens a line and leaves a speck alone', () => {
+    const image = field(21, 21, DARKEST_SURFACE)
+    for (let y = 0; y < 21; y++) paint(image, 4, y, BLACK)
+    paint(image, 15, 10, BLACK)
 
-    // Every row from the first dot to one past the last: a gap of two closes, which is what the
-    // engine leaves along a line running nearly along the view.
-    thickenMeshLines(image)
-    for (let y = 0; y <= 19; y++) expect(at(image, 4, y)[2], `row ${y}`).toBe(0)
+    expect(thickenMeshLines(image)).toBe(2 * 21 + 1)
+    expect(at(image, 16, 10)).toEqual([...DARKEST_SURFACE, 255])
+    expect(at(image, 15, 11)).toEqual([...DARKEST_SURFACE, 255])
+    expect(at(image, 5, 10)).toEqual([0, 0, 0, 255])
   })
 
   /**
@@ -93,14 +100,17 @@ describe('thickenMeshLines', () => {
   it('does not widen into a transparent pixel', () => {
     const image = field(9, 9, DARKEST_SURFACE)
     for (let i = 3; i < image.data.length; i += 4) image.data[i] = 0
-    const centre = (4 * 9 + 4) * 4
-    image.data[centre] = 0
-    image.data[centre + 1] = 0
-    image.data[centre + 2] = 0
-    image.data[centre + 3] = 255
+    // A line, since a pixel on its own is left alone whatever is beside it.
+    for (const y of [3, 4, 5]) {
+      const i = (y * 9 + 4) * 4
+      image.data[i] = 0
+      image.data[i + 1] = 0
+      image.data[i + 2] = 0
+      image.data[i + 3] = 255
+    }
 
     thickenMeshLines(image)
-    expect(at(image, 3, 4)).toEqual([...DARKEST_SURFACE, 0])
+    expect(at(image, 5, 4)).toEqual([...DARKEST_SURFACE, 0])
   })
 
   /**
@@ -112,7 +122,7 @@ describe('thickenMeshLines', () => {
     for (let y = 0; y < 3; y++) paint(image, 15, y, BLACK)
 
     thickenMeshLines(image)
-    expect(at(image, 13, 1)).toEqual([...DARKEST_SURFACE, 255])
+    expect(at(image, 14, 1)).toEqual([...DARKEST_SURFACE, 255])
     expect(at(image, 17, 1)).toEqual([...DARKEST_SURFACE, 255])
   })
 })

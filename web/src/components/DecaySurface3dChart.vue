@@ -14,6 +14,7 @@ import {
   peColor,
 } from '../measurements/decay3d'
 import { PE_CONTROL_DEFAULTS, peRuntime } from '../charts/peModule'
+import { thickenMeshLines } from '../charts/thickenMesh'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -94,6 +95,45 @@ const DECAY_KEY_STEPS = 6
 /** How many lines the surface's mesh is reduced to; see where it is written. */
 const DECAY_MESH_MAX_LINES = 20
 
+/**
+ * Widens the mesh in the composited image, which is the only way this engine will draw it wider
+ * than a pixel — see `charts/thickenMesh.ts`, which has the measurements and why black identifies
+ * a mesh pixel safely.
+ *
+ * <p>It runs a turn after the draw, because that is when the GPU layer composites into the
+ * control's own 2D canvas; in a hidden pane no frame is delivered, nothing is composited and
+ * nothing is thickened, which is the right answer there. Hovering does not undo it — the readout
+ * is a hit test and repaints nothing (measured: 41 753 mesh pixels before a pointer move and
+ * 41 753 after) — but the engine's own drag and wheel gestures do, so those re-run it.</p>
+ */
+function scheduleMeshThicken() {
+  if (thickenFrame !== 0) cancelAnimationFrame(thickenFrame)
+  thickenFrame = requestAnimationFrame(() => {
+    thickenFrame = requestAnimationFrame(() => {
+      thickenFrame = 0
+      thickenMeshNow()
+    })
+  })
+}
+
+function thickenMeshNow() {
+  const canvas = control?.canvas
+  if (!canvas || disposed) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  try {
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    // It reads the spacing off the mesh itself and declines where there is no room for a wider
+    // line, which is the default framing — see thickenMesh.ts.
+    thickenMeshLines(image)
+    ctx.putImageData(image, 0, 0)
+  } catch {
+    // A canvas the browser will not let us read is one we leave as the engine drew it.
+  }
+}
+
+let thickenFrame = 0
+
 const chartHeight = useResultChartHeight(container, host, { pageHeightPx: () => props.pageHeightPx })
 
 const { isDark } = useAppTheme()
@@ -156,6 +196,9 @@ function build(): boolean {
     applyData()
     control.el.addEventListener('pointermove', onPointerMove)
     control.el.addEventListener('pointerleave', clearHover)
+    // The two gestures the engine owns and repaints for itself; see onEngineGesture.
+    control.el.addEventListener('pointerup', onEngineGesture)
+    control.el.addEventListener('wheel', onEngineGesture, { passive: true })
     return true
   } catch (e) {
     failure.value = `The 3D chart could not be started: ${e instanceof Error ? e.message : String(e)}`
@@ -167,6 +210,10 @@ function build(): boolean {
 function teardown() {
   control?.el.removeEventListener('pointermove', onPointerMove)
   control?.el.removeEventListener('pointerleave', clearHover)
+  control?.el.removeEventListener('pointerup', onEngineGesture)
+  control?.el.removeEventListener('wheel', onEngineGesture)
+  if (thickenFrame !== 0) cancelAnimationFrame(thickenFrame)
+  thickenFrame = 0
   // Unconditionally: this is the one that leaks a GPU context, and the impulse screen's views are
   // switched constantly.
   control?.destroy()
@@ -571,6 +618,7 @@ function applyData() {
 
   C.PeFunction.Force3dxVerticeRebuild = true
   C.PeFunction.ReinitializeResetImage()
+  scheduleMeshThicken()
 }
 
 function resize() {
@@ -584,10 +632,20 @@ function resize() {
 }
 
 watch(chartHeight, () => resize())
+
+/**
+ * The engine repaints on its own for the gestures it owns — drag to turn, wheel to zoom — and each
+ * of those draws the mesh back at one pixel. Re-running on the pointer going up and on the wheel
+ * settling puts it back without fighting the gesture itself.
+ */
+function onEngineGesture() {
+  scheduleMeshThicken()
+}
 watch(() => [props.surface, props.mode, props.rangeDb], () => applyData(), { deep: false })
 watch(() => [props.palette, isDark.value], () => {
   applyTheme()
   chart?.PeFunction.ReinitializeResetImage()
+  scheduleMeshThicken()
 })
 /**
  * Where the surface sits, how big it is drawn and where the light comes from. They are applied by
@@ -604,6 +662,7 @@ watch(
     applyCamera()
     chart.PeFunction.Force3dxVerticeRebuild = true
     chart.PeFunction.ReinitializeResetImage()
+    scheduleMeshThicken()
   },
 )
 
@@ -634,6 +693,7 @@ watch(
     chart.PeFunction.Force3dxNewColors = true
     chart.PeFunction.Force3dxVerticeRebuild = true
     chart.PeFunction.ReinitializeResetImage()
+    scheduleMeshThicken()
   },
 )
 
@@ -641,6 +701,7 @@ watch(() => [props.rotationDeg, props.depthPercent], () => {
   if (props.rotationDeg === appliedRotation && props.depthPercent === appliedDepth) return
   applyCamera()
   chart?.PeFunction.ReinitializeResetImage()
+  scheduleMeshThicken()
 })
 
 /**
@@ -754,6 +815,14 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     plot.height = plotHeight
     const ctx = plot.getContext('2d')
     if (!ctx) throw new Error('Could not get a 2D context for the chart export.')
+    // The same widening the screen gets, on the copy's own image, so a report or a screenshot
+    // carries the mesh the chart is read with rather than the engine's hairline.
+    const copied = copy.canvas.getContext('2d')
+    if (copied) {
+      const image = copied.getImageData(0, 0, copy.canvas.width, copy.canvas.height)
+      thickenMeshLines(image)
+      copied.putImageData(image, 0, 0)
+    }
     ctx.drawImage(copy.canvas, 0, 0, width, plotHeight)
 
     return await composeChartPng({

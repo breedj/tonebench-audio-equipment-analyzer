@@ -59,10 +59,46 @@ export function decayLayout(
 }
 
 /**
+ * How far up the band a decay surface opens, as a fraction of the measurement's own Nyquist.
+ *
+ * <p><b>The top of a measured band rings rather than decaying, and on these two views that draws as
+ * a wall.</b> A measurement stops dead just below Nyquist — the analyzer's anti-alias filter and the
+ * end of the stimulus between them — and a cut-off that sharp leaves the impulse response ringing at
+ * the corner for a long time. Counted in periods of <em>that</em> frequency, which is what a burst
+ * decay counts in, that ringing barely decays, so the last stretch of the band stands at full height
+ * along the whole depth of the surface while everything below it has reached the floor.</p>
+ *
+ * <p>Measured 2026-10-29 by running <c>BurstDecay</c> over a band-limited impulse (flat to 0.98 of
+ * Nyquist, nothing above). <b>It is the edge that does it and not the frequency</b>: 23.8 kHz reads
+ * −14.9 dB five periods in and −29.7 dB at thirty when it <em>is</em> the edge, and −45.9 dB and
+ * −124.8 dB at the same frequency on a 192 kHz measurement where it is a quarter of Nyquist. The
+ * raised stretch starts around 0.85 of Nyquist at both rates — 20.3 kHz of 24, 78.5 kHz of 96 — so
+ * four fifths clears it with a little room.</p>
+ *
+ * <p><b>Only the decay views take it</b>, which is why this is their own setting rather than the
+ * shared <c>freqToHz</c>. The Bode and harmonics views on the same screen plot a magnitude, where
+ * the band edge is an honest roll-off worth seeing, and the input path is flat to about 0.94 of
+ * Nyquist — narrowing those to 0.8 would throw away real measurement. The bottom of the band has no
+ * equivalent, so <c>freqFromHz</c> stays shared.</p>
+ */
+export const DECAY_BAND_EDGE_FRACTION = 0.8
+
+/**
+ * Where a decay surface's frequency axis opens, for a measurement whose Nyquist is this.
+ *
+ * <p>Nyquist is the measurement's <em>frequency span</em>, which is what <c>params_json</c> stores —
+ * the sample rate is the span doubled, the way every other reader of those params derives it.</p>
+ */
+export function decayTopHz(nyquistHz: number): number {
+  if (!Number.isFinite(nyquistHz) || nyquistHz <= 0) return 0
+  return nyquistHz * DECAY_BAND_EDGE_FRACTION
+}
+
+/**
  * How far the stack leans, in degrees from straight down, and how deep it runs.
  *
- * <p><b>The two defaults are a view Joost turned the chart to and asked to keep</b> (2026-10-27),
- * not a derived figure — which is the only kind of answer available here, since what makes a decay
+ * <p><b>The two defaults are a view Joost turned the chart to and asked to keep</b> (2026-10-27,
+ * and retuned by him the same way on 2026-10-28 and again on 2026-10-29), not a derived figure — which is the only kind of answer available here, since what makes a decay
  * readable is a matter of looking at one. They are the GPU surface's camera as much as the flat
  * projection's geometry, and both charts take them, so the one picture is the one both open on.</p>
  *
@@ -72,8 +108,8 @@ export function decayLayout(
  * button — see <c>decayViewDefaults</c>, which is what that button and a new measurement both
  * read.</p>
  */
-export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -17 } as const
-export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 48 } as const
+export const DECAY_ROTATION_DEG = { min: -60, max: 60, default: -10 } as const
+export const DECAY_DEPTH_PERCENT = { min: 10, max: 80, default: 26 } as const
 
 /**
  * How far sideways the lean may ever take the stack, as a fraction of the width. The curves get
@@ -242,18 +278,35 @@ export function acrossX(layout: DecayLayout, originX: number, fraction: number):
 type Stop = [number, number, number, number]
 
 const PALETTES: Record<DecayPalette, Stop[]> = {
-  // The same ramp as the live spectrogram's, and for the same reason: sharp hue transitions are what
-  // let a ridge be picked out of a floor at a glance, which a monotone lightness ramp does badly.
+  /**
+   * <b>GigaSoft's own ramp, from the ProEssentials 3D surface demo</b>
+   * (gigasoft.com/javascript-3d-surface-chart-live-demo, <c>app/colors.js</c>), asked for
+   * 2026-10-29 so this chart and the one it is modelled on read alike.
+   *
+   * <p>Theirs is a 256-entry table built in eight linear runs of 32; these are its nine corners, at
+   * <c>k/255</c> for k = 0, 31, 63 … 255. Reconstructing the table from them by the same
+   * interpolation <c>paletteLut</c> does reproduces every one of the 256 entries to within
+   * <b>one count</b> — checked against the file — so this is their ramp rather than one like it.</p>
+   *
+   * <p><b>It is Jet itself rather than a palette beside it</b>, which is the second half of that
+   * ask. Offering it under a new name reached nobody: a measurement stores the palette it was saved
+   * with, so every existing one went on drawing the old ramp and the chart looked unchanged
+   * (reported twice). The name is right either way — this is the textbook jet colormap, blue
+   * through cyan, green and yellow to red, where the one it replaces was a hand-tuned variant.</p>
+   *
+   * <p>Both ends run into darkness, which is why this is the one palette whose scale is <em>not</em>
+   * lifted off its own floor; see {@link PALETTE_FLOOR_FRACTIONS}.</p>
+   */
   Jet: [
-    [0.0, 8, 12, 64],
-    [0.12, 0, 24, 180],
-    [0.25, 0, 96, 255],
-    [0.38, 0, 200, 240],
-    [0.5, 0, 220, 150],
-    [0.62, 130, 230, 60],
-    [0.75, 245, 220, 0],
-    [0.87, 255, 128, 0],
-    [1.0, 190, 0, 0],
+    [0.0, 0, 0, 131],
+    [0.121569, 0, 0, 254],
+    [0.247059, 0, 128, 255],
+    [0.372549, 0, 255, 255],
+    [0.498039, 128, 255, 128],
+    [0.623529, 255, 255, 0],
+    [0.74902, 255, 128, 0],
+    [0.87451, 255, 0, 0],
+    [1.0, 128, 0, 0],
   ],
   Hot: [
     [0.0, 10, 0, 0],
@@ -352,11 +405,14 @@ export function levelTicks(rangeDb: number): number[] {
  * @param steps How many stops to sample the palette at. Enough that the eye cannot find the joins,
  * and few enough that a quad per slice costs nothing to build.
  */
-export function wallGradientStops(steps = 32): { offset: number; index: number }[] {
+export function wallGradientStops(
+  floor = PALETTE_FLOOR_FRACTION,
+  steps = 32,
+): { offset: number; index: number }[] {
   const stops: { offset: number; index: number }[] = []
   for (let i = 0; i <= steps; i++) {
     const offset = i / steps
-    stops.push({ offset, index: paletteIndex(1 - offset) })
+    stops.push({ offset, index: paletteIndex(1 - offset, floor) })
   }
 
   return stops
@@ -391,19 +447,47 @@ export function wallGradientStops(steps = 32): { offset: number; index: number }
 export const PALETTE_FLOOR_FRACTION = 0.325
 
 /**
+ * How far each palette's level scale is lifted off its own foot.
+ *
+ * <p>It is a property of the palette and not a constant because the fault it answers is Hot's: its
+ * foot is a near-black red, so the quiet half of a surface painted in it loses its shape. Jet does
+ * not have that problem since it became the vendor's ramp — its foot is a readable dark blue, and
+ * lifting it would take the blue end off the chart altogether, which is the half of that ramp the
+ * vendor's own picture is mostly made of.</p>
+ *
+ * <p>Grey is lifted with the rest: its ramp runs all the way to near-black at one end whichever way
+ * round the theme puts it.</p>
+ */
+export const PALETTE_FLOOR_FRACTIONS: Record<DecayPalette, number> = {
+  Jet: 0,
+  Hot: PALETTE_FLOOR_FRACTION,
+  Grey: PALETTE_FLOOR_FRACTION,
+}
+
+/** How far this palette's scale is lifted; the shared figure for one this build does not know. */
+export function paletteFloorFraction(name: DecayPalette): number {
+  return PALETTE_FLOOR_FRACTIONS[name] ?? PALETTE_FLOOR_FRACTION
+}
+
+/**
  * The lookup index a position on the level scale maps to — 0 at the foot of the scale, 1 at the top.
  * Every path from a level to a colour goes through here: the curves, the sonogram, the trailing
  * wall and the key beside them, which is what stops any of them disagreeing about what a colour
  * means.
  */
-export function paletteIndex(fraction: number): number {
+export function paletteIndex(fraction: number, floor = PALETTE_FLOOR_FRACTION): number {
   const f = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction
-  return Math.round((PALETTE_FLOOR_FRACTION + (1 - PALETTE_FLOOR_FRACTION) * f) * (LUT_SIZE - 1))
+  return Math.round((floor + (1 - floor) * f) * (LUT_SIZE - 1))
 }
 
-export function levelIndex(levelDb: number, topDb: number, bottomDb: number): number {
+export function levelIndex(
+  levelDb: number,
+  topDb: number,
+  bottomDb: number,
+  floor = PALETTE_FLOOR_FRACTION,
+): number {
   const span = topDb - bottomDb || 1
-  return paletteIndex((levelDb - bottomDb) / span)
+  return paletteIndex((levelDb - bottomDb) / span, floor)
 }
 
 /** The transform lengths the panel offers, as powers of two. */

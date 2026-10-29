@@ -130,6 +130,16 @@ const { showPage } = useManual()
     </p>
     <p><strong>Harmonics</strong> is the distortion curves described above.</p>
     <p>
+      Under it, <strong>Curves</strong> has a checkbox per order, <strong>H2</strong> to
+      <strong>H5</strong>, each carrying the colour its line is drawn in. Switching one off takes
+      it off the chart entirely — off the legend, and out of a report's picture — which is how you
+      read one order against the noise floor, or compare the same order across several checked
+      runs without the other three crossing it. The choice is a display setting like the windows
+      beside it, so it is saved with the measurement. All four are offered whatever the run
+      extracted: a measurement whose <strong>Max harmonic order</strong> was lower simply has no
+      curve for the orders above it, and the chart's legend says which orders it holds.
+    </p>
+    <p>
       The display panel's <strong>Measurement</strong> block describes the data on screen rather
       than the settings in the panel, which after an edit are not the same thing: the
       <strong>Reference</strong> the run divided by, the <strong>Gate</strong> and what it
@@ -290,6 +300,50 @@ const { showPage } = useManual()
       exactly the frequencies least likely to have one. Measure at a finer resolution — which
       lengthens the record — to reach further down.
     </p>
+    <p>
+      <strong>Max periods</strong> is how far down that axis the surface reaches, and it is also what
+      decides where the low end stops. A column needs that many periods, plus the five or so the
+      analysis wavelet takes to open and close, inside whatever is left of the record after the
+      impulse — so the lowest frequency drawn is roughly
+      <em>(periods + 5) ÷ the time available</em>. On a 131&nbsp;072-point record at 192 kHz the
+      sweep gate leaves about 330 ms, which puts thirty periods at <strong>106 Hz</strong>, twenty at
+      76 Hz and ten at 46 Hz; halving the measurement's <strong>Resolution (Hz)</strong> doubles the
+      record and takes thirty periods down to 53 Hz. The frequency span does not help, since the
+      record and the sample rate grow together.
+    </p>
+    <p>
+      <strong>The wall at the top of the band is the band edge, not the DUT.</strong> A measurement
+      stops dead just below its own Nyquist — the analyzer's anti-alias filter and the end of the
+      stimulus between them — and a sharp cut-off like that leaves the impulse response ringing at the
+      corner for a long time. Counted in periods of <em>that</em> frequency, which is what this view
+      counts in, the ringing barely decays at all, so the top of the band draws as a raised sheet
+      standing along the whole depth of the surface while everything below it has fallen to the floor.
+    </p>
+    <p>
+      It is the edge that does it and not the frequency, which is worth knowing because it moves with
+      the measurement. Taken on a band-limited impulse: 23.8 kHz reads &minus;15 dB five periods in and
+      &minus;30 dB at thirty when it <em>is</em> the edge, on a 24 kHz span &mdash; and &minus;46 dB and
+      &minus;125 dB at the same frequency on a 96 kHz span, where it is a quarter of Nyquist. The
+      affected stretch is roughly the top sixth below Nyquist either way: about 20 kHz up on a 24 kHz
+      span, about 78 kHz up on a 96 kHz one.
+    </p>
+    <p>
+      <strong>So the two decay views open at four fifths of Nyquist</strong> — 19.2 kHz on a 24 kHz
+      span, 76.8 kHz on a 96 kHz one — which puts the edge off the chart with a little room to spare.
+      It is derived from the span the measurement was taken at rather than being a fixed figure, so it
+      follows the measurement; set <strong>To (Hz)</strong> on a decay view and that choice is stored
+      with it as usual. Raise it to Nyquist to look at the edge itself.
+    </p>
+    <p>
+      <strong>From (Hz)</strong> and <strong>To (Hz)</strong> are the frequency axis of whichever view
+      is on screen, and they only choose the window drawn — nothing is re-measured by moving them.
+      <strong>To</strong> is the one setting on this screen that is not shared between the views: the
+      decay surfaces keep their own, for the reason above, while the Bode and harmonics views open on
+      everything that was measured — there the band edge is an honest roll-off, and the input path is
+      flat to about 0.94 of Nyquist, so narrowing those would throw real measurement away.
+      <strong>From</strong> is shared, the bottom of the band having no such asymmetry; the decay views
+      will not take it below 10 Hz, and neither view can go above the measurement's own Nyquist.
+    </p>
 
     <h3>Reading either one</h3>
     <p>
@@ -386,39 +440,55 @@ const { showPage } = useManual()
       after a drag is the picture on screen, not the one the fields describe.
     </p>
     <p>
-      <strong>Surface view</strong>, collapsed below them, holds eight more. <strong>Move
+      <strong>Surface view</strong>, collapsed below them, holds six more — the same set the ProEssentials 3D surface demo offers, which is where this chart's engine comes from. <strong>Move
       horizontally</strong> and <strong>Move vertically</strong> slide the surface within the plot
-      and <strong>Magnification</strong> sets how large it is drawn, from half size to filling the plot
-      with the axes pushed off it. Magnified far enough the surface runs past the edge, which is
-      what the two Move sliders are then for. The mouse wheel zooms the same way; the camera is the
-      wheel's from the first turn, and moving the slider puts it back where the slider says. <strong>Rotate light
-      horizontally</strong> and <strong>Rotate light vertically</strong> move the light around the
+      and <strong>Magnification</strong> sets how large it is drawn, as a percentage of the view the
+      chart opens on. It scales in proportion all the way up its own travel &mdash; 100&nbsp;% is two
+      thirds the size of the default and 400&nbsp;% is nearly twice it &mdash; and it does not stop at
+      the edge of the plot, which is the point: magnifying to read detail means the surface no longer
+      fits, and the two Move sliders are what pan it then. The mouse wheel zooms the camera as well;
+      the camera is the wheel's from the first turn, and moving any of these sliders puts it back. At the foot
+      of the section, <strong>Rotate light vertically</strong> and <strong>Rotate light
+      horizontally</strong> move the light around the
       box without changing its distance, so they turn it rather than dimming it. All five are
       stored with the measurement, so a view that took some turning is kept; how dark the darkest
       colour reads is the palette, not the light.
     </p>
     <p>
-      The last three set the shape of the box itself: <strong>Frequency axis length</strong>,
-      <strong>Level axis length</strong> and <strong>Time axis length</strong>. Each stretches its
-      own edge and leaves the other two where they are &mdash; a flatter level axis makes a shallow
-      decay legible, and a longer time axis spreads the slices apart so they stop overlapping. They
-      are proportions rather than sizes, so what they set is the shape of the box; Magnification
-      sets how large it is drawn, which is why the two sit in the same section. Unlike the other
-      five these rebuild the chart rather than turning it, so they take a moment to land: the box's
-      proportions are fixed when the scene is built and cannot be changed after it.
+      <strong>Explode Z axis</strong> sets the shape of the box: how tall it is drawn against its own
+      floor. The floor's two axes are frequency and time, which have no common unit and so no
+      proportion that is right &mdash; so they are drawn square and the only thing worth stretching is
+      the level, which is the axis a decay is actually read along. Raise it to pull a shallow decay
+      apart; lower it to see the whole band at once. It is a proportion rather than a size, so what it
+      sets is the shape of the box and <strong>Magnification</strong> how large that box is drawn,
+      which is why the two sit together.
     </p>
     <p>
-      <strong>Reset view</strong>, at the foot of the section, puts all ten back where a new
-      measurement starts &mdash; the eight in the section, and Rotation and Tilt above it, which are
+      It replaced three sliders &mdash; one per axis &mdash; on 2026-10-29, and the default reproduces
+      the box they were last set to, so nothing opens on a different picture. A measurement that
+      stored those three keeps its shape: what it had chosen was the height against the floor, and
+      that is what carries over.
+    </p>
+    <p>
+      <strong>Reset view</strong>, at the foot of the section, puts all eight back where a new
+      measurement starts &mdash; the six in the section, and Rotation and Tilt above it, which are
       the camera and so belong to the same view. It is a change like any other slider's: it marks
       the measurement unsaved and is kept when you save it. Nothing already saved is touched by it,
       or by a later change to what the defaults are.
     </p>
     <p>
-      A <strong>colour key</strong> stands to the right of the box, labelled in dB, showing the
-      palette as it is actually mapped &mdash; including the quarter of the ramp the floor is
-      lifted by, so a colour read off the surface can be carried to it directly. It is hidden along
-      with the axes when <strong>Show axes</strong> is cleared.
+      A <strong>colour key</strong> stands to the left of the box, labelled in dB, showing the
+      palette as it is actually mapped &mdash; including the part of the ramp the foot of the scale
+      is lifted off, so a colour read off the surface can be carried to it directly. It is hidden
+      along with the axes when <strong>Show axes</strong> is cleared.
+    </p>
+    <p>
+      <strong>Jet</strong> is GigaSoft's own ramp from the demo this chart's engine comes with: dark
+      blue through cyan, green and yellow to dark red. It is also the one palette whose scale reaches
+      its own floor &mdash; <strong>Hot</strong> and <strong>Grey</strong> are lifted off theirs,
+      because a near-black foot paints the quiet half of a surface in something with no shape to it,
+      while this ramp's foot is a readable blue and lifting it would take the blue end &mdash; most
+      of the picture &mdash; off the chart.
     </p>
     <p>
       Two more differences. <strong>Sonogram</strong> is always drawn flat, because it is a colour
@@ -426,7 +496,9 @@ const { showPage } = useManual()
       rather than filled flat, so it carries the same smooth gradient the surface does and a
       resonance reads as a ridge instead of a staircase. And <strong>Filled</strong> and <strong>Coloured
       curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
-      3D surface, which is always a lit solid.
+      3D surface, which is always a lit solid &mdash; ruled with the same white mesh the flat
+      chart strokes along its curves, at whatever spacing the engine can draw legibly rather than
+      one line per slice.
     </p>
     <p>
       <strong>A decay surface cannot be overlaid.</strong> Curves can share a chart and a colour map

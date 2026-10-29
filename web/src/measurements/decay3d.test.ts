@@ -5,12 +5,13 @@ import {
   DECAY_ROTATION_DEG,
   levelAt,
   orientSurface,
+  paletteFloorFraction,
   paletteIndex,
   paletteLut,
 } from './decay'
 import { defaultImpulseDisplay } from './impulseDisplay'
 import {
-  DECAY_AXIS_LENGTH,
+  DECAY_EXPLODE_Z,
   DECAY_VIEW_MOVE_X,
   DECAY_VIEW_MOVE_Y,
   decayViewDefaults,
@@ -21,13 +22,12 @@ import {
   DECAY_LIGHT_RADIUS,
   DECAY_LIGHT_STRENGTH,
   decayLightVector,
-  decayFieldOfView,
-  decayPulledBackZoom,
+  magnificationFromStored,
   DECAY_VIEW_MAGNIFICATION,
   decayCameraZoom,
   DECAY_3D_ZOOM,
   DECAY_3D_ZOOM_NARROW,
-  DECAY_AXIS_LENGTH_DEFAULT,
+  explodeZForAxisLengths,
   decayGridAspect,
   decayMesh,
   decayModeIs3d,
@@ -204,23 +204,28 @@ describe('decayMesh', () => {
 
 describe('decaySubsetColors', () => {
   /**
-   * The floor fraction is the thing this must not quietly drop: the level-to-colour mapping is
-   * squeezed into the top three quarters of the ramp, and an engine palette that skipped it would
-   * put the quiet half of every surface back into Jet's near-black foot.
+   * The floor fraction is the thing this must not quietly drop: where a palette's own foot is too
+   * dark to read, the level-to-colour mapping is squeezed into the top of its ramp, and an engine
+   * palette that skipped that would put the quiet half of every surface back into the near-black.
+   * It is a property of the palette — Jet is the vendor's ramp and reaches its own floor, Hot does
+   * not — so this checks one of each.
    */
   it('is the palette LUT read through paletteIndex, so the floor fraction carries over', () => {
-    const colors = decaySubsetColors('Jet', true)
-    const lut = paletteLut('Jet', true)
-    expect(colors).toHaveLength(256)
-    for (const i of [0, 1, 128, 254, 255]) {
-      const index = paletteIndex(i / 255)
-      expect(colors[i]).toBe(peColor(lut[index * 3], lut[index * 3 + 1], lut[index * 3 + 2]))
+    for (const palette of ['Jet', 'Hot'] as const) {
+      const colors = decaySubsetColors(palette, true)
+      const lut = paletteLut(palette, true)
+      expect(colors).toHaveLength(256)
+      for (const i of [0, 1, 128, 254, 255]) {
+        const index = paletteIndex(i / 255, paletteFloorFraction(palette))
+        expect(colors[i], `${palette}/${i}`).toBe(peColor(lut[index * 3], lut[index * 3 + 1], lut[index * 3 + 2]))
+      }
     }
   })
 
-  it('does not reach the very foot of the ramp, which is the body fill', () => {
-    const colors = decaySubsetColors('Jet', true)
-    const lut = paletteLut('Jet', true)
+  /** A lifted palette's own foot stays out of reach, which is what the body fill is painted with. */
+  it('does not reach the very foot of a ramp that is lifted off it', () => {
+    const colors = decaySubsetColors('Hot', true)
+    const lut = paletteLut('Hot', true)
     expect(colors[0]).not.toBe(peColor(lut[0], lut[1], lut[2]))
   })
 
@@ -256,55 +261,66 @@ describe('decayGridAspect', () => {
   })
 
   /**
-   * <b>The constraint, and the whole reason the three sliders were dead.</b> The engine measures x
-   * and y against z, and z against x — so X and Z state one ratio twice and their product is 1.
-   * Raw lengths break that (10 and 14), and a box told two contradictory things about its shape
-   * degenerates to a slab that no later value moves.
+   * <b>The constraint, and the whole reason the three sliders this replaced were dead.</b> The
+   * engine measures x and y against z, and z against x — so X and Z state one ratio twice and their
+   * product is 1. Raw lengths break that, and a box told two contradictory things about its own
+   * shape degenerates to a slab that no later value moves. A square floor satisfies it by
+   * construction, which is the simplest way to be sure of it.
    */
   it('writes a triple that agrees with itself, so x over z and z over x multiply to one', () => {
-    for (const lengths of [
-      DECAY_AXIS_LENGTH_DEFAULT,
-      { x: 3, y: 2, z: 30 },
-      { x: 25, y: 12, z: 4 },
-    ]) {
-      const a = decayGridAspect(lengths)
-      expect(a.x * a.z).toBeCloseTo(1, 10)
+    for (const explode of [DECAY_EXPLODE_Z.min, 10, DECAY_EXPLODE_Z.default, DECAY_EXPLODE_Z.max]) {
+      const a = decayGridAspect(explode)
+      expect(a.x * a.z, String(explode)).toBeCloseTo(1, 10)
+      expect(a.x, String(explode)).toBe(a.z)
     }
   })
 
+  /** The slider's whole job: more explode is a taller box, and the floor does not move. */
+  it('raises the height against a floor that stays where it is', () => {
+    const low = decayGridAspect(5)
+    const high = decayGridAspect(40)
+    expect(high.y).toBeGreaterThan(low.y)
+    expect(high.x).toBe(low.x)
+    expect(high.z).toBe(low.z)
+  })
+
+  /** The vendor's own formula, divided through by the floor edge. */
+  it('is the demo’s height-to-diagonal ratio', () => {
+    for (const explode of [1, 10, 26, 50]) {
+      expect(decayGridAspect(explode).y, String(explode)).toBeCloseTo(Math.SQRT2 * (explode / 100), 12)
+    }
+  })
+
+  /** A cleared or nonsense box falls back rather than drawing one with no extent. */
+  it('falls back to the default rather than to a box of no height', () => {
+    for (const bad of [0, -5, Number.NaN]) {
+      const a = decayGridAspect(bad)
+      expect(a.y, String(bad)).toBeCloseTo(decayGridAspect(DECAY_EXPLODE_Z.default).y, 12)
+    }
+  })
+})
+
+describe('explodeZForAxisLengths', () => {
   /**
-   * Each slider has to reach its own edge, which is the second report of 2026-10-26: writing only
-   * X and Y satisfied the constraint but left the depth as the unit, so the Time slider shortened
-   * the other two instead of lengthening time.
+   * <b>The measurement that let three sliders become one.</b> The box Joost asked to keep on
+   * 2026-10-27 was 30 / 11 / 30, and 11/30 = 0.3667 against √2 × 26/100 = 0.3677 — three parts in
+   * a thousand, so the default reproduces it and a measurement that stored it opens unchanged.
    */
-  it('lengthens the axis whose slider moved, and leaves the other two alone', () => {
-    const base = decayGridAspect(DECAY_AXIS_LENGTH_DEFAULT)
-    const deeper = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, z: DECAY_AXIS_LENGTH_DEFAULT.z * 2 })
-    // z against x doubles; x and y, which are measured against z, halve with it.
-    expect(deeper.z).toBeCloseTo(base.z * 2, 10)
-    expect(deeper.x).toBeCloseTo(base.x / 2, 10)
-    expect(deeper.y / deeper.x).toBeCloseTo(base.y / base.x, 10)
-
-    const wider = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, x: DECAY_AXIS_LENGTH_DEFAULT.x * 2 })
-    expect(wider.x).toBeCloseTo(base.x * 2, 10)
-    expect(wider.z).toBeCloseTo(base.z / 2, 10)
-
-    const taller = decayGridAspect({ ...DECAY_AXIS_LENGTH_DEFAULT, y: DECAY_AXIS_LENGTH_DEFAULT.y * 2 })
-    expect(taller.y).toBeCloseTo(base.y * 2, 10)
-    expect(taller.x).toBeCloseTo(base.x, 10)
-    expect(taller.z).toBeCloseTo(base.z, 10)
+  it('carries a stored box over as the height against its floor', () => {
+    expect(explodeZForAxisLengths(30, 11)).toBe(26)
+    // Three parts in a thousand of the box it replaces, which is why it could replace it.
+    expect(Math.abs(decayGridAspect(26).y / (11 / 30) - 1)).toBeLessThan(0.005)
   })
 
-  /** A length of zero would divide by it; the stored fields are guarded, and so is this. */
-  it('falls back to the default rather than dividing by zero', () => {
-    for (const lengths of [
-      { ...DECAY_AXIS_LENGTH_DEFAULT, z: 0 },
-      { ...DECAY_AXIS_LENGTH_DEFAULT, x: 0 },
-      { ...DECAY_AXIS_LENGTH_DEFAULT, y: 0 },
-    ]) {
-      const a = decayGridAspect(lengths)
-      expect(Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.z)).toBe(true)
-    }
+  it('reads the ratio and not the lengths, so a box scaled up is the same explode', () => {
+    expect(explodeZForAxisLengths(60, 22)).toBe(explodeZForAxisLengths(30, 11))
+  })
+
+  it('stays inside the slider it feeds, and falls back rather than dividing by zero', () => {
+    expect(explodeZForAxisLengths(30, 300)).toBe(DECAY_EXPLODE_Z.max)
+    expect(explodeZForAxisLengths(30, 0.01)).toBe(DECAY_EXPLODE_Z.min)
+    expect(explodeZForAxisLengths(0, 11)).toBe(DECAY_EXPLODE_Z.default)
+    expect(explodeZForAxisLengths(30, 0)).toBe(DECAY_EXPLODE_Z.default)
   })
 })
 
@@ -327,10 +343,8 @@ describe('decayViewDefaults', () => {
   /** Rotation and Tilt are in it although their sliders sit above the panel the button is in. */
   it('covers the camera as well as the box and the light', () => {
     expect(Object.keys(decayViewDefaults()).sort()).toEqual([
-      'decayAxisLengthX',
-      'decayAxisLengthY',
-      'decayAxisLengthZ',
       'decayDepthPercent',
+      'decayExplodeZ',
       'decayLightAzimuthDeg',
       'decayLightElevationDeg',
       'decayMagnification',
@@ -358,9 +372,7 @@ describe('decayViewDefaults', () => {
     within(d.decayMagnification, DECAY_VIEW_MAGNIFICATION, 'magnification')
     within(d.decayLightAzimuthDeg, DECAY_LIGHT_AZIMUTH, 'light azimuth')
     within(d.decayLightElevationDeg, DECAY_LIGHT_ELEVATION, 'light elevation')
-    within(d.decayAxisLengthX, DECAY_AXIS_LENGTH, 'across axis')
-    within(d.decayAxisLengthY, DECAY_AXIS_LENGTH, 'level axis')
-    within(d.decayAxisLengthZ, DECAY_AXIS_LENGTH, 'depth axis')
+    within(d.decayExplodeZ, DECAY_EXPLODE_Z, 'explode z')
   })
 
   /**
@@ -378,9 +390,7 @@ describe('decayViewDefaults', () => {
     onStep(d.decayMoveX, DECAY_VIEW_MOVE_X.min, 0.1, 'move x')
     onStep(d.decayMoveY, DECAY_VIEW_MOVE_Y.min, 0.1, 'move y')
     onStep(d.decayMagnification, DECAY_VIEW_MAGNIFICATION.min, 5, 'magnification')
-    onStep(d.decayAxisLengthX, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'across axis')
-    onStep(d.decayAxisLengthY, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'level axis')
-    onStep(d.decayAxisLengthZ, DECAY_AXIS_LENGTH.min, DECAY_AXIS_LENGTH.step, 'depth axis')
+    onStep(d.decayExplodeZ, DECAY_EXPLODE_Z.min, DECAY_EXPLODE_Z.step, 'explode z')
   })
 
   /** Fresh objects: the panel writes into the models it hands back, and freezing one would throw. */
@@ -403,59 +413,79 @@ describe('DECAY_LIGHT_STRENGTH', () => {
   })
 })
 
-describe('decayFieldOfView and decayPulledBackZoom', () => {
-  const BASE = -3.3
-
+describe('magnification', () => {
   /**
-   * The report, in three parts: "a magnification of 90 % results in a larger graph than 110 %",
-   * "above 200 % does not work", "setting it lower, up to 50, does not change it". All three are
-   * the engine quantising DxFOV to whole numbers and clamping it at 1 — measured, 100 / 120 / 150 %
-   * rendered byte-identically at 19 122 pixels of surface, as did 50 and 100 %.
+   * <b>The report, and what was wrong with the old control.</b> "Our stops magnifying when the full
+   * chart is still in view" (2026-10-29). It narrowed the camera's lens and left the camera where
+   * it was, and a long lens converges on an orthographic view that no further narrowing enlarges:
+   * measured at a fixed camera, the drawn width went 96 px at 100 %, 209 at 400, 243 at 800, 270 at
+   * 2000 and 278 at 4000. Scaling the box instead is linear — 132 / 264 / 393 px at floor edges of
+   * 0.5 / 1 / 1.5 — and has no ceiling but the plot's own edge.
    */
-  it('takes the whole number of the lens, never below one', () => {
-    expect(decayFieldOfView(50)).toBe(1)
-    expect(decayFieldOfView(100)).toBe(1)
-    expect(decayFieldOfView(199)).toBe(1)
-    expect(decayFieldOfView(200)).toBe(2)
-    expect(decayFieldOfView(800)).toBe(8)
+  it('scales the box in proportion, all the way up the slider', () => {
+    const at = (percent: number) => decayGridAspect(DECAY_EXPLODE_Z.default, percent).x
+    const unit = at(DECAY_VIEW_MAGNIFICATION.default)
+
+    expect(at(DECAY_VIEW_MAGNIFICATION.default)).toBeCloseTo(1, 12)
+    expect(at(2 * DECAY_VIEW_MAGNIFICATION.default) / unit).toBeCloseTo(2, 12)
+    expect(at(DECAY_VIEW_MAGNIFICATION.default / 2) / unit).toBeCloseTo(0.5, 12)
+    // Proportional at the top of the slider as well, which is where the old control had nothing
+    // left to give: the ceiling is this many times the view the chart opens on.
+    const ceiling = DECAY_VIEW_MAGNIFICATION.max / DECAY_VIEW_MAGNIFICATION.default
+    expect(at(DECAY_VIEW_MAGNIFICATION.max) / unit).toBeCloseTo(ceiling, 12)
+    expect(ceiling).toBeGreaterThan(4)
   })
 
-  /** The camera covers what the lens cannot, which is what makes the slider monotonic throughout. */
-  it('grows without a dead step anywhere along the slider', () => {
-    const sizes = []
-    for (let pct = DECAY_VIEW_MAGNIFICATION.min; pct <= DECAY_VIEW_MAGNIFICATION.max; pct += 5) {
-      // Bigger means a narrower lens, or a camera nearer the surface — zoom is negative, so
-      // "nearer" is a smaller magnitude.
-      sizes.push(decayFieldOfView(pct) / Math.abs(decayPulledBackZoom(BASE, pct)))
-    }
-    for (let i = 1; i < sizes.length; i++) expect(sizes[i]).toBeGreaterThan(sizes[i - 1])
-  })
-
-  /** Below 100 % the lens is pinned, so the camera is the whole of the reduction. */
-  it('pulls the camera back below 100 per cent, where the lens cannot open any wider', () => {
-    expect(decayPulledBackZoom(BASE, 50)).toBeCloseTo(BASE * 2, 10)
-    expect(decayPulledBackZoom(BASE, 100)).toBeCloseTo(BASE, 10)
-  })
-
-  /** On a whole number the camera sits at the base framing every figure here was measured at. */
-  it('leaves the camera at its base wherever the lens lands exactly', () => {
-    for (const pct of [100, 200, 300, 800]) {
-      expect(decayPulledBackZoom(BASE, pct)).toBeCloseTo(BASE, 10)
+  /** Every step moves the picture, which is the whole of the complaint. */
+  it('grows at every step of its own slider', () => {
+    let previous = 0
+    for (let p = DECAY_VIEW_MAGNIFICATION.min; p <= DECAY_VIEW_MAGNIFICATION.max; p += DECAY_VIEW_MAGNIFICATION.step) {
+      const edge = decayGridAspect(DECAY_EXPLODE_Z.default, p).x
+      expect(edge, String(p)).toBeGreaterThan(previous)
+      previous = edge
     }
   })
 
-  it('clamps to the slider’s own range, and survives a cleared box', () => {
-    expect(decayFieldOfView(10_000)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max))
-    expect(decayFieldOfView(0)).toBe(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.min))
-    expect(Number.isFinite(decayPulledBackZoom(BASE, Number.NaN))).toBe(true)
+  /** It changes the size and not the shape: the height against the floor is the explode's alone. */
+  it('leaves the box’s shape to Explode Z', () => {
+    const small = decayGridAspect(26, 50)
+    const large = decayGridAspect(26, 400)
+    expect(large.y / large.x).toBeCloseTo(small.y / small.x, 12)
+    expect(large.x).toBe(large.z)
   })
 
-  /** The vendor documents 8 to 10 as near-isometric, which is where the picture stops growing. */
-  it('reaches the near-isometric end the engine documents, and no further', () => {
-    expect(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max)).toBeGreaterThanOrEqual(8)
-    expect(decayFieldOfView(DECAY_VIEW_MAGNIFICATION.max)).toBeLessThanOrEqual(10)
+  it('falls back to the default rather than to a box of no size', () => {
+    for (const bad of [0, -10, Number.NaN]) {
+      const a = decayGridAspect(DECAY_EXPLODE_Z.default, bad)
+      expect(a.x, String(bad)).toBeCloseTo(1, 12)
+    }
   })
 })
+
+describe('magnificationFromStored', () => {
+  /**
+   * The control was re-based on 2026-10-29 — it ran to 2000 and is a tenth of that now, asked for
+   * in the same message ("when 2000%, show 200% instead"). Anything above the new ceiling has to
+   * be the old unit.
+   */
+  it('divides a figure written on the old scale by ten', () => {
+    expect(magnificationFromStored(1500)).toBe(150)
+    expect(magnificationFromStored(2000)).toBe(200)
+    expect(magnificationFromStored(900)).toBe(90)
+  })
+
+  it('leaves a figure already on this one alone', () => {
+    expect(magnificationFromStored(150)).toBe(150)
+    expect(magnificationFromStored(DECAY_VIEW_MAGNIFICATION.max)).toBe(DECAY_VIEW_MAGNIFICATION.max)
+  })
+
+  it('stays inside the slider, and falls back rather than handing out a nonsense box', () => {
+    expect(magnificationFromStored(5)).toBe(DECAY_VIEW_MAGNIFICATION.min)
+    expect(magnificationFromStored(0)).toBe(DECAY_VIEW_MAGNIFICATION.default)
+    expect(magnificationFromStored(Number.NaN)).toBe(DECAY_VIEW_MAGNIFICATION.default)
+  })
+})
+
 describe('decayExportTitle', () => {
   it('names the measurement and the view, for all three modes', () => {
     const burst = ragged()
@@ -532,11 +562,13 @@ describe('DECAY_LIGHT', () => {
    * `360 - lean` left the light behind the surface and the chart went dark, 70.4 against 86.6 mean
    * luminance — and it is the one an angle typed into the panel can bring back.</p>
    *
-   * <p>It is also above the box, which is the negative y half; see decayLightVector.</p>
+   * <p><b>Only the x half is held.</b> How high the light sits has been turned three times — above
+   * the box, level with it, and below it since 2026-10-29 — and all three are legitimate views of
+   * a surface; which side of the box the light is on is not, because the far side leaves the chart
+   * dark whatever the elevation.</p>
    */
-  it('is in front of the surface and above it, which is the side the camera is on', () => {
+  it('is in front of the surface, which is the side the camera is on', () => {
     expect(DECAY_LIGHT.x).toBeLessThan(0)
-    expect(DECAY_LIGHT.y).toBeLessThan(0)
     expect(DECAY_LIGHT).toEqual(decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default))
   })
 

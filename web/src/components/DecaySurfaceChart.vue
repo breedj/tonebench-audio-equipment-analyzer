@@ -25,6 +25,7 @@ import {
   logTicks,
   lutColor,
   orientSurface,
+  paletteFloorFraction,
   paletteLut,
   pickSurfacePoint,
   paletteIndex,
@@ -512,7 +513,9 @@ function paintBand(
   }
 
   const gradient = ctx.createLinearGradient(0, originY, 0, originY + levelHeight)
-  for (const stop of wallGradientStops()) gradient.addColorStop(stop.offset, lutColor(lut, stop.index))
+  for (const stop of wallGradientStops(paletteFloorFraction(props.palette))) {
+    gradient.addColorStop(stop.offset, lutColor(lut, stop.index))
+  }
   ctx.fillStyle = gradient
   ctx.strokeStyle = gradient
   ctx.lineWidth = 1
@@ -561,7 +564,7 @@ function paintTrailingWall(
   lut: Uint8Array,
   levelHeight: number,
 ) {
-  const stops = wallGradientStops()
+  const stops = wallGradientStops(paletteFloorFraction(props.palette))
 
   for (let i = 1; i < wall.length; i++) {
     const back = wall[i - 1]
@@ -604,7 +607,7 @@ function bodyColor(lut: Uint8Array, colors: ChartTheme): string {
 const SHADES = 48
 
 function shade(levelDb: number, topDb: number, bottomDb: number): number {
-  return Math.round((levelIndex(levelDb, topDb, bottomDb) / 255) * (SHADES - 1))
+  return Math.round((levelIndex(levelDb, topDb, bottomDb, paletteFloorFraction(props.palette)) / 255) * (SHADES - 1))
 }
 
 /**
@@ -683,7 +686,7 @@ function drawSonogram(
         image.data[offset + 2] = background[2]
         continue
       }
-      const index = levelIndex(sum / weight, topDb, bottomDb)
+      const index = levelIndex(sum / weight, topDb, bottomDb, paletteFloorFraction(props.palette))
       image.data[offset] = lut[index * 3]
       image.data[offset + 1] = lut[index * 3 + 1]
       image.data[offset + 2] = lut[index * 3 + 2]
@@ -828,7 +831,7 @@ function drawLevelAxis(
   const lut = paletteLut(props.palette, paintDark)
   const rows = Math.max(1, Math.round(height))
   for (let row = 0; row < rows; row++) {
-    ctx.fillStyle = lutColor(lut, paletteIndex((rows - 1 - row) / (rows - 1 || 1)))
+    ctx.fillStyle = lutColor(lut, paletteIndex((rows - 1 - row) / (rows - 1 || 1), paletteFloorFraction(props.palette)))
     ctx.fillRect(keyRight - keyWidth, top + row, keyWidth, 1)
   }
   ctx.strokeStyle = colors.grid

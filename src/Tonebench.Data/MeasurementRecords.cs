@@ -2274,6 +2274,14 @@ public sealed record ImpulseResponseParameters(
     double? ChartResponseYBottomDb = null,
     double? ChartHarmonicsYTopDb = null,
     double? ChartHarmonicsYBottomDb = null,
+    /// <summary>
+    /// Which harmonic orders the Harmonics view draws — the display rail's H2..H5 checkboxes,
+    /// added 2026-10-28. Null is every order, which is what every build before them drew and so
+    /// what a type stored earlier means; an <b>empty list</b> is the opposite and a real answer,
+    /// every curve switched off. Orders this build does not know are ignored on the way in rather
+    /// than blanking the chart (see the client's <c>parseHarmonicOrders</c>).
+    /// </summary>
+    int[]? ChartHarmonicOrders = null,
     double? ChartPhaseTopDeg = null,
     double? ChartPhaseBottomDeg = null,
     /// <summary>The Response view's delay curve and its axis window — see <see cref="FrequencyResponseParameters.ChartDelayView"/>.</summary>
@@ -2284,6 +2292,14 @@ public sealed record ImpulseResponseParameters(
     double? ChartTimeToMs = null,
     double? ChartFreqFromHz = null,
     double? ChartFreqToHz = null,
+    /// <summary>
+    /// The two decay views' own top of band, where every other view on this screen shares
+    /// <see cref="ChartFreqToHz"/>. Null is a measurement that has never had one set, and the client
+    /// then derives it from <see cref="FrequencySpanHz"/> — see the client's
+    /// <c>DECAY_BAND_EDGE_FRACTION</c>, which explains why the last stretch below Nyquist is left
+    /// off a decay surface and nothing else.
+    /// </summary>
+    double? ChartDecayFreqToHz = null,
     /// <summary>How the two decay surfaces are drawn — stacked curves or a sonogram — and in what colours.</summary>
     string? ChartDecayMode = null,
     string? ChartDecayPalette = null,
@@ -2325,6 +2341,13 @@ public sealed record ImpulseResponseParameters(
     /// there is no proportion to be right and the shape is a reading preference. Null is the fixed
     /// box everything before them was drawn at.
     /// </summary>
+    /// <summary>
+    /// How tall the surface's box is drawn against its own floor, as the vendor demo's
+    /// <c>Explode Z Axis</c> does it — one number where this app had three axis lengths until
+    /// 2026-10-29. The three are kept so that a measurement stored before that still opens on the
+    /// box it was saved with; nothing writes them any more.
+    /// </summary>
+    double? ChartDecayExplodeZ = null,
     double? ChartDecayAxisLengthX = null,
     double? ChartDecayAxisLengthY = null,
     double? ChartDecayAxisLengthZ = null,

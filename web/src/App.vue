@@ -156,6 +156,7 @@ import {
 import { useOutputImpedance } from './composables/useOutputImpedance'
 import { formatOhms } from './impedance/equivalent'
 import { DEFAULT_IMPULSE_DISPLAY, impulseDisplayFromParams, type ImpulseDisplay } from './measurements/impulseDisplay'
+import { allHarmonicOrders } from './measurements/harmonicOrders'
 import { monochromeChartPng, type ChartExportOptions } from './charts/exportChart'
 import { copyPngToClipboard, frameChartPng, screenshotFrameLayout, type ScreenshotSettings } from './screenshot'
 import { useScreenshotSettings } from './composables/useScreenshotSettings'
@@ -3443,6 +3444,11 @@ const impulseShowCoherence = ref(false)
 const impulseThickLines = ref(true)
 const impulseShowDataPoints = ref(false)
 /**
+ * Which harmonic orders the Harmonics view draws. Replaced rather than mutated — the dirty watcher
+ * below compares by identity, and measurements/harmonicOrders.ts is where the editing lives.
+ */
+const impulseHarmonicOrders = ref<number[]>(allHarmonicOrders())
+/**
  * A level window per view, not one shared pair. The three views read completely different
  * quantities — dB below the impulse's own peak, gain in dB, and distortion in dBc — so a single
  * window means switching view lands on a range that belongs to the previous one. The gated response
@@ -3488,6 +3494,9 @@ const impulseTimeToMs = ref(20)
 // DEFAULT_IMPULSE_DISPLAY, which is what a stored measurement falls back to.
 const impulseFreqFromHz = ref(DEFAULT_IMPULSE_DISPLAY.freqFromHz)
 const impulseFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.freqToHz)
+// The decay views' own top of band — see DECAY_BAND_EDGE_FRACTION, which is why it is not the one
+// above. `applyStoredImpulseDisplay` re-derives it from the measurement's own span.
+const impulseDecayFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.decayFreqToHz)
 
 // The two decay surfaces. How they are drawn is shared between them; what is analysed is not.
 const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
@@ -3501,9 +3510,7 @@ const impulseDecayMoveY = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveY)
 const impulseDecayMagnification = ref(DEFAULT_IMPULSE_DISPLAY.decayMagnification)
 const impulseDecayLightAzimuthDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightAzimuthDeg)
 const impulseDecayLightElevationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightElevationDeg)
-const impulseDecayAxisLengthX = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthX)
-const impulseDecayAxisLengthY = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthY)
-const impulseDecayAxisLengthZ = ref(DEFAULT_IMPULSE_DISPLAY.decayAxisLengthZ)
+const impulseDecayExplodeZ = ref(DEFAULT_IMPULSE_DISPLAY.decayExplodeZ)
 const impulseDecayRangeDb = ref(30)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
@@ -3562,6 +3569,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
     responseYBottomDb: impulseYWindows.Response.bottom,
     harmonicsYTopDb: impulseYWindows.Harmonics.top,
     harmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
+    harmonicOrders: impulseHarmonicOrders.value,
     phaseTopDeg: impulsePhaseTopDeg.value,
     phaseBottomDeg: impulsePhaseBottomDeg.value,
     delayView: impulseDelayView.value,
@@ -3569,6 +3577,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
     delayBottomUs: impulseDelayBottomUs.value,
     freqFromHz: impulseFreqFromHz.value,
     freqToHz: impulseFreqToHz.value,
+    decayFreqToHz: impulseDecayFreqToHz.value,
     decayMode: impulseDecayMode.value,
     decayPalette: impulseDecayPalette.value,
     decayColoredCurves: impulseDecayColoredCurves.value,
@@ -3580,9 +3589,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayMagnification: impulseDecayMagnification.value,
     decayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
     decayLightElevationDeg: impulseDecayLightElevationDeg.value,
-    decayAxisLengthX: impulseDecayAxisLengthX.value,
-    decayAxisLengthY: impulseDecayAxisLengthY.value,
-    decayAxisLengthZ: impulseDecayAxisLengthZ.value,
+    decayExplodeZ: impulseDecayExplodeZ.value,
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
       fftLength: impulseCsdFftLength.value,
@@ -3630,6 +3637,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseYWindows.Response.bottom = display.responseYBottomDb
   impulseYWindows.Harmonics.top = display.harmonicsYTopDb
   impulseYWindows.Harmonics.bottom = display.harmonicsYBottomDb
+  impulseHarmonicOrders.value = display.harmonicOrders
   impulsePhaseTopDeg.value = display.phaseTopDeg
   impulsePhaseBottomDeg.value = display.phaseBottomDeg
   impulseDelayView.value = display.delayView
@@ -3637,6 +3645,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDelayBottomUs.value = display.delayBottomUs
   impulseFreqFromHz.value = display.freqFromHz
   impulseFreqToHz.value = display.freqToHz
+  impulseDecayFreqToHz.value = display.decayFreqToHz
   impulseDecayMode.value = display.decayMode
   impulseDecayPalette.value = display.decayPalette
   impulseDecayColoredCurves.value = display.decayColoredCurves
@@ -3648,9 +3657,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayMagnification.value = display.decayMagnification
   impulseDecayLightAzimuthDeg.value = display.decayLightAzimuthDeg
   impulseDecayLightElevationDeg.value = display.decayLightElevationDeg
-  impulseDecayAxisLengthX.value = display.decayAxisLengthX
-  impulseDecayAxisLengthY.value = display.decayAxisLengthY
-  impulseDecayAxisLengthZ.value = display.decayAxisLengthZ
+  impulseDecayExplodeZ.value = display.decayExplodeZ
   impulseDecayRangeDb.value = display.decayRangeDb
   impulseCsdFftLength.value = display.csd.fftLength
   impulseCsdSpanMs.value = display.csd.spanMs
@@ -3681,13 +3688,13 @@ watch(
 watch(
   [
     impulseView, impulseNormalised, impulseShowPhase, impulseShowCoherence, impulseThickLines,
-    impulseShowDataPoints, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
-    impulseFreqFromHz, impulseFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
+    impulseShowDataPoints, impulseHarmonicOrders, impulseYWindows, impulseTimeFromMs, impulseTimeToMs,
+    impulseFreqFromHz, impulseFreqToHz, impulseDecayFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
     impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
     impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification, impulseDecayLightAzimuthDeg, impulseDecayLightElevationDeg,
-    impulseDecayAxisLengthX, impulseDecayAxisLengthY, impulseDecayAxisLengthZ,
+    impulseDecayExplodeZ,
     impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
   ],
@@ -3792,7 +3799,7 @@ function requestImpulseDecay() {
         windowMode: impulseCsdWindowMode.value,
         riseTimeMs: impulseCsdRiseTimeMs.value,
         lowHz: impulseFreqFromHz.value,
-        highHz: impulseFreqToHz.value,
+        highHz: impulseDecayFreqToHz.value,
         displayColumns: DECAY_DISPLAY_COLUMNS,
       }
       void (storedId === null ? computeImpulseCsd(csdRequest) : computeStoredImpulseCsd(storedId, csdRequest))
@@ -3802,7 +3809,7 @@ function requestImpulseDecay() {
     } else {
       const burstRequest = {
         lowHz: impulseFreqFromHz.value,
-        highHz: impulseFreqToHz.value,
+        highHz: impulseDecayFreqToHz.value,
         maxPeriods: impulseBurstMaxPeriods.value,
         pointsPerPeriod: impulseBurstPointsPerPeriod.value,
         resolution: impulseBurstResolution.value,
@@ -3825,7 +3832,7 @@ watch(
   () => [
     impulseView.value,
     impulseFreqFromHz.value,
-    impulseFreqToHz.value,
+    impulseDecayFreqToHz.value,
     impulseCsdFftLength.value,
     impulseCsdSpanMs.value,
     impulseCsdSlices.value,
@@ -3917,6 +3924,7 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartResponseYBottomDb: impulseYWindows.Response.bottom,
       chartHarmonicsYTopDb: impulseYWindows.Harmonics.top,
       chartHarmonicsYBottomDb: impulseYWindows.Harmonics.bottom,
+      chartHarmonicOrders: impulseHarmonicOrders.value,
       chartPhaseTopDeg: impulsePhaseTopDeg.value,
       chartPhaseBottomDeg: impulsePhaseBottomDeg.value,
       chartDelayView: impulseDelayView.value,
@@ -3926,6 +3934,7 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartTimeToMs: impulseTimeToMs.value,
       chartFreqFromHz: impulseFreqFromHz.value,
       chartFreqToHz: impulseFreqToHz.value,
+      chartDecayFreqToHz: impulseDecayFreqToHz.value,
       chartDecayMode: impulseDecayMode.value,
       chartDecayPalette: impulseDecayPalette.value,
       chartDecayColoredCurves: impulseDecayColoredCurves.value,
@@ -3937,9 +3946,7 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayMagnification: impulseDecayMagnification.value,
       chartDecayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
       chartDecayLightElevationDeg: impulseDecayLightElevationDeg.value,
-      chartDecayAxisLengthX: impulseDecayAxisLengthX.value,
-      chartDecayAxisLengthY: impulseDecayAxisLengthY.value,
-      chartDecayAxisLengthZ: impulseDecayAxisLengthZ.value,
+      chartDecayExplodeZ: impulseDecayExplodeZ.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
       chartCsdSpanMs: impulseCsdSpanMs.value,
@@ -4589,10 +4596,17 @@ onBeforeUnmount(() => stopLoadPolling?.())
             <!-- Shortcut into the manual chapter for whichever kind is selected. It sits in this
                  toolbar rather than in each screen's own template because the toolbar is the one
                  row every screen shares, so the button is in the same place everywhere: the far right
-                 of the row, clear of the save buttons. -->
+                 of the row, clear of the save buttons.
+
+                 It is drawn as `HeaderIcon`'s About glyph is — the mark's own blue, filled with the
+                 same colour at 18 % — because it is the fourth way into the manual and should read
+                 as one of that set rather than as a grey outline beside the toolbar's tinted icons.
+                 Literal hues with no dark-theme twin, for the reason that component gives: #2563eb
+                 is light enough to carry on either ground, and a second value would be one more to
+                 keep in step. 28 px rather than 36: it is a shortcut, not an action. -->
             <button
               type="button"
-              class="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-[13px] font-semibold text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              class="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#2563eb]/40 bg-[#2563eb]/[0.18] text-xs font-semibold text-[#2563eb] hover:bg-[#2563eb]/30"
               :aria-label="`Help for ${currentType?.kind ? currentType.name : 'this measurement'}`"
               title="Open this measurement's chapter of the manual."
               @click="openManualForKind(currentType?.kind)"
@@ -4737,6 +4751,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   ref="impulseHarmonicsChart"
                   :harmonics="impulseHarmonics"
                   :overlays="visibleHarmonicOverlays"
+                  :shown-orders="impulseHarmonicOrders"
                   :thick-lines="impulseThickLines"
                   :show-data-points="impulseShowDataPoints"
                   :freq-from-hz="impulseFreqFromHz"
@@ -4781,9 +4796,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :magnification="impulseDecayMagnification"
                   :light-azimuth-deg="impulseDecayLightAzimuthDeg"
                   :light-elevation-deg="impulseDecayLightElevationDeg"
-                  :axis-length-x="impulseDecayAxisLengthX"
-                  :axis-length-y="impulseDecayAxisLengthY"
-                  :axis-length-z="impulseDecayAxisLengthZ"
+                  :explode-z="impulseDecayExplodeZ"
                   :range-db="impulseDecayRangeDb"
                   :thick-lines="impulseThickLines"
                   :computing="impulseDecayComputing"
@@ -4832,9 +4845,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :magnification="impulseDecayMagnification"
                       :light-azimuth-deg="impulseDecayLightAzimuthDeg"
                       :light-elevation-deg="impulseDecayLightElevationDeg"
-                  :axis-length-x="impulseDecayAxisLengthX"
-                  :axis-length-y="impulseDecayAxisLengthY"
-                  :axis-length-z="impulseDecayAxisLengthZ"
+                  :explode-z="impulseDecayExplodeZ"
                       :range-db="impulseDecayRangeDb"
                       :thick-lines="impulseThickLines"
                       :computing="false"
@@ -4920,12 +4931,14 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:show-coherence="impulseShowCoherence"
                   v-model:thick-lines="impulseThickLines"
                   v-model:show-data-points="impulseShowDataPoints"
+                  v-model:harmonic-orders="impulseHarmonicOrders"
                   v-model:y-top-db="impulseYTopDb"
                   v-model:y-bottom-db="impulseYBottomDb"
                   v-model:time-from-ms="impulseTimeFromMs"
                   v-model:time-to-ms="impulseTimeToMs"
                   v-model:freq-from-hz="impulseFreqFromHz"
                   v-model:freq-to-hz="impulseFreqToHz"
+                  v-model:decay-freq-to-hz="impulseDecayFreqToHz"
                   v-model:delay-view="impulseDelayView"
                   v-model:delay-top-us="impulseDelayTopUs"
                   v-model:delay-bottom-us="impulseDelayBottomUs"
@@ -4940,9 +4953,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-magnification="impulseDecayMagnification"
                   v-model:decay-light-azimuth-deg="impulseDecayLightAzimuthDeg"
                   v-model:decay-light-elevation-deg="impulseDecayLightElevationDeg"
-                  v-model:decay-axis-length-x="impulseDecayAxisLengthX"
-                  v-model:decay-axis-length-y="impulseDecayAxisLengthY"
-                  v-model:decay-axis-length-z="impulseDecayAxisLengthZ"
+                  v-model:decay-explode-z="impulseDecayExplodeZ"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"
                   v-model:csd-span-ms="impulseCsdSpanMs"

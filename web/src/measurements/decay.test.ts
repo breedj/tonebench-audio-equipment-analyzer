@@ -11,6 +11,9 @@ import {
   levelAt,
   levelIndex,
   PALETTE_FLOOR_FRACTION,
+  PALETTE_NAMES,
+  paletteFloorFraction,
+  paletteIndex,
   levelTicks,
   levelY,
   linearTicks,
@@ -290,7 +293,7 @@ describe('wallGradientStops', () => {
   it('is the same ramp the curves and the key are coloured from', () => {
     // Every stop is the colour levelIndex gives the level at that height, which is what makes the
     // wall and the curve that ends on it agree where they meet.
-    for (const stop of wallGradientStops(8)) {
+    for (const stop of wallGradientStops(PALETTE_FLOOR_FRACTION, 8)) {
       const levelDb = 0 + stop.offset * -30
       expect(stop.index).toBe(levelIndex(levelDb, 0, -30))
     }
@@ -474,7 +477,7 @@ describe('lutColor', () => {
   it('reads a palette entry as a CSS colour, clamped at both ends', () => {
     const lut = paletteLut('Jet')
 
-    expect(lutColor(lut, 0)).toBe('rgb(8,12,64)')
+    expect(lutColor(lut, 0)).toBe('rgb(0,0,131)')
     expect(lutColor(lut, -5)).toBe(lutColor(lut, 0))
     expect(lutColor(lut, 999)).toBe(lutColor(lut, 255))
   })
@@ -784,5 +787,60 @@ describe('dragToView', () => {
 
   it('falls back to the foot of the range rather than passing NaN to the projection', () => {
     expect(dragToView(Number.NaN, 50, 10, 0).rotationDeg).toBe(DECAY_ROTATION_DEG.min)
+  })
+})
+
+describe('the Jet palette', () => {
+  /**
+   * <b>GigaSoft's own ramp</b>, from the ProEssentials 3D surface demo's <c>app/colors.js</c> —
+   * asked for 2026-10-29 so this chart and the demo it is modelled on read alike. Theirs is a
+   * 256-entry table; these are nine of its entries, read out of that file, at the indices the stop
+   * table is built from. A palette that stopped being theirs would fail here rather than quietly
+   * drawing a ramp like it.
+   */
+  it('is the ramp the vendor demo draws', () => {
+    const lut = paletteLut('Jet')
+    const at = (i: number) => [lut[i * 3], lut[i * 3 + 1], lut[i * 3 + 2]]
+    const vendor: [number, number[]][] = [
+      [0, [0, 0, 131]],
+      [31, [0, 0, 254]],
+      [63, [0, 128, 255]],
+      [95, [0, 255, 255]],
+      [127, [128, 255, 128]],
+      [159, [255, 255, 0]],
+      [191, [255, 128, 0]],
+      [223, [255, 0, 0]],
+      [255, [128, 0, 0]],
+    ]
+
+    // To within one count: nine stops interpolated back out to 256 cannot land on every one of
+    // their entries exactly, and one count of 255 is not a colour anybody can see.
+    for (const [index, expected] of vendor) {
+      const got = at(index)
+      for (let c = 0; c < 3; c++) {
+        expect(Math.abs(got[c] - expected[c]), `${index}/${c}`).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  /**
+   * The lift exists because Jet's foot is a near-black navy and Hot's a near-black red, so a
+   * surface's quiet half painted in either loses its shape. This ramp's foot is a readable dark
+   * blue, and lifting it would take the blue end — most of the vendor's own picture — off the chart.
+   */
+  it('is the one palette whose level scale reaches its own floor', () => {
+    expect(paletteFloorFraction('Jet')).toBe(0)
+    expect(paletteIndex(0, paletteFloorFraction('Jet'))).toBe(0)
+
+    for (const lifted of ['Hot', 'Grey'] as const) {
+      expect(paletteFloorFraction(lifted), lifted).toBe(PALETTE_FLOOR_FRACTION)
+    }
+  })
+
+  /** Every palette the dropdown offers has a floor, or the level-to-colour path would read NaN. */
+  it('leaves no palette without one', () => {
+    for (const name of PALETTE_NAMES) {
+      expect(Number.isFinite(paletteFloorFraction(name)), name).toBe(true)
+    }
   })
 })

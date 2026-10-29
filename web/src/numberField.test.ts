@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { clampNumberField } from './numberField'
+import { clampNumberField, formatSliderValue } from './numberField'
 
 describe('clampNumberField', () => {
   it('holds a value inside its floor and ceiling', () => {
@@ -92,5 +92,30 @@ describe('a number input with both a min and a step', () => {
     expect(
       offGrid.map((input) => `${input.file}: min=${input.min} step=${input.step}`),
     ).toEqual([])
+  })
+})
+
+describe('formatSliderValue', () => {
+  /** The report: a dragged Tilt wrote 29.299999999999997 into the model and the caption printed it. */
+  it('rounds a dragged figure to one decimal', () => {
+    expect(formatSliderValue(29.299999999999997)).toBe('29.3')
+    expect(formatSliderValue(-7.96)).toBe('-8')
+  })
+
+  it('prints a whole number without a decimal', () => {
+    expect(formatSliderValue(25)).toBe('25')
+    expect(formatSliderValue(0)).toBe('0')
+    expect(formatSliderValue(1500)).toBe('1500')
+  })
+
+  it('keeps the one decimal a slider of its own stepping can land on', () => {
+    expect(formatSliderValue(11.5)).toBe('11.5')
+    expect(formatSliderValue(-0.3)).toBe('-0.3')
+  })
+
+  /** Never NaN on screen: a cleared model is the caller's business, and every slider has a default. */
+  it('prints nothing for a value that is not a number', () => {
+    expect(formatSliderValue(Number.NaN)).toBe('')
+    expect(formatSliderValue(Number.POSITIVE_INFINITY)).toBe('')
   })
 })

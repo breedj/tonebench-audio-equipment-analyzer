@@ -4,6 +4,7 @@ import {
   DECAY_ROTATION_DEG,
   levelAt,
   orientSurface,
+  paletteFloorFraction,
   paletteIndex,
   paletteLut,
 } from './decay'
@@ -135,7 +136,7 @@ export function decaySubsetColors(palette: DecayPalette, onDark: boolean): Uint3
   const lut = paletteLut(palette, onDark)
   const out = new Uint32Array(256)
   for (let i = 0; i < 256; i++) {
-    const index = paletteIndex(i / 255)
+    const index = paletteIndex(i / 255, paletteFloorFraction(palette))
     out[i] = peColor(lut[index * 3], lut[index * 3 + 1], lut[index * 3 + 2])
   }
   return out
@@ -172,63 +173,66 @@ export function peColor(r: number, g: number, b: number): number {
  * translation range of -3..+3 moves the surface <em>seven pixels</em>, so the gesture looks broken.
  * At this size the same range moves it 47, and the gesture works.</p>
  */
-export function decayGridAspect(lengths: DecayAxisLengths = DECAY_AXIS_LENGTH_DEFAULT): { x: number; y: number; z: number } {
-  // <p><b>All three aspect numbers are written, and they have to agree with each other.</b> The
-  // engine documents <c>GridAspectX</c> as the x axis "as relates to z" and <c>GridAspectY</c> as y
-  // "as relates to z", while <c>GridAspectZ</c> is z <em>"as relates to x"</em> — so X and Z are two
-  // statements of one ratio and <c>X · Z = 1</c> is the constraint between them. Raw lengths break
-  // it (10 and 14, where 14 is not 1/10), and a box told two contradictory things about its own
-  // shape degenerates to a slab that no later value moves: that is why all three sliders looked
-  // completely inert on 2026-10-26, through a reload, through <c>ReinitializeResetImage()</c> and
-  // through <c>render()</c> alike.</p>
-  //
-  // <p>Writing only X and Y satisfies the constraint by saying nothing, and was the first fix — but
-  // it leaves the depth edge as the <em>unit</em> the other two are measured in, so the Time slider
-  // shortened frequency and level instead of lengthening time, and rescaled the whole box doing it.
-  // Reported the same day, in those words: the time axis length slider does not change the time
-  // axis. Writing the consistent triple is what gives each slider its own edge.</p>
-  //
-  // <p><b>These are ratios, so they carry no size</b>, and the box is drawn about ten times smaller
-  // than the raw lengths drew it — which is why {@link DECAY_3D_ZOOM} is scaled to match rather than
-  // being the figure the earlier framing was measured at. Do not try to restore the magnitude by
-  // scaling the triple: multiplying X and Z by anything breaks <c>X · Z = 1</c> and puts the slab
-  // back.</p>
-  const x = lengths.x > 0 ? lengths.x : DECAY_AXIS_LENGTH_DEFAULT.x
-  const y = lengths.y > 0 ? lengths.y : DECAY_AXIS_LENGTH_DEFAULT.y
-  const z = lengths.z > 0 ? lengths.z : DECAY_AXIS_LENGTH_DEFAULT.z
-  return { x: x / z, y: y / z, z: z / x }
+export function decayGridAspect(
+  explodeZ: number = DECAY_EXPLODE_Z.default,
+  magnificationPercent: number = DECAY_VIEW_MAGNIFICATION.default,
+): { x: number; y: number; z: number } {
+  // <p>The floor is square, so the two statements the engine wants about it — x against z and z
+  // against x — agree by construction. An afternoon of 2026-10-26 went on a box told two
+  // contradictory things about its own shape, which degenerates to a slab that no later value
+  // moves; a square floor is the simplest way to be sure of it. (The <c>X · Z = 1</c> rule that was
+  // written here is not one: the vendor's own demo writes raw lengths, 1232 by 1028, and these
+  // scale linearly over at least 0.5 to 5 — which is the whole of {@link DECAY_VIEW_MAGNIFICATION}
+  // below.)</p>
+  const explode = Number.isFinite(explodeZ) && explodeZ > 0 ? explodeZ : DECAY_EXPLODE_Z.default
+  const edge = boxEdge(magnificationPercent)
+  return { x: edge, y: edge * Math.SQRT2 * (explode / 100), z: edge }
 }
 
-/** How long each edge of the box is drawn, in the engine's own grid-aspect units. */
-export interface DecayAxisLengths {
-  /** The across axis — frequency in the by-frequency views, time in the by-period one. */
-  x: number
-  /** The height axis, which is always the level in dB. */
-  y: number
-  /** The depth axis, the other of time and frequency. */
-  z: number
+/** How long the box's floor edge is drawn, for this magnification. */
+function boxEdge(magnificationPercent: number): number {
+  const percent = Number.isFinite(magnificationPercent) && magnificationPercent > 0
+    ? magnificationPercent
+    : DECAY_VIEW_MAGNIFICATION.default
+  return percent / DECAY_VIEW_MAGNIFICATION.default
 }
 
 /**
- * The lengths the box is drawn at unless a measurement says otherwise, and the range the three
- * sliders offer.
+ * How tall the box is drawn, against its own floor — the vendor demo's <b>Explode Z Axis</b>, and
+ * the only control over the box's shape.
  *
- * <p>Asked for 2026-10-26 ("controls to set the length of the axes individually"), which is worth
- * having for the reason {@link decayGridAspect} gives: the three axes have no common unit, so
- * there is no proportion to be right and the shape is a reading preference. A flatter height makes
- * a shallow decay legible; a longer depth separates slices that overlap.</p>
+ * <p>Asked for 2026-10-29: the demo at gigasoft.com/javascript-3d-surface-chart-live-demo offers
+ * one slider here where this app offered three, and the three were a worse answer. The floor's two
+ * axes are frequency and time, which have no common unit and so no proportion to be right, and
+ * setting them apart only ever tilted the picture; what is worth stretching is the height, which is
+ * the only axis a decay surface is actually read along.</p>
  *
- * <p><b>The defaults are the box Joost turned these three sliders to and asked to keep</b>
- * (2026-10-27, with the rest of {@link decayViewDefaults}), which is a longer and considerably
- * taller box than the one the camera's framing was originally measured against. That is safe
- * because the framing is a function of the aspect ratios and not of these numbers — see
- * {@link decayGridAspect}, which divides them down to a triple of order one — and because the
- * magnification default was chosen on the same screen, in the same sitting, against this box. Any
- * further stretching can still push the surface off the plot, which is what Magnification and the
- * two Move sliders are then for.</p>
+ * <p>The formula is the demo's own, divided through by the floor edge. Theirs reads
+ * <c>GridAspectX = width, GridAspectZ = height, GridAspectY = diagonal × explode/100</c> on a
+ * terrain map whose floor is a real rectangle; with a square floor that is <c>X = Z = 1</c> and
+ * <c>Y = √2 × explode/100</c>, which keeps the triple at order one where this chart's camera
+ * distance was measured. The range is theirs too, 1 to 50.</p>
+ *
+ * <p><b>This could replace those three without the chart opening on a different picture</b>: the box
+ * they were last set to (2026-10-27, as the axis lengths 30 / 11 / 30) is 11/30 = 0.3667 against
+ * √2 × 26/100 = 0.3677, three parts in a thousand, and that is what
+ * {@link explodeZForAxisLengths} carries a stored one over by. The default is 23 rather than that
+ * 26 because Joost turned it there on 2026-10-29, with the rest of {@link decayViewDefaults}.</p>
  */
-export const DECAY_AXIS_LENGTH_DEFAULT: DecayAxisLengths = { x: 25, y: 11.5, z: 21 }
-export const DECAY_AXIS_LENGTH = { min: 2, max: 30, step: 0.5 } as const
+export const DECAY_EXPLODE_Z = { min: 1, max: 50, step: 1, default: 23 } as const
+
+/**
+ * The Explode Z a measurement's stored axis lengths come to, for one saved before this slider
+ * existed. What that measurement chose was the height against the floor, so that ratio is what
+ * carries over: invert {@link decayGridAspect}'s <c>y = √2 × explode/100</c> against the across
+ * length, which the floor was square on anyway in the only box this app ever opened on.
+ */
+export function explodeZForAxisLengths(acrossLength: number, levelLength: number): number {
+  if (!(acrossLength > 0) || !(levelLength > 0)) return DECAY_EXPLODE_Z.default
+  const explode = (100 * levelLength) / (acrossLength * Math.SQRT2)
+  const stepped = Math.round(explode / DECAY_EXPLODE_Z.step) * DECAY_EXPLODE_Z.step
+  return Math.min(DECAY_EXPLODE_Z.max, Math.max(DECAY_EXPLODE_Z.min, stepped))
+}
 
 /**
  * How far to pull the camera back, for a plot of this shape.
@@ -317,22 +321,60 @@ export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 0 } as const
  * consequence of asking for too much here is the surface leaving the plot, which is on screen the
  * moment it happens rather than silent.</p>
  */
-export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0.1 } as const
+export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
 
 /**
- * How large the surface is drawn, as a percentage of the framing the plot's own shape gives it.
+ * How large the surface is drawn, as a percentage of the view a measurement opens on.
  *
- * <p>A percentage of {@link decayCameraZoom} rather than a zoom outright, so that framing — which
- * is what keeps a narrow plot from clipping — still applies and this rides on top of it. 100 is
- * the fitted view.</p>
+ * <p><b>It is the size of the box, not the camera's lens, and that is the whole of why it now
+ * works.</b> Reported 2026-10-29: "our stops magnifying when the full chart is still in view".
+ * Measured, exactly so — the old control narrowed <c>DxFOV</c> and left the camera where it was,
+ * and a long lens converges on an orthographic view that no further narrowing can enlarge. At a
+ * fixed camera the drawn width went <b>96 px at 100 %, 209 at 400, 243 at 800, 270 at 2000 and 278
+ * at 4000</b>: a tenfold slider travel bought a third more picture, all of it in the first eighth.
+ * Bringing the camera in instead buys almost nothing at that lens (270 → 285 px from -3.3 to
+ * -0.4), and opening the lens to the vendor's own 45° buys range at the cost of the near-isometric
+ * view a waterfall is read in — their terrain looks right that way and this does not.</p>
+ *
+ * <p>Scaling the box is linear and has no ceiling: measured at the same camera and lens, floor
+ * edges of 0.5 / 1 / 1.5 drew <b>132 / 264 / 393 px</b>, proportional to three figures, and 2, 3
+ * and 5 carry on past the edge of the plot — which is the point, since magnifying to see detail
+ * means the surface no longer fits. The two Move sliders pan it; their own range is ample at any of
+ * these sizes (±3 takes the surface right off the plot at an edge of 3).</p>
+ *
+ * <p><b>The scale is a tenth of what it was</b>, asked for in the same message — the old 2000 is
+ * 200, and the view the chart used to open on is 150. A measurement that stored the old scale is
+ * divided by ten on the way in, which is approximate by nature, since the old control was not
+ * linear in the first place. The default is 170, which is where Joost left it on 2026-10-29 once
+ * the slider did something.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 50, max: 800, default: 600 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 20, max: 800, step: 5, default: 170 } as const
+
+/**
+ * Where a stored magnification was written on the old scale, which ran to 2000 and saturated.
+ *
+ * <p>Anything above this slider's own maximum has to be the old unit; the overlap below it cannot
+ * be told apart and is left alone, which costs a measurement stored between 200 and 400 a view
+ * twice the size it had. Every build that wrote this field defaulted to 600 or 1500, so that is a
+ * narrow window.</p>
+ */
+export function magnificationFromStored(stored: number): number {
+  if (!Number.isFinite(stored) || stored <= 0) return DECAY_VIEW_MAGNIFICATION.default
+  const value = stored > DECAY_VIEW_MAGNIFICATION.max ? stored / 10 : stored
+  return Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, value))
+}
 
 /** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
-export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 215 } as const
+export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 164 } as const
 
-/** How high the light sits, in degrees above the floor plane. */
-export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: 20 } as const
+/**
+ * How high the light sits, in degrees above the floor plane; negative puts it below.
+ *
+ * <p>The default is below the box, which is not an oversight — it is where Joost turned it on
+ * 2026-10-29. A surface lit from under its own floor is lit on the faces that recede from the
+ * camera, which is what makes a decay's steps read as steps.</p>
+ */
+export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: -57 } as const
 
 /**
  * Everything about the decay view that is a camera, a box or a light — the ten sliders, under the
@@ -346,9 +388,7 @@ export interface DecayViewSettings {
   decayMagnification: number
   decayLightAzimuthDeg: number
   decayLightElevationDeg: number
-  decayAxisLengthX: number
-  decayAxisLengthY: number
-  decayAxisLengthZ: number
+  decayExplodeZ: number
 }
 
 /**
@@ -366,8 +406,10 @@ export interface DecayViewSettings {
  * that left them where they were would hand back a box seen from whatever angle the last turn left,
  * which is to say not the view it promises. The button's own title says it covers them.</p>
  *
- * <p>The figures are Joost's, turned on the bench and asked for as the defaults on 2026-10-27.
- * Nothing here is derived, and nothing here can be: what makes a decay surface readable is a matter
+ * <p>The figures are Joost's, turned on the bench and asked for as the defaults on 2026-10-27, and
+ * again on 2026-10-28 and 2026-10-29 as the controls around them changed — the set here is a
+ * flattish box seen from nearly straight on, drawn large, lit from below. Nothing here is derived,
+ * and nothing here can be: what makes a decay surface readable is a matter
  * of looking at one, which is also why all ten are sliders rather than boxes.</p>
  */
 export function decayViewDefaults(): DecayViewSettings {
@@ -379,9 +421,7 @@ export function decayViewDefaults(): DecayViewSettings {
     decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
     decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
     decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
-    decayAxisLengthX: DECAY_AXIS_LENGTH_DEFAULT.x,
-    decayAxisLengthY: DECAY_AXIS_LENGTH_DEFAULT.y,
-    decayAxisLengthZ: DECAY_AXIS_LENGTH_DEFAULT.z,
+    decayExplodeZ: DECAY_EXPLODE_Z.default,
   }
 }
 
@@ -416,61 +456,17 @@ export function decayLightVector(azimuthDeg: number, elevationDeg: number): { x:
  * inside the box.</p>
  */
 /**
- * <p>How large the surface is drawn, as the camera's <b>field of view</b> rather than its distance.
- * <c>DxFOV</c> is documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10 is near
- * isometric — a longer lens, which magnifies without moving the camera into the box.</p>
+ * The camera's lens, fixed.
  *
- * <p><b>It is the field of view and not <c>DxZoom</c> because the box has no size of its own.</b>
- * {@link decayGridAspect} returns ratios, which fixes the box's shape and leaves its scale to the
- * engine, so the only way to fill the plot is optical. Driving <c>DxZoom</c> instead saturates as
- * the camera nears the focal point: measured 2026-10-26 at the default box, 250 %, 400 % and 700 %
- * were barely distinguishable, and the slider read as stuck at its own maximum — which is how it
- * was reported ("I like to enlarge the chart, but it is already at 250 %"). The same measurement
- * says the clamp in <c>decayMagnifiedZoom</c> was never the limit; that function is gone with it.</p>
+ * <p><c>DxFOV</c> is documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10 is near
+ * isometric. 15 is what the magnification control used to reach at its own default, and it is kept
+ * because that near-isometric view is what makes a waterfall readable: the vendor's demo runs at 1,
+ * which suits a terrain seen from above and draws this box as a looming wide-angle shot.</p>
  *
- * <p>The ceiling is the vendor's own near-isometric end. Past about 500 % the picture grows very
- * little, because the view angle is already narrow and narrowing it further buys less and less.</p>
+ * <p>It is a constant rather than a control because at this lens the camera and the lens barely
+ * change the drawn size — see {@link DECAY_VIEW_MAGNIFICATION}, which is the box instead.</p>
  */
-/**
- * <p>How large the surface is drawn. <b>Two engine properties carry one slider</b>, because neither
- * covers the range on its own, and the measurements that say so are worth keeping.</p>
- *
- * <p><c>DxFOV</c> is the lens — documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10
- * is near isometric. It is the only lever that magnifies a box with no size of its own (see
- * {@link decayGridAspect}), but it is <b>quantised to whole numbers and clamped at 1</b>: measured
- * 2026-10-26, 100 %, 120 % and 150 % rendered byte-identically at 19 122 pixels of surface, as did
- * 50 % and 100 %, while 200 % gave 48 202 and 400 % 74 184. So on its own the slider does nothing
- * at all over seven eighths of its travel — which is how it was reported ("a magnification of 90 %
- * results in a larger graph than 110 %", "above 200 % does not work", "lower, up to 50, does not
- * change it").</p>
- *
- * <p><c>DxZoom</c> is the camera, and it fills the gaps: it moves continuously, pulls back without
- * limit, and saturates only as it approaches the focal point. So the whole number of the lens is
- * taken first and the camera covers the fraction, which makes the control monotonic end to end.</p>
- *
- * <p><b>The lens is written before the camera at every call site</b>, because setting it moves the
- * camera — the vendor says so and the measurement agrees: written the other way round, 110 % drew a
- * surface a quarter the size of 90 %.</p>
- */
-export function decayFieldOfView(magnificationPercent: number): number {
-  return Math.max(1, Math.floor(clampMagnification(magnificationPercent) / 100))
-}
-
-/**
- * Where the camera sits for this magnification: the base framing where the lens lands exactly on a
- * whole number, pulled back below it and brought in above it. See {@link decayFieldOfView} for why
- * the two share one slider.
- */
-export function decayPulledBackZoom(baseZoom: number, magnificationPercent: number): number {
-  const magnification = clampMagnification(magnificationPercent) / 100
-  return baseZoom * (decayFieldOfView(magnificationPercent) / magnification)
-}
-
-function clampMagnification(magnificationPercent: number): number {
-  if (!Number.isFinite(magnificationPercent)) return DECAY_VIEW_MAGNIFICATION.default
-  return Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
-}
-
+export const DECAY_LENS_FOV = 15
 
 /**
  * Where the light goes. One position, not one per camera angle.

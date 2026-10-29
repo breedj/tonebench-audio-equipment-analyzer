@@ -1713,6 +1713,8 @@ export interface ImpulseResponseParameters {
   chartYBottomDb?: number | null
   chartResponseYTopDb?: number | null
   chartResponseYBottomDb?: number | null
+  /** Which harmonic orders the Harmonics view draws; absent means every one of them. */
+  chartHarmonicOrders?: number[] | null
   chartHarmonicsYTopDb?: number | null
   chartHarmonicsYBottomDb?: number | null
   chartPhaseTopDeg?: number | null
@@ -1725,6 +1727,8 @@ export interface ImpulseResponseParameters {
   chartTimeToMs?: number | null
   chartFreqFromHz?: number | null
   chartFreqToHz?: number | null
+  /** The decay views' own top of band — see DECAY_BAND_EDGE_FRACTION. Null re-derives it from the span. */
+  chartDecayFreqToHz?: number | null
   /** How the two decay surfaces are drawn, and in what colours. Shared by both of them. */
   chartDecayMode?: DecayChartMode | null
   chartDecayPalette?: DecayPalette | null
@@ -1738,6 +1742,12 @@ export interface ImpulseResponseParameters {
   chartDecayMagnification?: number | null
   chartDecayLightAzimuthDeg?: number | null
   chartDecayLightElevationDeg?: number | null
+  /**
+   * How tall the box is drawn against its own floor — the vendor demo's Explode Z Axis, and what
+   * replaced the three axis lengths on 2026-10-29. The three are still read where a measurement
+   * stored them; see `impulseDisplayFromParams`.
+   */
+  chartDecayExplodeZ?: number | null
   chartDecayAxisLengthX?: number | null
   chartDecayAxisLengthY?: number | null
   chartDecayAxisLengthZ?: number | null

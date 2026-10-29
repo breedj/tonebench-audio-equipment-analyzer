@@ -11,6 +11,7 @@ import type { ZoomWindow } from '../charts/zoomHistory'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { useZoomBounds } from '../composables/useZoomBounds'
+import { allHarmonicOrders, harmonicOrderColor } from '../measurements/harmonicOrders'
 import { sweepOverlayDash } from '../measurements/sweepOverlayStyles'
 import { freqAxis } from '../freqAxis'
 import { exportGridTheme } from '../charts/palette'
@@ -56,13 +57,20 @@ const props = withDefaults(defineProps<{
    * still means the order, so H3 is the same colour in every run, and the dash says which run.
    */
   overlays: OverlayEntry[]
+  /**
+   * Which orders are drawn — the display rail's H2…H5 checkboxes. Defaulted rather than required
+   * for the reason `annotationNumbers` is: `renderChartPng` passes props as a bare record, so a
+   * caller that forgot this would hand over `undefined` and the filter below would throw. Every
+   * order is the honest fallback, that being what this chart drew before the control existed.
+   */
+  shownOrders?: number[]
   thickLines: boolean
   showDataPoints: boolean
   freqFromHz: number
   freqToHz: number
   yTopDb: number
   yBottomDb: number
-}>(), { annotationNumbers: true })
+}>(), { annotationNumbers: true, shownOrders: () => allHarmonicOrders() })
 
 const { isDark } = useAppTheme()
 
@@ -72,14 +80,6 @@ const container = ref<HTMLDivElement | null>(null)
 // new height is applied through setSize, the same call a width change makes below.
 const chartHeight = useResultChartHeight(root, container)
 const plot = shallowRef<uPlot | null>(null)
-
-/** Matches the sweep chart's harmonic colours, so H2 means the same colour on both screens. */
-const ORDER_COLORS: Record<number, { dark: string; light: string }> = {
-  2: { dark: '#60a5fa', light: '#1d6fd0' },
-  3: { dark: '#4ade80', light: '#15803d' },
-  4: { dark: '#fbbf24', light: '#b45309' },
-  5: { dark: '#f87171', light: '#c62828' },
-}
 
 const THEME = {
   dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1 },
@@ -95,12 +95,23 @@ function themeFor(dark: boolean, forExport = false): Theme {
   return forExport ? exportGridTheme(theme) : theme
 }
 
+/** The order's colour, from the table the display rail's swatches read too. */
 function colorFor(order: number, dark: boolean = isDark.value): string {
-  const pair = ORDER_COLORS[order] ?? ORDER_COLORS[5]
-  return dark ? pair.dark : pair.light
+  return harmonicOrderColor(order, dark)
 }
 
-const ordered = computed(() => [...props.harmonics].sort((a, b) => a.order - b.order))
+/**
+ * The live run's curves, in order and with the orders the rail has switched off left out.
+ *
+ * <p>Hiding happens here rather than at the series, so an order that is off is gone from the
+ * legend, from the shared x grid and from the export's legend as well — it is not on the chart in
+ * any sense, which is what the checkbox says.</p>
+ */
+const shown = computed(() => new Set(props.shownOrders))
+
+const ordered = computed(() =>
+  [...props.harmonics].filter((c) => shown.value.has(c.order)).sort((a, b) => a.order - b.order),
+)
 
 /**
  * Every curve to draw, flattened: the live run's orders first, then each checked history item's.
@@ -112,7 +123,7 @@ const plotted = computed(() =>
     { dash: undefined as number[] | undefined, curves: ordered.value },
     ...props.overlays.map((o) => ({
       dash: sweepOverlayDash(props.overlays, o.id, props.harmonics.length > 0, null) ?? undefined,
-      curves: [...(o.harmonicCurves ?? [])].sort((a, b) => a.order - b.order),
+      curves: [...(o.harmonicCurves ?? [])].filter((c) => shown.value.has(c.order)).sort((a, b) => a.order - b.order),
     })),
   ].flatMap((run) => run.curves.map((curve) => ({ curve, dash: run.dash }))),
 )

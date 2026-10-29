@@ -14,7 +14,7 @@ import type { ResponseTrace } from '../composables/useFrequencyResponse'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
 import { useMeasurements } from '../composables/useMeasurements'
 import { autofitRange, autofitRangeInBand } from '../measurements/autofitRange'
-import { clampNumberField } from '../numberField'
+import { clampNumberField, formatSliderValue } from '../numberField'
 import {
   CSD_FFT_LENGTHS,
   DECAY_DEPTH_PERCENT,
@@ -28,7 +28,7 @@ import {
 import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import {
-  DECAY_AXIS_LENGTH,
+  DECAY_EXPLODE_Z,
   DECAY_LIGHT_AZIMUTH,
   DECAY_LIGHT_ELEVATION,
   DECAY_VIEW_MAGNIFICATION,
@@ -37,6 +37,8 @@ import {
   decayViewDefaults,
 } from '../measurements/decay3d'
 import { harmonicsUnavailableNote } from '../measurements/harmonicsAvailability'
+import { harmonicOrderColor, harmonicOrdersWith, HARMONIC_ORDERS } from '../measurements/harmonicOrders'
+import { useAppTheme } from '../composables/useAppTheme'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
@@ -61,8 +63,21 @@ const yTopDb = defineModel<number>('yTopDb', { required: true })
 const yBottomDb = defineModel<number>('yBottomDb', { required: true })
 const timeFromMs = defineModel<number>('timeFromMs', { required: true })
 const timeToMs = defineModel<number>('timeToMs', { required: true })
+/**
+ * The orders drawn in the Harmonics view. One list rather than a boolean per order: the set is
+ * fixed by the analysis (`HARMONIC_ORDERS`), the chart wants one prop rather than four, and a sixth
+ * order would then be a constant to change rather than a field to thread through five files.
+ */
+const harmonicOrders = defineModel<number[]>('harmonicOrders', { required: true })
 const freqFromHz = defineModel<number>('freqFromHz', { required: true })
 const freqToHz = defineModel<number>('freqToHz', { required: true })
+/**
+ * The decay views' own top of band. Separate from `freqToHz` because the last stretch below Nyquist
+ * rings rather than decaying and draws as a wall on a decay surface, while on the Bode and harmonics
+ * views the same stretch is an honest roll-off — see `DECAY_BAND_EDGE_FRACTION`. The *bottom* has no
+ * such asymmetry, so From stays shared.
+ */
+const decayFreqToHz = defineModel<number>('decayFreqToHz', { required: true })
 const delayView = defineModel<ResponseDelayView>('delayView', { required: true })
 const delayTopUs = defineModel<number>('delayTopUs', { required: true })
 const delayBottomUs = defineModel<number>('delayBottomUs', { required: true })
@@ -98,9 +113,7 @@ const decayMoveY = defineModel<number>('decayMoveY', { required: true })
 const decayMagnification = defineModel<number>('decayMagnification', { required: true })
 const decayLightAzimuthDeg = defineModel<number>('decayLightAzimuthDeg', { required: true })
 const decayLightElevationDeg = defineModel<number>('decayLightElevationDeg', { required: true })
-const decayAxisLengthX = defineModel<number>('decayAxisLengthX', { required: true })
-const decayAxisLengthY = defineModel<number>('decayAxisLengthY', { required: true })
-const decayAxisLengthZ = defineModel<number>('decayAxisLengthZ', { required: true })
+const decayExplodeZ = defineModel<number>('decayExplodeZ', { required: true })
 const decayDepthPercent = defineModel<number>('decayDepthPercent', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
 const csdFftLength = defineModel<number>('csdFftLength', { required: true })
@@ -128,6 +141,28 @@ const overlayImpulses = computed(() =>
 /** Checked history items carrying harmonic curves, which Autofit and its note both count. */
 const overlayHarmonics = computed(() => overlays.value.filter((o) => o.visible && o.harmonicCurves?.length))
 
+const { isDark } = useAppTheme()
+
+/**
+ * The H2…H5 checkboxes: whether an order is on the chart, and the writer for its box.
+ *
+ * <p>All four are offered whatever the last run extracted. A measurement's <b>Max harmonic
+ * order</b> may be lower, in which case the box switches a curve that is not there — which is the
+ * quieter of the two faults, a control that comes and goes with the last run being harder to find
+ * than one that is always in the same place, and the chart's own legend already saying which
+ * orders it has.</p>
+ *
+ * <p>The list is <em>replaced</em>, never pushed into: it is a model, and the dirty watcher that
+ * marks the measurement unsaved compares by identity.</p>
+ */
+function harmonicShown(order: number): boolean {
+  return harmonicOrders.value.includes(order)
+}
+
+function setHarmonicShown(order: number, visible: boolean) {
+  harmonicOrders.value = harmonicOrdersWith(harmonicOrders.value, order, visible)
+}
+
 /** Checked history items carrying a gated magnitude, likewise. */
 const overlayGains = computed(() =>
   overlays.value
@@ -148,16 +183,7 @@ const VIEWS: { value: ImpulseView; label: string }[] = [
 const isDecayView = computed(() => view.value === 'Csd' || view.value === 'BurstDecay')
 
 /**
- * What the across and depth edges of the box are carrying, for the two axis-length sliders that
- * move them. Which is which swaps with the projection — Waterfall (f) runs frequency across and
- * recedes in time, Waterfall (p) the other way about — so a fixed pair of labels would be wrong
- * half the time, and "X" and "Z" say nothing to anyone.
- */
-const acrossAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Time' : 'Frequency'))
-const depthAxisLabel = computed(() => (decayMode.value === 'WaterfallPeriods' ? 'Frequency' : 'Time'))
-
-/**
- * Puts every one of the ten view sliders back where a new measurement starts, from the one function
+ * Puts every one of the eight view sliders back where a new measurement starts, from the one function
  * that also seeds a new measurement — see `decayViewDefaults`, which is where the reasoning for
  * including Rotation and Tilt is.
  *
@@ -173,13 +199,11 @@ function resetView() {
   decayMagnification.value = d.decayMagnification
   decayLightAzimuthDeg.value = d.decayLightAzimuthDeg
   decayLightElevationDeg.value = d.decayLightElevationDeg
-  decayAxisLengthX.value = d.decayAxisLengthX
-  decayAxisLengthY.value = d.decayAxisLengthY
-  decayAxisLengthZ.value = d.decayAxisLengthZ
+  decayExplodeZ.value = d.decayExplodeZ
 }
 
 const resetViewTitle =
-  'Puts the camera, the box and the light back where a new measurement starts — these eight sliders, and Rotation and Tilt above them.'
+  'Puts the camera, the box and the light back where a new measurement starts — these six sliders, and Rotation and Tilt above them.'
 
 const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
   { value: 'Apodizing', label: 'CSD, apodizing window' },
@@ -254,12 +278,48 @@ const freqCeilingHz = computed(() => (sampleRateHz.value > 0 ? Math.round(sample
  * spinners step on round numbers — see clampNumberField, which is where the reason lives. Their
  * ceilings are still attributes: `max` is no part of HTML's step base.
  */
+/**
+ * The From floor is **10 Hz on the decay surfaces** and 1 Hz elsewhere (Joost, 2026-10-28). A decay
+ * analysis has nothing to say below about ten hertz — a burst decay counts periods *of that
+ * frequency*, and thirty periods of 1 Hz is half a minute of a record that is under a second, so
+ * those columns are axis the analysis cannot fill — while the Harmonics view's x axis is the
+ * fundamental, which really does start at the chirp's own start frequency and may be 2 Hz.
+ *
+ * <p>One stored value serves both views, so a window typed in Harmonics is deliberately
+ * <em>not</em> re-clamped on arriving at a decay view: the ceiling's own remark above says why —
+ * clamping a stored number would mark a measurement dirty merely for having been looked at.</p>
+ */
+const freqFloorHz = computed(() => (isDecayView.value ? 10 : 1))
+
+/**
+ * The frequency pair's hints. From's names its own floor, which is not the same on the two views
+ * this pair is edited from — so it is a computed rather than a constant, and cannot come to
+ * describe the other view's limit.
+ */
+const freqFromTitle = computed(
+  () =>
+    `The bottom of the frequency axis, down to ${freqFloorHz.value} Hz. It is the window drawn, not the band analysed: ` +
+    'nothing is re-measured by moving it.',
+)
+const FREQ_TO_TITLE =
+  "The top of the frequency axis. It cannot go above the measurement's own Nyquist, and the last few " +
+  'per cent below that are the band edge rather than the DUT.'
+const DECAY_FREQ_TO_TITLE =
+  'The top of the frequency axis, which on the decay views is its own setting and opens at four fifths ' +
+  "of the measurement's Nyquist. The stretch above that is the band edge: it rings rather than decaying, " +
+  'so it draws as a wall standing the whole depth of the surface. Raise it to see that edge; the manual ' +
+  'has the figures.'
+
 function clampFreqFrom() {
-  freqFromHz.value = clampNumberField(freqFromHz.value, 1, freqCeilingHz.value)
+  freqFromHz.value = clampNumberField(freqFromHz.value, freqFloorHz.value, freqCeilingHz.value)
 }
 
 function clampFreqTo() {
   freqToHz.value = clampNumberField(freqToHz.value, 2, freqCeilingHz.value)
+}
+
+function clampDecayFreqTo() {
+  decayFreqToHz.value = clampNumberField(decayFreqToHz.value, 2, freqCeilingHz.value)
 }
 
 function clampCsdSpan() {
@@ -554,6 +614,26 @@ const referenceLabel = computed(() => {
         Data points
       </label>
 
+      <span class="tb-group pt-1">Curves</span>
+      <!-- One row per order, each carrying the colour its line is drawn in — the sweep rail's own
+           arrangement (SweepDisplayPanel's "Graph data"), and from the one table the chart reads,
+           so the swatch cannot come to name a colour the chart does not draw. -->
+      <label
+        v-for="order in HARMONIC_ORDERS"
+        :key="order"
+        class="tb-check-row"
+        :title="`Draw the ${order}${order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'} harmonic. Switching an order off takes it off the chart, its legend and a report's picture alike.`"
+      >
+        <input
+          type="checkbox"
+          class="tb-check"
+          :checked="harmonicShown(order)"
+          @change="setHarmonicShown(order, ($event.target as HTMLInputElement).checked)"
+        />
+        <span class="flex-1">H{{ order }}</span>
+        <span class="h-[3px] w-4 shrink-0 rounded-full" :style="{ background: harmonicOrderColor(order, isDark) }"></span>
+      </label>
+
       <div class="grid grid-cols-2 gap-2.5">
         <label class="tb-field">
           From (Hz)
@@ -563,6 +643,7 @@ const referenceLabel = computed(() => {
             :max="freqCeilingHz"
             step="10"
             class="tb-input"
+            :title="freqFromTitle"
             @change="clampFreqFrom"
           />
         </label>
@@ -574,7 +655,9 @@ const referenceLabel = computed(() => {
             :max="freqCeilingHz"
             step="1000"
             class="tb-input"
+            :title="FREQ_TO_TITLE"
             @change="clampFreqTo"
+
           />
         </label>
       </div>
@@ -637,7 +720,7 @@ const referenceLabel = computed(() => {
         <label class="tb-field">
           <span class="tb-field-row">
             <span>Rotation</span>
-            <span class="tb-field-value">{{ decayRotationDeg }}°</span>
+            <span class="tb-field-value">{{ formatSliderValue(decayRotationDeg) }}°</span>
           </span>
           <input
             v-model.number="decayRotationDeg"
@@ -652,7 +735,7 @@ const referenceLabel = computed(() => {
         <label class="tb-field">
           <span class="tb-field-row">
             <span>Tilt</span>
-            <span class="tb-field-value">{{ decayDepthPercent }}%</span>
+            <span class="tb-field-value">{{ formatSliderValue(decayDepthPercent) }}%</span>
           </span>
           <input
             v-model.number="decayDepthPercent"
@@ -680,7 +763,7 @@ const referenceLabel = computed(() => {
           <label class="tb-field">
             <span class="tb-field-row">
               <span>Move horizontally</span>
-              <span class="tb-field-value">{{ decayMoveX.toFixed(1) }}</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayMoveX) }}</span>
             </span>
             <input
               v-model.number="decayMoveX"
@@ -696,7 +779,7 @@ const referenceLabel = computed(() => {
           <label class="tb-field">
             <span class="tb-field-row">
               <span>Move vertically</span>
-              <span class="tb-field-value">{{ decayMoveY.toFixed(1) }}</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayMoveY) }}</span>
             </span>
             <input
               v-model.number="decayMoveY"
@@ -712,7 +795,7 @@ const referenceLabel = computed(() => {
           <label class="tb-field">
             <span class="tb-field-row">
               <span>Magnification</span>
-              <span class="tb-field-value">{{ decayMagnification }}%</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayMagnification) }}%</span>
             </span>
             <input
               v-model.number="decayMagnification"
@@ -727,72 +810,24 @@ const referenceLabel = computed(() => {
 
           <label class="tb-field">
             <span class="tb-field-row">
-              <span>Rotate light horizontally</span>
-              <span class="tb-field-value">{{ decayLightAzimuthDeg }}°</span>
+              <span>Explode Z axis</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayExplodeZ) }}</span>
             </span>
             <input
-              v-model.number="decayLightAzimuthDeg"
+              v-model.number="decayExplodeZ"
               type="range"
-              :min="DECAY_LIGHT_AZIMUTH.min"
-              :max="DECAY_LIGHT_AZIMUTH.max"
-              step="1"
+              :min="DECAY_EXPLODE_Z.min"
+              :max="DECAY_EXPLODE_Z.max"
+              :step="DECAY_EXPLODE_Z.step"
               class="tb-range"
-              title="Where the light sits around the box. The default lights the side the camera is on; turning it right round puts the surface in its own shadow."
-            />
-          </label>
-
-          <label class="tb-field">
-            <span class="tb-field-row">
-              <span>{{ acrossAxisLabel }} axis length</span>
-              <span class="tb-field-value">{{ decayAxisLengthX.toFixed(1) }}</span>
-            </span>
-            <input
-              v-model.number="decayAxisLengthX"
-              type="range"
-              :min="DECAY_AXIS_LENGTH.min"
-              :max="DECAY_AXIS_LENGTH.max"
-              :step="DECAY_AXIS_LENGTH.step"
-              class="tb-range"
-              title="How long the box is drawn across. The three axes have no common unit, so there is no proportion to be right — stretch whichever one you are reading."
-            />
-          </label>
-
-          <label class="tb-field">
-            <span class="tb-field-row">
-              <span>Level axis length</span>
-              <span class="tb-field-value">{{ decayAxisLengthY.toFixed(1) }}</span>
-            </span>
-            <input
-              v-model.number="decayAxisLengthY"
-              type="range"
-              :min="DECAY_AXIS_LENGTH.min"
-              :max="DECAY_AXIS_LENGTH.max"
-              :step="DECAY_AXIS_LENGTH.step"
-              class="tb-range"
-              title="How tall the box is drawn. Raising it makes a shallow decay legible; it changes the shape of the picture and not the dB range, which is Range (dB)."
-            />
-          </label>
-
-          <label class="tb-field">
-            <span class="tb-field-row">
-              <span>{{ depthAxisLabel }} axis length</span>
-              <span class="tb-field-value">{{ decayAxisLengthZ.toFixed(1) }}</span>
-            </span>
-            <input
-              v-model.number="decayAxisLengthZ"
-              type="range"
-              :min="DECAY_AXIS_LENGTH.min"
-              :max="DECAY_AXIS_LENGTH.max"
-              :step="DECAY_AXIS_LENGTH.step"
-              class="tb-range"
-              title="How deep the box is drawn — how far the stack recedes. A longer one separates slices that overlap."
+              title="How tall the box is drawn against its own floor. The floor's two axes are frequency and time, which have no common unit and so no proportion to be right; what is worth stretching is the level, which is the axis a decay is read along. Raise it to pull a shallow decay apart, lower it to see the whole band at once."
             />
           </label>
 
           <label class="tb-field">
             <span class="tb-field-row">
               <span>Rotate light vertically</span>
-              <span class="tb-field-value">{{ decayLightElevationDeg }}°</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayLightElevationDeg) }}°</span>
             </span>
             <input
               v-model.number="decayLightElevationDeg"
@@ -802,6 +837,22 @@ const referenceLabel = computed(() => {
               step="1"
               class="tb-range"
               title="How high the light sits. The distance does not change with it, so this turns the light rather than dimming it — how dark the darkest colour reads is the palette's floor, not this."
+            />
+          </label>
+
+          <label class="tb-field">
+            <span class="tb-field-row">
+              <span>Rotate light horizontally</span>
+              <span class="tb-field-value">{{ formatSliderValue(decayLightAzimuthDeg) }}°</span>
+            </span>
+            <input
+              v-model.number="decayLightAzimuthDeg"
+              type="range"
+              :min="DECAY_LIGHT_AZIMUTH.min"
+              :max="DECAY_LIGHT_AZIMUTH.max"
+              step="1"
+              class="tb-range"
+              title="Where the light sits around the box. The default lights the side the camera is on; turning it right round puts the surface in its own shadow."
             />
           </label>
 
@@ -838,18 +889,20 @@ const referenceLabel = computed(() => {
             :max="freqCeilingHz"
             step="10"
             class="tb-input"
+            :title="freqFromTitle"
             @change="clampFreqFrom"
           />
         </label>
         <label class="tb-field">
           To (Hz)
           <input
-            v-model.number="freqToHz"
+            v-model.number="decayFreqToHz"
             type="number"
             :max="freqCeilingHz"
             step="1000"
             class="tb-input"
-            @change="clampFreqTo"
+            :title="DECAY_FREQ_TO_TITLE"
+            @change="clampDecayFreqTo"
           />
         </label>
       </div>
@@ -947,6 +1000,7 @@ const referenceLabel = computed(() => {
               max="100"
               step="1"
               class="tb-input"
+              title="How far down the decay axis the surface reaches, counted in periods of each frequency — so it asks for the same amount of ringing at 40 Hz as at 4 kHz. It also sets the lowest frequency the surface can draw: a column needs this many periods, plus the analysis wavelet's own few, inside what is left of the record after the impulse, and the low end is left blank where it does not fit. Lower it, or measure at a finer resolution, to reach further down."
             />
           </label>
           <label class="tb-field">
@@ -958,6 +1012,7 @@ const referenceLabel = computed(() => {
               max="8"
               step="1"
               class="tb-input"
+              title="How many slices to cut each period into — how finely the decay is sampled down the depth axis. More is a smoother surface and a slower analysis, every slice being its own convolution at every frequency, and it buys no extra detail: that is the wavelet's, and Time-frequency resolution is what sets it."
             />
           </label>
         </div>

@@ -5,8 +5,7 @@ import { formatHz } from '../measurements/decay'
 import {
   decayCameraZoom,
   decayLightVector,
-  decayFieldOfView,
-  decayPulledBackZoom,
+  DECAY_LENS_FOV,
   DECAY_LIGHT_STRENGTH,
   decayExportTitle,
   decayGridAspect,
@@ -49,10 +48,8 @@ const props = defineProps<{
   moveX: number
   moveY: number
   magnification: number
-  /** How long each edge of the box is drawn; see DecayAxisLengths. */
-  axisLengthX: number
-  axisLengthY: number
-  axisLengthZ: number
+  /** How tall the box is drawn against its own floor; see DECAY_EXPLODE_Z. */
+  explodeZ: number
   lightAzimuthDeg: number
   lightElevationDeg: number
   rangeDb: number
@@ -93,6 +90,9 @@ const host = ref<HTMLDivElement | null>(null)
  * this screen draws; the ramp itself is 256 colours and is unaffected.
  */
 const DECAY_KEY_STEPS = 6
+
+/** How many lines the surface's mesh is reduced to; see where it is written. */
+const DECAY_MESH_MAX_LINES = 20
 
 const chartHeight = useResultChartHeight(container, host, { pageHeightPx: () => props.pageHeightPx })
 
@@ -224,12 +224,24 @@ function configure() {
   // Shift and drag translates the surface, as the vendor's own demo does it. The engine
   // implements the gesture; this is only its speed, and without it the gesture does nothing.
   C.PePlot.Option.DxViewportPanFactor = 10
-  // Takes a margin off the top and gives it to the bottom, which moves the whole plot box up
-  // inside the panel — the engine otherwise parks it on the floor with the top left empty.
-  // Measured on a 547x320 plot: the gap above the content falls from 58 px to 47 and the gap
-  // below rises from 4 to 15. Going further clips: at -150/150 the bottom gap is already 0.
-  C.PeConfigure.ImageAdjustTop = -100
-  C.PeConfigure.ImageAdjustBottom = 100
+  // <p>How much of the canvas the plot box gets. Asked for 2026-10-28 as moving the axis labels
+  // closer to the axes, "then we can make more use of the area" — and the first half of that is
+  // not reachable: <b>the gap between the plot and its axis label is the engine's own and fixed</b>.
+  // Measured against proessentials 11.0.1 over ImageAdjustBottom 0/100/200/300, the gap below the
+  // content is 22/21/20/19 px — the label travels with the plot and the space between them does
+  // not move. What these three <em>do</em> control is how much of the canvas the box is drawn in,
+  // which is the half that was asked for.</p>
+  //
+  // <p>Measured as the drawn height of everything but the label, old (-100/100) against these
+  // (-300/0): <b>292 → 321 px at 700x420, 389 → 428 at 900x560, 477 → 525 at 1100x686</b> — about
+  // a tenth more box at every size this app draws — with 10 to 17 px still clear below the label.
+  // At the 320 px floor (<c>MIN_RESULT_CHART_HEIGHT_PX</c>) the label is tight either way, and the
+  // old pair was the worse of the two there: it put ink on row 0 and drew the box 3 px tall.</p>
+  //
+  // <p><b>The right margin is deliberately left alone.</b> It is where the contour legend is laid
+  // out, and -200 is already enough to cost the legend its own labels — see <c>PeLegend</c>.</p>
+  C.PeConfigure.ImageAdjustTop = -300
+  C.PeConfigure.ImageAdjustBottom = 0
   C.PeConfigure.ImageAdjustRight = -200
   // <p>The wheel's own limits, and they have to bracket the zooms this chart sets or the gesture
   // has nowhere to go. The near end was <c>-3</c>, measured when the box was built from raw
@@ -240,8 +252,10 @@ function configure() {
   // report is asking for, and no nearer: past it the camera ends up inside the box.</p>
   C.PePlot.Option.DxZoomMin = -90
   C.PePlot.Option.DxZoomMax = -0.2
-  C.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
-  C.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(plotWidth(), chartHeight.value), props.magnification)
+  // Both fixed: magnification is the size of the box now, not the camera — see
+  // DECAY_VIEW_MAGNIFICATION, and decayGridAspect, which is where it lands.
+  C.PePlot.Option.DxFOV = DECAY_LENS_FOV
+  C.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
 
   C.PeUserInterface.RotationDetail = E.RotationDetail.WireFrame
   C.PeUserInterface.Scrollbar.HorzScrollBar = false
@@ -260,10 +274,17 @@ function configure() {
   // legend is a ramp with levels against it, which is what the Canvas 2D chart welds to its own
   // level axis — it cannot be welded here, since the engine draws that axis, so this is the same
   // reading in the shape the engine has for it. Left or right only, which the property's own
-  // documentation says; right, so it does not sit over the dB labels.
+  // documentation says.
+  //
+  // <p><b>Left since 2026-10-28, and that is a fix as much as a preference.</b> Asked for in those
+  // words — and measured on the way: on the right the ramp was drawn with <em>no numbers beside
+  // it</em>, because <c>ImageAdjustRight = -200</c> gives the plot the strip the legend's own
+  // labels are laid out in. Same picture with the margin at 0 and the labels are there. So a key
+  // on the right reads as a bare colour bar; on the left, where nothing steals the margin, it
+  // carries its dB figures. Verified against proessentials 11.0.1.</p>
   C.PeLegend.Show = true
   C.PeLegend.ContourStyle = true
-  C.PeLegend.Location = E.LegendLocation.Right
+  C.PeLegend.Location = E.LegendLocation.Left
   const light = decayLightVector(props.lightAzimuthDeg, props.lightElevationDeg)
   C.PeFunction.SetLight(0, light.x, light.y, light.z)
   C.PePlot.Option.LightStrength = DECAY_LIGHT_STRENGTH
@@ -274,21 +295,58 @@ function configure() {
   C.PeGrid.Configure.AutoPadBeyondZeroY = true
   C.PeGrid.Configure.AutoPadBeyondZeroZ = true
 
-  // The hit test the readout needs. Without one of these the engine never builds its octree and
+  // The hit test the readout needs. Without `HotSpot.Data` the engine never builds its octree and
   // every GetHotSpot answers type -1 — which reads as "the pointer is never over the surface".
   // `HighlightColor` is also what marks the point under the pointer, the engine's own answer to
-  // the Canvas 2D chart's ring; `PromptStyle = None` keeps the engine from drawing a tooltip of
-  // its own beside our readout, which says the same thing in the app's own wording.
+  // the Canvas 2D chart's ring; it is its own enabler and needs no prompt tracking.
+  //
+  // **`PromptTracking` is off, and `PromptStyle = None` was not enough.** Tracking is what makes
+  // the engine prompt the value under the pointer, and with the style set to None it printed the
+  // bare number in a tooltip of its own — which over a cell this analysis could not reach is the
+  // C formatting of a NaN, so a burst decay's whole unmeasured corner hovered as a box reading
+  // `nan` beside our own readout saying "not measured this deep" (reported 2026-10-28). Nothing
+  // here reads the engine's prompt: `GetHotSpot`/`GetHotSpotData` are called by hand in
+  // onPointerMove, and the docs make those a separate enabler from tracking.
   C.PeUserInterface.HotSpot.Data = true
-  C.PeUserInterface.Cursor.PromptTracking = true
+  C.PeUserInterface.Cursor.PromptTracking = false
   C.PeUserInterface.Cursor.HighlightColor = peColor(248, 250, 252)
   C.PeUserInterface.Cursor.PromptStyle = E.CursorPromptStyle.None
 
   C.PeData.DuplicateDataX = E.DuplicateData.PointIncrement
   C.PeData.DuplicateDataZ = E.DuplicateData.SubsetIncrement
-  C.PeData.ComputeShader = true
   C.PeConfigure.RenderEngine = E.RenderEngine.Direct3D
 
+  // <p><b>The mesh over the surface, and the compute shader is the price of it.</b> Asked for
+  // 2026-10-28 — the Canvas 2D chart strokes a white line along every curve of a filled surface,
+  // and the lit one had nothing. <c>ShowWireFrame</c> is the engine's iso-line grid and it is
+  // free (2.5 ms a draw either way), but with <c>ComputeShader = true</c> it is drawn at full
+  // data resolution: 400 columns of dark lines that bury the surface completely. <b>Turning the
+  // shader off is also what makes <c>ShowWireframeMaxLines</c> work</b> — with it on, 10, 20, 25,
+  // 50 and 80 render identically, which is why that property was written up here as inert. It is
+  // not; it is simply ignored on the shader path.</p>
+  //
+  // <p>What the shader buys is dashed and dotted line styles under Direct3D, which this chart
+  // never draws. What it costs is the draw call: measured five times each, <b>2.5–3.9 ms with it
+  // on against 38.8–43.4 ms with it off</b>, and the wireframe itself is free in both — so the
+  // 40 ms is the shader path and not the mesh. That is affordable because it is the same order as
+  // the Canvas 2D chart's own 37.5 ms redraw, and because nothing here animates: the chart redraws
+  // on a slider step, a resize or a new surface.</p>
+  C.PeData.ComputeShader = false
+  C.PePlot.Option.ShowWireFrame = true
+  // <p><b>How many lines the grid is reduced to, and it has to be set.</b> The engine's own default
+  // is 50, which is a readable grid on a 60-slice surface and a speckle on a 241-slice one — and
+  // 241 is what an ordinary burst decay has (30 periods at 8 points each). Reported 2026-10-29 as
+  // the mesh being hard to see, which is what a white line one pixel wide every few pixels looks
+  // like once it has been anti-aliased into the surface under it.</p>
+  //
+  // <p>A constant rather than a figure derived from the data, deliberately: the mesh is furniture
+  // and reads best at the same density whatever the analysis resolution is. Measured against
+  // proessentials 11.0.1 at 241 slices x 400 columns — 12 is coarse, 20 is a clear grid, 30 is
+  // busy but legible, 100 is his screenshot.</p>
+  C.PePlot.Option.ShowWireframeMaxLines = DECAY_MESH_MAX_LINES
+  // False, or the lines are coloured by height like the surface under them and vanish into it.
+  // The colour itself is <c>PeColor.BarBorderColor</c> — see applyTheme.
+  C.PePlot.Option.WireFrameContourColored = false
 
   applyTheme()
   applyCamera()
@@ -309,6 +367,23 @@ function applyTheme() {
   C.PeColor.YAxis = ink
   C.PeColor.ZAxis = ink
   C.PeColor.Text = ink
+
+  // <p>The mesh's own colour, and <b>it is <c>BarBorderColor</c></b> — not
+  // <c>SubsetColors[SurfaceColors.WireFrame]</c>, which the vendor's documentation names and which
+  // does nothing at all here: measured 2026-10-28 by pushing magenta into each in turn and counting
+  // the pixels that came back, 32000 and 32001 changed nothing and this changed the whole grid.</p>
+  //
+  // <p><b>Black, where the Canvas 2D chart's mesh is white, and the difference is the lighting.</b>
+  // This engine lights the mesh along with the surface, so a white line is multiplied down towards
+  // the colour underneath it and all but disappears over the bright middle of the ramp — reported
+  // twice as the mesh being hard to see. Black is not shaded by anything.</p>
+  //
+  // <p>Measured 2026-10-29 as the mean luminance a mesh pixel moves against the same surface drawn
+  // without one, split by how bright the surface under it is: <b>white 38.6 / 46.7 / 119.6 and
+  // black 30.5 / 110.7 / 183.6</b> over the dark, middle and light thirds. Black is more than twice
+  // as legible where it matters and a little behind only on the darkest floor, which is the part of
+  // a decay nobody reads. Over the whole surface the figures are 65.1 against 99.0.</p>
+  C.PeColor.BarBorderColor = peColor(0, 0, 0)
 
   const colors = decaySubsetColors(props.palette, dark)
   C.PeColor.SubsetColors.clear()
@@ -434,9 +509,9 @@ function applyData() {
   C.PeGrid.Configure.ManualMinY = -props.rangeDb
   C.PeGrid.Configure.ManualMaxY = 0
 
-  // Two numbers, never three — GridAspectZ is left at its default on purpose, and decayGridAspect
-  // says why: writing it as well states the box's shape twice, and contradicts it.
-  const aspect = decayGridAspect({ x: props.axisLengthX, y: props.axisLengthY, z: props.axisLengthZ })
+  // All three, and they agree with each other because the floor is square — decayGridAspect says
+  // why that matters and what a box told two different things about its own shape does.
+  const aspect = decayGridAspect(props.explodeZ, props.magnification)
   C.PeGrid.Option.GridAspectX = aspect.x
   C.PeGrid.Option.GridAspectY = aspect.y
   C.PeGrid.Option.GridAspectZ = aspect.z
@@ -503,8 +578,8 @@ function resize() {
   const width = plotWidth()
   const height = chartHeight.value
   // The zoom follows the plot's shape, so a resize re-frames rather than only re-rasterising.
-  chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
-  chart.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(width, height), props.magnification)
+  chart.PePlot.Option.DxFOV = DECAY_LENS_FOV
+  chart.PePlot.Option.DxZoom = decayCameraZoom(width, height)
   control.setSize(width, height)
 }
 
@@ -521,7 +596,7 @@ watch(() => [props.palette, isDark.value], () => {
  * short-circuits when the two angles have not moved, which none of these touch.
  */
 watch(
-  () => [props.moveX, props.moveY, props.magnification, props.lightAzimuthDeg, props.lightElevationDeg],
+  () => [props.moveX, props.moveY, props.lightAzimuthDeg, props.lightElevationDeg],
   () => {
     if (!chart) return
     configure()
@@ -533,25 +608,32 @@ watch(
 )
 
 /**
- * <p><b>The three axis lengths rebuild the control, and nothing cheaper reaches them.</b> The box's
- * proportions are read while the scene is laid out and never looked at again: measured 2026-10-26,
- * moving any of the three through a reinitialise — and again through `render()`, with the vertices
- * forced to rebuild both times — left the picture <em>byte-identical</em>, the same pixels in the
- * same places. The same values applied at construction draw a different box, which is what says it
- * is the refresh rather than the values. (The first hour of that was spent on a worse fault
- * underneath it: all three aspect numbers were being written, which states the shape twice and
- * degenerates the box — see {@link decayGridAspect}.)</p>
- *
- * <p>A rebuild destroys a GPU context and creates another, which is not something to do lightly;
- * it is affordable here only because these three live in a collapsed section nobody opens on an
- * ordinary visit. Do not fold them into the watcher above.</p>
+ * <p><b>Explode Z changes the box's shape, and the engine takes that without the control being
+ * rebuilt.</b> The three axis-length sliders this replaced did need one, and the reason is worth
+ * keeping: they were writing a contradictory aspect triple, which degenerates the box into a slab
+ * that no later value moves — so the rebuild was working around a bug rather than around the
+ * engine. With a square floor the triple is consistent by construction and the vendor's own
+ * sequence is enough. Measured 2026-10-29 against proessentials 11.0.1: explode 5 / 15 / 26 / 40 /
+ * 50 drew 25 176 / 29 055 / 33 304 / 38 817 / 41 964 pixels of surface through nothing but this,
+ * at about 45 ms a step — the same order as any other redraw with the compute shader off.</p>
  */
 watch(
-  () => [props.axisLengthX, props.axisLengthY, props.axisLengthZ],
+  () => [props.explodeZ, props.magnification],
   () => {
-    if (!control || disposed) return
-    teardown()
-    build()
+    if (!chart) return
+    const aspect = decayGridAspect(props.explodeZ, props.magnification)
+    chart.PeGrid.Option.GridAspectX = aspect.x
+    chart.PeGrid.Option.GridAspectY = aspect.y
+    chart.PeGrid.Option.GridAspectZ = aspect.z
+    // The camera goes back where the chart frames it. It is the wheel's from the first turn, and
+    // putting it back is what makes Reset view — and any slider — undo a wheel zoom, which is the
+    // behaviour magnification had while it was the camera rather than the box.
+    chart.PePlot.Option.DxFOV = DECAY_LENS_FOV
+    chart.PePlot.Option.DxZoom = decayCameraZoom(plotWidth(), chartHeight.value)
+    // The vendor's own order, from its Explode Z handler: new colours, then the mesh, then a render.
+    chart.PeFunction.Force3dxNewColors = true
+    chart.PeFunction.Force3dxVerticeRebuild = true
+    chart.PeFunction.ReinitializeResetImage()
   },
 )
 
@@ -647,8 +729,8 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
       chart = copy.attach(runtime.attachApi)
       enums = runtime.Enums
       configure()
-      chart.PePlot.Option.DxFOV = decayFieldOfView(props.magnification)
-      chart.PePlot.Option.DxZoom = decayPulledBackZoom(decayCameraZoom(width, plotHeight), props.magnification)
+      chart.PePlot.Option.DxFOV = DECAY_LENS_FOV
+      chart.PePlot.Option.DxZoom = decayCameraZoom(width, plotHeight)
       // The live camera, not the props: once the surface has been dragged the props no longer
       // describe what is on screen, and a screenshot has to be the picture the user is looking at.
       if (live) {

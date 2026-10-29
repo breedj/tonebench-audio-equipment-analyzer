@@ -391,6 +391,7 @@ export async function renderView(
               overlays: overlayEntries,
               annotations: display.annotations,
               annotationNumbers,
+              shownOrders: display.harmonicOrders,
               thickLines: display.thickLines,
               showDataPoints: display.showDataPoints,
               freqFromHz: display.freqFromHz,
@@ -573,7 +574,7 @@ async function decaySurface(subject: ReportSubject, view: 'Csd' | 'BurstDecay'):
         windowMode: display.csd.windowMode,
         riseTimeMs: display.csd.riseTimeMs,
         lowHz: display.freqFromHz,
-        highHz: display.freqToHz,
+        highHz: display.decayFreqToHz,
         displayColumns: DECAY_DISPLAY_COLUMNS,
       }
       return subject.resultId === null
@@ -583,7 +584,7 @@ async function decaySurface(subject: ReportSubject, view: 'Csd' | 'BurstDecay'):
 
     const request: ImpulseBurstDecayRequest = {
       lowHz: display.freqFromHz,
-      highHz: display.freqToHz,
+      highHz: display.decayFreqToHz,
       maxPeriods: display.burstMaxPeriods,
       pointsPerPeriod: display.burstPointsPerPeriod,
       resolution: display.burstResolution,

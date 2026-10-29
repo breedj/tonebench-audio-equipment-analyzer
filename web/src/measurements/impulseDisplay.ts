@@ -10,9 +10,11 @@ import { isDelayView } from '../response/delayAxis'
 import {
   DEFAULT_CSD_ANALYSIS,
   csdSpanMs,
+  decayTopHz,
   type CsdAnalysis,
 } from './decay'
-import { decayViewDefaults } from './decay3d'
+import { decayViewDefaults, explodeZForAxisLengths, magnificationFromStored } from './decay3d'
+import { allHarmonicOrders, parseHarmonicOrders } from './harmonicOrders'
 
 /**
  * The impulse screen's display state — what each of its five views' charts takes that is a
@@ -37,6 +39,8 @@ export interface ImpulseDisplay {
   responseYBottomDb: number
   harmonicsYTopDb: number
   harmonicsYBottomDb: number
+  /** Which harmonic orders the Harmonics view draws — the rail's H2…H5 checkboxes. */
+  harmonicOrders: number[]
   phaseTopDeg: number
   phaseBottomDeg: number
   /** The gated response's delay curve and its axis window in µs — see ResponseDisplay. */
@@ -45,6 +49,13 @@ export interface ImpulseDisplay {
   delayBottomUs: number
   freqFromHz: number
   freqToHz: number
+  /**
+   * The two decay views' own top of band, where every other view on this screen shares
+   * {@link freqToHz}. See `DECAY_BAND_EDGE_FRACTION`, which is the whole of why it is separate:
+   * the last stretch below Nyquist rings rather than decaying and draws as a wall, and that is
+   * true of a decay surface and of nothing else on this screen.
+   */
+  decayFreqToHz: number
   /** The two decay views: how the surface is drawn, and how each is analysed. */
   decayMode: DecayChartMode
   decayPalette: DecayPalette
@@ -64,10 +75,8 @@ export interface ImpulseDisplay {
   decayMagnification: number
   decayLightAzimuthDeg: number
   decayLightElevationDeg: number
-  /** How long each edge of the surface's box is drawn; see DecayAxisLengths. */
-  decayAxisLengthX: number
-  decayAxisLengthY: number
-  decayAxisLengthZ: number
+  /** How tall the surface's box is drawn against its own floor; see DECAY_EXPLODE_Z. */
+  decayExplodeZ: number
   decayRangeDb: number
   csd: CsdAnalysis
   burstMaxPeriods: number
@@ -101,15 +110,20 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     responseYBottomDb: -120,
     harmonicsYTopDb: 0,
     harmonicsYBottomDb: -120,
+    harmonicOrders: allHarmonicOrders(),
     phaseTopDeg: 180,
     phaseBottomDeg: -180,
     delayView: 'None',
     delayTopUs: 1000,
     delayBottomUs: -1000,
     freqFromHz: 20,
-    // The whole span a 96 kHz measurement covers, not the audio band: the decay charts are the ones
-    // read on this screen, and clipping them at 20 kHz hides the top two thirds of what was measured.
+    // The whole span a 96 kHz measurement covers, not the audio band: the Bode and harmonics views
+    // are read across everything that was measured, and clipping them at 20 kHz would hide the top
+    // two thirds of it.
     freqToHz: 96000,
+    // The decay views stop short of the band edge; `impulseDisplayFromParams` re-derives this from
+    // whatever span the measurement was actually taken at, and this is the figure for the default.
+    decayFreqToHz: decayTopHz(DEFAULT_SPAN_HZ),
     decayMode: 'Waterfall',
     decayPalette: 'Jet',
     decayColoredCurves: true,
@@ -129,6 +143,14 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
   }
 }
 
+/**
+ * The span a new impulse measurement is created at, mirroring
+ * `MeasurementSaveService.DefaultImpulseResponseParametersJson`. It is here only to give
+ * {@link defaultImpulseDisplay} a Nyquist to derive the decay views' top of band from, for a
+ * measurement whose own params say nothing.
+ */
+const DEFAULT_SPAN_HZ = 96000
+
 /** The same thing as a shared constant, for callers with nothing of their own to start from. */
 export const DEFAULT_IMPULSE_DISPLAY: Readonly<ImpulseDisplay> = Object.freeze(defaultImpulseDisplay())
 
@@ -137,7 +159,9 @@ export function impulseDisplayFromParams(
   paramsJson: string | null | undefined,
   base: Readonly<ImpulseDisplay> = DEFAULT_IMPULSE_DISPLAY,
 ): ImpulseDisplay {
-  const display: ImpulseDisplay = { ...base, csd: { ...base.csd } }
+  // Both of the fields that are objects are copied, not shared: a caller that edits what comes
+  // back must not reach into `base`, which is usually the frozen DEFAULT_IMPULSE_DISPLAY.
+  const display: ImpulseDisplay = { ...base, csd: { ...base.csd }, harmonicOrders: [...base.harmonicOrders] }
   if (!paramsJson) return display
 
   let stored: Partial<ImpulseResponseParameters>
@@ -161,6 +185,10 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartResponseYBottomDb === 'number') display.responseYBottomDb = stored.chartResponseYBottomDb
   if (typeof stored.chartHarmonicsYTopDb === 'number') display.harmonicsYTopDb = stored.chartHarmonicsYTopDb
   if (typeof stored.chartHarmonicsYBottomDb === 'number') display.harmonicsYBottomDb = stored.chartHarmonicsYBottomDb
+  // An empty list is a real answer (every curve switched off) and survives as one; a list this
+  // build cannot read comes back null and leaves `base` alone, like every other field here.
+  const harmonicOrders = parseHarmonicOrders((stored as { chartHarmonicOrders?: unknown }).chartHarmonicOrders)
+  if (harmonicOrders) display.harmonicOrders = harmonicOrders
   if (typeof stored.chartPhaseTopDeg === 'number') display.phaseTopDeg = stored.chartPhaseTopDeg
   if (typeof stored.chartPhaseBottomDeg === 'number') display.phaseBottomDeg = stored.chartPhaseBottomDeg
   if (isDelayView(stored.chartDelayView)) display.delayView = stored.chartDelayView
@@ -168,8 +196,22 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartDelayBottomUs === 'number' && Number.isFinite(stored.chartDelayBottomUs)) display.delayBottomUs = stored.chartDelayBottomUs
   if (typeof stored.chartFreqFromHz === 'number' && stored.chartFreqFromHz > 0) display.freqFromHz = stored.chartFreqFromHz
   if (typeof stored.chartFreqToHz === 'number' && stored.chartFreqToHz > 0) display.freqToHz = stored.chartFreqToHz
+  // The decay views' own top of band. Stored wins, as everywhere here — but where nothing is stored
+  // this is *derived from the measurement's own Nyquist* rather than left at the default, because
+  // the default is only right for a measurement taken at the default span. A measurement saved
+  // before this field existed has nothing stored for it and so takes the derived figure, which is
+  // the point: the wall it was drawing is not something anybody chose.
+  const storedDecayTop = (stored as { chartDecayFreqToHz?: unknown }).chartDecayFreqToHz
+  if (typeof storedDecayTop === 'number' && storedDecayTop > 0) display.decayFreqToHz = storedDecayTop
+  else if (typeof stored.frequencySpanHz === 'number' && stored.frequencySpanHz > 0) {
+    display.decayFreqToHz = decayTopHz(stored.frequencySpanHz)
+  }
   if (stored.chartDecayMode) display.decayMode = stored.chartDecayMode
-  if (stored.chartDecayPalette) display.decayPalette = stored.chartDecayPalette
+  // `Spectrum` was this ramp's name for a day, before it became Jet itself; a measurement saved
+  // in between stores that, and the dropdown would render a value it has no option for.
+  if (stored.chartDecayPalette) {
+    display.decayPalette = (stored.chartDecayPalette as string) === 'Spectrum' ? 'Jet' : stored.chartDecayPalette
+  }
   if (typeof stored.chartDecayColoredCurves === 'boolean') display.decayColoredCurves = stored.chartDecayColoredCurves
   if (typeof stored.chartDecayFilled === 'boolean') display.decayFilled = stored.chartDecayFilled
   if (typeof stored.chartDecayRotationDeg === 'number' && Number.isFinite(stored.chartDecayRotationDeg)) {
@@ -186,8 +228,11 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartDecayMoveY === 'number' && Number.isFinite(stored.chartDecayMoveY)) {
     display.decayMoveY = stored.chartDecayMoveY
   }
+  // Through magnificationFromStored, because this control was re-based on 2026-10-29: it used
+  // to run to 2000 and is a tenth of that now, so a stored figure above the new ceiling is one
+  // written on the old scale.
   if (typeof stored.chartDecayMagnification === 'number' && stored.chartDecayMagnification > 0) {
-    display.decayMagnification = stored.chartDecayMagnification
+    display.decayMagnification = magnificationFromStored(stored.chartDecayMagnification)
   }
   if (typeof stored.chartDecayLightAzimuthDeg === 'number' && Number.isFinite(stored.chartDecayLightAzimuthDeg)) {
     display.decayLightAzimuthDeg = stored.chartDecayLightAzimuthDeg
@@ -196,14 +241,17 @@ export function impulseDisplayFromParams(
     display.decayLightElevationDeg = stored.chartDecayLightElevationDeg
   }
   // Positive: a zero-length axis is a box with no extent, which the engine draws as nothing.
-  if (typeof stored.chartDecayAxisLengthX === 'number' && stored.chartDecayAxisLengthX > 0) {
-    display.decayAxisLengthX = stored.chartDecayAxisLengthX
-  }
-  if (typeof stored.chartDecayAxisLengthY === 'number' && stored.chartDecayAxisLengthY > 0) {
-    display.decayAxisLengthY = stored.chartDecayAxisLengthY
-  }
-  if (typeof stored.chartDecayAxisLengthZ === 'number' && stored.chartDecayAxisLengthZ > 0) {
-    display.decayAxisLengthZ = stored.chartDecayAxisLengthZ
+  // How tall the box is drawn. A measurement stored before 2026-10-29 has three axis lengths
+  // instead, and what it chose is the *ratio* of the height to the floor — so that is what is
+  // carried over, through the same formula the slider drives. The floor's own two lengths are
+  // dropped: setting them apart only tilted the picture, which is why there is one slider now.
+  if (typeof stored.chartDecayExplodeZ === 'number' && stored.chartDecayExplodeZ > 0) {
+    display.decayExplodeZ = stored.chartDecayExplodeZ
+  } else if (
+    typeof stored.chartDecayAxisLengthX === 'number' && stored.chartDecayAxisLengthX > 0 &&
+    typeof stored.chartDecayAxisLengthY === 'number' && stored.chartDecayAxisLengthY > 0
+  ) {
+    display.decayExplodeZ = explodeZForAxisLengths(stored.chartDecayAxisLengthX, stored.chartDecayAxisLengthY)
   }
   if (typeof stored.chartDecayRangeDb === 'number' && stored.chartDecayRangeDb > 0) display.decayRangeDb = stored.chartDecayRangeDb
   if (typeof stored.chartCsdFftLength === 'number') display.csd.fftLength = stored.chartCsdFftLength

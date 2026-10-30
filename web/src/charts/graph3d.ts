@@ -117,7 +117,10 @@ export interface Graph3dOptions {
  * cost two seconds before this was measured.</p>
  */
 export interface Graph3dInstance {
-  /** Rebuilds the grid and redraws. For a change to the *surface*, never to the view. */
+  /**
+   * Rebuilds the grid and redraws. For a change to the *surface*, never to the view.
+   * Never pass an empty array — see {@link createGraph3d}.
+   */
   setData(data: Graph3dPoint[]): void
   /** Merges options, rebuilds the grid and redraws — it calls `setData` itself. */
   setOptions(options: Graph3dOptions): void
@@ -179,6 +182,12 @@ export function applyVerticalRatio(chart: Graph3dInstance, ratio: number): boole
  * <c>create()</c> merely empties the container, and a comment in its source says the event
  * listeners "are never cleaned up". So a caller tears one down by dropping its reference and
  * emptying the host, which is what {@link destroyGraph3d} does.</p>
+ *
+ * <p><b><c>data</c> must not be empty, and the same goes for {@link Graph3dInstance.setData}.</b>
+ * <c>DataGroup.initializeData</c> returns on its own first lines for a zero-row table, leaving
+ * every range unset, and the <c>_setScale</c> that follows reads <c>xRange.range()</c> off
+ * <c>undefined</c> — so an empty surface throws out of this constructor rather than drawing bare
+ * axes. A caller with nothing to draw builds no chart.</p>
  */
 export function createGraph3d(
   host: HTMLElement,

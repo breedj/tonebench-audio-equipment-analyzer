@@ -253,11 +253,17 @@ function surfaceCloud(): DecayPointCloud | null {
 function build() {
   const element = host.value
   if (!element) return
+  cloud = surfaceCloud()
+  // Nothing to draw: no chart at all, and the template's empty state is the whole of what is on
+  // screen. See `refreshSurface` for why an empty one is not merely pointless but impossible.
+  if (!cloud) {
+    failure.value = null
+    return
+  }
   try {
-    cloud = surfaceCloud()
     chart = createGraph3d(
       element,
-      cloud?.points ?? [],
+      cloud.points,
       buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()),
     )
     rememberApplied()
@@ -371,20 +377,42 @@ let appliedOptionsKey: string | null = null
 
 watch(
   () => [props.surface, props.mode, props.rangeDb],
-  () => {
-    if (!chart) {
-      build()
-      return
-    }
-    cloud = surfaceCloud()
-    chart.setData(cloud?.points ?? [])
-    if (decayOptionsKey(props.surface, props.mode, props.rangeDb) !== appliedOptionsKey) {
-      chart.setOptions(buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()))
-      rememberApplied()
-    }
-  },
+  () => refreshSurface(),
   { deep: false },
 )
+
+/**
+ * <p><b>The chart exists only while there is something to draw, and an empty one is not merely
+ * pointless but impossible.</b> <c>DataGroup.initializeData</c> returns on its own first lines
+ * for a zero-row table — <c>if (data.length == 0) return</c> — which leaves every range unset;
+ * <c>_initializeRanges</c> then copies those <c>undefined</c>s onto the instance and ends by
+ * calling <c>_setScale</c>, whose first statement is <c>1 / this.xRange.range()</c>. So handing
+ * the library an empty array throws <em>"Cannot read properties of undefined (reading
+ * 'range')"</em> from inside the constructor, and <c>build</c>'s catch printed that as a red
+ * banner across the screen that should have read "Press Single." — reported 2026-10-30, and the
+ * state every impulse measurement opens in.</p>
+ *
+ * <p><b><c>setData([])</c> is the same trap from the other side</b>, which is why a surface going
+ * away drops the chart rather than emptying it: that early return also leaves <c>dataPoints</c>
+ * undefined for the redraw which follows it.</p>
+ */
+function refreshSurface() {
+  if (!chart) {
+    build()
+    return
+  }
+  cloud = surfaceCloud()
+  if (!cloud) {
+    teardown()
+    failure.value = null
+    return
+  }
+  chart.setData(cloud.points)
+  if (decayOptionsKey(props.surface, props.mode, props.rangeDb) !== appliedOptionsKey) {
+    chart.setOptions(buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()))
+    rememberApplied()
+  }
+}
 
 /** What the options last carried, so the comparison above has one definition rather than two. */
 function rememberApplied() {
@@ -437,13 +465,18 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
 
   let copy: Graph3dInstance | null = null
   try {
+    // With no surface this exports the well and the title, which is what the flat projection
+    // gives for the same state — and the library cannot be handed an empty one at all, so the
+    // copy is built only when there is something in it (see `refreshSurface`).
     const points = cloud ?? surfaceCloud()
-    const camera = chart ? chart.getCameraPosition() : cameraFromProps()
-    copy = createGraph3d(
-      offscreen,
-      points?.points ?? [],
-      buildOptions(points, width, plotHeight, false, camera),
-    )
+    if (points) {
+      const camera = chart ? chart.getCameraPosition() : cameraFromProps()
+      copy = createGraph3d(
+        offscreen,
+        points.points,
+        buildOptions(points, width, plotHeight, false, camera),
+      )
+    }
 
     const plot = document.createElement('canvas')
     plot.width = width
@@ -457,7 +490,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     // downstream fills in for it is one that breaks the day that changes.</p>
     ctx.fillStyle = theme(false).back
     ctx.fillRect(0, 0, width, plotHeight)
-    ctx.drawImage(copy.frame.canvas, 0, 0, width, plotHeight)
+    if (copy) ctx.drawImage(copy.frame.canvas, 0, 0, width, plotHeight)
 
     return await composeChartPng({
       width,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import { formatHz } from '../measurements/decay'
 import {
@@ -114,6 +114,13 @@ const MIN_WIDTH = 240
 /** How many whole decades of the frequency axis a tick is put on. */
 const FREQUENCY_DECADE_STEP = 1
 
+/**
+ * Whether a surface is on screen, which is to say whether `chart` is built — kept as a ref because
+ * `chart` is not reactive and the template needs to know, and the one thing that decides whether
+ * the empty placeholder below is drawn instead.
+ */
+const drawn = ref(false)
+
 let chart: Graph3dInstance | null = null
 let cloud: DecayPointCloud | null = null
 let disposed = false
@@ -143,6 +150,9 @@ function theme(dark: boolean) {
     back: dark ? '#15181d' : '#ffffff',
   }
 }
+
+/** The well the empty placeholder paints, so it and the drawn chart cannot differ. */
+const wellColour = computed(() => theme(isDark.value).back)
 
 /**
  * <p>Every option the chart is built and updated with. Split out so the live chart, a resize and
@@ -247,7 +257,11 @@ function cameraFromProps() {
 function surfaceCloud(): DecayPointCloud | null {
   const surface = props.surface
   if (!surface || surface.slices.length === 0) return null
-  return decayPoints(surface, props.mode, props.rangeDb)
+  const cloud = decayPoints(surface, props.mode, props.rangeDb)
+  // A surface whose every cell went unmeasured is as empty as no surface at all, and the library
+  // can be handed neither — see `refreshSurface`. Reachable rather than theoretical: a burst decay
+  // leaves out every column whose periods run past the record, so a short enough one leaves none.
+  return cloud.points.length > 0 ? cloud : null
 }
 
 function build() {
@@ -258,6 +272,7 @@ function build() {
   // screen. See `refreshSurface` for why an empty one is not merely pointless but impossible.
   if (!cloud) {
     failure.value = null
+    drawn.value = false
     return
   }
   try {
@@ -272,6 +287,7 @@ function build() {
     failure.value = e instanceof Error ? e.message : 'Could not draw the 3D surface.'
     chart = null
   }
+  drawn.value = chart !== null
 }
 
 function teardown() {
@@ -281,6 +297,7 @@ function teardown() {
   }
   chart = null
   cloud = null
+  drawn.value = false
   // All the teardown there is: the library has no `destroy()` and its own source says its listeners
   // are never cleaned up, so emptying the host is what takes its DOM and their bindings with it.
   destroyGraph3d(host.value)
@@ -516,6 +533,22 @@ defineExpose({ exportPng })
          the bottom. The button is the thing that can move, and the left of the plot is empty.</p> -->
     <ExpandToggle class="absolute left-2 top-2 z-10" :target="container" />
     <div ref="host" class="block w-full"></div>
+
+    <!-- <p><b>The empty well, for when there is no surface to draw.</b> The library cannot be built
+         with an empty one at all (see `refreshSurface`), so with nothing measured there is no
+         canvas and the host collapses to nothing — which left the message below floating in a
+         strip where the chart should be, and made the whole column jump the moment a measurement
+         landed. The same reasoning as the three FFT charts' `drawEmpty`, except that here the
+         placeholder cannot be a real plot and so is a plain box of the height the chart will take.
+
+         It paints the chart's own well colour rather than taking `--surface-plot`, so the empty
+         box and the drawn one are the same tone in either theme — `theme()` is the one place that
+         says what that is.</p> -->
+    <div
+      v-if="!drawn"
+      class="block w-full"
+      :style="{ height: `${chartHeight}px`, backgroundColor: wellColour }"
+    ></div>
 
     <p
       v-if="computing"

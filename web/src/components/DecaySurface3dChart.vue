@@ -532,22 +532,26 @@ defineExpose({ exportPng })
          same `margin` is also the key's distance from the top, so pushing it left pushes it off
          the bottom. The button is the thing that can move, and the left of the plot is empty.</p> -->
     <ExpandToggle class="absolute left-2 top-2 z-10" :target="container" />
-    <div ref="host" class="block w-full"></div>
 
-    <!-- <p><b>The empty well, for when there is no surface to draw.</b> The library cannot be built
-         with an empty one at all (see `refreshSurface`), so with nothing measured there is no
-         canvas and the host collapses to nothing — which left the message below floating in a
-         strip where the chart should be, and made the whole column jump the moment a measurement
-         landed. The same reasoning as the three FFT charts' `drawEmpty`, except that here the
-         placeholder cannot be a real plot and so is a plain box of the height the chart will take.
+    <!-- <p><b>The host is the empty well when there is nothing to draw.</b> The library cannot be
+         built with an empty surface at all (see `refreshSurface`), so with nothing measured there
+         is no canvas — which left the message below floating in a strip where the chart should be,
+         and made the whole column jump the moment a measurement landed. The same reasoning as the
+         three FFT charts' `drawEmpty`, except that here the placeholder cannot be a real plot and
+         so is a plain box of the height the chart will take, in the chart's own well colour rather
+         than `--surface-plot`, so the empty box and the drawn one are one tone in either theme.
 
-         It paints the chart's own well colour rather than taking `--surface-plot`, so the empty
-         box and the drawn one are the same tone in either theme — `theme()` is the one place that
-         says what that is.</p> -->
+         <b>It has to be this element and not a sibling of it</b>, which is the whole of why the
+         empty 3D chart came out half the sonogram's height. `useResultChartHeight` measures the
+         chart's furniture as root minus *this* box, so a placeholder standing beside it is counted
+         as furniture: the fit then has a whole chart's height already spoken for, and what is left
+         is clamped to `MIN_RESULT_CHART_HEIGHT_PX` — 360 px against the sonogram's 680 on the same
+         screen, and the chart built into it kept that height afterwards. On the host the sum is
+         the one the flat chart already gets, its canvas being its own plot box.</p> -->
     <div
-      v-if="!drawn"
+      ref="host"
       class="block w-full"
-      :style="{ height: `${chartHeight}px`, backgroundColor: wellColour }"
+      :style="drawn ? undefined : { height: `${chartHeight}px`, backgroundColor: wellColour }"
     ></div>
 
     <p

@@ -111,6 +111,19 @@ const failure = ref<string | null>(null)
 
 const MIN_WIDTH = 240
 
+/**
+ * <p>How far the library insets its colour key from the top and right edges, where it defaults to
+ * 10 — raised so the key clears the expand button in that same corner.</p>
+ *
+ * <p>The button is 28 px at 8 from each edge, so it holds x from `width - 36` to `width - 8` and y
+ * from 8 to 36; the key is a 20 px bar at x from `width - margin - 20` to `width - margin`, with
+ * its labels further left again and its top at `margin`. At 44 the bar ends 8 px clear of the
+ * button's left edge and starts 8 px below its bottom, so neither has to give way. **This is why
+ * the button is on the right at all**: it sat top left for a day because the key could not be
+ * moved, which is true of `setOptions` and not of the field itself (Joost, 2026-10-30).</p>
+ */
+const LEGEND_MARGIN_PX = 44
+
 /** How many whole decades of the frequency axis a tick is put on. */
 const FREQUENCY_DECADE_STEP = 1
 
@@ -281,6 +294,13 @@ function build() {
       cloud.points,
       buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()),
     )
+    // After the constructor, which has already drawn once at the library's own 10, and so paid for
+    // with a second redraw — the one place in this component that deliberately draws twice. There
+    // is no earlier seam: the constructor takes its options and paints, and `margin` is not one of
+    // the options it will take. It is a build, not a slider, so it costs a measurement's last
+    // ~300 ms rather than a frame of a drag.
+    chart.margin = LEGEND_MARGIN_PX
+    chart.redraw()
     rememberApplied()
     failure.value = null
   } catch (e) {
@@ -493,6 +513,10 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
         points.points,
         buildOptions(points, width, plotHeight, false, camera),
       )
+      // The export has no expand button over it, and the key is put where the screen's is anyway:
+      // a picture of the chart that moves one of its parts is not a picture of the chart.
+      copy.margin = LEGEND_MARGIN_PX
+      copy.redraw()
     }
 
     const plot = document.createElement('canvas')
@@ -531,7 +555,7 @@ defineExpose({ exportPng })
          the library will not move it.</b> Its legend is drawn at `clientWidth - margin`, and the
          same `margin` is also the key's distance from the top, so pushing it left pushes it off
          the bottom. The button is the thing that can move, and the left of the plot is empty.</p> -->
-    <ExpandToggle class="absolute left-2 top-2 z-10" :target="container" />
+    <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
 
     <!-- <p><b>The host is the empty well when there is nothing to draw.</b> The library cannot be
          built with an empty surface at all (see `refreshSurface`), so with nothing measured there

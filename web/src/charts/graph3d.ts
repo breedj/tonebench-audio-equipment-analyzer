@@ -146,13 +146,6 @@ export interface Graph3dInstance {
   xCenter: string
   yCenter: string
   verticalRatio: number
-  /**
-   * How far the colour key is inset from the top and right edges, in pixels (the library's own
-   * default is 10). Not an option — it is absent from the package's validator, which refuses what
-   * it does not know — so it is written here like the three above, and `_redrawLegend` reads it on
-   * the next pass. It is the only lever over where that key goes.
-   */
-  margin: number
   colormap?: (fraction: number) => Graph3dRgb
   /**
    * Private, and called only through {@link applyVerticalRatio}, which checks for it first.

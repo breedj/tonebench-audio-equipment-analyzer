@@ -25,6 +25,7 @@ import {
   type Graph3dOptions,
   type Graph3dPoint,
 } from '../charts/graph3d'
+import { drawDecayLevelKey } from '../charts/decayLevelKey'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from '../charts/exportChart'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { useAppTheme } from '../composables/useAppTheme'
@@ -101,6 +102,8 @@ const props = defineProps<{
 
 const container = ref<HTMLDivElement | null>(null)
 const host = ref<HTMLDivElement | null>(null)
+/** The colour key's own canvas, laid over the library's — see `charts/decayLevelKey.ts`. */
+const keyCanvas = ref<HTMLCanvasElement | null>(null)
 // First in setup, so the chart is built at the height it will keep rather than resized a frame
 // later — see the composable's own remarks.
 const chartHeight = useResultChartHeight(container, host, { pageHeightPx: () => props.pageHeightPx })
@@ -111,18 +114,6 @@ const failure = ref<string | null>(null)
 
 const MIN_WIDTH = 240
 
-/**
- * <p>How far the library insets its colour key from the top and right edges, where it defaults to
- * 10 — raised so the key clears the expand button in that same corner.</p>
- *
- * <p>The button is 28 px at 8 from each edge, so it holds x from `width - 36` to `width - 8` and y
- * from 8 to 36; the key is a 20 px bar at x from `width - margin - 20` to `width - margin`, with
- * its labels further left again and its top at `margin`. At 44 the bar ends 8 px clear of the
- * button's left edge and starts 8 px below its bottom, so neither has to give way. **This is why
- * the button is on the right at all**: it sat top left for a day because the key could not be
- * moved, which is true of `setOptions` and not of the field itself (Joost, 2026-10-30).</p>
- */
-const LEGEND_MARGIN_PX = 44
 
 /** How many whole decades of the frequency axis a tick is put on. */
 const FREQUENCY_DECADE_STEP = 1
@@ -139,6 +130,37 @@ let cloud: DecayPointCloud | null = null
 let disposed = false
 let observer: ResizeObserver | null = null
 let redrawFrame = 0
+
+/**
+ * Repaints the colour key over the chart.
+ *
+ * <p>Its own canvas rather than the library's: that one is cleared and redrawn by every path in
+ * here, so anything painted onto it would have to be repainted after each of them — and the key
+ * does not move when the camera does. Called when the chart is built or resized, and when the
+ * palette, the theme or the range changes, which is the whole of what it depends on.</p>
+ */
+function paintKey() {
+  const element = keyCanvas.value
+  if (!element) return
+  const width = plotWidth()
+  const height = chartHeight.value
+  const dpr = window.devicePixelRatio || 1
+  element.width = Math.round(width * dpr)
+  element.height = Math.round(height * dpr)
+  element.style.width = `${width}px`
+  element.style.height = `${height}px`
+  const ctx = element.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  if (!drawn.value) return
+  drawDecayLevelKey(ctx, {
+    plotHeight: height,
+    rangeDb: props.rangeDb,
+    colourAt: decayColormap(props.palette, isDark.value),
+    ink: theme(isDark.value).ink,
+  })
+}
 
 function plotWidth(): number {
   return Math.max(MIN_WIDTH, Math.round(container.value?.clientWidth ?? MIN_WIDTH))
@@ -232,8 +254,8 @@ function buildOptions(
     gridColor: ink.grid,
     backgroundColor: { fill: ink.back, stroke: ink.back, strokeWidth: 0 },
     // The key, which the library draws for a surface as a gradient bar keyed to the height range.
-    showLegend: true,
-    legendLabel: 'dB',
+    // Off: this app draws its own, on the left — see charts/decayLevelKey.ts for why it has to.
+    showLegend: false,
     tooltip: (point: Graph3dPoint) => tooltipFor(point, points),
     tooltipDelay: 120,
   }
@@ -294,13 +316,6 @@ function build() {
       cloud.points,
       buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()),
     )
-    // After the constructor, which has already drawn once at the library's own 10, and so paid for
-    // with a second redraw — the one place in this component that deliberately draws twice. There
-    // is no earlier seam: the constructor takes its options and paints, and `margin` is not one of
-    // the options it will take. It is a build, not a slider, so it costs a measurement's last
-    // ~300 ms rather than a frame of a drag.
-    chart.margin = LEGEND_MARGIN_PX
-    chart.redraw()
     rememberApplied()
     failure.value = null
   } catch (e) {
@@ -308,6 +323,7 @@ function build() {
     chart = null
   }
   drawn.value = chart !== null
+  paintKey()
 }
 
 function teardown() {
@@ -318,6 +334,7 @@ function teardown() {
   chart = null
   cloud = null
   drawn.value = false
+  paintKey()
   // All the teardown there is: the library has no `destroy()` and its own source says its listeners
   // are never cleaned up, so emptying the host is what takes its DOM and their bindings with it.
   destroyGraph3d(host.value)
@@ -388,6 +405,7 @@ function schedule(what: keyof Pending) {
 }
 
 function resize() {
+  paintKey()
   if (!chart) return
   chart.setSize(`${plotWidth()}px`, `${chartHeight.value}px`)
 }
@@ -482,6 +500,12 @@ watch(
   () => schedule('options'),
 )
 
+/** The key's own dependencies: what it is made of, rather than where the camera is. */
+watch(
+  () => [props.palette, isDark.value, props.rangeDb],
+  () => paintKey(),
+)
+
 /**
  * The chart as a PNG of the requested size, light whatever the theme — built from a second chart in
  * a detached host rather than read off the one on screen, which is how the Canvas 2D chart does it
@@ -513,10 +537,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
         points.points,
         buildOptions(points, width, plotHeight, false, camera),
       )
-      // The export has no expand button over it, and the key is put where the screen's is anyway:
-      // a picture of the chart that moves one of its parts is not a picture of the chart.
-      copy.margin = LEGEND_MARGIN_PX
-      copy.redraw()
+
     }
 
     const plot = document.createElement('canvas')
@@ -532,6 +553,15 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     ctx.fillStyle = theme(false).back
     ctx.fillRect(0, 0, width, plotHeight)
     if (copy) ctx.drawImage(copy.frame.canvas, 0, 0, width, plotHeight)
+    // The same key, by the same function, so a picture of the chart cannot put it somewhere else.
+    if (points) {
+      drawDecayLevelKey(ctx, {
+        plotHeight,
+        rangeDb: props.rangeDb,
+        colourAt: decayColormap(props.palette, false),
+        ink: theme(false).ink,
+      })
+    }
 
     return await composeChartPng({
       width,
@@ -551,10 +581,6 @@ defineExpose({ exportPng })
 
 <template>
   <div ref="container" class="relative w-full">
-    <!-- <p><b>Left, where every other chart puts it right — the colour key is in that corner and
-         the library will not move it.</b> Its legend is drawn at `clientWidth - margin`, and the
-         same `margin` is also the key's distance from the top, so pushing it left pushes it off
-         the bottom. The button is the thing that can move, and the left of the plot is empty.</p> -->
     <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
 
     <!-- <p><b>The host is the empty well when there is nothing to draw.</b> The library cannot be
@@ -577,6 +603,9 @@ defineExpose({ exportPng })
       class="block w-full"
       :style="drawn ? undefined : { height: `${chartHeight}px`, backgroundColor: wellColour }"
     ></div>
+    <!-- The colour key, over the library's own canvas and never on it: that one is cleared and
+         repainted by every camera move, and the key does not move with the camera. -->
+    <canvas ref="keyCanvas" class="pointer-events-none absolute left-0 top-0 block"></canvas>
 
     <p
       v-if="computing"

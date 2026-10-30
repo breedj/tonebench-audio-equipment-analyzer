@@ -327,9 +327,15 @@ describe('decayVerticalRatio', () => {
     }
   })
 
-  /** A coincidence worth keeping: the box this chart opens on is the shape the library defaults to. */
-  it('opens near the library’s own default box', () => {
-    expect(decayVerticalRatio(DECAY_EXPLODE_Z.default)).toBeCloseTo(0.5, 1)
+  /**
+   * The default used to land on the library's own 0.5 and no longer does — Joost turned it to a
+   * flatter box on 2026-10-30. What is worth holding is that it is a real height rather than a
+   * degenerate one; where on the travel it sits is his, and the range and step cases cover it.
+   */
+  it('opens on a box with a real height', () => {
+    const opening = decayVerticalRatio(DECAY_EXPLODE_Z.default)
+    expect(opening).toBeGreaterThan(0.1)
+    expect(opening).toBeLessThan(1)
   })
 
   it('clamps rather than handing out a box with no height', () => {
@@ -399,9 +405,15 @@ describe('decayCameraDistance', () => {
     expect(decayCameraDistance(400)).toBeLessThan(decayCameraDistance(100))
   })
 
-  /** The view a measurement opens on is near the framing the library was tuned for. */
-  it('opens near the library’s own default arm', () => {
-    expect(decayCameraDistance(DECAY_VIEW_MAGNIFICATION.default)).toBeCloseTo(1.7, 0)
+  /**
+   * The opening arm was within a tenth of the library's own 1.7 until Joost magnified the default
+   * view on 2026-10-30. What has to hold is that it is inside the arm the library accepts and not
+   * against either stop, so the slider can still be turned both ways from where a measurement opens.
+   */
+  it('opens inside the arm, with travel left in both directions', () => {
+    const opening = decayCameraDistance(DECAY_VIEW_MAGNIFICATION.default)
+    expect(opening).toBeGreaterThan(0.71)
+    expect(opening).toBeLessThan(5.0)
   })
 
   it('falls back to the default rather than to a camera inside the box', () => {
@@ -467,8 +479,14 @@ describe('decayCenterPercent', () => {
     }
   })
 
-  it('falls back rather than writing NaN% into the options', () => {
-    expect(decayCenterPercent(Number.NaN, Number.NaN)).toEqual(decayCenterPercent(0, 0))
+  /**
+   * The fallback is each slider's own default rather than the centred position — which stopped
+   * being the same thing when Joost moved the opening view off centre on 2026-10-30.
+   */
+  it('falls back to the default rather than writing NaN% into the options', () => {
+    expect(decayCenterPercent(Number.NaN, Number.NaN))
+      .toEqual(decayCenterPercent(DECAY_VIEW_MOVE_X.default, DECAY_VIEW_MOVE_Y.default))
+    expect(decayCenterPercent(Number.NaN, Number.NaN).xCenter).not.toContain('NaN')
   })
 })
 
@@ -536,8 +554,8 @@ describe('decayViewDefaults', () => {
     }
     onStep(d.decayRotationDeg, DECAY_ROTATION_DEG.min, 1, 'rotation')
     onStep(d.decayDepthPercent, DECAY_DEPTH_PERCENT.min, 1, 'tilt')
-    onStep(d.decayMoveX, DECAY_VIEW_MOVE_X.min, 0.1, 'move x')
-    onStep(d.decayMoveY, DECAY_VIEW_MOVE_Y.min, 0.1, 'move y')
+    onStep(d.decayMoveX, DECAY_VIEW_MOVE_X.min, DECAY_VIEW_MOVE_X.step, 'move x')
+    onStep(d.decayMoveY, DECAY_VIEW_MOVE_Y.min, DECAY_VIEW_MOVE_Y.step, 'move y')
     onStep(d.decayMagnification, DECAY_VIEW_MAGNIFICATION.min, 5, 'magnification')
     onStep(d.decayExplodeZ, DECAY_EXPLODE_Z.min, DECAY_EXPLODE_Z.step, 'explode z')
   })

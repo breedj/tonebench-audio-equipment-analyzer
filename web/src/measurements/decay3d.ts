@@ -208,7 +208,7 @@ export function decayColormap(palette: DecayPalette, onDark: boolean): (fraction
  * <p>The range 1 to 50 was the previous engine's demo's own and is kept, because it is what every
  * measurement already stored this field on. {@link decayVerticalRatio} is what maps it.</p>
  */
-export const DECAY_EXPLODE_Z = { min: 1, max: 50, step: 1, default: 23 } as const
+export const DECAY_EXPLODE_Z = { min: 1, max: 50, step: 1, default: 10 } as const
 
 /**
  * <p>The library's <c>verticalRatio</c>, which multiplies the height axis's scale and is documented
@@ -216,9 +216,9 @@ export const DECAY_EXPLODE_Z = { min: 1, max: 50, step: 1, default: 23 } as cons
  * stretch — the fault the previous engine's magnification had, where seven eighths of the slider
  * rendered byte-identically.</p>
  *
- * <p>The default lands on 0.504, which is the library's own default of 0.5 to within a step. That
- * is a coincidence worth keeping rather than designing around: it means the box this chart opens on
- * is the shape the library was tuned to draw.</p>
+ * <p>The default lands on 0.265 — a flatter box than the library's own 0.5, which it happened to
+ * sit on until Joost turned the slider to 10 on 2026-10-30. The coincidence was never the reason:
+ * how tall a decay surface wants to be drawn is a matter of looking at one.</p>
  */
 export function decayVerticalRatio(explodeZ: number = DECAY_EXPLODE_Z.default): number {
   const value = Number.isFinite(explodeZ) ? explodeZ : DECAY_EXPLODE_Z.default
@@ -251,10 +251,10 @@ export function explodeZForAxisLengths(acrossLength: number, levelLength: number
  * <c>xCenter</c>/<c>yCenter</c> instead of being migrated. The two axes have their own ranges for
  * the reason they always did — the opening view has more room above it than beside it.</p>
  */
-export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 0 } as const
+export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, step: 0.1, default: -0.7 } as const
 
 /** The same up the plot, and its range is <b>not</b> the sideways one. Positive moves it up. */
-export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
+export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, step: 0.1, default: -0.6 } as const
 
 /** How far one unit of either Move slider shifts the box, as a percentage of the plot. */
 export const DECAY_MOVE_PERCENT_PER_UNIT = 8
@@ -289,7 +289,7 @@ export function decayCenterPercent(
  * screen conversion is <c>dx / armLength</c>, so the drawn size is exactly the reciprocal of the
  * distance, and the documented arm of 0.71 to 5.0 is a sevenfold span of picture.</p>
  */
-export const DECAY_VIEW_MAGNIFICATION = { min: 20, max: 800, step: 5, default: 170 } as const
+export const DECAY_VIEW_MAGNIFICATION = { min: 20, max: 800, step: 5, default: 230 } as const
 
 /** The library's documented arm length. More is further back, so a larger magnification is less. */
 const CAMERA_DISTANCE_NEAR = 0.71
@@ -306,8 +306,9 @@ const CAMERA_DISTANCE_FAR = 5.0
  * "above 200 % does not work"), and a mapping that cannot produce it is worth more than a literal
  * percentage. Both ends of the slider reach both ends of the arm, and no two steps are equal.</p>
  *
- * <p>The default falls near 1.61, which is the library's own default arm of 1.7 to within a tenth —
- * so the view a measurement opens on is close to the framing the library was tuned for.</p>
+ * <p>The default falls near 1.37, a shorter arm than the library's own 1.7 — which is simply where
+ * Joost put the slider on 2026-10-30, with the two Move sliders turned down a little to keep the
+ * larger box on the plot.</p>
  */
 export function decayCameraDistance(
   magnificationPercent: number = DECAY_VIEW_MAGNIFICATION.default,

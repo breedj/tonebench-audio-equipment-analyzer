@@ -1734,6 +1734,8 @@ export interface ImpulseResponseParameters {
   chartDecayPalette?: DecayPalette | null
   chartDecayColoredCurves?: boolean | null
   chartDecayFilled?: boolean | null
+  /** Rule the 3D surface along every cell edge. Null on anything stored before 2026-10-30. */
+  chartDecayMeshLines?: boolean | null
   chartDecayRotationDeg?: number | null
   chartDecayDepthPercent?: number | null
   /** The 3D surface's own view — see ImpulseResponseParameters on the server. Null on an older type. */

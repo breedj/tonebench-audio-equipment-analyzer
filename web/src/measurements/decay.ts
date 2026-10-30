@@ -294,8 +294,9 @@ const PALETTES: Record<DecayPalette, Stop[]> = {
    * (reported twice). The name is right either way — this is the textbook jet colormap, blue
    * through cyan, green and yellow to red, where the one it replaces was a hand-tuned variant.</p>
    *
-   * <p>Both ends run into darkness, which is why this is the one palette whose scale is <em>not</em>
-   * lifted off its own floor; see {@link PALETTE_FLOOR_FRACTIONS}.</p>
+   * <p>Both ends run into darkness, which is why this one is lifted off its own floor far less
+   * than the other two — enough to start the scale on a readable blue, little enough to keep the
+   * blue end on the chart; see {@link JET_FLOOR_FRACTION}.</p>
    */
   Jet: [
     [0.0, 0, 0, 131],
@@ -446,19 +447,31 @@ export function wallGradientStops(
 export const PALETTE_FLOOR_FRACTION = 0.325
 
 /**
+ * <p><b>Jet is lifted by a seventh, which is Joost's own figure rather than a derived one.</b>
+ * Asked for 2026-10-30 as "the current colour at -60 dB will be the one for -70 dB, so we have a
+ * slightly lighter chart" — that is a tenth of a 70 dB range, so the foot of the scale takes the
+ * colour a seventh up the ramp and everything above it lightens to match. Stated as a fraction of
+ * the ramp rather than as 10 dB, because the mapping is relative to whatever Range the chart is
+ * set to and a figure in decibels would mean something different at every one of them.</p>
+ *
+ * <p>It reverses a decision rather than filling a gap, which is worth knowing before it moves
+ * again: Jet used to be the one palette reaching its own floor, on the grounds that its foot is a
+ * readable dark blue where Hot's is a near-black red, and that lifting it takes the blue end off
+ * the chart — the half of the ramp the vendor's own picture is mostly made of. A seventh is a
+ * long way short of the 0.325 the other two carry, so most of that blue is still there.</p>
+ */
+export const JET_FLOOR_FRACTION = 1 / 7
+
+/**
  * How far each palette's level scale is lifted off its own foot.
  *
- * <p>It is a property of the palette and not a constant because the fault it answers is Hot's: its
- * foot is a near-black red, so the quiet half of a surface painted in it loses its shape. Jet does
- * not have that problem since it became the vendor's ramp — its foot is a readable dark blue, and
- * lifting it would take the blue end off the chart altogether, which is the half of that ramp the
- * vendor's own picture is mostly made of.</p>
- *
- * <p>Grey is lifted with the rest: its ramp runs all the way to near-black at one end whichever way
- * round the theme puts it.</p>
+ * <p>It is a property of the palette and not a constant because the fault it answers differs by
+ * ramp: Hot's foot is a near-black red and Grey's runs to near-black at one end whichever way the
+ * theme puts it, so the quiet half of a surface painted in either loses its shape, while Jet's is
+ * a readable dark blue and wants only the gentler lift above.</p>
  */
 export const PALETTE_FLOOR_FRACTIONS: Record<DecayPalette, number> = {
-  Jet: 0,
+  Jet: JET_FLOOR_FRACTION,
   Hot: PALETTE_FLOOR_FRACTION,
   Grey: PALETTE_FLOOR_FRACTION,
 }

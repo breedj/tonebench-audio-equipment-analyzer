@@ -480,11 +480,12 @@ const { showPage } = useManual()
     </p>
     <p>
       <strong>Jet</strong> is the classic analyzer ramp: dark blue through cyan, green and yellow to
-      dark red. It is also the one palette whose scale reaches
-      its own floor &mdash; <strong>Hot</strong> and <strong>Grey</strong> are lifted off theirs,
-      because a near-black foot paints the quiet half of a surface in something with no shape to it,
-      while this ramp's foot is a readable blue and lifting it would take the blue end &mdash; most
-      of the picture &mdash; off the chart.
+      dark red. All three palettes are lifted off their own feet, so the bottom of the dB scale is a
+      colour with some shape in it rather than a near-black that paints the quiet half of a surface
+      in nothing. <strong>Hot</strong> and <strong>Grey</strong> are lifted furthest, their feet
+      being a near-black red and a near-black grey; Jet is lifted by a seventh, which is enough to
+      start the scale on a readable blue and little enough to keep the blue end &mdash; most of the
+      picture &mdash; on the chart.
     </p>
     <p>
       Two more differences. <strong>Sonogram</strong> is always drawn flat, because it is a colour
@@ -492,9 +493,12 @@ const { showPage } = useManual()
       rather than filled flat, so it carries the same smooth gradient the surface does and a
       resonance reads as a ridge instead of a staircase. And <strong>Filled</strong> and <strong>Coloured
       curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
-      3D surface, which is always a solid: it is read by its colour and its shading rather than by
-      lines along it, there being twenty-odd thousand cells and no spacing at which one line per
-      cell is a mesh rather than a wash.
+      3D surface. Its own counterpart is <strong>Mesh lines</strong>, which rules the solid along
+      every cell edge. It is off to begin with: a cumulative spectral decay has twenty-odd thousand
+      cells and one line each is a wash rather than a mesh, so the surface is normally read by its
+      colour and its shading. On a coarser analysis, or magnified into a corner of one, the lines
+      are what show the shape. They take the axis ink, so they are white on the dark style and dark
+      on a light export, and like every other setting here they are stored with the measurement.
     </p>
     <p>
       <strong>A decay surface cannot be overlaid.</strong> Curves can share a chart and a colour map

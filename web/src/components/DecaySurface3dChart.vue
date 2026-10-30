@@ -55,6 +55,8 @@ const props = defineProps<{
   /** Accepted so the two charts are prop-compatible; the Canvas 2D painter's, and unread here. */
   coloredCurves: boolean
   filled: boolean
+  /** Rule the surface along every cell edge — this chart's counterpart to those two. */
+  meshLines: boolean
   rotationDeg: number
   depthPercent: number
   /**
@@ -129,7 +131,14 @@ function plotWidth(): number {
  */
 function theme(dark: boolean) {
   return {
-    ink: dark ? '#d4d4d4' : '#404040',
+    // <p><b>The mesh takes this ink, and that is the library's doing rather than a choice.</b>
+    // `_redrawSurfaceGraphPoint` strokes each cell with `this.axisColor` — its own source marks
+    // that line "should be customizable" — so the mesh cannot be coloured apart from the axes.
+    // On the dark style the ink is a near-white that already reads as white against the palette;
+    // it is lifted the rest of the way when the mesh is actually on, which is imperceptible on an
+    // axis label and is the difference between a white mesh and an off-white one. A light export
+    // keeps its dark ink, since white lines would whiten every tick and label on it too.</p>
+    ink: dark ? (props.meshLines ? '#ffffff' : '#d4d4d4') : '#404040',
     grid: dark ? '#3f3f46' : '#d4d4d4',
     back: dark ? '#15181d' : '#ffffff',
   }
@@ -172,10 +181,12 @@ function buildOptions(
     // light to position. It is what keeps a decay's steps reading as steps rather than as flat
     // colour — the two light-angle sliders went with the old engine, there being nothing to turn.
     showShadow: true,
-    // Off, and not for speed: it strokes every cell border, and at twenty-odd thousand cells that
-    // is a wash rather than a mesh. With it off each quad is stroked in its own fill colour, which
-    // closes the hairline seams between them.
-    showSurfaceGrid: false,
+    // <p>Off by default, and not for speed — measured at 388 ms against 395 ms, inside the noise.
+    // It strokes every cell border, and at a cumulative spectral decay's twenty-odd thousand cells
+    // that is a wash rather than a mesh; on a coarser analysis, or magnified into a corner of one,
+    // it is what shows the shape, so it is the user's call. With it off each quad is stroked in
+    // its own fill colour, which closes the hairline seams between them.</p>
+    showSurfaceGrid: props.meshLines,
     showGrayBottom: false,
     zoomable: true,
     ctrlToZoom: false,
@@ -392,9 +403,17 @@ watch(
   () => schedule('layout'),
 )
 
-/** The palette and the page's own theme. Neither is a slider, so the rebuild is affordable. */
+/**
+ * The palette, the page's own theme and the mesh. None of the three is a slider, so the rebuild
+ * `setOptions` costs is affordable — and all three are options rather than fields, the mesh
+ * because it is `showSurfaceGrid` and the ink it strokes with.
+ *
+ * <p>Every prop `buildOptions` reads has to be in this list. One that is not reaches the chart
+ * only when something else happens to rebuild the options, which is to say it silently does
+ * nothing — which is what the mesh checkbox did until it was ticked and measured.</p>
+ */
 watch(
-  () => [props.palette, isDark.value],
+  () => [props.palette, isDark.value, props.meshLines],
   () => schedule('options'),
 )
 
@@ -458,7 +477,11 @@ defineExpose({ exportPng })
 
 <template>
   <div ref="container" class="relative w-full">
-    <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
+    <!-- <p><b>Left, where every other chart puts it right — the colour key is in that corner and
+         the library will not move it.</b> Its legend is drawn at `clientWidth - margin`, and the
+         same `margin` is also the key's distance from the top, so pushing it left pushes it off
+         the bottom. The button is the thing that can move, and the left of the plot is empty.</p> -->
+    <ExpandToggle class="absolute left-2 top-2 z-10" :target="container" />
     <div ref="host" class="block w-full"></div>
 
     <p

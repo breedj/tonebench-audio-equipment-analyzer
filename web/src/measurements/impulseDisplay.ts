@@ -62,6 +62,13 @@ export interface ImpulseDisplay {
   decayColoredCurves: boolean
   /** Fill between the curves, and draw them in one colour. See DecaySurfaceChart. */
   decayFilled: boolean
+  /**
+   * Rule the 3D surface with a line along every cell edge. Off by default: there are twenty-odd
+   * thousand cells on a cumulative spectral decay and one line per cell is a wash rather than a
+   * mesh — but on a coarse analysis, or magnified into a corner of one, it is what shows the
+   * shape. Read by the 3D chart alone.
+   */
+  decayMeshLines: boolean
   /** The oblique projection: the lean in degrees and the depth as a percentage of the plot. */
   decayRotationDeg: number
   decayDepthPercent: number
@@ -130,6 +137,7 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     // its own default because it decides what the *unfilled* stack looks like, which is a separate
     // answer and the one that applies once this is turned off.
     decayFilled: true,
+    decayMeshLines: false,
     // The six view sliders, spread rather than listed, so that a new measurement and the Surface
     // view panel's Reset view button cannot come to disagree about what the default view is.
     ...decayViewDefaults(),
@@ -212,14 +220,15 @@ export function impulseDisplayFromParams(
   }
   if (typeof stored.chartDecayColoredCurves === 'boolean') display.decayColoredCurves = stored.chartDecayColoredCurves
   if (typeof stored.chartDecayFilled === 'boolean') display.decayFilled = stored.chartDecayFilled
+  if (typeof stored.chartDecayMeshLines === 'boolean') display.decayMeshLines = stored.chartDecayMeshLines
   if (typeof stored.chartDecayRotationDeg === 'number' && Number.isFinite(stored.chartDecayRotationDeg)) {
     display.decayRotationDeg = stored.chartDecayRotationDeg
   }
   if (typeof stored.chartDecayDepthPercent === 'number' && stored.chartDecayDepthPercent > 0) {
     display.decayDepthPercent = stored.chartDecayDepthPercent
   }
-  // Finite rather than positive: Move takes either sign and zero is its default, so the usual
-  // `> 0` guard every window field here carries would silently drop the commonest stored value.
+  // Finite rather than positive: Move takes either sign and zero is a legal value for it, so the
+  // usual `> 0` guard every window field here carries would silently drop a centred view.
   if (typeof stored.chartDecayMoveX === 'number' && Number.isFinite(stored.chartDecayMoveX)) {
     display.decayMoveX = stored.chartDecayMoveX
   }

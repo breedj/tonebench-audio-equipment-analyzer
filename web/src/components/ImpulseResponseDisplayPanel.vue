@@ -105,6 +105,7 @@ const decayMode = defineModel<DecayChartMode>('decayMode', { required: true })
 const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true })
 const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
 const decayFilled = defineModel<boolean>('decayFilled', { required: true })
+const decayMeshLines = defineModel<boolean>('decayMeshLines', { required: true })
 const decayRotationDeg = defineModel<number>('decayRotationDeg', { required: true })
 const decayMoveX = defineModel<number>('decayMoveX', { required: true })
 const decayMoveY = defineModel<number>('decayMoveY', { required: true })
@@ -695,6 +696,17 @@ const referenceLabel = computed(() => {
           Filled surface
         </label>
 
+        <!-- The 3D surface's counterpart to the two above: they describe how a stack of curves is
+             drawn and this describes how a solid one is, so each is shown only to its own chart. -->
+        <label
+          v-if="props.surface3d"
+          class="tb-check-row"
+          title="Rule the surface along every cell edge. Off by default: a cumulative spectral decay has twenty-odd thousand cells and one line each is a wash rather than a mesh — but on a coarser analysis, or magnified into a corner of one, it is what shows the shape. The lines take the axis ink, so they are white on the dark style and dark on a light export."
+        >
+          <input v-model="decayMeshLines" type="checkbox" class="tb-check" />
+          Mesh lines
+        </label>
+
         <!-- Hidden rather than disabled under a filled surface: it decides the colour of the
              curves, and there the fill has already decided it. -->
         <label
@@ -764,7 +776,7 @@ const referenceLabel = computed(() => {
               type="range"
               :min="DECAY_VIEW_MOVE_X.min"
               :max="DECAY_VIEW_MOVE_X.max"
-              step="0.1"
+              :step="DECAY_VIEW_MOVE_X.step"
               class="tb-range"
               title="Slides the surface across the plot. The engine's own translation, which is a fine adjustment here rather than a coarse one — the whole range is a few tens of pixels."
             />
@@ -780,7 +792,7 @@ const referenceLabel = computed(() => {
               type="range"
               :min="DECAY_VIEW_MOVE_Y.min"
               :max="DECAY_VIEW_MOVE_Y.max"
-              step="0.1"
+              :step="DECAY_VIEW_MOVE_Y.step"
               class="tb-range"
               title="Slides the surface up and down the plot."
             />

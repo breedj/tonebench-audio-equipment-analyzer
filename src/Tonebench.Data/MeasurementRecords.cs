@@ -2311,6 +2311,12 @@ public sealed record ImpulseResponseParameters(
     /// </summary>
     bool? ChartDecayFilled = null,
     /// <summary>
+    /// Rule the 3D surface along every cell edge — that chart's counterpart to
+    /// <see cref="ChartDecayFilled"/> and <c>ChartDecayColoredCurves</c>, which are the flat one's.
+    /// Null on anything stored before 2026-10-30, which reads as off.
+    /// </summary>
+    bool? ChartDecayMeshLines = null,
+    /// <summary>
     /// The oblique projection: how far the stack leans, in degrees from straight down and positive
     /// to the left, and how much of the chart's height the depth axis takes. Both were constants
     /// until 2026-10-25; null is this build's default rather than those, which were a fraction of

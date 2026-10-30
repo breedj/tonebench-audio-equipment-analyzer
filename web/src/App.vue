@@ -3497,6 +3497,7 @@ const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
 const impulseDecayPalette = ref<import('./api/client').DecayPalette>('Jet')
 const impulseDecayColoredCurves = ref(true)
 const impulseDecayFilled = ref(DEFAULT_IMPULSE_DISPLAY.decayFilled)
+const impulseDecayMeshLines = ref(DEFAULT_IMPULSE_DISPLAY.decayMeshLines)
 const impulseDecayRotationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayRotationDeg)
 const impulseDecayDepthPercent = ref(DEFAULT_IMPULSE_DISPLAY.decayDepthPercent)
 const impulseDecayMoveX = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveX)
@@ -3574,6 +3575,7 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayPalette: impulseDecayPalette.value,
     decayColoredCurves: impulseDecayColoredCurves.value,
     decayFilled: impulseDecayFilled.value,
+    decayMeshLines: impulseDecayMeshLines.value,
     decayRotationDeg: impulseDecayRotationDeg.value,
     decayDepthPercent: impulseDecayDepthPercent.value,
     decayMoveX: impulseDecayMoveX.value,
@@ -3640,6 +3642,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayPalette.value = display.decayPalette
   impulseDecayColoredCurves.value = display.decayColoredCurves
   impulseDecayFilled.value = display.decayFilled
+  impulseDecayMeshLines.value = display.decayMeshLines
   impulseDecayRotationDeg.value = display.decayRotationDeg
   impulseDecayDepthPercent.value = display.decayDepthPercent
   impulseDecayMoveX.value = display.decayMoveX
@@ -3680,6 +3683,7 @@ watch(
     impulseFreqFromHz, impulseFreqToHz, impulseDecayFreqToHz, impulsePhaseTopDeg, impulsePhaseBottomDeg,
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
+    impulseDecayMeshLines,
     impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
     impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification,
     impulseDecayExplodeZ,
@@ -3927,6 +3931,7 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayPalette: impulseDecayPalette.value,
       chartDecayColoredCurves: impulseDecayColoredCurves.value,
       chartDecayFilled: impulseDecayFilled.value,
+      chartDecayMeshLines: impulseDecayMeshLines.value,
       chartDecayRotationDeg: impulseDecayRotationDeg.value,
       chartDecayDepthPercent: impulseDecayDepthPercent.value,
       chartDecayMoveX: impulseDecayMoveX.value,
@@ -4775,6 +4780,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :palette="impulseDecayPalette"
                   :colored-curves="impulseDecayColoredCurves"
                   :filled="impulseDecayFilled"
+                  :mesh-lines="impulseDecayMeshLines"
                   :rotation-deg="impulseDecayRotationDeg"
                   :depth-percent="impulseDecayDepthPercent"
                   :move-x="impulseDecayMoveX"
@@ -4822,6 +4828,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :palette="impulseDecayPalette"
                       :colored-curves="impulseDecayColoredCurves"
                       :filled="impulseDecayFilled"
+                      :mesh-lines="impulseDecayMeshLines"
                       :rotation-deg="impulseDecayRotationDeg"
                       :depth-percent="impulseDecayDepthPercent"
                       :move-x="impulseDecayMoveX"
@@ -4928,6 +4935,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-palette="impulseDecayPalette"
                   v-model:decay-colored-curves="impulseDecayColoredCurves"
                   v-model:decay-filled="impulseDecayFilled"
+                  v-model:decay-mesh-lines="impulseDecayMeshLines"
                   v-model:decay-rotation-deg="impulseDecayRotationDeg"
                   v-model:decay-depth-percent="impulseDecayDepthPercent"
                   v-model:decay-move-x="impulseDecayMoveX"

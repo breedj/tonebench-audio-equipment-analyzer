@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DecaySurface } from '../api/client'
 import {
+  JET_FLOOR_FRACTION,
   acrossX,
   axisFraction,
   axisFractions,
@@ -824,17 +825,28 @@ describe('the Jet palette', () => {
   })
 
   /**
-   * The lift exists because Jet's foot is a near-black navy and Hot's a near-black red, so a
-   * surface's quiet half painted in either loses its shape. This ramp's foot is a readable dark
-   * blue, and lifting it would take the blue end — most of the vendor's own picture — off the chart.
+   * <p>Jet reached its own floor until 2026-10-30, when Joost asked for a lighter chart in the
+   * terms its own constant records. It is still lifted far less than the other two, whose feet are
+   * a near-black red and a near-black grey: most of Jet's blue end is still on the chart, which is
+   * what the original decision was protecting.</p>
    */
-  it('is the one palette whose level scale reaches its own floor', () => {
-    expect(paletteFloorFraction('Jet')).toBe(0)
-    expect(paletteIndex(0, paletteFloorFraction('Jet'))).toBe(0)
+  it('is lifted least of the three, keeping most of its blue end', () => {
+    expect(paletteFloorFraction('Jet')).toBe(JET_FLOOR_FRACTION)
+    expect(paletteFloorFraction('Jet')).toBeGreaterThan(0)
+    expect(paletteFloorFraction('Jet')).toBeLessThan(PALETTE_FLOOR_FRACTION / 2)
 
     for (const lifted of ['Hot', 'Grey'] as const) {
       expect(paletteFloorFraction(lifted), lifted).toBe(PALETTE_FLOOR_FRACTION)
     }
+  })
+
+  /**
+   * The ask, in the terms it was made in: at a 70 dB range the foot of the scale now shows what
+   * -60 dB showed before, which is a seventh of the way up the ramp.
+   */
+  it('puts the colour that was a seventh up at the foot of the scale', () => {
+    const wasAtMinus60 = paletteIndex(10 / 70, 0)
+    expect(paletteIndex(0, paletteFloorFraction('Jet'))).toBe(wasAtMinus60)
   })
 
   /** Every palette the dropdown offers has a floor, or the level-to-colour path would read NaN. */

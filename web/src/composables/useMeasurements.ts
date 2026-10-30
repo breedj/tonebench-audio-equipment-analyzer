@@ -688,16 +688,25 @@ export function useMeasurements() {
   }
 
   /**
-   * Unchecks every loaded overlay — called when a measurement is *created*, which is the one
-   * arrival that cannot be a comparison.
+   * Unchecks every loaded overlay — called by `useProjects.selectType` whenever the open
+   * measurement changes, so **a measurement's screen draws its own results and no others**.
    *
-   * <p>An overlay outliving a switch is the point of the list, and it is why this is not done on
-   * every selection. A brand-new measurement is the exception: it has no results of its own, so
-   * every checked item on it belongs to some other measurement, and on every screen but the FFT
-   * one there is nowhere to uncheck it — the History list is server-filtered to the open
-   * measurement and `OverlayList` renders only on that screen. So the curves of whatever was open
-   * when New measurement was pressed were drawn over an empty chart with no way to take them off
-   * (reported 2026-10-30).</p>
+   * <p>They used to outlive a switch, deliberately, so that one measurement's stored run could be
+   * drawn under another's — the analyzer's own loopback floor under an amplifier's spectrum. The
+   * comparison is real and it was still the wrong default, because the item carried over cannot be
+   * taken off again: the History checklist is server-filtered to the open measurement, so a foreign
+   * result has no row there, and `OverlayList` — the only other place one can be unchecked —
+   * renders on the FFT screen alone. That trap had already been answered three times by narrowing
+   * which *screens* an overlay may be drawn on (overlayScope.ts records each), which is treating
+   * the symptom. Joost's call, 2026-10-30, after meeting it twice in a day on the impulse screen:
+   * each measurement shows only its own.</p>
+   *
+   * <p><b>What that makes true:</b> every loaded overlay now belongs to the open measurement, since
+   * `MeasurementChecklist` is the one thing that adds one and it lists that measurement's results.
+   * So `foreignMeasurementName` can no longer fire and `curveOverlayScreen` can no longer have
+   * anything to exclude. Both stay — they are cheap, and they are what would catch a second way of
+   * loading an overlay arriving later — but they are backstops now rather than the thing doing the
+   * work.</p>
    */
   function clearOverlays() {
     // Only on a real change, for `pruneOverlaysToTypes`'s reason: this array is what every chart

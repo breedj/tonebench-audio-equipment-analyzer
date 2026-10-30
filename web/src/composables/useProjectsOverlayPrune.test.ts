@@ -58,21 +58,6 @@ describe('useProjects: overlays of a measurement that is gone', () => {
     expect(measurements.overlays.value.map((o) => o.id)).toEqual([11])
   })
 
-  it('are all unchecked when a measurement is created, whichever measurement they belong to', async () => {
-    const measurements = useMeasurements()
-    measurements.overlays.value = [
-      { id: 10, detail: detail(10, 7), visible: true } as never,
-      { id: 11, detail: detail(11, 8), visible: false } as never,
-    ]
-
-    vi.spyOn(api, 'createMeasurementType').mockResolvedValue({ id: 9 })
-    vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([type(7, 'one'), type(8, 'two'), type(9, 'new')])
-    await useProjects().createMeasurementType(1, { kind: 'ThdVsFrequency', name: 'new', notes: null })
-
-    // Not the prune's doing: every one of these belongs to a measurement that is still there.
-    expect(measurements.overlays.value).toEqual([])
-  })
-
   it('leaves the list object alone when nothing is dropped, so no chart redraws for free', async () => {
     const measurements = useMeasurements()
     measurements.overlays.value = [{ id: 11, detail: detail(11, 8), visible: true } as never]
@@ -83,5 +68,72 @@ describe('useProjects: overlays of a measurement that is gone', () => {
     await useProjects().loadTypes(1)
 
     expect(measurements.overlays.value).toBe(before)
+  })
+})
+
+/**
+ * And a checked history item does not outlive a measurement *switch* either, as of 2026-10-30.
+ * It used to, deliberately — one measurement's stored run drawn under another's is a real
+ * comparison — but the item carried over could not be taken off again on any screen but the FFT
+ * one, which is the trap `measurements/overlayScope.ts` records three earlier answers to. Joost
+ * met it twice in a day on the impulse screen and called it: each measurement shows only its own.
+ */
+describe('useProjects: overlays when the open measurement changes', () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks()
+    vi.spyOn(api, 'getProjectSession').mockResolvedValue({ open: true, path: 'C:\\P\\amp.tbench', project: amp } satisfies ProjectSession)
+    vi.spyOn(api, 'listRecentProjects').mockResolvedValue([])
+    vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([type(7, 'one'), type(8, 'two')])
+    vi.spyOn(api, 'cancelRuns').mockResolvedValue(undefined as never)
+    vi.spyOn(api, 'stopAcquisition').mockResolvedValue(undefined as never)
+    vi.spyOn(api, 'setGenerator').mockResolvedValue(undefined as never)
+    vi.spyOn(api, 'applyMeasurementType').mockResolvedValue({ spectrum: null, generator: null, acquisition: null } as never)
+
+    const projects = useProjects()
+    projects.setRunActive(false)
+    await projects.refreshSession()
+    await projects.loadTypes(1)
+    await projects.selectType(7)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('are all unchecked, whichever measurement they came from', async () => {
+    const measurements = useMeasurements()
+    measurements.overlays.value = [
+      { id: 10, detail: detail(10, 7), visible: true } as never,
+      { id: 11, detail: detail(11, 8), visible: false } as never,
+    ]
+
+    await useProjects().selectType(8)
+
+    // Not the prune's doing: both of these belong to a measurement that is still there.
+    expect(measurements.overlays.value).toEqual([])
+  })
+
+  it('survive re-selecting the measurement that is already open, which changes nothing', async () => {
+    const measurements = useMeasurements()
+    measurements.overlays.value = [{ id: 10, detail: detail(10, 7), visible: true } as never]
+
+    await useProjects().selectType(7)
+
+    // Unchecking what the user has just ticked would be the worst reading of a click on the row
+    // they are already on.
+    expect(measurements.overlays.value.map((o) => o.id)).toEqual([10])
+  })
+
+  it('are cleared by a create too, since creating one ends in selecting it', async () => {
+    const measurements = useMeasurements()
+    measurements.overlays.value = [{ id: 10, detail: detail(10, 7), visible: true } as never]
+
+    vi.spyOn(api, 'createMeasurementType').mockResolvedValue({ id: 9 })
+    vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([type(7, 'one'), type(8, 'two'), type(9, 'new')])
+    const projects = useProjects()
+    const id = await projects.createMeasurementType(1, { kind: 'ThdVsFrequency', name: 'new', notes: null })
+    await projects.selectType(id)
+
+    expect(measurements.overlays.value).toEqual([])
   })
 })

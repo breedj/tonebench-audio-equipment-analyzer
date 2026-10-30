@@ -170,18 +170,23 @@ export function useProjects() {
    * generator/acquisition staged into loadedParams for the Run button. See SpectrumConfigPanel.vue and App.vue's runFromCurrentSettings.
    */
   async function selectType(id: number) {
+    const changing = id !== currentTypeId.value
     // Silently, and that is deliberate: the sidebar has already greyed every row that would get
     // here, so the refusal is visible before the click rather than afterwards, and the standing
     // sentence it used to print took a line of the sidebar for the length of every run (Joost,
     // 2026-10-17). This still guards the paths that do not go through those rows.
-    if (id !== currentTypeId.value && runActive.value) return
-    if (id !== currentTypeId.value && !(await confirmDiscardCurrentIfDirty())) return
+    if (changing && runActive.value) return
+    if (changing && !(await confirmDiscardCurrentIfDirty())) return
     await stopRun()
     // After the stop and before the selection moves — see `liveStateReset`. A failure here is not
     // worth refusing the selection over: the worst case is the previous measurement's spectrum
     // staying on screen, which is what this whole path is a fix for and not a reason to strand the
     // user on a measurement they have navigated away from.
     if (liveStateReset) await liveStateReset(id).catch(() => undefined)
+    // A measurement draws its own results and no others — see useMeasurements.clearOverlays.
+    // Only on a real change: re-selecting the open measurement changes nothing, and unchecking
+    // the items the user had just ticked would be the worst reading of that.
+    if (changing) useMeasurements().clearOverlays()
     currentTypeId.value = id
     typeNotes.value = types.value.find((t) => t.id === id)?.notes ?? ''
     appliedTypeId.value = null
@@ -268,9 +273,6 @@ export function useProjects() {
     try {
       const { id } = await api.createMeasurementType(projectId, req)
       await loadTypes(projectId)
-      // A new measurement starts with nothing checked — see useMeasurements.clearOverlays. Here
-      // rather than in the dialog so that a second way of creating one cannot forget it.
-      useMeasurements().clearOverlays()
       error.value = null
       return id
     } catch (e) {

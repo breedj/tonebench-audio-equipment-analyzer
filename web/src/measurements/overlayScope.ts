@@ -11,6 +11,23 @@ import {
 } from './kinds'
 
 /**
+ * <p><b>Everything in this file is a backstop as of 2026-10-30, where it used to be the thing
+ * doing the work.</b> Its whole subject is an overlay that belongs to a <i>different</i>
+ * measurement from the one on screen, and `useProjects.selectType` now unchecks every overlay when
+ * the open measurement changes (see `useMeasurements.clearOverlays`) — so with
+ * `MeasurementChecklist` the one thing that loads one, and it listing the open measurement's own
+ * results, a foreign overlay can no longer exist. `foreignMeasurementName` therefore cannot fire
+ * and the two screen maps can no longer have anything to exclude.</p>
+ *
+ * <p>None of it is removed, for two reasons. It is cheap, and it is what would catch a second way
+ * of loading an overlay arriving later — the exact fault each of the three reports below describes.
+ * And the two partition tests are the statement of which kinds may share a chart, which is a fact
+ * about the kinds rather than about how overlays are loaded. The history below is kept as written:
+ * it is why that clear exists at all, three narrowings of the screen map having been the earlier,
+ * symptomatic answers to one complaint.</p>
+ */
+
+/**
  * Which measurement a loaded overlay came from, when that is not the one on screen.
  *
  * <p><b>Why this exists.</b> The two lists on a measurement screen are scoped differently, and

@@ -58,6 +58,21 @@ describe('useProjects: overlays of a measurement that is gone', () => {
     expect(measurements.overlays.value.map((o) => o.id)).toEqual([11])
   })
 
+  it('are all unchecked when a measurement is created, whichever measurement they belong to', async () => {
+    const measurements = useMeasurements()
+    measurements.overlays.value = [
+      { id: 10, detail: detail(10, 7), visible: true } as never,
+      { id: 11, detail: detail(11, 8), visible: false } as never,
+    ]
+
+    vi.spyOn(api, 'createMeasurementType').mockResolvedValue({ id: 9 })
+    vi.spyOn(api, 'listMeasurementTypes').mockResolvedValue([type(7, 'one'), type(8, 'two'), type(9, 'new')])
+    await useProjects().createMeasurementType(1, { kind: 'ThdVsFrequency', name: 'new', notes: null })
+
+    // Not the prune's doing: every one of these belongs to a measurement that is still there.
+    expect(measurements.overlays.value).toEqual([])
+  })
+
   it('leaves the list object alone when nothing is dropped, so no chart redraws for free', async () => {
     const measurements = useMeasurements()
     measurements.overlays.value = [{ id: 11, detail: detail(11, 8), visible: true } as never]

@@ -688,6 +688,24 @@ export function useMeasurements() {
   }
 
   /**
+   * Unchecks every loaded overlay — called when a measurement is *created*, which is the one
+   * arrival that cannot be a comparison.
+   *
+   * <p>An overlay outliving a switch is the point of the list, and it is why this is not done on
+   * every selection. A brand-new measurement is the exception: it has no results of its own, so
+   * every checked item on it belongs to some other measurement, and on every screen but the FFT
+   * one there is nowhere to uncheck it — the History list is server-filtered to the open
+   * measurement and `OverlayList` renders only on that screen. So the curves of whatever was open
+   * when New measurement was pressed were drawn over an empty chart with no way to take them off
+   * (reported 2026-10-30).</p>
+   */
+  function clearOverlays() {
+    // Only on a real change, for `pruneOverlaysToTypes`'s reason: this array is what every chart
+    // watches, and a new one redraws all of them.
+    if (overlays.value.length > 0) overlays.value = []
+  }
+
+  /**
    * Shows or hides an already-loaded overlay. Returns false — leaving the overlay hidden — when
    * showing it would exceed MAX_VISIBLE_OVERLAYS, rather than throwing: this one is called straight
    * from click handlers that have nowhere to put an exception. Hiding always succeeds.
@@ -707,6 +725,6 @@ export function useMeasurements() {
 
   return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
     update, remove,
-    addOverlay, reloadOverlay, removeOverlay, pruneOverlaysToTypes, setOverlayVisible, setOverlayWindow,
+    addOverlay, reloadOverlay, removeOverlay, pruneOverlaysToTypes, clearOverlays, setOverlayVisible, setOverlayWindow,
     visibleOverlayCount, canShowMoreOverlays }
 }

@@ -1399,7 +1399,7 @@ function applyStoredSweepDisplay(paramsJson: string) {
   sweepDisplayRestoring = true
   // The chart's own fields go through the shared restore (sweep/display.ts), which the PDF report
   // also uses to render a stored sweep — so a type restores the same on screen and on paper.
-  const display = sweepDisplayFromParams(paramsJson, currentSweepDisplay())
+  const display = sweepDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -1427,7 +1427,9 @@ function applyStoredSweepDisplay(paramsJson: string) {
   sweepXToHz.value = display.xToHz
   sweepYTopDb.value = display.yTopDb
   sweepYBottomDb.value = display.yBottomDb
-  if (typeof stored.chartAutofitOnDone === 'boolean') sweepAutofitOnDone.value = stored.chartAutofitOnDone
+  // Absent reads as the app's own default, like every field above — never as whatever the last
+  // measurement left on screen. The sweep kinds state `false` in a new type's params_json anyway.
+  sweepAutofitOnDone.value = stored.chartAutofitOnDone === true
   // Absent on a type saved before the previews had a Fit all button, which now reads as *on* --
   // the default these toggles took on 2026-10-17 (see sweep/previewAxis.ts). Only an explicit
   // false survives, which is the toggle a type was deliberately saved with. Written straight
@@ -1688,7 +1690,7 @@ function applyStoredResponseDisplay(paramsJson: string) {
   // The Bode chart's own fields go through the shared restore (response/display.ts), which the PDF
   // report also uses to render a stored measurement — so a type restores the same on screen and on
   // paper. What follows is the screen's own state: the polar views, autofit and the fit order.
-  const display = responseDisplayFromParams(paramsJson, currentResponseDisplay())
+  const display = responseDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -1733,15 +1735,15 @@ function applyStoredResponseDisplay(paramsJson: string) {
   responseSurfaceContours.value = display.surfaceContours
   responseInvertLoopSign.value = display.invertLoopSign
   responseRestoreDelay.value = display.restoreDelay
-  if (typeof stored.chartAutofitOnDone === 'boolean') responseAutofitOnDone.value = stored.chartAutofitOnDone
+  responseAutofitOnDone.value = stored.chartAutofitOnDone === true
   // Unconditional, with Bode as the fallback: assigning only when the type stores one leaves the
   // previous measurement's projection on screen for a type that has never been saved, so a fresh
   // Frequency response could open on Nyquist because the last one was looked at that way.
   responseProjection.value = stored.chartProjection ?? 'Bode'
   // Absent on a type written before the orders were stored: Auto, which is what those builds did.
   responseFitAutoOrder.value = typeof stored.chartFitAutoOrder === 'boolean' ? stored.chartFitAutoOrder : true
-  if (typeof stored.chartFitPoles === 'number') responseFitOrder.value = stored.chartFitPoles
-  if (typeof stored.chartFitZeros === 'number') responseFitZeroOrder.value = stored.chartFitZeros
+  responseFitOrder.value = typeof stored.chartFitPoles === 'number' ? stored.chartFitPoles : 2
+  responseFitZeroOrder.value = typeof stored.chartFitZeros === 'number' ? stored.chartFitZeros : 2
 
   void nextTick(() => {
     responseDisplayRestoring = false
@@ -1867,7 +1869,7 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   impedanceDisplayRestoring = true
   // The chart's own fields go through the shared restore (impedance/display.ts), which the PDF
   // report also uses to render a stored impedance — so a type restores the same on screen and on paper.
-  const display = impedanceDisplayFromParams(paramsJson, currentImpedanceDisplay())
+  const display = impedanceDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -1885,7 +1887,9 @@ function applyStoredImpedanceDisplay(paramsJson: string) {
   impedanceXToHz.value = display.xToHz
   impedancePhaseTopDeg.value = display.phaseTopDeg
   impedancePhaseBottomDeg.value = display.phaseBottomDeg
-  if (typeof stored.chartAutofitOnDone === 'boolean') impedanceAutofitOnDone.value = stored.chartAutofitOnDone
+  // On where the others are off: an ohm axis has no sensible default window, so a measurement
+  // that does not say is fitted rather than drawn inside the last DUT's.
+  impedanceAutofitOnDone.value = stored.chartAutofitOnDone !== false
   impedanceDutType.value = isDutType(stored.chartDutType) ? stored.chartDutType : 'None'
   impedanceEquivalentHz.value =
     typeof stored.chartEquivalentHz === 'number' && stored.chartEquivalentHz > 0 ? stored.chartEquivalentHz : 1000
@@ -1954,7 +1958,7 @@ function currentCrosstalkDisplay(): CrosstalkDisplay {
 
 function applyStoredCrosstalkDisplay(paramsJson: string) {
   crosstalkDisplayRestoring = true
-  const display = crosstalkDisplayFromParams(paramsJson, currentCrosstalkDisplay())
+  const display = crosstalkDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -2056,7 +2060,7 @@ function currentOutputImpedanceDisplay(): OutputImpedanceDisplay {
 
 function applyStoredOutputImpedanceDisplay(paramsJson: string) {
   outputImpedanceDisplayRestoring = true
-  const display = outputImpedanceDisplayFromParams(paramsJson, currentOutputImpedanceDisplay())
+  const display = outputImpedanceDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -3611,7 +3615,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   // The impulse chart's own fields go through the shared restore (measurements/impulseDisplay.ts),
   // which the PDF report also uses to render a stored impulse — so a type restores the same on
   // screen and on paper. The other views' state follows below.
-  const display = impulseDisplayFromParams(paramsJson, currentImpulseDisplay())
+  const display = impulseDisplayFromParams(paramsJson)
   // The notes come back with the rest of the display state, and are applied even when the
   // list is empty -- a measurement that has never carried one must not be left showing the
   // previous measurement's, which is what every other field here deliberately does.
@@ -3659,7 +3663,7 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseBurstMaxPeriods.value = display.burstMaxPeriods
   impulseBurstPointsPerPeriod.value = display.burstPointsPerPeriod
   impulseBurstResolution.value = display.burstResolution
-  if (stored.chartView) impulseView.value = stored.chartView
+  impulseView.value = stored.chartView ?? 'Impulse'
 
   void nextTick(() => {
     impulseDisplayRestoring = false

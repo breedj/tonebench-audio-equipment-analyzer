@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import { api, type DecaySurface, type ImpulseBurstDecayRequest, type ImpulseCsdRequest } from '../api/client'
 import { CHART_EXPORT_HEIGHT_PX, CHART_EXPORT_WIDTH_PX, type ChartExportOptions } from '../charts/exportChart'
 import { csdSpanSamples } from '../measurements/decay'
+import { decayModeIs3d } from '../measurements/decay3d'
+import { prefers3dSurface, useDecaySurfaceEngine } from '../composables/useDecaySurfaceEngine'
 import DecaySurfaceChart from '../components/DecaySurfaceChart.vue'
 import FrequencyResponseChart from '../components/FrequencyResponseChart.vue'
 import ImpedanceChart from '../components/ImpedanceChart.vue'
@@ -407,8 +409,19 @@ export async function renderView(
         case 'BurstDecay': {
           if (!impulse) return null
           const surface = await decaySurface(primary, view)
+          // <p><b>The same chart the screen is showing</b>, which is new since 2026-10-30. The
+          // report drew the flat projection whatever was on screen, because the 3D surface needed
+          // WebGPU and "needs a GPU" is not a property a PDF can have. `vis-graph3d` is a plain 2D
+          // canvas, so that reason is gone and a chapter now carries the picture the measurement
+          // was read from — including the browser's own Decay surfaces preference, which is the
+          // only thing left that decides.</p>
+          const uses3d = prefers3dSurface(useDecaySurfaceEngine().decaySurfaceEngine.value)
+            && decayModeIs3d(display.decayMode)
+          const component = uses3d
+            ? (await import('../components/DecaySurface3dChart.vue')).default
+            : DecaySurfaceChart
           const png = await renderChartPng(
-            DecaySurfaceChart,
+            component,
             {
               surface,
               mode: display.decayMode,
@@ -417,6 +430,13 @@ export async function renderView(
               filled: display.decayFilled,
               rotationDeg: display.decayRotationDeg,
               depthPercent: display.decayDepthPercent,
+              // The four the 3D chart reads and the flat one ignores. Passed either way: a prop a
+              // component does not declare costs nothing, and a chart that silently drew the
+              // default view because one was forgotten is the fault this guards against.
+              moveX: display.decayMoveX,
+              moveY: display.decayMoveY,
+              magnification: display.decayMagnification,
+              explodeZ: display.decayExplodeZ,
               rangeDb: display.decayRangeDb,
               thickLines: display.thickLines,
               computing: false,

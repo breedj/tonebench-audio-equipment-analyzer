@@ -1736,12 +1736,10 @@ export interface ImpulseResponseParameters {
   chartDecayFilled?: boolean | null
   chartDecayRotationDeg?: number | null
   chartDecayDepthPercent?: number | null
-  /** The GPU surface's own view — see ImpulseResponseParameters on the server. Null on an older type. */
+  /** The 3D surface's own view — see ImpulseResponseParameters on the server. Null on an older type. */
   chartDecayMoveX?: number | null
   chartDecayMoveY?: number | null
   chartDecayMagnification?: number | null
-  chartDecayLightAzimuthDeg?: number | null
-  chartDecayLightElevationDeg?: number | null
   /**
    * How tall the box is drawn against its own floor — the vendor demo's Explode Z Axis, and what
    * replaced the three axis lengths on 2026-10-29. The three are still read where a measurement

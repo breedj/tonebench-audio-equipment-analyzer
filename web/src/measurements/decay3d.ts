@@ -1,7 +1,9 @@
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
+import type { Graph3dPoint, Graph3dRgb } from '../charts/graph3d'
 import {
   DECAY_DEPTH_PERCENT,
   DECAY_ROTATION_DEG,
+  formatHz,
   levelAt,
   orientSurface,
   paletteFloorFraction,
@@ -10,221 +12,228 @@ import {
 } from './decay'
 
 /**
- * <p>What <c>DecaySurface3dChart</c> hands the ProEssentials engine, and the only place that
- * conversion happens. It lives here rather than in the component for the reason
- * <c>decay.ts</c> exists: nothing in a <c>.vue</c> file is testable under the node environment
- * vitest runs in, and a Z-matrix transpose is the archetypal fault that draws a convincing
- * picture of the wrong data.</p>
+ * <p>What <c>DecaySurface3dChart</c> hands <c>vis-graph3d</c>, and the only place that conversion
+ * happens. It lives here rather than in the component for the reason <c>decay.ts</c> exists:
+ * nothing in a <c>.vue</c> file is testable under the node environment vitest runs in, and a
+ * transposed or mirrored surface is the archetypal fault that draws a convincing picture of the
+ * wrong data.</p>
  *
  * <p>Everything reads through <c>orientSurface</c> and <c>levelAt</c>, so the two charts cannot
  * drift apart about which way round a waterfall goes or where a slice's data begins.</p>
  */
 
 /**
- * <p><b>Missing cells are NaN, and that is measured rather than chosen.</b> The engine carries a
- * <c>PeData.NullDataValue</c> property and a <c>PePlot.Option.SurfaceNullDataGaps</c> flag, and on
- * the 3D surface path <em>neither does anything</em>: a <c>-9999</c> sentinel is drawn as data, so
- * a burst decay whose low-frequency corner is 22 % missing auto-scaled its height axis to
- * <c>-10499 … +503</c> and squeezed the real -30…0 dB into a third of a percent of it, while the
- * gaps flag produced byte-identical renders either way. The same surface with NaN in those cells
- * scales to <c>-31.6 … +4.6</c> and leaves the corner undrawn. Verified 2026-10-25 against
- * proessentials 11.0.1.</p>
+ * <p><b>A cell with no measurement is left out of the array, and that is the one rule here that
+ * cannot be got wrong quietly.</b> The library builds its grid by indexing each row against the
+ * distinct values of the two floor axes, so an absent <c>(x, y)</c> combination is simply a hole:
+ * its neighbour-linking loop skips it (<c>if (dataMatrix[x][y])</c>) and the four quads around it
+ * are not drawn. That is exactly what a burst decay's ragged low-frequency corner needs.</p>
+ *
+ * <p><b>Passing a sentinel or a NaN instead would be drawn as data at full level.</b>
+ * <c>DataGroup.getDataPoints</c> reads every coordinate as <c>data[i][col] || 0</c> — so NaN,
+ * null and undefined all become <c>0</c>, and 0 dB is the <em>top</em> of a decay scale. The cells
+ * the analysis has no answer for would come out as the loudest thing on the surface, which is the
+ * same false decay the sweep gate exists to prevent. The previous engine wanted NaN in those cells
+ * and had its own reasons measured for it; this one wants the row gone.</p>
  */
-export interface DecayMesh {
-  /** Subsets — one per curve, back to front. */
+export interface DecayPointCloud {
+  /** One per *measured* cell, in row-major order. Holes are absent, not zeroed. */
+  points: Graph3dPoint[]
+  /** Curves, back to front. */
   rows: number
-  /** Points per curve. */
+  /** Columns per curve. */
   cols: number
-  /**
-   * The across coordinate of each column — frequency in Hz, or time, whichever this view runs
-   * across. <b>Negated unless it is the frequency</b>, which {@link acrossNegated} says.
-   */
-  x: Float64Array
-  /** Whether {@link x} is a frequency, and so whether that axis wants a logarithmic scale. */
+  /** Whether the across axis is a frequency, and so whether its coordinate is a logarithm. */
   acrossIsFrequency: boolean
-  /**
-   * Whether {@link x} has been negated, which is to say whether its axis is the linear one.
-   *
-   * <p>The chart sets the engine's <c>InvertedXAxis</c> either way, because the camera sits on the
-   * side of the box that mirrors this axis — see <c>DecaySurface3dChart.azimuthFor</c> — and that
-   * flag is what puts it back. What the flag <em>does</em> differs with the scale, and both halves
-   * were measured against proessentials 11.0.1 on 2026-10-25:</p>
-   *
-   * <ul>
-   *   <li><b>Logarithmic</b> (the frequency axis): the flag reverses the drawing and the labels
-   *   together, so the data is left alone. A log scale has no negative half anyway.</li>
-   *   <li><b>Linear</b> (the time axis): the flag reverses the labels only — setting it and
-   *   clearing it render byte for byte the same picture — so the data has to be negated to
-   *   reverse the drawing, and the flag hands the sign back to the ticks. This is exactly what the
-   *   vendor's own documentation says of the whole family: "subset data must be multiplied by
-   *   (-1) when passed into the chart to achieve the desired effect".</li>
-   * </ul>
-   */
-  acrossNegated: boolean
-  /** Whether {@link z} is a frequency. The two are never both true. */
+  /** Whether the depth axis is a frequency. The two are never both true. */
   depthIsFrequency: boolean
-  /** Heights, row-major, <c>rows * cols</c> of them. NaN wherever the analysis has no answer. */
-  y: Float64Array
-  /**
-   * One depth coordinate per curve, in its own units and never negated.
-   *
-   * <p>Which end of it faces the viewer is the camera's business, not the data's — see
-   * <c>DecaySurface3dChart.azimuthFor</c>. Negating this was tried for an afternoon, to pair with
-   * the engine's <c>InvertedZAxis</c>, and that flag turns out to be <em>refused</em> by the 3D
-   * control: written true it reads back false, where the X and Y ones take. Measured 2026-10-25
-   * against proessentials 11.0.1.</p>
-   */
-  z: Float64Array
-  /** How many cells came back NaN — the ragged corner, and a useful thing to assert on. */
-  missing: number
+  /** How many cells the analysis had no answer for — the ragged corner, and worth asserting on. */
+  omitted: number
 }
 
 /**
- * The surface as the engine wants it: counts, three coordinate blocks and a dense height matrix.
+ * <p><b>A frequency axis carries its logarithm, because the library has no logarithmic
+ * scale.</b> Neither its option list nor its axis code offers one, so true hertz on a linear axis
+ * puts four decades into the last twentieth of the floor; the coordinate is <c>log10(f)</c> and
+ * {@link decayAcrossLabel} prints the hertz back onto the ticks. (The column index with string
+ * labels is the other way round and is a dead end — a 3D axis takes no strings, so the ticks would
+ * read 0…399.)</p>
+ *
+ * <p><b>Either floor axis can be the frequency one</b>, which is what the by-period view is: it
+ * reads time across the curves and stacks them in frequency. So this takes the flag rather than
+ * assuming the across axis, and {@link decayPoints} asks it for both coordinates.</p>
+ */
+export function decayAxisCoordinate(value: number, isFrequency: boolean): number {
+  return isFrequency ? Math.log10(value > 0 ? value : 1) : value
+}
+
+/**
+ * The value a coordinate stands for, undoing {@link decayAxisCoordinate}.
+ *
+ * <p><b>Rounded to twelve significant figures</b>, which strips the float residue the logarithm
+ * and its inverse leave behind and nothing else: <c>10 ** Math.log10(2000)</c> is
+ * 1999.9999999999998, and <c>formatHz</c> reads that as "2.0k" rather than "2k" because it is
+ * no longer an integer. Twelve figures is far more precision than any axis label or readout
+ * shows, so this cannot round a frequency anyone could tell apart.</p>
+ */
+export function decayAxisValue(coordinate: number, isFrequency: boolean): number {
+  if (!isFrequency) return coordinate
+  const value = 10 ** coordinate
+  return Number.isFinite(value) ? Number(value.toPrecision(12)) : value
+}
+
+/**
+ * <p><b>The depth axis is negated, and that is the handedness of the library's camera rather than
+ * a preference.</b> Working its projection through for a parallel view: at a horizontal angle of
+ * zero, screen x follows the first floor axis and screen y follows
+ * <c>cos(v)·height + sin(v)·(second floor axis)</c> — so the second axis recedes <em>away</em> from
+ * the viewer as it grows. Slice zero is the back of a waterfall, so the depth coordinate has to
+ * fall as the stack comes forward.</p>
+ *
+ * <p>Turning the camera to the opposite side instead fixes the depth and mirrors the frequency
+ * with it, because the floor keeps its handedness however the camera moves — the same trap the
+ * previous engine's <c>InvertedXAxis</c> was there to undo. This library has no such flag, which
+ * leaves negating one coordinate as the only lever that moves one axis alone; the sign is handed
+ * back to the ticks by {@link decayDepthLabel}.</p>
+ */
+export const DECAY_DEPTH_SIGN = -1
+
+/**
+ * The surface as the library wants it: a flat list of vertices, holes simply absent.
  *
  * @param rangeDb How far below 0 dB the chart reaches. Levels are clamped to it rather than
  * dropped, exactly as <c>levelY</c> clamps them in the Canvas 2D chart, so the two agree about
  * what the foot of the scale means.
  */
-export function decayMesh(surface: DecaySurface, mode: DecayChartMode, rangeDb: number): DecayMesh {
+export function decayPoints(
+  surface: DecaySurface,
+  mode: DecayChartMode,
+  rangeDb: number,
+): DecayPointCloud {
   const view = orientSurface(surface, mode === 'WaterfallPeriods')
   const rows = view.depth.length
   const cols = view.across.length
+  const floor = -Math.abs(rangeDb)
 
-  const y = new Float64Array(rows * cols)
-  let missing = 0
+  // Computed once per column and once per curve rather than per point: the library matches rows
+  // to grid positions by exact equality, so every slice has to carry the identical coordinate for
+  // a column, and `log10` twice on the same input is not guaranteed to be the same bits.
+  const across = view.across.map((v) => decayAxisCoordinate(v, view.acrossIsFrequency))
+  const depth = view.depth.map((v) => DECAY_DEPTH_SIGN * decayAxisCoordinate(v, view.depthIsFrequency))
+
+  const points: Graph3dPoint[] = []
+  let omitted = 0
   for (let r = 0; r < rows; r++) {
+    const y = depth[r]
     for (let c = 0; c < cols; c++) {
       const level = view.level(r, c)
       if (level === null) {
-        y[r * cols + c] = Number.NaN
-        missing++
-      } else {
-        y[r * cols + c] = level < -rangeDb ? -rangeDb : level > 0 ? 0 : level
+        omitted++
+        continue
       }
+      points.push({ x: across[c], y, z: level < floor ? floor : level > 0 ? 0 : level })
     }
   }
 
   return {
+    points,
     rows,
     cols,
-    // The real values — the frequency axis is told to scale itself logarithmically, which is what
-    // puts true hertz on the ticks. (The column index plus point labels was the first attempt and
-    // is a dead end: a 3D chart has no way to put strings on an axis, so the ticks read 0…399.)
-    // Negated on the linear axis only; see `acrossNegated` for the whole of why.
-    x: Float64Array.from(view.across, (v) => (view.acrossIsFrequency ? v : -v)),
-    acrossNegated: !view.acrossIsFrequency,
     acrossIsFrequency: view.acrossIsFrequency,
     depthIsFrequency: view.depthIsFrequency,
-    y,
-    // Plain values. The camera is what puts slice zero at the back.
-    z: Float64Array.from(view.depth),
-    missing,
+    omitted,
   }
 }
 
+/** A tick on the across axis, undoing {@link decayAxisCoordinate}. */
+export function decayAcrossLabel(coordinate: number, isFrequency: boolean): string {
+  if (!Number.isFinite(coordinate)) return ''
+  const value = decayAxisValue(coordinate, isFrequency)
+  return isFrequency ? formatHz(value) : formatTimeValue(value)
+}
+
+/** A tick on the depth axis, undoing both the coordinate and {@link DECAY_DEPTH_SIGN}. */
+export function decayDepthLabel(coordinate: number, isFrequency: boolean): string {
+  if (!Number.isFinite(coordinate)) return ''
+  const value = decayAxisValue(DECAY_DEPTH_SIGN * coordinate, isFrequency)
+  return isFrequency ? formatHz(value) : formatTimeValue(value)
+}
+
+/** The frequency a point of the cloud stands at, whichever floor axis is carrying it. */
+export function decayPointFrequencyHz(point: Graph3dPoint, cloud: DecayPointCloud): number {
+  if (cloud.acrossIsFrequency) return decayAxisValue(point.x, true)
+  if (cloud.depthIsFrequency) return decayAxisValue(DECAY_DEPTH_SIGN * point.y, true)
+  return Number.NaN
+}
+
+/** The time or period a point of the cloud stands at — the floor axis that is not the frequency. */
+export function decayPointTime(point: Graph3dPoint, cloud: DecayPointCloud): number {
+  return cloud.acrossIsFrequency ? DECAY_DEPTH_SIGN * point.y : point.x
+}
+
+/** Milliseconds or periods, to as many places as the number needs and no more. */
+function formatTimeValue(value: number): string {
+  const magnitude = Math.abs(value)
+  if (magnitude >= 100) return value.toFixed(0)
+  if (magnitude >= 10) return value.toFixed(1)
+  return value.toFixed(2)
+}
+
 /**
- * The 256 colours the engine ramps the height axis through, as its own packed ARGB.
+ * The colour of a height, as the library's <c>colormap</c> wants it: a function of the level's
+ * position in the z range, 0 at the foot of the scale.
  *
- * <p><c>PeColor.SubsetColors[0..255]</c> is the height ramp on a surface — not
- * <c>ContourColorSet</c>, which offers ten fixed ramps and twenty overridable colours. 256 entries
- * is a 1:1 fit for <c>paletteLut</c>, so the palette, <c>paletteIndex</c> and
- * <c>PALETTE_FLOOR_FRACTION</c> all carry over exactly and a level means the same colour on both
- * charts.</p>
+ * <p>It reads <c>paletteLut</c> through <c>paletteIndex</c>, so the palette and
+ * <c>PALETTE_FLOOR_FRACTION</c> carry over exactly and a level means the same colour on both
+ * charts and in the key beside either of them.</p>
  */
-export function decaySubsetColors(palette: DecayPalette, onDark: boolean): Uint32Array {
+export function decayColormap(palette: DecayPalette, onDark: boolean): (fraction: number) => Graph3dRgb {
   const lut = paletteLut(palette, onDark)
-  const out = new Uint32Array(256)
-  for (let i = 0; i < 256; i++) {
-    const index = paletteIndex(i / 255, paletteFloorFraction(palette))
-    out[i] = peColor(lut[index * 3], lut[index * 3 + 1], lut[index * 3 + 2])
+  const floor = paletteFloorFraction(palette)
+  return (fraction: number) => {
+    const index = paletteIndex(Number.isFinite(fraction) ? fraction : 0, floor)
+    return { r: lut[index * 3], g: lut[index * 3 + 1], b: lut[index * 3 + 2] }
   }
-  return out
-}
-
-/** A ProEssentials colour: opaque, red in the low byte. */
-export function peColor(r: number, g: number, b: number): number {
-  return ((r | (g << 8) | (b << 16) | (255 << 24)) >>> 0)
 }
 
 /**
- * The proportions of the box the surface is drawn in — <b>fixed, not the data's own extents</b>.
+ * How tall the box is drawn, against its own floor — the <b>Explode Z axis</b> slider.
  *
- * <p>Taking them from the slice and column counts is the obvious thing and it is wrong: a CSD is
- * 400 columns by 60 slices, so a box in data units is seven times wider than it is deep and the
- * surface is drawn edge-on and clipped. The axes here are frequency and time, which have no
- * common unit, so there is no proportion to preserve — the Canvas 2D chart does not preserve one
- * either, giving the depth axis a share of the plot box rather than a share of the slice count.</p>
+ * <p>Asked for 2026-10-29, when it replaced three per-axis sliders, and it is the one control over
+ * the box's shape that this library has: the floor's two axes are frequency and time, which have no
+ * common unit and so no proportion that would be right, and setting them apart only ever tilted the
+ * picture. What is worth stretching is the height, which is the only axis a decay surface is
+ * actually read along.</p>
  *
- * <p>So the box is a fixed shape and the <em>view</em> is what the panel's two numbers move:
- * Rotation swings the camera round it and Tilt raises it. A fixed box is also what lets one zoom
- * frame every surface, whatever its resolution.</p>
- *
- * <p><b>The depth is 14 rather than 9 because the Canvas 2D chart is deeper than that</b> — asked
- * for 2026-10-25, so the two charts of one measurement read alike — and the camera was pulled back
- * with it, which is the half that cannot be skipped: at the old distance a 14-deep box runs off
- * the plot and takes the frequency label with it. See {@link DECAY_3D_ZOOM}, whose two figures
- * were scaled by this same 14/9.</p>
- *
- * <p><b>And it is a small box viewed from close to, not a large one viewed from far off</b>, which
- * is not a free choice: <c>DxViewportX</c>/<c>Y</c> — the viewport translation, and what the
- * engine's own shift-and-drag gesture writes — scale with the camera's distance. At ten times this
- * size and ten times the distance the picture is identical to the pixel, and the whole legal
- * translation range of -3..+3 moves the surface <em>seven pixels</em>, so the gesture looks broken.
- * At this size the same range moves it 47, and the gesture works.</p>
- */
-export function decayGridAspect(
-  explodeZ: number = DECAY_EXPLODE_Z.default,
-  magnificationPercent: number = DECAY_VIEW_MAGNIFICATION.default,
-): { x: number; y: number; z: number } {
-  // <p>The floor is square, so the two statements the engine wants about it — x against z and z
-  // against x — agree by construction. An afternoon of 2026-10-26 went on a box told two
-  // contradictory things about its own shape, which degenerates to a slab that no later value
-  // moves; a square floor is the simplest way to be sure of it. (The <c>X · Z = 1</c> rule that was
-  // written here is not one: the vendor's own demo writes raw lengths, 1232 by 1028, and these
-  // scale linearly over at least 0.5 to 5 — which is the whole of {@link DECAY_VIEW_MAGNIFICATION}
-  // below.)</p>
-  const explode = Number.isFinite(explodeZ) && explodeZ > 0 ? explodeZ : DECAY_EXPLODE_Z.default
-  const edge = boxEdge(magnificationPercent)
-  return { x: edge, y: edge * Math.SQRT2 * (explode / 100), z: edge }
-}
-
-/** How long the box's floor edge is drawn, for this magnification. */
-function boxEdge(magnificationPercent: number): number {
-  const percent = Number.isFinite(magnificationPercent) && magnificationPercent > 0
-    ? magnificationPercent
-    : DECAY_VIEW_MAGNIFICATION.default
-  return percent / DECAY_VIEW_MAGNIFICATION.default
-}
-
-/**
- * How tall the box is drawn, against its own floor — the vendor demo's <b>Explode Z Axis</b>, and
- * the only control over the box's shape.
- *
- * <p>Asked for 2026-10-29: the demo at gigasoft.com/javascript-3d-surface-chart-live-demo offers
- * one slider here where this app offered three, and the three were a worse answer. The floor's two
- * axes are frequency and time, which have no common unit and so no proportion to be right, and
- * setting them apart only ever tilted the picture; what is worth stretching is the height, which is
- * the only axis a decay surface is actually read along.</p>
- *
- * <p>The formula is the demo's own, divided through by the floor edge. Theirs reads
- * <c>GridAspectX = width, GridAspectZ = height, GridAspectY = diagonal × explode/100</c> on a
- * terrain map whose floor is a real rectangle; with a square floor that is <c>X = Z = 1</c> and
- * <c>Y = √2 × explode/100</c>, which keeps the triple at order one where this chart's camera
- * distance was measured. The range is theirs too, 1 to 50.</p>
- *
- * <p><b>This could replace those three without the chart opening on a different picture</b>: the box
- * they were last set to (2026-10-27, as the axis lengths 30 / 11 / 30) is 11/30 = 0.3667 against
- * √2 × 26/100 = 0.3677, three parts in a thousand, and that is what
- * {@link explodeZForAxisLengths} carries a stored one over by. The default is 23 rather than that
- * 26 because Joost turned it there on 2026-10-29, with the rest of {@link decayViewDefaults}.</p>
+ * <p>The range 1 to 50 was the previous engine's demo's own and is kept, because it is what every
+ * measurement already stored this field on. {@link decayVerticalRatio} is what maps it.</p>
  */
 export const DECAY_EXPLODE_Z = { min: 1, max: 50, step: 1, default: 23 } as const
 
 /**
+ * <p>The library's <c>verticalRatio</c>, which multiplies the height axis's scale and is documented
+ * as 0.1 to 1.0. The slider's whole travel maps onto the whole of that, so neither end is a dead
+ * stretch — the fault the previous engine's magnification had, where seven eighths of the slider
+ * rendered byte-identically.</p>
+ *
+ * <p>The default lands on 0.504, which is the library's own default of 0.5 to within a step. That
+ * is a coincidence worth keeping rather than designing around: it means the box this chart opens on
+ * is the shape the library was tuned to draw.</p>
+ */
+export function decayVerticalRatio(explodeZ: number = DECAY_EXPLODE_Z.default): number {
+  const value = Number.isFinite(explodeZ) ? explodeZ : DECAY_EXPLODE_Z.default
+  const clamped = Math.min(DECAY_EXPLODE_Z.max, Math.max(DECAY_EXPLODE_Z.min, value))
+  const t = (clamped - DECAY_EXPLODE_Z.min) / (DECAY_EXPLODE_Z.max - DECAY_EXPLODE_Z.min)
+  return VERTICAL_RATIO_MIN + t * (VERTICAL_RATIO_MAX - VERTICAL_RATIO_MIN)
+}
+
+const VERTICAL_RATIO_MIN = 0.1
+const VERTICAL_RATIO_MAX = 1.0
+
+/**
  * The Explode Z a measurement's stored axis lengths come to, for one saved before this slider
  * existed. What that measurement chose was the height against the floor, so that ratio is what
- * carries over: invert {@link decayGridAspect}'s <c>y = √2 × explode/100</c> against the across
+ * carries over: invert the previous engine's <c>y = √2 × explode/100</c> against the across
  * length, which the floor was square on anyway in the only box this app ever opened on.
  */
 export function explodeZForAxisLengths(acrossLength: number, levelLength: number): number {
@@ -235,120 +244,88 @@ export function explodeZForAxisLengths(acrossLength: number, levelLength: number
 }
 
 /**
- * How far to pull the camera back, for a plot of this shape.
+ * How far the surface is moved across the plot and up it.
  *
- * <p>Measured rather than derived (2026-10-25, against the fixed box {@link decayGridAspect}
- * returns): the ordinary figure frames the surface with nothing touching an edge at every aspect
- * from 0.98 to 4.0, which is every layout this app actually produces. Below about 0.95 — both
- * rails open on a narrow window — it clips, and the narrow figure covers that. Both were measured
- * at ten times this box and ten times this distance, where the picture is identical, and scaled
- * with it.</p>
- *
- * <p><b>More negative is further back</b>, which is worth writing down because the sweep that
- * found it read as non-monotonic by eye and is not: counting surface pixels against the plot's own
- * border, a 14-deep box reads <b>41 edge pixels at -30, 0 at -34 and 0 at -40</b>, with the
- * drawn area falling 30.7 %, 24.9 %, 19.0 % of the canvas as it recedes. Note what the same
- * measurement says about the pairing before the box was deepened: at 9 deep and -20 the surface
- * put <b>252 pixels</b> against the border, so it had been clipping slightly all along, which
- * nothing had caught because the clipped part is the corner of a floor.</p>
- *
- * <p><b>Both figures were measured again on 2026-10-26 for how well they *fill* the plot, which is
- * a different question from whether they clip, and the narrow one was far out.</b> Asked for as a
- * default view matching a supplied picture. The limiting dimension is not the same at the two
- * shapes — a wide plot runs out of height and a near-square one runs out of width — which is the
- * whole reason this is per-aspect. Measured as the surface's own bounding box over the canvas, by
- * magnifying until it reached an edge: at <b>aspect 1.39</b> the surface already spans 0.21-0.89
- * of the height at the fitted distance and has about <b>10 %</b> left, while at <b>aspect 0.95</b>
- * it spans 0.18-0.85 of the width and has about <b>55 %</b>. So the ordinary figure moved a little
- * and the narrow one a lot; it had been scaled with the box the day before without being
- * re-measured, which is what left it pulled so far back — and a chart at a 1000-pixel window sits
- * right on the 0.95 threshold, so that over-conservative rung is what a bench actually saw.</p>
- *
- * <p>The limit is close to -31 at every aspect measured and is reached by a different edge at each
- * (the sides near 1.0, the floor by 1.4), so the ordinary figure is set one notch inside it:
- * at aspect 1.06, <b>-31 puts 217 pixels against the border while -33 leaves a left margin of
- * 0.086 and -34 of 0.104</b>, all three filling far more of the plot than the narrow rung did.</p>
- *
- * <p>The engine's own <c>DxFitControlShape</c> is not the answer: it ignores the zoom and fills
- * the plot, measuring 65–99 % of the canvas covered with thousands of pixels against the edges at
- * every zoom tried. And the relation is not monotonic at extreme shapes — pulling further back
- * from a very tall, narrow plot can clip again — so this is a measured step rather than a formula.</p>
- */
-// <p>Scaled by a tenth on 2026-10-26, when {@link decayGridAspect} went from raw lengths to the
-// engine's own ratios: the box those draw is about ten times smaller, so the camera comes in by the
-// same factor and the picture is the one these figures were measured for. The relation below is
-// unchanged — it is the shape of the plot that decides which of the two applies.</p>
-export const DECAY_3D_ZOOM = -3.3
-export const DECAY_3D_ZOOM_NARROW = -3.8
-/** Below this width-over-height the surface no longer fits at the ordinary zoom. */
-export const DECAY_3D_NARROW_ASPECT = 0.95
-
-export function decayCameraZoom(widthPx: number, heightPx: number): number {
-  if (!(widthPx > 0) || !(heightPx > 0)) return DECAY_3D_ZOOM
-  return widthPx / heightPx < DECAY_3D_NARROW_ASPECT ? DECAY_3D_ZOOM_NARROW : DECAY_3D_ZOOM
-}
-
-/**
- * The view controls the GigaSoft demo offers and this chart did not, added 2026-10-26 after a
- * side-by-side with it: where the surface sits, how big it is drawn, and where the light comes
- * from. They live in a section of their own, collapsed, because none of them is touched on an
- * ordinary visit — the defaults are the view the chart opens on, and these are for matching a
- * picture or lighting an awkward one.
- *
- * <p>Each is stored with the measurement, so a view that took some turning can be kept. That is
- * the whole reason they are settings rather than a drag: the shift-and-drag gesture already moves
- * the surface and is forgotten the moment the chart is rebuilt.</p>
- */
-
-/**
- * How far the surface is moved across the plot, in the engine's own viewport units.
- *
- * <p>±3 is the documented legal range of <c>DxViewportX</c>/<c>Y</c> and is also why the box is
- * small and close rather than large and far: that range scales with the camera's distance, and at
- * ten times this size it moves the surface seven pixels. See {@link decayGridAspect}.</p>
- *
- * <p>The two axes have their own ranges and their own defaults, which is why they are two
- * constants: the opening view sits further up the plot than across it.</p>
+ * <p>The ranges and the defaults are the previous engine's viewport units, kept so that no stored
+ * value changes meaning: {@link decayCenterPercent} maps them onto this library's own
+ * <c>xCenter</c>/<c>yCenter</c> instead of being migrated. The two axes have their own ranges for
+ * the reason they always did — the opening view has more room above it than beside it.</p>
  */
 export const DECAY_VIEW_MOVE_X = { min: -3, max: 3, default: 0 } as const
 
-/**
- * The same up the plot, and its range is <b>not</b> the sideways one.
- *
- * <p>Up to 4 rather than 3, asked for 2026-10-26: the default view already sits at 3 and there was
- * no room left above it. The engine documents ±3 as the legal translation, so the top of this
- * slider is past what it promises — it is accepted and keeps moving the surface, and the
- * consequence of asking for too much here is the surface leaving the plot, which is on screen the
- * moment it happens rather than silent.</p>
- */
+/** The same up the plot, and its range is <b>not</b> the sideways one. Positive moves it up. */
 export const DECAY_VIEW_MOVE_Y = { min: -3, max: 4, default: 0 } as const
+
+/** How far one unit of either Move slider shifts the box, as a percentage of the plot. */
+export const DECAY_MOVE_PERCENT_PER_UNIT = 8
+
+/** Where the library puts the box with no Move at all. */
+const DECAY_CENTER_X_PERCENT = 55
+const DECAY_CENTER_Y_PERCENT = 45
+
+/**
+ * The two Move sliders as the library's percentage strings.
+ *
+ * <p><b>Y is subtracted</b>: the library measures its vertical centre down the canvas, and a slider
+ * labelled "Move vertically" that sent the surface down when pushed up would be its own bug.</p>
+ */
+export function decayCenterPercent(
+  moveX: number = DECAY_VIEW_MOVE_X.default,
+  moveY: number = DECAY_VIEW_MOVE_Y.default,
+): { xCenter: string; yCenter: string } {
+  const x = Number.isFinite(moveX) ? moveX : DECAY_VIEW_MOVE_X.default
+  const y = Number.isFinite(moveY) ? moveY : DECAY_VIEW_MOVE_Y.default
+  return {
+    xCenter: `${DECAY_CENTER_X_PERCENT + x * DECAY_MOVE_PERCENT_PER_UNIT}%`,
+    yCenter: `${DECAY_CENTER_Y_PERCENT - y * DECAY_MOVE_PERCENT_PER_UNIT}%`,
+  }
+}
 
 /**
  * How large the surface is drawn, as a percentage of the view a measurement opens on.
  *
- * <p><b>It is the size of the box, not the camera's lens, and that is the whole of why it now
- * works.</b> Reported 2026-10-29: "our stops magnifying when the full chart is still in view".
- * Measured, exactly so — the old control narrowed <c>DxFOV</c> and left the camera where it was,
- * and a long lens converges on an orthographic view that no further narrowing can enlarge. At a
- * fixed camera the drawn width went <b>96 px at 100 %, 209 at 400, 243 at 800, 270 at 2000 and 278
- * at 4000</b>: a tenfold slider travel bought a third more picture, all of it in the first eighth.
- * Bringing the camera in instead buys almost nothing at that lens (270 → 285 px from -3.3 to
- * -0.4), and opening the lens to the vendor's own 45° buys range at the cost of the near-isometric
- * view a waterfall is read in — their terrain looks right that way and this does not.</p>
- *
- * <p>Scaling the box is linear and has no ceiling: measured at the same camera and lens, floor
- * edges of 0.5 / 1 / 1.5 drew <b>132 / 264 / 393 px</b>, proportional to three figures, and 2, 3
- * and 5 carry on past the edge of the plot — which is the point, since magnifying to see detail
- * means the surface no longer fits. The two Move sliders pan it; their own range is ample at any of
- * these sizes (±3 takes the surface right off the plot at an edge of 3).</p>
- *
- * <p><b>The scale is a tenth of what it was</b>, asked for in the same message — the old 2000 is
- * 200, and the view the chart used to open on is 150. A measurement that stored the old scale is
- * divided by ten on the way in, which is approximate by nature, since the old control was not
- * linear in the first place. The default is 170, which is where Joost left it on 2026-10-29 once
- * the slider did something.</p>
+ * <p>The range and the default are kept from the previous engine so no stored value changes
+ * meaning. What it drives here is the camera's arm: in a parallel projection the library's own
+ * screen conversion is <c>dx / armLength</c>, so the drawn size is exactly the reciprocal of the
+ * distance, and the documented arm of 0.71 to 5.0 is a sevenfold span of picture.</p>
  */
 export const DECAY_VIEW_MAGNIFICATION = { min: 20, max: 800, step: 5, default: 170 } as const
+
+/** The library's documented arm length. More is further back, so a larger magnification is less. */
+const CAMERA_DISTANCE_NEAR = 0.71
+const CAMERA_DISTANCE_FAR = 5.0
+
+/**
+ * The camera arm for a magnification.
+ *
+ * <p><b>Logarithmic, so that every step of the slider moves the picture.</b> The obvious mapping is
+ * proportional — hold a reference size and divide — and it saturates: the arm's legal range is only
+ * sevenfold where the slider is fortyfold, so a proportional map pins everything below about 58 %
+ * and above about 400 % against a limit. That is precisely the fault this slider had on the
+ * previous engine, reported twice ("a magnification of 90 % results in a larger graph than 110 %",
+ * "above 200 % does not work"), and a mapping that cannot produce it is worth more than a literal
+ * percentage. Both ends of the slider reach both ends of the arm, and no two steps are equal.</p>
+ *
+ * <p>The default falls near 1.61, which is the library's own default arm of 1.7 to within a tenth —
+ * so the view a measurement opens on is close to the framing the library was tuned for.</p>
+ */
+export function decayCameraDistance(
+  magnificationPercent: number = DECAY_VIEW_MAGNIFICATION.default,
+): number {
+  const percent = Number.isFinite(magnificationPercent) && magnificationPercent > 0
+    ? Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, magnificationPercent))
+    : DECAY_VIEW_MAGNIFICATION.default
+  const t =
+    Math.log(percent / DECAY_VIEW_MAGNIFICATION.min) /
+    Math.log(DECAY_VIEW_MAGNIFICATION.max / DECAY_VIEW_MAGNIFICATION.min)
+  const distance = Math.exp(
+    Math.log(CAMERA_DISTANCE_FAR) + t * (Math.log(CAMERA_DISTANCE_NEAR) - Math.log(CAMERA_DISTANCE_FAR)),
+  )
+  // Clamped against its own ends, not because the mapping can overshoot but because exp(log())
+  // lands a few parts in 10^16 outside them: the top of the slider came back as 0.70999999999,
+  // and the library refuses an arm below 0.71 by silently clamping it.
+  return Math.min(CAMERA_DISTANCE_FAR, Math.max(CAMERA_DISTANCE_NEAR, distance))
+}
 
 /**
  * Where a stored magnification was written on the old scale, which ran to 2000 and saturated.
@@ -364,21 +341,43 @@ export function magnificationFromStored(stored: number): number {
   return Math.min(DECAY_VIEW_MAGNIFICATION.max, Math.max(DECAY_VIEW_MAGNIFICATION.min, value))
 }
 
-/** Where the light sits around the box, in degrees; 0 is along +x and it turns towards +z. */
-export const DECAY_LIGHT_AZIMUTH = { min: 0, max: 359, default: 164 } as const
-
 /**
- * How high the light sits, in degrees above the floor plane; negative puts it below.
+ * The camera, from the two sliders above the Surface view section.
  *
- * <p>The default is below the box, which is not an oversight — it is where Joost turned it on
- * 2026-10-29. A surface lit from under its own floor is lit on the faces that recede from the
- * camera, which is what makes a decay's steps read as steps.</p>
+ * <p><b>Rotation is the horizontal angle straight through</b>, with no offset: at zero the library
+ * draws the first floor axis left to right, which is the frequency, and that is the view a
+ * waterfall is read from. The lean is then the same quantity on both charts, so the two agree
+ * about what Rotation means.</p>
+ *
+ * <p><b>Tilt is how much of the picture the depth axis takes</b>, which on an oblique projection is
+ * a fraction of the plot's height and here is how far the camera is raised: 0 is level with the
+ * floor, where the stack has no depth at all, and 0.5π looks straight down on it, where it has
+ * nothing but. So the percentage maps onto that quarter turn directly.</p>
  */
-export const DECAY_LIGHT_ELEVATION = { min: -90, max: 90, default: -57 } as const
+export function decayCameraAngles(
+  rotationDeg: number = DECAY_ROTATION_DEG.default,
+  depthPercent: number = DECAY_DEPTH_PERCENT.default,
+): { horizontal: number; vertical: number } {
+  const rotation = clampTo(rotationDeg, DECAY_ROTATION_DEG)
+  const depth = clampTo(depthPercent, DECAY_DEPTH_PERCENT)
+  return {
+    horizontal: (rotation * Math.PI) / 180,
+    vertical: (depth / 100) * (Math.PI / 2),
+  }
+}
+
+function clampTo(value: number, range: { min: number; max: number; default: number }): number {
+  if (!Number.isFinite(value)) return range.default
+  return value < range.min ? range.min : value > range.max ? range.max : value
+}
 
 /**
- * Everything about the decay view that is a camera, a box or a light — the ten sliders, under the
- * names the display state carries them by.
+ * Everything about the decay view that is a camera or a box — the six sliders, under the names the
+ * display state carries them by.
+ *
+ * <p>It was eight until the GigaSoft engine was replaced on 2026-10-30. The two that went were the
+ * light's angles: <c>vis-graph3d</c> has no positionable light, only a view-angle brightness term
+ * it applies per quad, so there was nothing for them to turn.</p>
  */
 export interface DecayViewSettings {
   decayRotationDeg: number
@@ -386,8 +385,6 @@ export interface DecayViewSettings {
   decayMoveX: number
   decayMoveY: number
   decayMagnification: number
-  decayLightAzimuthDeg: number
-  decayLightElevationDeg: number
   decayExplodeZ: number
 }
 
@@ -395,7 +392,7 @@ export interface DecayViewSettings {
  * The view a measurement opens on, and the one the Surface view panel's <b>Reset view</b> button
  * gives back.
  *
- * <p><b>It is one function because those have to be the same ten numbers</b>, and a button that
+ * <p><b>It is one function because those have to be the same six numbers</b>, and a button that
  * restored a view no new measurement ever opens on would be the worse of two wrong answers.
  * <c>defaultImpulseDisplay</c> spreads this rather than listing the fields beside it, so there is
  * no second copy to drift — which is the trap the per-mode level memory and the impedance stimulus
@@ -407,10 +404,9 @@ export interface DecayViewSettings {
  * which is to say not the view it promises. The button's own title says it covers them.</p>
  *
  * <p>The figures are Joost's, turned on the bench and asked for as the defaults on 2026-10-27, and
- * again on 2026-10-28 and 2026-10-29 as the controls around them changed — the set here is a
- * flattish box seen from nearly straight on, drawn large, lit from below. Nothing here is derived,
- * and nothing here can be: what makes a decay surface readable is a matter
- * of looking at one, which is also why all ten are sliders rather than boxes.</p>
+ * again on 2026-10-28 and 2026-10-29 as the controls around them changed. Nothing here is derived,
+ * and nothing here can be: what makes a decay surface readable is a matter of looking at one, which
+ * is also why all six are sliders rather than boxes.</p>
  */
 export function decayViewDefaults(): DecayViewSettings {
   return {
@@ -419,106 +415,13 @@ export function decayViewDefaults(): DecayViewSettings {
     decayMoveX: DECAY_VIEW_MOVE_X.default,
     decayMoveY: DECAY_VIEW_MOVE_Y.default,
     decayMagnification: DECAY_VIEW_MAGNIFICATION.default,
-    decayLightAzimuthDeg: DECAY_LIGHT_AZIMUTH.default,
-    decayLightElevationDeg: DECAY_LIGHT_ELEVATION.default,
     decayExplodeZ: DECAY_EXPLODE_Z.default,
   }
 }
 
 /**
- * How far the light sits from the box — fixed, and not a control.
- *
- * <p>Brightness is a property of this distance, so leaving it out of the two angle controls is
- * what makes them turn the light rather than dim it. The figure is the vendor demo's own, which
- * {@link DECAY_LIGHT} has matched since it was first turned.</p>
- */
-export const DECAY_LIGHT_RADIUS = Math.hypot(2, 7, 7)
-
-/** The light's position from the two angles the panel turns. */
-export function decayLightVector(azimuthDeg: number, elevationDeg: number): { x: number; y: number; z: number } {
-  const az = (azimuthDeg * Math.PI) / 180
-  const el = (elevationDeg * Math.PI) / 180
-  const flat = DECAY_LIGHT_RADIUS * Math.cos(el)
-  return {
-    x: flat * Math.cos(az),
-    // Negative is above: the engine's height axis points down for the light, which is why every
-    // vector that has ever lit this chart has had a negative y.
-    y: -DECAY_LIGHT_RADIUS * Math.sin(el),
-    z: flat * Math.sin(az),
-  }
-}
-
-/**
- * The camera distance for a plot of this shape at this magnification.
- *
- * <p>More negative is further back, so a larger magnification divides. Clamped to the engine's own
- * <c>DxZoomMin</c> at the far end and short of zero at the near one, where the camera would be
- * inside the box.</p>
- */
-/**
- * The camera's lens, fixed.
- *
- * <p><c>DxFOV</c> is documented as <c>Pi / (4 * this)</c>, so 1 is a 45° view and 8 to 10 is near
- * isometric. 15 is what the magnification control used to reach at its own default, and it is kept
- * because that near-isometric view is what makes a waterfall readable: the vendor's demo runs at 1,
- * which suits a terrain seen from above and draws this box as a looming wide-angle shot.</p>
- *
- * <p>It is a constant rather than a control because at this lens the camera and the lens barely
- * change the drawn size — see {@link DECAY_VIEW_MAGNIFICATION}, which is the box instead.</p>
- */
-export const DECAY_LENS_FOV = 15
-
-/**
- * Where the light goes. One position, not one per camera angle.
- *
- * <p>The vendor demo's light lit its own default view and went dark as the camera moved round the
- * box, which is what the surface looked like once the default lean changed: measured on a 60x400
- * surface, the mean luminance of the lit pixels fell from 92.4 at azimuth 315 to 82.4 at azimuth
- * 10. Reported 2026-10-25.</p>
- *
- * <p><b>Turning the light with the camera, per frame, was the obvious answer and is the worse
- * one.</b> Swept right round the circle in 30-degree steps, a light that follows the camera reads
- * 77.3 at its worst and is below 95 at five of the twelve angles, because the relation between a
- * good light and the camera is not a rotation about the height axis.</p>
- *
- * <p><b>But which side of the box the camera sits on is a different question, and this vector
- * belongs to a side.</b> It was <c>{ 7, -7, -2 }</c> while the camera was at <c>180 - lean</c>;
- * moving it to <c>360 - lean</c> to get the axes the right way round therefore left the light
- * behind the surface, and the chart went dark — reported 2026-10-25 as exactly that, the day after
- * the lighting had been called spot on. Mirroring it about the height axis, which is the same
- * 180 degrees the camera moved, is the fix: measured on one capture, mean luminance
- * <b>70.4 against 86.6</b>, a lift of 23 %, with the darkest quarter unchanged at 25.3 — the
- * mirror lights the faces that face the viewer and does nothing for the shadowed ones, which is
- * what <c>DECAY_LIGHT_STRENGTH</c> is for and why the two complaints needed two fixes. Three other
- * vectors were tried at the new azimuth and all read lower: <c>-7,-7,-2</c> 100.1,
- * <c>7,-7,2</c> 85.6 against this one's 121.1 in that run.</p>
- */
-export const DECAY_LIGHT = decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default)
-
-/**
- * The ambient floor, which is what decides how dark the darkest colour on the surface reads.
- *
- * <p>The engine's own default is 0.3 of a documented 0.1-0.5, and this is the top of that range.
- * Asked for 2026-10-25 as "the darker blue is too dark": the surface is lit, so every colour in
- * the palette is multiplied by a shading term, and at the foot of the ramp that leaves Jet's deep
- * blue almost black against a near-black page.</p>
- *
- * <p><b>It costs no shading, which is the measured part.</b> Over the same capture the mean
- * luminance of the darkest quarter of the surface goes <b>25.3 at 0.30, 35.1 at 0.42 and 42.0 at
- * 0.50</b> — the dark end lifts by two thirds — while the standard deviation of luminance across
- * the whole surface, which is what makes it read as a solid rather than a flat patch, goes
- * <b>63.4, 66.8, 66.7</b>: it rises slightly and then holds. So brightening here does not flatten
- * the picture, and there is no reason to stop short of the documented maximum.</p>
- *
- * <p><c>BackLight</c>, the secondary light 180 degrees from the primary, is deliberately left at
- * its default: swept to 100 it rendered <em>identically</em> — mean 98.6 and dark quarter 33.4,
- * to the digit, with it at 65 and at 100 — so it reaches nothing on this plot type.</p>
- */
-export const DECAY_LIGHT_STRENGTH = 0.5
-
-/**
  * The caption a report or a screenshot carries. Shared with the Canvas 2D chart rather than
- * written out twice, so a chapter reads identically whichever engine drew it.
+ * written out twice, so a chapter reads identically whichever chart drew it.
  */
 export function decayExportTitle(
   surface: DecaySurface | null,
@@ -535,9 +438,28 @@ export function decayExportTitle(
 }
 
 /**
- * Whether the 3D engine can draw this mode at all. The sonogram is a flat colour map — one
+ * <p>What the chart's options depend on, as one comparable value — so a pass that changes none of
+ * them can skip the rebuild <c>setOptions</c> costs, and a pass that changes one cannot.</p>
+ *
+ * <p><b>The slice axis is in it, and is the one easy to leave out.</b> It belongs to the
+ * <em>surface</em> rather than to a setting: switching the view from the cumulative spectral decay
+ * to the burst decay hands over a different surface at the same mode and the same range, and its
+ * depth is counted in periods where the other's was in milliseconds. Left out, the burst decay
+ * draws under a time axis labelled "Time (ms)" over a scale that is nothing of the kind — which
+ * is what it did the first time this comparison was written, and what the test here pins.</p>
+ */
+export function decayOptionsKey(
+  surface: DecaySurface | null,
+  mode: DecayChartMode,
+  rangeDb: number,
+): string {
+  return `${surface?.sliceAxis ?? '-'}|${mode}|${rangeDb}`
+}
+
+/**
+ * Whether the 3D chart can draw this mode at all. The sonogram is a flat colour map — one
  * <c>putImageData</c> blit in the Canvas 2D chart, already correct and already fast — so there is
- * nothing for a lit mesh to add, and the engine's own flat-contour view is a different picture.
+ * nothing for a turnable surface to add, and a flat-shaded 3D box is a different picture.
  */
 export function decayModeIs3d(mode: DecayChartMode): boolean {
   return mode !== 'Sonogram'

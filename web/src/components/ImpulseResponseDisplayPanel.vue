@@ -29,8 +29,6 @@ import { impulseReferenceLabel } from '../measurements/impulseReadings'
 import { chooseDelayUnit, delayFitStepUs, delayValuesOf, unitToUs, usToUnit } from '../response/delayAxis'
 import {
   DECAY_EXPLODE_Z,
-  DECAY_LIGHT_AZIMUTH,
-  DECAY_LIGHT_ELEVATION,
   DECAY_VIEW_MAGNIFICATION,
   DECAY_VIEW_MOVE_X,
   DECAY_VIEW_MOVE_Y,
@@ -42,16 +40,16 @@ import { useAppTheme } from '../composables/useAppTheme'
 import CollapsibleSection from './CollapsibleSection.vue'
 
 /**
- * Whether the GPU surface is drawing the decay charts rather than the Canvas 2D one.
+ * Whether the 3D surface is drawing the decay charts rather than the Canvas 2D one.
  *
- * <p>Two of the controls below are the 2D painter's own and reach nothing on the lit mesh: the
+ * <p>Two of the controls below are the 2D painter's own and reach nothing on the 3D box: the
  * fill between the curves, and the colour of the curves themselves — a surface has no gaps to
  * fill and no separate curves to colour. They are hidden rather than disabled, because a disabled
  * control invites the reader to work out how to enable it, and here there is nothing to enable.
  * Everything else in the section is shared: Rotation and Tilt move the camera, Palette is the
  * height ramp, and the mode picks which surface is drawn.</p>
  */
-const props = defineProps<{ gpuSurface?: boolean }>()
+const props = defineProps<{ surface3d?: boolean }>()
 
 const view = defineModel<ImpulseView>('view', { required: true })
 const normalisedImpulse = defineModel<boolean>('normalisedImpulse', { required: true })
@@ -111,8 +109,6 @@ const decayRotationDeg = defineModel<number>('decayRotationDeg', { required: tru
 const decayMoveX = defineModel<number>('decayMoveX', { required: true })
 const decayMoveY = defineModel<number>('decayMoveY', { required: true })
 const decayMagnification = defineModel<number>('decayMagnification', { required: true })
-const decayLightAzimuthDeg = defineModel<number>('decayLightAzimuthDeg', { required: true })
-const decayLightElevationDeg = defineModel<number>('decayLightElevationDeg', { required: true })
 const decayExplodeZ = defineModel<number>('decayExplodeZ', { required: true })
 const decayDepthPercent = defineModel<number>('decayDepthPercent', { required: true })
 const decayRangeDb = defineModel<number>('decayRangeDb', { required: true })
@@ -183,7 +179,7 @@ const VIEWS: { value: ImpulseView; label: string }[] = [
 const isDecayView = computed(() => view.value === 'Csd' || view.value === 'BurstDecay')
 
 /**
- * Puts every one of the eight view sliders back where a new measurement starts, from the one function
+ * Puts every one of the six view sliders back where a new measurement starts, from the one function
  * that also seeds a new measurement — see `decayViewDefaults`, which is where the reasoning for
  * including Rotation and Tilt is.
  *
@@ -197,13 +193,11 @@ function resetView() {
   decayMoveX.value = d.decayMoveX
   decayMoveY.value = d.decayMoveY
   decayMagnification.value = d.decayMagnification
-  decayLightAzimuthDeg.value = d.decayLightAzimuthDeg
-  decayLightElevationDeg.value = d.decayLightElevationDeg
   decayExplodeZ.value = d.decayExplodeZ
 }
 
 const resetViewTitle =
-  'Puts the camera, the box and the light back where a new measurement starts — these six sliders, and Rotation and Tilt above them.'
+  'Puts the camera and the box back where a new measurement starts — these four sliders, and Rotation and Tilt above them.'
 
 const CSD_WINDOW_MODES: { value: CsdWindowModeName; label: string }[] = [
   { value: 'Apodizing', label: 'CSD, apodizing window' },
@@ -690,10 +684,10 @@ const referenceLabel = computed(() => {
       </label>
 
       <template v-if="decayMode !== 'Sonogram'">
-        <!-- Both of these are the Canvas 2D painter's and reach nothing on the GPU surface; see
-             the `gpuSurface` prop. -->
+        <!-- Both of these are the Canvas 2D painter's and reach nothing on the 3D surface; see
+             the `surface3d` prop. -->
         <label
-          v-if="!props.gpuSurface"
+          v-if="!props.surface3d"
           class="tb-check-row"
           title="Fill the surface between the curves instead of leaving the page between them, and draw the curves themselves in white. The level is then carried by the fill, so the curves read the shape."
         >
@@ -704,7 +698,7 @@ const referenceLabel = computed(() => {
         <!-- Hidden rather than disabled under a filled surface: it decides the colour of the
              curves, and there the fill has already decided it. -->
         <label
-          v-if="!props.gpuSurface && !decayFilled"
+          v-if="!props.surface3d && !decayFilled"
           class="tb-check-row"
           title="Colour each curve by level. Off draws them all in one colour, which reads the shape rather than the level."
         >
@@ -748,13 +742,13 @@ const referenceLabel = computed(() => {
           />
         </label>
 
-        <!-- The five the vendor's own demo offers and this chart did not. In a section of their
-             own and collapsed, because none of them is touched on an ordinary visit: the defaults
-             are the view the chart opens on, and these are for matching a picture or lighting an
-             awkward surface. Only on the GPU chart — the flat projection has no camera and no
-             light, so there would be nothing for any of them to move. -->
+        <!-- Where the box sits, how large it is drawn and how tall. In a section of their own and
+             collapsed, because none of them is touched on an ordinary visit: the defaults are the
+             view the chart opens on, and these are for matching a picture or reading an awkward
+             surface. Only on the 3D chart — the flat projection has no camera, so there would be
+             nothing for any of them to move. -->
         <CollapsibleSection
-          v-if="props.gpuSurface"
+          v-if="props.surface3d"
           title="Surface view"
           size="xs"
           icon="sliders"
@@ -824,40 +818,8 @@ const referenceLabel = computed(() => {
             />
           </label>
 
-          <label class="tb-field">
-            <span class="tb-field-row">
-              <span>Rotate light vertically</span>
-              <span class="tb-field-value">{{ formatSliderValue(decayLightElevationDeg) }}°</span>
-            </span>
-            <input
-              v-model.number="decayLightElevationDeg"
-              type="range"
-              :min="DECAY_LIGHT_ELEVATION.min"
-              :max="DECAY_LIGHT_ELEVATION.max"
-              step="1"
-              class="tb-range"
-              title="How high the light sits. The distance does not change with it, so this turns the light rather than dimming it — how dark the darkest colour reads is the palette's floor, not this."
-            />
-          </label>
-
-          <label class="tb-field">
-            <span class="tb-field-row">
-              <span>Rotate light horizontally</span>
-              <span class="tb-field-value">{{ formatSliderValue(decayLightAzimuthDeg) }}°</span>
-            </span>
-            <input
-              v-model.number="decayLightAzimuthDeg"
-              type="range"
-              :min="DECAY_LIGHT_AZIMUTH.min"
-              :max="DECAY_LIGHT_AZIMUTH.max"
-              step="1"
-              class="tb-range"
-              title="Where the light sits around the box. The default lights the side the camera is on; turning it right round puts the surface in its own shadow."
-            />
-          </label>
-
           <!-- At the foot of the section rather than in its header: beside the chevron it would be
-               hit by anyone reaching to collapse the panel, and ten sliders is a lot to put back by
+               hit by anyone reaching to collapse the panel, and six sliders is a lot to put back by
                hand. It covers Rotation and Tilt too, although their sliders are above this section
                — they are the camera, and a reset that left the box at whatever angle the last turn
                gave it would not be handing back the view it promises. The title says so. -->

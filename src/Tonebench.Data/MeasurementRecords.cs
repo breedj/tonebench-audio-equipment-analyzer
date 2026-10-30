@@ -2319,22 +2319,25 @@ public sealed record ImpulseResponseParameters(
     double? ChartDecayRotationDeg = null,
     double? ChartDecayDepthPercent = null,
     /// <summary>
-    /// The GPU surface's own view, which the Canvas 2D chart has no counterpart for: where the
-    /// surface sits across and up the plot, how large it is drawn as a percentage of the framing
-    /// the plot's shape gives it, and the two angles the light is turned to.
+    /// The 3D surface's own view, which the Canvas 2D chart has no counterpart for: where the
+    /// surface sits across and up the plot, and how large it is drawn as a percentage of the
+    /// framing the plot's shape gives it.
     /// </summary>
     /// <remarks>
-    /// Added 2026-10-26 with the controls themselves, after a side-by-side with the vendor's own
-    /// demo, which offers all five. Stored because the point of them is keeping a view that took
-    /// some turning — the shift-and-drag gesture already moves the surface and is forgotten the
-    /// moment the chart is rebuilt. Null throughout on anything stored before them, and on a
-    /// measurement nobody has opened that section on.
+    /// Added 2026-10-26 with the controls themselves. Stored because the point of them is keeping
+    /// a view that took some turning — a drag already moves the camera and is forgotten the moment
+    /// the chart is rebuilt. Null throughout on anything stored before them, and on a measurement
+    /// nobody has opened that section on.
+    /// <para>Two more sat here until 2026-10-30, the angles the light was turned to. The engine
+    /// that replaced the GigaSoft one has no light to position — only a per-quad brightness from
+    /// the angle a face is seen at — so they were dropped rather than kept as fields nothing could
+    /// read. A measurement saved before that still carries them in its params_json, where they are
+    /// ignored; they are not migrated and nothing is lost by it, a light being a property of the
+    /// view rather than of the measurement.</para>
     /// </remarks>
     double? ChartDecayMoveX = null,
     double? ChartDecayMoveY = null,
     double? ChartDecayMagnification = null,
-    double? ChartDecayLightAzimuthDeg = null,
-    double? ChartDecayLightElevationDeg = null,
     /// <summary>
     /// How long each edge of the surface's box is drawn, in the engine's own grid-aspect units —
     /// across, height and depth. Asked for 2026-10-26: the three axes have no common unit, so

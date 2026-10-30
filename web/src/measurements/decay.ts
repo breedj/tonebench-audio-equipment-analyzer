@@ -99,7 +99,7 @@ export function decayTopHz(nyquistHz: number): number {
  *
  * <p><b>The two defaults are a view Joost turned the chart to and asked to keep</b> (2026-10-27,
  * and retuned by him the same way on 2026-10-28 and again on 2026-10-29), not a derived figure — which is the only kind of answer available here, since what makes a decay
- * readable is a matter of looking at one. They are the GPU surface's camera as much as the flat
+ * readable is a matter of looking at one. They are the 3D surface's camera as much as the flat
  * projection's geometry, and both charts take them, so the one picture is the one both open on.</p>
  *
  * <p>Changing these reaches a measurement that has never stored a view, and nothing else: the two
@@ -439,10 +439,9 @@ export function wallGradientStops(
  * setting this constant to 0.325. The top of the scale is untouched at either value, so this
  * lifts the quiet end and nothing else.</p>
  *
- * <p>The ask came from the GPU surface, where the shading multiplies the palette and so costs the
- * dark end twice over — but it is applied here, to the shared mapping, rather than per chart. A
- * level has to mean the same colour on both charts; the lit mesh already has its own answer to
- * being dark, which is <c>DECAY_LIGHT_STRENGTH</c>.</p>
+ * <p>The ask came from the 3D surface, where the shading multiplies the palette and so costs the
+ * dark end twice over — but it is applied here, to the shared mapping, rather than per chart,
+ * because a level has to mean the same colour on both charts and in the key beside either.</p>
  */
 export const PALETTE_FLOOR_FRACTION = 0.325
 

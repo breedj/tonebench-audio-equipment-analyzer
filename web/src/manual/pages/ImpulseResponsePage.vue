@@ -415,22 +415,17 @@ const { showPage } = useManual()
     </p>
     <h3>The 3D view</h3>
     <p>
-      Where the browser can drive a GPU, the two waterfalls are drawn as a <strong>lit 3D
-      surface</strong> that can be rotated and zoomed freely: drag to turn it, and use the wheel to
-      move the camera in and out. It is the same measurement, the same palette and the same dB
-      range as the flat projection &mdash; only the drawing differs.
+      By default the two waterfalls are drawn as a <strong>3D surface</strong> that can be turned
+      and zoomed freely: drag to turn it, and use the wheel to move the camera in and out. It is
+      the same measurement, the same palette and the same dB range as the flat projection
+      &mdash; only the drawing differs, and a report carries whichever of the two is on screen.
     </p>
     <p>
-      This needs <strong>WebGPU</strong>, which Chrome and Edge 113 and later have on Windows and
-      macOS, and Firefox 141 and later has on Windows. On Linux it depends on the browser, the GPU
-      and the driver. Where it is not available the decay charts simply use the flat projection
-      described above, with no loss of measurement and no message &mdash; nothing needs setting
-      either way.
-    </p>
-    <p>
-      It can also be turned off by hand: <strong>Configuration &rarr; General &rarr; Decay
-      surfaces</strong> chooses between the 3D surface where the browser allows it and the flat
-      projection always. The choice is kept for this browser rather than with the bench's settings.
+      <strong>Configuration &rarr; General &rarr; Decay surfaces</strong> chooses between the two.
+      The choice is kept for this browser rather than with the bench's settings, since it is a
+      choice about how to look at a chart rather than about the measurement. Nothing else decides:
+      the surface needs no particular browser or graphics card, and the <strong>Sonogram</strong>
+      is drawn flat either way.
     </p>
     <p>
       <strong>Rotation</strong> and <strong>Tilt</strong> set the 3D view, and from the first drag
@@ -440,19 +435,20 @@ const { showPage } = useManual()
       after a drag is the picture on screen, not the one the fields describe.
     </p>
     <p>
-      <strong>Surface view</strong>, collapsed below them, holds six more — the same set the ProEssentials 3D surface demo offers, which is where this chart's engine comes from. <strong>Move
+      <strong>Surface view</strong>, collapsed below them, holds four more. <strong>Move
       horizontally</strong> and <strong>Move vertically</strong> slide the surface within the plot
       and <strong>Magnification</strong> sets how large it is drawn, as a percentage of the view the
-      chart opens on. It scales in proportion all the way up its own travel &mdash; 100&nbsp;% is two
-      thirds the size of the default and 400&nbsp;% is nearly twice it &mdash; and it does not stop at
-      the edge of the plot, which is the point: magnifying to read detail means the surface no longer
-      fits, and the two Move sliders are what pan it then. The mouse wheel zooms the camera as well;
-      the camera is the wheel's from the first turn, and moving any of these sliders puts it back. At the foot
-      of the section, <strong>Rotate light vertically</strong> and <strong>Rotate light
-      horizontally</strong> move the light around the
-      box without changing its distance, so they turn it rather than dimming it. All five are
-      stored with the measurement, so a view that took some turning is kept; how dark the darkest
-      colour reads is the palette, not the light.
+      chart opens on. Every step of it moves the picture, and it does not stop at the edge of the
+      plot, which is the point: magnifying to read detail means the surface no longer fits, and the
+      two Move sliders are what pan it then. The mouse wheel zooms the camera as well; the camera is
+      the wheel's from the first turn, and moving any of these sliders puts it back. All four are
+      stored with the measurement, so a view that took some turning is kept.
+    </p>
+    <p>
+      There is no light to position. The surface is shaded by the angle each face is seen at, which
+      is what makes a decay's steps read as steps; how dark the darkest colour reads is the palette.
+      Two sliders that turned a light around the box went with the drawing engine on
+      2026-10-30, and a measurement saved with them keeps the two figures, ignored.
     </p>
     <p>
       <strong>Explode Z axis</strong> sets the shape of the box: how tall it is drawn against its own
@@ -470,8 +466,8 @@ const { showPage } = useManual()
       that is what carries over.
     </p>
     <p>
-      <strong>Reset view</strong>, at the foot of the section, puts all eight back where a new
-      measurement starts &mdash; the six in the section, and Rotation and Tilt above it, which are
+      <strong>Reset view</strong>, at the foot of the section, puts all six back where a new
+      measurement starts &mdash; the four in the section, and Rotation and Tilt above it, which are
       the camera and so belong to the same view. It is a change like any other slider's: it marks
       the measurement unsaved and is kept when you save it. Nothing already saved is touched by it,
       or by a later change to what the defaults are.
@@ -483,8 +479,8 @@ const { showPage } = useManual()
       along with the axes when <strong>Show axes</strong> is cleared.
     </p>
     <p>
-      <strong>Jet</strong> is GigaSoft's own ramp from the demo this chart's engine comes with: dark
-      blue through cyan, green and yellow to dark red. It is also the one palette whose scale reaches
+      <strong>Jet</strong> is the classic analyzer ramp: dark blue through cyan, green and yellow to
+      dark red. It is also the one palette whose scale reaches
       its own floor &mdash; <strong>Hot</strong> and <strong>Grey</strong> are lifted off theirs,
       because a near-black foot paints the quiet half of a surface in something with no shape to it,
       while this ramp's foot is a readable blue and lifting it would take the blue end &mdash; most
@@ -496,9 +492,9 @@ const { showPage } = useManual()
       rather than filled flat, so it carries the same smooth gradient the surface does and a
       resonance reads as a ridge instead of a staircase. And <strong>Filled</strong> and <strong>Coloured
       curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
-      3D surface, which is always a lit solid &mdash; ruled with the same white mesh the flat
-      chart strokes along its curves, at whatever spacing the engine can draw legibly rather than
-      one line per slice.
+      3D surface, which is always a solid: it is read by its colour and its shading rather than by
+      lines along it, there being twenty-odd thousand cells and no spacing at which one line per
+      cell is a mesh rather than a wash.
     </p>
     <p>
       <strong>A decay surface cannot be overlaid.</strong> Curves can share a chart and a colour map

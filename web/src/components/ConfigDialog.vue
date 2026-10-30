@@ -188,7 +188,7 @@ const dateFormatOptions = computed(() =>
 )
 
 const DECAY_SURFACE_OPTIONS: { value: DecaySurfaceEngine; label: string }[] = [
-  { value: 'Auto', label: '3D where the browser allows' },
+  { value: 'Auto', label: 'The 3D surface' },
   { value: 'Classic', label: 'Always the flat projection' },
 ]
 
@@ -479,7 +479,7 @@ async function clearStoredCalibration() {
 
           <label
             class="flex flex-col gap-1"
-            title="How the cumulative spectral decay and the burst decay are drawn. The 3D surface can be turned and zoomed freely and needs WebGPU; where the browser has none, or for the sonogram, the flat projection draws either way. Kept per browser, like the style above — whether the 3D surface is worth having is a property of this machine."
+            title="How the cumulative spectral decay and the burst decay are drawn. The 3D surface can be turned and zoomed freely: drag it to turn it and use the wheel to move the camera. The sonogram is a colour map and is drawn flat either way. Kept per browser, like the style above."
           >
             Decay surfaces
             <select

@@ -66,15 +66,13 @@ export interface ImpulseDisplay {
   decayRotationDeg: number
   decayDepthPercent: number
   /**
-   * The GPU surface's own view: where it sits, how large it is drawn, and where the light comes
-   * from. Stored so a view that took some turning can be kept, which is the whole reason they are
-   * settings rather than only a drag. Read by that chart alone — the Canvas 2D one has no camera.
+   * The 3D surface's own view: where it sits and how large it is drawn. Stored so a view that took
+   * some turning can be kept, which is the whole reason they are settings rather than only a drag.
+   * Read by that chart alone — the Canvas 2D one has no camera.
    */
   decayMoveX: number
   decayMoveY: number
   decayMagnification: number
-  decayLightAzimuthDeg: number
-  decayLightElevationDeg: number
   /** How tall the surface's box is drawn against its own floor; see DECAY_EXPLODE_Z. */
   decayExplodeZ: number
   decayRangeDb: number
@@ -132,7 +130,7 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     // its own default because it decides what the *unfilled* stack looks like, which is a separate
     // answer and the one that applies once this is turned off.
     decayFilled: true,
-    // The ten view sliders, spread rather than listed, so that a new measurement and the Surface
+    // The six view sliders, spread rather than listed, so that a new measurement and the Surface
     // view panel's Reset view button cannot come to disagree about what the default view is.
     ...decayViewDefaults(),
     decayRangeDb: 30,
@@ -234,13 +232,8 @@ export function impulseDisplayFromParams(
   if (typeof stored.chartDecayMagnification === 'number' && stored.chartDecayMagnification > 0) {
     display.decayMagnification = magnificationFromStored(stored.chartDecayMagnification)
   }
-  if (typeof stored.chartDecayLightAzimuthDeg === 'number' && Number.isFinite(stored.chartDecayLightAzimuthDeg)) {
-    display.decayLightAzimuthDeg = stored.chartDecayLightAzimuthDeg
-  }
-  if (typeof stored.chartDecayLightElevationDeg === 'number' && Number.isFinite(stored.chartDecayLightElevationDeg)) {
-    display.decayLightElevationDeg = stored.chartDecayLightElevationDeg
-  }
-  // Positive: a zero-length axis is a box with no extent, which the engine draws as nothing.
+  // A measurement stored before 2026-10-30 also carries the two light angles, and nothing reads
+  // them: vis-graph3d has no light to position. They stay in its params_json, ignored.
   // How tall the box is drawn. A measurement stored before 2026-10-29 has three axis lengths
   // instead, and what it chose is the *ratio* of the height to the floor — so that is what is
   // carried over, through the same formula the slider drives. The floor's own two lengths are

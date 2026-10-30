@@ -110,15 +110,14 @@ import ImpulseResponseConfigPanel from './components/ImpulseResponseConfigPanel.
 import ImpulseResponseDisplayPanel from './components/ImpulseResponseDisplayPanel.vue'
 import ImpulseResponseChart from './components/ImpulseResponseChart.vue'
 import ImpulseHarmonicsChart from './components/ImpulseHarmonicsChart.vue'
-import { decaySurfaceGpuAvailable } from './charts/peCapability'
-import { prefersGpuSurface, useDecaySurfaceEngine } from './composables/useDecaySurfaceEngine'
+import { prefers3dSurface, useDecaySurfaceEngine } from './composables/useDecaySurfaceEngine'
 import type { DecaySurface } from './api/client'
 import { decayModeIs3d } from './measurements/decay3d'
 import { decaySubjectIds, decaySubjects } from './measurements/decaySubjects'
 import { harmonicsUnavailableNote } from './measurements/harmonicsAvailability'
 import DecaySurfaceChart from './components/DecaySurfaceChart.vue'
-// Async, so the 2.8 MB ProEssentials engine never reaches the main chunk — a bench that does not
-// open an impulse measurement, or has no WebGPU, never fetches it at all.
+// Async, so vis-graph3d never reaches the main chunk — a bench that does not open an impulse
+// measurement never fetches it at all.
 const DecaySurface3dChart = defineAsyncComponent(() => import('./components/DecaySurface3dChart.vue'))
 import LoopbackReferenceDialog from './components/LoopbackReferenceDialog.vue'
 import ResponsePolarChart from './components/ResponsePolarChart.vue'
@@ -2710,24 +2709,19 @@ const impulseHarmonicsChart = ref<InstanceType<typeof ImpulseHarmonicsChart> | n
 const impulseDecayChart = ref<InstanceType<typeof DecaySurfaceChart> | null>(null)
 const impulseDecay3dChart = ref<{ exportPng: (o: ChartExportOptions) => Promise<Blob> } | null>(null)
 
-/**
- * Whether the decay surfaces are drawn by the GPU engine. False until the probe answers, so the
- * screen never waits on a blank panel — and false for ever on a bench without WebGPU, where the
- * engine would otherwise draw a plausible surface that is not the measurement. See
- * `charts/peCapability.ts`.
- */
-const decayGpu = ref(false)
-decaySurfaceGpuAvailable().then((ok) => { decayGpu.value = ok })
-
 const { decaySurfaceEngine } = useDecaySurfaceEngine()
 
 /**
- * All three have to agree: the setting has to allow it, the browser has to offer an adapter, and
- * the mode has to be a waterfall — the sonogram is a flat colour map with nothing for a lit mesh
- * to add to it.
+ * Two things have to agree: the setting has to allow it, and the mode has to be a waterfall — the
+ * sonogram is a flat colour map with nothing for a turnable box to add to it.
+ *
+ * <p>It was three until 2026-10-30, the third being a WebGPU probe: the engine before this one drew
+ * a plausible surface that was not the data when handed no adapter. <c>vis-graph3d</c> is a plain 2D
+ * canvas, so there is nothing left to probe and nothing to wait for — which is also why
+ * `report/render.ts` can now draw the same chart into a PDF.</p>
  */
 const decayUses3d = computed(
-  () => prefersGpuSurface(decaySurfaceEngine.value) && decayGpu.value && decayModeIs3d(impulseDecayMode.value),
+  () => prefers3dSurface(decaySurfaceEngine.value) && decayModeIs3d(impulseDecayMode.value),
 )
 const impedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
 const outputImpedanceChart = ref<InstanceType<typeof ImpedanceChart> | null>(null)
@@ -3508,8 +3502,6 @@ const impulseDecayDepthPercent = ref(DEFAULT_IMPULSE_DISPLAY.decayDepthPercent)
 const impulseDecayMoveX = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveX)
 const impulseDecayMoveY = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveY)
 const impulseDecayMagnification = ref(DEFAULT_IMPULSE_DISPLAY.decayMagnification)
-const impulseDecayLightAzimuthDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightAzimuthDeg)
-const impulseDecayLightElevationDeg = ref(DEFAULT_IMPULSE_DISPLAY.decayLightElevationDeg)
 const impulseDecayExplodeZ = ref(DEFAULT_IMPULSE_DISPLAY.decayExplodeZ)
 const impulseDecayRangeDb = ref(30)
 
@@ -3587,8 +3579,6 @@ function currentImpulseDisplay(): ImpulseDisplay {
     decayMoveX: impulseDecayMoveX.value,
     decayMoveY: impulseDecayMoveY.value,
     decayMagnification: impulseDecayMagnification.value,
-    decayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
-    decayLightElevationDeg: impulseDecayLightElevationDeg.value,
     decayExplodeZ: impulseDecayExplodeZ.value,
     decayRangeDb: impulseDecayRangeDb.value,
     csd: {
@@ -3655,8 +3645,6 @@ function applyStoredImpulseDisplay(paramsJson: string) {
   impulseDecayMoveX.value = display.decayMoveX
   impulseDecayMoveY.value = display.decayMoveY
   impulseDecayMagnification.value = display.decayMagnification
-  impulseDecayLightAzimuthDeg.value = display.decayLightAzimuthDeg
-  impulseDecayLightElevationDeg.value = display.decayLightElevationDeg
   impulseDecayExplodeZ.value = display.decayExplodeZ
   impulseDecayRangeDb.value = display.decayRangeDb
   impulseCsdFftLength.value = display.csd.fftLength
@@ -3693,7 +3681,7 @@ watch(
     impulseDelayView, impulseDelayTopUs, impulseDelayBottomUs,
     impulseDecayMode, impulseDecayPalette, impulseDecayColoredCurves, impulseDecayFilled,
     impulseDecayRotationDeg, impulseDecayDepthPercent, impulseDecayRangeDb,
-    impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification, impulseDecayLightAzimuthDeg, impulseDecayLightElevationDeg,
+    impulseDecayMoveX, impulseDecayMoveY, impulseDecayMagnification,
     impulseDecayExplodeZ,
     impulseCsdFftLength, impulseCsdSpanMs, impulseCsdSlices, impulseCsdStartBeforePeakMs, impulseCsdWindowMode,
     impulseCsdRiseTimeMs, impulseBurstMaxPeriods, impulseBurstPointsPerPeriod, impulseBurstResolution,
@@ -3944,8 +3932,6 @@ function buildTypeParamsJsonCore(): string | undefined {
       chartDecayMoveX: impulseDecayMoveX.value,
       chartDecayMoveY: impulseDecayMoveY.value,
       chartDecayMagnification: impulseDecayMagnification.value,
-      chartDecayLightAzimuthDeg: impulseDecayLightAzimuthDeg.value,
-      chartDecayLightElevationDeg: impulseDecayLightElevationDeg.value,
       chartDecayExplodeZ: impulseDecayExplodeZ.value,
       chartDecayRangeDb: impulseDecayRangeDb.value,
       chartCsdFftLength: impulseCsdFftLength.value,
@@ -4763,11 +4749,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <!-- Both decay surfaces, drawn by one chart: they differ in what the depth axis
                      counts and in nothing about how it is drawn.
 
-                     Two charts, one prop list. The GPU one is used where WebGPU can actually draw
-                     it and the mode is a waterfall; everywhere else — no adapter, or the sonogram,
-                     which is a flat colour map — the Canvas 2D one draws, which is also what every
-                     report renders through. The two take the same props and expose the same
-                     exportPng, so nothing downstream knows which is on screen. -->
+                     Two charts, one prop list. The 3D one is used where the Decay surfaces setting
+                     allows it and the mode is a waterfall; for the sonogram, which is a flat
+                     colour map, the Canvas 2D one draws. The two take the same props and expose
+                     the same exportPng, so nothing downstream knows which is on screen — and
+                     since 2026-10-30 a report renders through whichever of them this picks. -->
                 <!-- Marked as one column of charts: every chart inside it is fitted from this
                      element's top rather than its own, so the stacked ones are the same height as
                      the primary instead of each reserving the charts above it and coming out at
@@ -4794,8 +4780,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :move-x="impulseDecayMoveX"
                   :move-y="impulseDecayMoveY"
                   :magnification="impulseDecayMagnification"
-                  :light-azimuth-deg="impulseDecayLightAzimuthDeg"
-                  :light-elevation-deg="impulseDecayLightElevationDeg"
                   :explode-z="impulseDecayExplodeZ"
                   :range-db="impulseDecayRangeDb"
                   :thick-lines="impulseThickLines"
@@ -4843,8 +4827,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                       :move-x="impulseDecayMoveX"
                       :move-y="impulseDecayMoveY"
                       :magnification="impulseDecayMagnification"
-                      :light-azimuth-deg="impulseDecayLightAzimuthDeg"
-                      :light-elevation-deg="impulseDecayLightElevationDeg"
                   :explode-z="impulseDecayExplodeZ"
                       :range-db="impulseDecayRangeDb"
                       :thick-lines="impulseThickLines"
@@ -4924,7 +4906,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
               <template #aside>
                 <ImpulseResponseDisplayPanel
-                  :gpu-surface="decayUses3d"
+                  :surface3d="decayUses3d"
                   v-model:view="impulseView"
                   v-model:normalised-impulse="impulseNormalised"
                   v-model:show-phase="impulseShowPhase"
@@ -4951,8 +4933,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:decay-move-x="impulseDecayMoveX"
                   v-model:decay-move-y="impulseDecayMoveY"
                   v-model:decay-magnification="impulseDecayMagnification"
-                  v-model:decay-light-azimuth-deg="impulseDecayLightAzimuthDeg"
-                  v-model:decay-light-elevation-deg="impulseDecayLightElevationDeg"
                   v-model:decay-explode-z="impulseDecayExplodeZ"
                   v-model:decay-range-db="impulseDecayRangeDb"
                   v-model:csd-fft-length="impulseCsdFftLength"

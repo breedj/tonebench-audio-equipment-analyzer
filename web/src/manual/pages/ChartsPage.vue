@@ -103,9 +103,9 @@ import SettingsTable from '../components/SettingsTable.vue'
       writes the Rotation and Tilt fields in the display rail.
     </p>
     <p>
-      Where the browser offers WebGPU, those two waterfalls are drawn as a lit 3D surface that also
-      zooms with the wheel. Where it does not, they are drawn flat, with the same data, palette and
-      dB range. Nothing needs setting, and nothing is lost — see the impulse-response page.
+      By default those two waterfalls are drawn as a 3D surface that also zooms with the wheel.
+      <strong>Configuration &rarr; General &rarr; Decay surfaces</strong> draws them flat instead,
+      with the same data, palette and dB range &mdash; see the impulse-response page.
     </p>
 
     <h2>Cursors and readouts</h2>

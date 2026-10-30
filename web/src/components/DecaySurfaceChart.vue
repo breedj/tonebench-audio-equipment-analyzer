@@ -6,6 +6,7 @@ import { CHART_EXPORT_HEADER_PX, composeChartPng, type ChartExportOptions } from
 import ExpandToggle from './ExpandToggle.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
+import { decayExportTitle } from '../measurements/decay3d'
 import { exportGridTheme } from '../charts/palette'
 import {
   acrossX,
@@ -302,14 +303,15 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
     paintExport = false
   }
 
-  const kind = props.surface?.sliceAxis === 'Periods' ? 'Burst decay' : 'Cumulative spectral decay'
-  const how = props.mode === 'Sonogram' ? 'sonogram' : props.mode === 'WaterfallPeriods' ? 'waterfall, by period' : 'waterfall'
   return composeChartPng({
     width,
     height,
     plotCanvas: plot,
     headerHeight: header,
-    title: `${kind} — ${how}, ${props.rangeDb} dB range`,
+    // Shared with the 3D chart rather than written out twice, so a chapter reads identically
+    // whichever one drew it. It was spelled out here and the two happened to agree; nothing held
+    // them in step, and only the one in decay3d.ts was tested.
+    title: decayExportTitle(props.surface, props.mode, props.rangeDb),
   })
 }
 

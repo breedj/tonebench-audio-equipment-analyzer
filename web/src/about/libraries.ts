@@ -180,16 +180,12 @@ const SHIPPED: Library[] = [
     package: { manifest: 'npm', id: 'vue' },
   },
   {
-    name: 'ProEssentials JS',
-    version: '11.0.1',
-    url: 'https://gigasoft.com/',
-    // No SPDX identifier exists: it is a commercial product with a free tier, and the tier is the
-    // thing worth stating. Not "free for non-commercial use" — that is both narrower and wider
-    // than the terms, which allow commercial use and redistribution below the threshold.
-    licence: 'Gigasoft ProEssentials JS licence — free, including redistribution, below USD 250,000 annual revenue',
-    role: 'Draws the rotatable 3D decay surface, where the browser offers WebGPU. The decay charts fall back to our own Canvas 2D ones everywhere else.',
-    notice: 'ProEssentials — Copyright 1994-2026 Gigasoft, Inc. All rights reserved.',
-    package: { manifest: 'npm', id: 'proessentials' },
+    name: 'vis-graph3d',
+    version: '7.0.4',
+    url: 'https://visjs.github.io/vis-graph3d/',
+    licence: 'Apache-2.0 OR MIT',
+    role: 'Draws the turnable 3D decay surface on the impulse-response screen, and the same surface in a report. The sonogram, and the flat projection the Decay surfaces setting offers instead, are our own Canvas 2D chart.',
+    package: { manifest: 'npm', id: 'vis-graph3d' },
   },
   {
     name: 'µPlot',

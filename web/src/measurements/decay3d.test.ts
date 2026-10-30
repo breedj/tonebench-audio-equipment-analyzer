@@ -11,28 +11,29 @@ import {
 } from './decay'
 import { defaultImpulseDisplay } from './impulseDisplay'
 import {
+  DECAY_DEPTH_SIGN,
   DECAY_EXPLODE_Z,
+  DECAY_VIEW_MAGNIFICATION,
   DECAY_VIEW_MOVE_X,
   DECAY_VIEW_MOVE_Y,
-  decayViewDefaults,
+  decayAcrossLabel,
+  decayAxisCoordinate,
+  decayAxisValue,
+  decayCameraAngles,
+  decayCameraDistance,
+  decayCenterPercent,
+  decayColormap,
+  decayDepthLabel,
   decayExportTitle,
-  DECAY_LIGHT,
-  DECAY_LIGHT_AZIMUTH,
-  DECAY_LIGHT_ELEVATION,
-  DECAY_LIGHT_RADIUS,
-  DECAY_LIGHT_STRENGTH,
-  decayLightVector,
-  magnificationFromStored,
-  DECAY_VIEW_MAGNIFICATION,
-  decayCameraZoom,
-  DECAY_3D_ZOOM,
-  DECAY_3D_ZOOM_NARROW,
-  explodeZForAxisLengths,
-  decayGridAspect,
-  decayMesh,
   decayModeIs3d,
-  decaySubsetColors,
-  peColor,
+  decayOptionsKey,
+  decayPointFrequencyHz,
+  decayPointTime,
+  decayPoints,
+  decayVerticalRatio,
+  decayViewDefaults,
+  explodeZForAxisLengths,
+  magnificationFromStored,
 } from './decay3d'
 
 /** Four slices over five log-spaced columns, the last two slices missing their low end. */
@@ -62,48 +63,81 @@ function dense(): DecaySurface {
   }
 }
 
-describe('decayMesh', () => {
+const MODES = ['Waterfall', 'WaterfallPeriods'] as const
+
+describe('decayPoints', () => {
   /**
-   * The one test that matters: a cell of the matrix the engine is handed must be the level the
-   * Canvas 2D chart reads at the same point. Compared cell for cell rather than by a summary —
-   * a transposed or offset matrix agrees on every summary and is wrong about every point.
+   * The one test that matters: every vertex the library is handed must be the level the Canvas 2D
+   * chart reads at the same point. Compared cell for cell rather than by a summary — a transposed
+   * or offset cloud agrees on every summary and is wrong about every point.
    */
   it('agrees with levelAt cell for cell, on both orientations', () => {
     const surface = ragged()
-    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
-      const mesh = decayMesh(surface, mode, 30)
+    for (const mode of MODES) {
+      const cloud = decayPoints(surface, mode, 30)
       const view = orientSurface(surface, mode === 'WaterfallPeriods')
-      expect(mesh.rows).toBe(view.depth.length)
-      expect(mesh.cols).toBe(view.across.length)
-      for (let r = 0; r < mesh.rows; r++) {
-        for (let c = 0; c < mesh.cols; c++) {
-          const expected = view.level(r, c)
-          const actual = mesh.y[r * mesh.cols + c]
-          if (expected === null) expect(Number.isNaN(actual), `${mode} ${r},${c}`).toBe(true)
-          else expect(actual, `${mode} ${r},${c}`).toBeCloseTo(expected, 12)
-        }
+      expect(cloud.rows).toBe(view.depth.length)
+      expect(cloud.cols).toBe(view.across.length)
+
+      // Rebuild the (row, column) the library will index each vertex at, which is what it does from
+      // the distinct values of the two floor axes.
+      const acrossCoords = view.across.map((v) => decayAxisCoordinate(v, view.acrossIsFrequency))
+      const depthCoords = view.depth.map(
+        (v) => DECAY_DEPTH_SIGN * decayAxisCoordinate(v, view.depthIsFrequency),
+      )
+      let seen = 0
+      for (const point of cloud.points) {
+        const c = acrossCoords.indexOf(point.x)
+        const r = depthCoords.indexOf(point.y)
+        expect(c, `${mode} column of ${point.x}`).toBeGreaterThanOrEqual(0)
+        expect(r, `${mode} row of ${point.y}`).toBeGreaterThanOrEqual(0)
+        expect(point.z, `${mode} ${r},${c}`).toBeCloseTo(view.level(r, c) as number, 12)
+        seen++
       }
+      expect(seen).toBe(cloud.rows * cloud.cols - cloud.omitted)
     }
   })
 
   /**
-   * NaN rather than a sentinel, and this is measured behaviour rather than taste: the engine's
-   * own NullDataValue is ignored on the 3D path, so a sentinel is drawn as data and takes the
-   * height axis with it. See the remarks on DecayMesh.
+   * <p><b>The headline rule, and the one with the worst available failure.</b> A cell the analysis
+   * has no answer for is left out of the array; the library reads every coordinate as
+   * <c>data[i][col] || 0</c>, so a NaN or a sentinel written into it becomes <c>0</c> — and 0 dB is
+   * the <em>top</em> of a decay scale. A burst decay's unmeasured low-frequency corner would come
+   * out as the loudest thing on the surface.</p>
+   *
+   * <p>So this asserts both halves: the count of what was left out, and that nothing emitted sits
+   * at a level <c>levelAt</c> refused to give.</p>
    */
-  it('writes NaN for a slice that has no data at a column, and counts them', () => {
-    const mesh = decayMesh(ragged(), 'Waterfall', 30)
+  it('omits a cell it has no measurement for, rather than zeroing it', () => {
+    const surface = ragged()
+    const cloud = decayPoints(surface, 'Waterfall', 30)
+
     // Slice 2 starts at column 2, slice 3 at column 4.
-    expect(Number.isNaN(mesh.y[2 * mesh.cols + 0])).toBe(true)
-    expect(Number.isNaN(mesh.y[2 * mesh.cols + 1])).toBe(true)
-    expect(mesh.y[2 * mesh.cols + 2]).toBeCloseTo(-10, 12)
-    expect(mesh.missing).toBe(2 + 4)
+    expect(cloud.omitted).toBe(2 + 4)
+    expect(cloud.points).toHaveLength(4 * 5 - 6)
+
+    const acrossCoords = surface.freqHz.map((f) => decayAxisCoordinate(f, true))
+    for (const point of cloud.points) {
+      const c = acrossCoords.indexOf(point.x)
+      const r = surface.slices.findIndex((s) => DECAY_DEPTH_SIGN * s.value === point.y)
+      expect(levelAt(surface, r, c), `${r},${c} was emitted`).not.toBeNull()
+    }
+
+    // And the cells it dropped really are the ragged ones, named the other way round.
+    const emitted = new Set(cloud.points.map((p) => `${p.x},${p.y}`))
+    for (const [r, slice] of surface.slices.entries()) {
+      for (let c = 0; c < slice.firstValidColumn; c++) {
+        const key = `${acrossCoords[c]},${DECAY_DEPTH_SIGN * slice.value}`
+        expect(emitted.has(key), `${r},${c} should be absent`).toBe(false)
+      }
+    }
   })
 
-  it('leaves a surface with nothing missing entirely free of NaN', () => {
-    const mesh = decayMesh(dense(), 'Waterfall', 30)
-    expect(mesh.missing).toBe(0)
-    expect([...mesh.y].every(Number.isFinite)).toBe(true)
+  it('emits every cell of a surface with nothing missing', () => {
+    const cloud = decayPoints(dense(), 'Waterfall', 30)
+    expect(cloud.omitted).toBe(0)
+    expect(cloud.points).toHaveLength(cloud.rows * cloud.cols)
+    expect(cloud.points.every((p) => Number.isFinite(p.z))).toBe(true)
   })
 
   /** Clamped like levelY, not dropped — the two charts must agree about the foot of the scale. */
@@ -114,189 +148,194 @@ describe('decayMesh', () => {
       resolutionLimitHz: 0,
       slices: [{ value: 0, firstValidColumn: 0, levelDb: [-80, 5] }],
     }
-    const mesh = decayMesh(surface, 'Waterfall', 30)
-    expect(mesh.y[0]).toBe(-30)
-    expect(mesh.y[1]).toBe(0)
-    expect(mesh.missing).toBe(0)
+    const cloud = decayPoints(surface, 'Waterfall', 30)
+    expect(cloud.points.map((p) => p.z)).toEqual([-30, 0])
+    expect(cloud.omitted).toBe(0)
   })
 
   /**
-   * Real values on both axes, and a flag saying which one is a frequency — the chart scales that
-   * one logarithmically, which is what puts true hertz on its ticks.
+   * <p>A frequency axis carries its logarithm, because the library has no logarithmic scale — and
+   * <b>either floor axis can be the frequency one</b>, which is what the by-period view is. An
+   * implementation that logged only the across axis draws the by-period view's whole frequency
+   * stack inside the last twentieth of its floor.</p>
    */
-  it('hands over the real axis values and says which axis is the frequency', () => {
-    const across = decayMesh(dense(), 'Waterfall', 30)
-    expect([...across.x]).toEqual([100, 1000, 10000])
+  it('puts the logarithm on whichever axis is the frequency', () => {
+    const across = decayPoints(dense(), 'Waterfall', 30)
     expect(across.acrossIsFrequency).toBe(true)
     expect(across.depthIsFrequency).toBe(false)
+    expect([...new Set(across.points.map((p) => p.x))].sort((a, b) => a - b)).toEqual([2, 3, 4])
 
-    const byPeriod = decayMesh(dense(), 'WaterfallPeriods', 30)
-    expect([...byPeriod.x]).toEqual([-0, -0.5])
-    expect([...byPeriod.z]).toEqual([100, 1000, 10000])
+    const byPeriod = decayPoints(dense(), 'WaterfallPeriods', 30)
     expect(byPeriod.acrossIsFrequency).toBe(false)
     expect(byPeriod.depthIsFrequency).toBe(true)
+    // Time across, untouched; frequency in depth, logged and negated.
+    expect([...new Set(byPeriod.points.map((p) => p.x))].sort((a, b) => a - b)).toEqual([0, 0.5])
+    expect([...new Set(byPeriod.points.map((p) => p.y))].sort((a, b) => a - b)).toEqual([-4, -3, -2])
   })
 
   /**
-   * <p>The depth coordinates are the measurement's own and are never negated — which end of the
-   * axis faces the viewer is the camera's business. Negating them to pair with the engine's
-   * <c>InvertedZAxis</c> was tried and reverted: that flag is refused by the 3D control, so the
-   * negation showed through as a time axis reading 0,0 / -0,5 / -1,0.</p>
+   * <p><b>The depth axis is negated, and that is the library's handedness rather than a
+   * preference.</b> Working its parallel projection through: at a horizontal angle of zero, screen
+   * x follows the first floor axis and the second recedes <em>away</em> from the viewer as it
+   * grows. Slice zero is the back of a waterfall, so the depth coordinate has to fall as the stack
+   * comes forward. Turning the camera to the other side instead fixes the depth and mirrors the
+   * frequency with it, the floor keeping its handedness however the camera moves — and this library
+   * has no axis-inversion flag, so negating one coordinate is the only lever that moves one axis
+   * alone.</p>
    */
-  it('leaves the depth coordinates exactly as the measurement gives them', () => {
-    expect([...decayMesh(dense(), 'Waterfall', 30).z]).toEqual([0, 0.5])
-    expect([...decayMesh(dense(), 'WaterfallPeriods', 30).z]).toEqual([100, 1000, 10000])
-  })
-
-  /**
-   * <p>The across axis is negated exactly when it is the linear one, which is the half of
-   * un-mirroring that <c>InvertedXAxis</c> cannot do on its own: on a linear axis that flag
-   * reverses the labels and not the drawing. On the logarithmic frequency axis it reverses both,
-   * and a log scale could not take a negative coordinate anyway.</p>
-   */
-  it('negates the across axis exactly when it is the linear one', () => {
-    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
-      const mesh = decayMesh(ragged(), mode, 30)
-      expect(mesh.acrossNegated, mode).toBe(!mesh.acrossIsFrequency)
-      const negative = [...mesh.x].some((v) => v < 0)
-      expect(negative, `${mode} has a negative across coordinate`).toBe(mesh.acrossNegated)
-    }
-  })
-
-  /** A log axis cannot carry a zero or a negative, whichever axis is carrying the frequency. */
-  it('keeps the depth axis positive, and the frequency axis whichever one it is', () => {
-    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
-      const mesh = decayMesh(ragged(), mode, 30)
-      expect([...mesh.z].every((v) => v >= 0), `${mode} z`).toBe(true)
-      const freqs = mesh.acrossIsFrequency ? mesh.x : mesh.z
-      expect([...freqs].every((f) => f > 0), `${mode} frequency`).toBe(true)
-    }
+  it('negates the depth axis, so slice zero sits at the back', () => {
+    const cloud = decayPoints(dense(), 'Waterfall', 30)
+    const depths = [...new Set(cloud.points.map((p) => p.y))].sort((a, b) => a - b)
+    expect(depths).toEqual([-0.5, 0])
+    expect(DECAY_DEPTH_SIGN).toBe(-1)
   })
 
   it('never calls both axes a frequency, since one of them is always the time', () => {
-    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
-      const mesh = decayMesh(ragged(), mode, 30)
-      expect(mesh.acrossIsFrequency && mesh.depthIsFrequency).toBe(false)
-    }
-  })
-
-  /** A log axis cannot carry a zero or a negative, so the frequency values must all be positive. */
-  it('keeps every frequency coordinate positive, as a log axis requires', () => {
-    for (const mode of ['Waterfall', 'WaterfallPeriods'] as const) {
-      const mesh = decayMesh(ragged(), mode, 30)
-      const freqs = mesh.acrossIsFrequency ? mesh.x : mesh.z
-      expect([...freqs].every((f) => f > 0)).toBe(true)
+    for (const mode of MODES) {
+      const cloud = decayPoints(ragged(), mode, 30)
+      expect(cloud.acrossIsFrequency && cloud.depthIsFrequency, mode).toBe(false)
     }
   })
 
   it('transposes the orientation, swapping which axis is frequency', () => {
     const surface = ragged()
-    const across = decayMesh(surface, 'Waterfall', 30)
-    const periods = decayMesh(surface, 'WaterfallPeriods', 30)
-    expect(across.rows).toBe(4)
-    expect(across.cols).toBe(5)
-    expect(periods.rows).toBe(5)
-    expect(periods.cols).toBe(4)
-    // The same cell, reached the other way round.
-    expect(periods.y[2 * periods.cols + 0]).toBeCloseTo(across.y[0 * across.cols + 2], 12)
+    const across = decayPoints(surface, 'Waterfall', 30)
+    const periods = decayPoints(surface, 'WaterfallPeriods', 30)
+    expect([across.rows, across.cols]).toEqual([4, 5])
+    expect([periods.rows, periods.cols]).toEqual([5, 4])
+    // The same cells, however they are indexed.
+    expect(periods.points).toHaveLength(across.points.length)
+    expect(periods.omitted).toBe(across.omitted)
+  })
+
+  /**
+   * One coordinate per column and per curve, computed once. The library matches a row to a grid
+   * position by exact equality, so a coordinate recomputed per point is a grid that may not line
+   * up — and `Math.log10` is not required to return the same bits for the same input twice.
+   */
+  it('gives every curve the identical coordinate for a column', () => {
+    const cloud = decayPoints(dense(), 'Waterfall', 30)
+    const columns = new Set(cloud.points.map((p) => p.x))
+    expect(columns.size).toBe(cloud.cols)
   })
 })
 
-describe('decaySubsetColors', () => {
+describe('the axis coordinates round-trip', () => {
+  it('undoes the logarithm, and leaves a linear axis alone', () => {
+    for (const hz of [20, 632, 2000, 96000]) {
+      expect(decayAxisValue(decayAxisCoordinate(hz, true), true)).toBeCloseTo(hz, 6)
+    }
+    for (const ms of [0, 0.5, 2.46, 120]) {
+      expect(decayAxisValue(decayAxisCoordinate(ms, false), false)).toBe(ms)
+    }
+  })
+
+  /** A log axis cannot carry a zero or a negative, which `freqHz[0]` could be on a bad surface. */
+  it('keeps a non-positive frequency off a logarithmic axis', () => {
+    expect(Number.isFinite(decayAxisCoordinate(0, true))).toBe(true)
+    expect(Number.isFinite(decayAxisCoordinate(-5, true))).toBe(true)
+  })
+
+  it('labels a tick in the units the axis is read in', () => {
+    expect(decayAcrossLabel(decayAxisCoordinate(2000, true), true)).toBe('2k')
+    expect(decayAcrossLabel(2.46, false)).toBe('2.46')
+    // The depth label undoes the sign as well as the coordinate.
+    expect(decayDepthLabel(DECAY_DEPTH_SIGN * 2.46, false)).toBe('2.46')
+    expect(decayDepthLabel(DECAY_DEPTH_SIGN * decayAxisCoordinate(1000, true), true)).toBe('1k')
+  })
+
+  it('says nothing rather than NaN for a tick the library has no value for', () => {
+    expect(decayAcrossLabel(Number.NaN, true)).toBe('')
+    expect(decayDepthLabel(Number.NaN, false)).toBe('')
+  })
+})
+
+describe('reading a point back', () => {
+  /**
+   * The readout has to ask the cloud which axis carries the frequency. One that assumed the across
+   * axis would print the by-period view's *depth* coordinate as hertz — a plausible wrong number,
+   * which is the worst kind.
+   */
+  it('finds the frequency and the time whichever axis each is on', () => {
+    for (const mode of MODES) {
+      const cloud = decayPoints(dense(), mode, 30)
+      for (const point of cloud.points) {
+        const hz = decayPointFrequencyHz(point, cloud)
+        expect([100, 1000, 10000].some((f) => Math.abs(hz - f) < 1e-6), `${mode} ${hz}`).toBe(true)
+        const time = decayPointTime(point, cloud)
+        expect([0, 0.5].some((t) => Math.abs(time - t) < 1e-9), `${mode} ${time}`).toBe(true)
+      }
+    }
+  })
+})
+
+describe('decayColormap', () => {
   /**
    * The floor fraction is the thing this must not quietly drop: where a palette's own foot is too
-   * dark to read, the level-to-colour mapping is squeezed into the top of its ramp, and an engine
-   * palette that skipped that would put the quiet half of every surface back into the near-black.
-   * It is a property of the palette — Jet is the vendor's ramp and reaches its own floor, Hot does
-   * not — so this checks one of each.
+   * dark to read, the level-to-colour mapping is squeezed into the top of its ramp, and a colormap
+   * that skipped it would put the quiet half of every surface back into the near-black. It is also
+   * what keeps a colour read off the surface matching the key beside it and the Canvas 2D chart's
+   * own curves.
    */
-  it('is the palette LUT read through paletteIndex, so the floor fraction carries over', () => {
-    for (const palette of ['Jet', 'Hot'] as const) {
-      const colors = decaySubsetColors(palette, true)
-      const lut = paletteLut(palette, true)
-      expect(colors).toHaveLength(256)
-      for (const i of [0, 1, 128, 254, 255]) {
-        const index = paletteIndex(i / 255, paletteFloorFraction(palette))
-        expect(colors[i], `${palette}/${i}`).toBe(peColor(lut[index * 3], lut[index * 3 + 1], lut[index * 3 + 2]))
+  it('is paletteLut read through paletteIndex, floor fraction and all', () => {
+    for (const palette of ['Jet', 'Hot', 'Grey'] as const) {
+      for (const onDark of [false, true]) {
+        const colormap = decayColormap(palette, onDark)
+        const lut = paletteLut(palette, onDark)
+        const floor = paletteFloorFraction(palette)
+        for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+          const index = paletteIndex(fraction, floor)
+          expect(colormap(fraction), `${palette} ${onDark} ${fraction}`).toEqual({
+            r: lut[index * 3],
+            g: lut[index * 3 + 1],
+            b: lut[index * 3 + 2],
+          })
+        }
       }
     }
   })
 
-  /** A lifted palette's own foot stays out of reach, which is what the body fill is painted with. */
-  it('does not reach the very foot of a ramp that is lifted off it', () => {
-    const colors = decaySubsetColors('Hot', true)
-    const lut = paletteLut('Hot', true)
-    expect(colors[0]).not.toBe(peColor(lut[0], lut[1], lut[2]))
+  it('is a colour at the foot of the scale rather than a hole', () => {
+    const foot = decayColormap('Jet', true)(0)
+    expect(foot.r + foot.g + foot.b).toBeGreaterThan(0)
   })
 
-  it('follows the theme for the one palette that is theme-dependent', () => {
-    expect(decaySubsetColors('Grey', true)[200]).not.toBe(decaySubsetColors('Grey', false)[200])
-    expect(decaySubsetColors('Jet', true)[200]).toBe(decaySubsetColors('Jet', false)[200])
-  })
-})
-
-describe('peColor', () => {
-  it('puts red in the low byte and leaves it opaque', () => {
-    expect(peColor(255, 0, 0)).toBe(0xff0000ff >>> 0)
-    expect(peColor(0, 0, 255)).toBe(0xffff0000 >>> 0)
-    expect(peColor(0, 0, 0)).toBe(0xff000000 >>> 0)
+  /** The library hands it a fraction it computed; a non-finite one must not come back as NaN ink. */
+  it('answers the foot of the ramp for a fraction it cannot use', () => {
+    const colormap = decayColormap('Jet', false)
+    expect(colormap(Number.NaN)).toEqual(colormap(0))
   })
 })
 
-describe('decayGridAspect', () => {
+describe('decayVerticalRatio', () => {
   /**
-   * The regression this exists for: a box in data units is seven times wider than deep on a
-   * 400-column, 60-slice CSD, and the surface is then drawn edge-on and clipped.
+   * The slider's whole travel maps onto the whole of the library's documented 0.1 to 1.0, so
+   * neither end is a dead stretch — which is the fault the magnification control had on the engine
+   * this replaced, where seven eighths of the slider rendered byte-identically.
    */
-  it('is the same box whatever the resolution of the surface', () => {
-    const a = decayGridAspect()
-    expect(a.x).toBeGreaterThan(0)
-    expect(a.y).toBeGreaterThan(0)
-    expect(a.z).toBeGreaterThan(0)
+  it('covers the library’s whole range from the slider’s own ends', () => {
+    expect(decayVerticalRatio(DECAY_EXPLODE_Z.min)).toBeCloseTo(0.1, 12)
+    expect(decayVerticalRatio(DECAY_EXPLODE_Z.max)).toBeCloseTo(1.0, 12)
   })
 
-  it('is wider than it is tall, so a waterfall reads as one', () => {
-    const a = decayGridAspect()
-    expect(a.y).toBeLessThan(a.x)
-  })
-
-  /**
-   * <b>The constraint, and the whole reason the three sliders this replaced were dead.</b> The
-   * engine measures x and y against z, and z against x — so X and Z state one ratio twice and their
-   * product is 1. Raw lengths break that, and a box told two contradictory things about its own
-   * shape degenerates to a slab that no later value moves. A square floor satisfies it by
-   * construction, which is the simplest way to be sure of it.
-   */
-  it('writes a triple that agrees with itself, so x over z and z over x multiply to one', () => {
-    for (const explode of [DECAY_EXPLODE_Z.min, 10, DECAY_EXPLODE_Z.default, DECAY_EXPLODE_Z.max]) {
-      const a = decayGridAspect(explode)
-      expect(a.x * a.z, String(explode)).toBeCloseTo(1, 10)
-      expect(a.x, String(explode)).toBe(a.z)
+  it('rises at every step of the slider', () => {
+    let previous = -1
+    for (let v = DECAY_EXPLODE_Z.min; v <= DECAY_EXPLODE_Z.max; v += DECAY_EXPLODE_Z.step) {
+      const ratio = decayVerticalRatio(v)
+      expect(ratio, String(v)).toBeGreaterThan(previous)
+      previous = ratio
     }
   })
 
-  /** The slider's whole job: more explode is a taller box, and the floor does not move. */
-  it('raises the height against a floor that stays where it is', () => {
-    const low = decayGridAspect(5)
-    const high = decayGridAspect(40)
-    expect(high.y).toBeGreaterThan(low.y)
-    expect(high.x).toBe(low.x)
-    expect(high.z).toBe(low.z)
+  /** A coincidence worth keeping: the box this chart opens on is the shape the library defaults to. */
+  it('opens near the library’s own default box', () => {
+    expect(decayVerticalRatio(DECAY_EXPLODE_Z.default)).toBeCloseTo(0.5, 1)
   })
 
-  /** The vendor's own formula, divided through by the floor edge. */
-  it('is the demo’s height-to-diagonal ratio', () => {
-    for (const explode of [1, 10, 26, 50]) {
-      expect(decayGridAspect(explode).y, String(explode)).toBeCloseTo(Math.SQRT2 * (explode / 100), 12)
-    }
-  })
-
-  /** A cleared or nonsense box falls back rather than drawing one with no extent. */
-  it('falls back to the default rather than to a box of no height', () => {
-    for (const bad of [0, -5, Number.NaN]) {
-      const a = decayGridAspect(bad)
-      expect(a.y, String(bad)).toBeCloseTo(decayGridAspect(DECAY_EXPLODE_Z.default).y, 12)
-    }
+  it('clamps rather than handing out a box with no height', () => {
+    expect(decayVerticalRatio(0)).toBeCloseTo(0.1, 12)
+    expect(decayVerticalRatio(1000)).toBeCloseTo(1.0, 12)
+    expect(decayVerticalRatio(Number.NaN)).toBe(decayVerticalRatio(DECAY_EXPLODE_Z.default))
   })
 })
 
@@ -308,8 +347,9 @@ describe('explodeZForAxisLengths', () => {
    */
   it('carries a stored box over as the height against its floor', () => {
     expect(explodeZForAxisLengths(30, 11)).toBe(26)
-    // Three parts in a thousand of the box it replaces, which is why it could replace it.
-    expect(Math.abs(decayGridAspect(26).y / (11 / 30) - 1)).toBeLessThan(0.005)
+    // Three parts in a thousand of the box it replaces, which is why it could replace it. Written
+    // out rather than read off the chart, the aspect triple having gone with the old engine.
+    expect(Math.abs((Math.SQRT2 * 26) / 100 / (11 / 30) - 1)).toBeLessThan(0.005)
   })
 
   it('reads the ratio and not the lengths, so a box scaled up is the same explode', () => {
@@ -324,10 +364,118 @@ describe('explodeZForAxisLengths', () => {
   })
 })
 
+describe('decayCameraDistance', () => {
+  /**
+   * <p><b>The fault this mapping exists to make impossible.</b> Reported twice against the previous
+   * engine — "a magnification of 90 % results in a larger graph than 110 %", "above 200 % does not
+   * work" — and the cause both times was a control whose travel was wider than what it drove, so
+   * most of the slider pushed against a limit. The library's arm is sevenfold where the slider is
+   * fortyfold, so a proportional map would pin everything below about 58 % and above about 400 %.
+   * A logarithmic one reaches both ends and moves at every step in between.</p>
+   */
+  it('moves at every step of the slider, with no two steps alike', () => {
+    let previous = Number.POSITIVE_INFINITY
+    for (let p = DECAY_VIEW_MAGNIFICATION.min; p <= DECAY_VIEW_MAGNIFICATION.max; p += DECAY_VIEW_MAGNIFICATION.step) {
+      const distance = decayCameraDistance(p)
+      expect(distance, String(p)).toBeLessThan(previous)
+      previous = distance
+    }
+  })
+
+  it('reaches both ends of the arm the library documents, and leaves neither', () => {
+    expect(decayCameraDistance(DECAY_VIEW_MAGNIFICATION.min)).toBeCloseTo(5.0, 10)
+    expect(decayCameraDistance(DECAY_VIEW_MAGNIFICATION.max)).toBeCloseTo(0.71, 10)
+    for (let p = DECAY_VIEW_MAGNIFICATION.min; p <= DECAY_VIEW_MAGNIFICATION.max; p += DECAY_VIEW_MAGNIFICATION.step) {
+      expect(decayCameraDistance(p), String(p)).toBeGreaterThanOrEqual(0.71)
+      expect(decayCameraDistance(p), String(p)).toBeLessThanOrEqual(5.0)
+    }
+  })
+
+  /**
+   * More magnification is a shorter arm, because the drawn size is its reciprocal: the library's own
+   * parallel-projection conversion is `dx / armLength`.
+   */
+  it('brings the camera in as the magnification rises', () => {
+    expect(decayCameraDistance(400)).toBeLessThan(decayCameraDistance(100))
+  })
+
+  /** The view a measurement opens on is near the framing the library was tuned for. */
+  it('opens near the library’s own default arm', () => {
+    expect(decayCameraDistance(DECAY_VIEW_MAGNIFICATION.default)).toBeCloseTo(1.7, 0)
+  })
+
+  it('falls back to the default rather than to a camera inside the box', () => {
+    for (const bad of [0, -10, Number.NaN]) {
+      expect(decayCameraDistance(bad), String(bad)).toBe(decayCameraDistance(DECAY_VIEW_MAGNIFICATION.default))
+    }
+  })
+})
+
+describe('decayCameraAngles', () => {
+  it('is the panel’s lean in radians, straight through', () => {
+    expect(decayCameraAngles(0, 50).horizontal).toBeCloseTo(0, 12)
+    expect(decayCameraAngles(60, 50).horizontal).toBeCloseTo(Math.PI / 3, 12)
+    expect(decayCameraAngles(-60, 50).horizontal).toBeCloseTo(-Math.PI / 3, 12)
+  })
+
+  /**
+   * Tilt is how much of the picture the depth axis takes: 0 is level with the floor, where the
+   * stack has no depth at all, and a quarter turn looks straight down on it, where it has nothing
+   * but. The library clamps `vertical` to that quarter turn itself, so this must not exceed it.
+   */
+  it('maps tilt onto the quarter turn the library allows, and no further', () => {
+    for (let p = DECAY_DEPTH_PERCENT.min; p <= DECAY_DEPTH_PERCENT.max; p++) {
+      const { vertical } = decayCameraAngles(0, p)
+      expect(vertical, String(p)).toBeGreaterThan(0)
+      expect(vertical, String(p)).toBeLessThanOrEqual(Math.PI / 2)
+    }
+    expect(decayCameraAngles(0, DECAY_DEPTH_PERCENT.max).vertical)
+      .toBeGreaterThan(decayCameraAngles(0, DECAY_DEPTH_PERCENT.min).vertical)
+  })
+
+  it('clamps a value outside the slider, and falls back for one that is not a number', () => {
+    expect(decayCameraAngles(900, 50).horizontal).toBeCloseTo((DECAY_ROTATION_DEG.max * Math.PI) / 180, 12)
+    expect(decayCameraAngles(0, 900).vertical).toBeCloseTo((DECAY_DEPTH_PERCENT.max / 100) * (Math.PI / 2), 12)
+    expect(decayCameraAngles(Number.NaN, Number.NaN))
+      .toEqual(decayCameraAngles(DECAY_ROTATION_DEG.default, DECAY_DEPTH_PERCENT.default))
+  })
+})
+
+describe('decayCenterPercent', () => {
+  it('leaves the box where the library puts it when neither slider has moved', () => {
+    expect(decayCenterPercent(0, 0)).toEqual({ xCenter: '55%', yCenter: '45%' })
+  })
+
+  /**
+   * The library measures its vertical centre *down* the canvas, so a slider labelled "Move
+   * vertically" that sent the surface down when pushed up would be its own bug.
+   */
+  it('moves the box right and up for positive values', () => {
+    const right = decayCenterPercent(1, 0)
+    const up = decayCenterPercent(0, 1)
+    expect(Number.parseFloat(right.xCenter)).toBeGreaterThan(55)
+    expect(Number.parseFloat(up.yCenter)).toBeLessThan(45)
+  })
+
+  it('keeps the box on the plot across each slider’s own range', () => {
+    for (const x of [DECAY_VIEW_MOVE_X.min, 0, DECAY_VIEW_MOVE_X.max]) {
+      for (const y of [DECAY_VIEW_MOVE_Y.min, 0, DECAY_VIEW_MOVE_Y.max]) {
+        const { xCenter, yCenter } = decayCenterPercent(x, y)
+        expect(xCenter).toMatch(/^-?[\d.]+%$/)
+        expect(yCenter).toMatch(/^-?[\d.]+%$/)
+      }
+    }
+  })
+
+  it('falls back rather than writing NaN% into the options', () => {
+    expect(decayCenterPercent(Number.NaN, Number.NaN)).toEqual(decayCenterPercent(0, 0))
+  })
+})
+
 describe('decayViewDefaults', () => {
   /**
-   * <b>The point of the function.</b> The Surface view panel's Reset view button writes these ten
-   * values; a new measurement opens on them too, and it has to be the same ten — a button that
+   * <b>The point of the function.</b> The Surface view panel's Reset view button writes these
+   * values; a new measurement opens on them too, and it has to be the same set — a button that
    * restored a view no measurement ever starts at would be the worse of two wrong answers. Asserted
    * against `defaultImpulseDisplay` rather than against a copy of the figures, so the test fails if
    * either side gains a field the other has not.
@@ -340,13 +488,16 @@ describe('decayViewDefaults', () => {
     }
   })
 
-  /** Rotation and Tilt are in it although their sliders sit above the panel the button is in. */
-  it('covers the camera as well as the box and the light', () => {
+  /**
+   * Rotation and Tilt are in it although their sliders sit above the panel the button is in.
+   *
+   * <p>It was eight fields until the engine was replaced on 2026-10-30; the two that went were the
+   * light's angles, <c>vis-graph3d</c> having no light to position.</p>
+   */
+  it('covers the camera as well as the box, and no longer a light', () => {
     expect(Object.keys(decayViewDefaults()).sort()).toEqual([
       'decayDepthPercent',
       'decayExplodeZ',
-      'decayLightAzimuthDeg',
-      'decayLightElevationDeg',
       'decayMagnification',
       'decayMoveX',
       'decayMoveY',
@@ -370,8 +521,6 @@ describe('decayViewDefaults', () => {
     within(d.decayMoveX, DECAY_VIEW_MOVE_X, 'move x')
     within(d.decayMoveY, DECAY_VIEW_MOVE_Y, 'move y')
     within(d.decayMagnification, DECAY_VIEW_MAGNIFICATION, 'magnification')
-    within(d.decayLightAzimuthDeg, DECAY_LIGHT_AZIMUTH, 'light azimuth')
-    within(d.decayLightElevationDeg, DECAY_LIGHT_ELEVATION, 'light elevation')
     within(d.decayExplodeZ, DECAY_EXPLODE_Z, 'explode z')
   })
 
@@ -396,69 +545,6 @@ describe('decayViewDefaults', () => {
   /** Fresh objects: the panel writes into the models it hands back, and freezing one would throw. */
   it('hands back a new object each time', () => {
     expect(decayViewDefaults()).not.toBe(decayViewDefaults())
-  })
-})
-
-describe('DECAY_LIGHT_STRENGTH', () => {
-  /**
-   * The vendor documents 0.1 to 0.5 for this, and the figure is at the top of it deliberately —
-   * asked for 2026-10-25 because the foot of the palette read almost black. A value outside the
-   * range is not refused by the engine, it is silently clamped or ignored, so the bound is worth
-   * holding here.
-   */
-  it('is inside the range the engine documents, at the bright end of it', () => {
-    expect(DECAY_LIGHT_STRENGTH).toBeGreaterThanOrEqual(0.1)
-    expect(DECAY_LIGHT_STRENGTH).toBeLessThanOrEqual(0.5)
-    expect(DECAY_LIGHT_STRENGTH).toBeGreaterThan(0.3)
-  })
-})
-
-describe('magnification', () => {
-  /**
-   * <b>The report, and what was wrong with the old control.</b> "Our stops magnifying when the full
-   * chart is still in view" (2026-10-29). It narrowed the camera's lens and left the camera where
-   * it was, and a long lens converges on an orthographic view that no further narrowing enlarges:
-   * measured at a fixed camera, the drawn width went 96 px at 100 %, 209 at 400, 243 at 800, 270 at
-   * 2000 and 278 at 4000. Scaling the box instead is linear — 132 / 264 / 393 px at floor edges of
-   * 0.5 / 1 / 1.5 — and has no ceiling but the plot's own edge.
-   */
-  it('scales the box in proportion, all the way up the slider', () => {
-    const at = (percent: number) => decayGridAspect(DECAY_EXPLODE_Z.default, percent).x
-    const unit = at(DECAY_VIEW_MAGNIFICATION.default)
-
-    expect(at(DECAY_VIEW_MAGNIFICATION.default)).toBeCloseTo(1, 12)
-    expect(at(2 * DECAY_VIEW_MAGNIFICATION.default) / unit).toBeCloseTo(2, 12)
-    expect(at(DECAY_VIEW_MAGNIFICATION.default / 2) / unit).toBeCloseTo(0.5, 12)
-    // Proportional at the top of the slider as well, which is where the old control had nothing
-    // left to give: the ceiling is this many times the view the chart opens on.
-    const ceiling = DECAY_VIEW_MAGNIFICATION.max / DECAY_VIEW_MAGNIFICATION.default
-    expect(at(DECAY_VIEW_MAGNIFICATION.max) / unit).toBeCloseTo(ceiling, 12)
-    expect(ceiling).toBeGreaterThan(4)
-  })
-
-  /** Every step moves the picture, which is the whole of the complaint. */
-  it('grows at every step of its own slider', () => {
-    let previous = 0
-    for (let p = DECAY_VIEW_MAGNIFICATION.min; p <= DECAY_VIEW_MAGNIFICATION.max; p += DECAY_VIEW_MAGNIFICATION.step) {
-      const edge = decayGridAspect(DECAY_EXPLODE_Z.default, p).x
-      expect(edge, String(p)).toBeGreaterThan(previous)
-      previous = edge
-    }
-  })
-
-  /** It changes the size and not the shape: the height against the floor is the explode's alone. */
-  it('leaves the box’s shape to Explode Z', () => {
-    const small = decayGridAspect(26, 50)
-    const large = decayGridAspect(26, 400)
-    expect(large.y / large.x).toBeCloseTo(small.y / small.x, 12)
-    expect(large.x).toBe(large.z)
-  })
-
-  it('falls back to the default rather than to a box of no size', () => {
-    for (const bad of [0, -10, Number.NaN]) {
-      const a = decayGridAspect(DECAY_EXPLODE_Z.default, bad)
-      expect(a.x, String(bad)).toBeCloseTo(1, 12)
-    }
   })
 })
 
@@ -502,6 +588,38 @@ describe('decayExportTitle', () => {
   })
 })
 
+describe('decayOptionsKey', () => {
+  /**
+   * <b>The regression, written down as the case that caused it.</b> Switching the view from the
+   * cumulative spectral decay to the burst decay hands the chart a different surface at the same
+   * mode and the same range — and the second one's depth is counted in periods. A key that read
+   * only the two settings called them equal, so the chart kept the labels it had and drew the
+   * burst decay under "Time (ms)" over a scale of periods.
+   */
+  it('tells the two decay analyses apart, which differ only in their slice axis', () => {
+    const csd = dense()      // Milliseconds
+    const burst = ragged()   // Periods
+    expect(csd.sliceAxis).not.toBe(burst.sliceAxis)
+    expect(decayOptionsKey(csd, 'Waterfall', 30)).not.toBe(decayOptionsKey(burst, 'Waterfall', 30))
+  })
+
+  it('changes with the mode and with the range', () => {
+    const s = dense()
+    expect(decayOptionsKey(s, 'Waterfall', 30)).not.toBe(decayOptionsKey(s, 'WaterfallPeriods', 30))
+    expect(decayOptionsKey(s, 'Waterfall', 30)).not.toBe(decayOptionsKey(s, 'Waterfall', 40))
+  })
+
+  /** The point of it: a fresh pass of the same measurement must not pay for a rebuild. */
+  it('is unchanged by a new pass of the same measurement', () => {
+    expect(decayOptionsKey(dense(), 'Waterfall', 30)).toBe(decayOptionsKey(dense(), 'Waterfall', 30))
+  })
+
+  it('answers for an empty chart without throwing', () => {
+    expect(decayOptionsKey(null, 'Waterfall', 30)).toBeTruthy()
+    expect(decayOptionsKey(null, 'Waterfall', 30)).not.toBe(decayOptionsKey(dense(), 'Waterfall', 30))
+  })
+})
+
 describe('decayModeIs3d', () => {
   it('is every mode but the sonogram, which is a flat colour map', () => {
     expect(decayModeIs3d('Waterfall')).toBe(true)
@@ -511,82 +629,19 @@ describe('decayModeIs3d', () => {
 })
 
 describe('the two charts agree', () => {
-  /** A guard against the mesh builder growing its own idea of where a slice's data starts. */
+  /** A guard against the point builder growing its own idea of where a slice's data starts. */
   it('about where a ragged slice begins, for every slice', () => {
     const surface = ragged()
-    const mesh = decayMesh(surface, 'Waterfall', 30)
-    for (let r = 0; r < mesh.rows; r++) {
-      const first = surface.slices[r].firstValidColumn
-      for (let c = 0; c < mesh.cols; c++) {
-        expect(Number.isNaN(mesh.y[r * mesh.cols + c])).toBe(levelAt(surface, r, c) === null)
-        if (c < first) expect(Number.isNaN(mesh.y[r * mesh.cols + c])).toBe(true)
+    const cloud = decayPoints(surface, 'Waterfall', 30)
+    const acrossCoords = surface.freqHz.map((f) => decayAxisCoordinate(f, true))
+
+    for (const [r, slice] of surface.slices.entries()) {
+      const y = DECAY_DEPTH_SIGN * slice.value
+      for (let c = 0; c < surface.freqHz.length; c++) {
+        const present = cloud.points.some((p) => p.y === y && p.x === acrossCoords[c])
+        expect(present, `${r},${c}`).toBe(levelAt(surface, r, c) !== null)
+        if (c < slice.firstValidColumn) expect(present, `${r},${c} before its start`).toBe(false)
       }
     }
-  })
-})
-
-describe('decayCameraZoom', () => {
-  it('uses the ordinary framing for every plot shape the layout actually produces', () => {
-    for (const [w, h] of [[1200, 300], [873, 458], [600, 458], [450, 458]]) {
-      expect(decayCameraZoom(w, h), `${w}x${h}`).toBe(DECAY_3D_ZOOM)
-    }
-  })
-
-  it('pulls further back where the plot is taller than it is wide, which clips otherwise', () => {
-    expect(decayCameraZoom(345, 458)).toBe(DECAY_3D_ZOOM_NARROW)
-    expect(DECAY_3D_ZOOM_NARROW).toBeLessThan(DECAY_3D_ZOOM)
-  })
-
-  it('falls back to the ordinary framing rather than NaN before the plot has a size', () => {
-    expect(decayCameraZoom(0, 0)).toBe(DECAY_3D_ZOOM)
-    expect(decayCameraZoom(Number.NaN, 400)).toBe(DECAY_3D_ZOOM)
-  })
-})
-
-describe('DECAY_LIGHT', () => {
-  /**
-   * The light was turned about the height axis, not moved nearer or further: its distance from the
-   * origin is the vendor demo's to the last bit. Brightness is a property of that distance, so an
-   * edit that changed it would be changing two things while appearing to change one.
-   */
-  it("is the demo's light turned, not moved", () => {
-    const demo = { x: -2, y: -7, z: -7 }
-    const length = (v: { x: number; y: number; z: number }) => Math.hypot(v.x, v.y, v.z)
-    expect(length(DECAY_LIGHT)).toBeCloseTo(length(demo), 12)
-  })
-
-  /**
-   * <p>The invariant that survived the default being retuned by eye (2026-10-26, to 180/40 from
-   * the measured 164/44): the light has to be on the <em>camera's</em> side of the box, which is
-   * the negative x half. That is the fault this family has actually had — moving the camera to
-   * `360 - lean` left the light behind the surface and the chart went dark, 70.4 against 86.6 mean
-   * luminance — and it is the one an angle typed into the panel can bring back.</p>
-   *
-   * <p><b>Only the x half is held.</b> How high the light sits has been turned three times — above
-   * the box, level with it, and below it since 2026-10-29 — and all three are legitimate views of
-   * a surface; which side of the box the light is on is not, because the far side leaves the chart
-   * dark whatever the elevation.</p>
-   */
-  it('is in front of the surface, which is the side the camera is on', () => {
-    expect(DECAY_LIGHT.x).toBeLessThan(0)
-    expect(DECAY_LIGHT).toEqual(decayLightVector(DECAY_LIGHT_AZIMUTH.default, DECAY_LIGHT_ELEVATION.default))
-  })
-
-  it('turns rather than dims: every angle is the same distance from the box', () => {
-    for (const az of [0, 45, 164, 270, 359]) {
-      for (const el of [-90, -20, 0, 44, 90]) {
-        const v = decayLightVector(az, el)
-        expect(Math.hypot(v.x, v.y, v.z), `${az}/${el}`).toBeCloseTo(DECAY_LIGHT_RADIUS, 10)
-      }
-    }
-  })
-
-  it('puts a higher elevation further above the box, which is the negative side', () => {
-    expect(decayLightVector(164, 80).y).toBeLessThan(decayLightVector(164, 10).y)
-    expect(decayLightVector(164, 0).y).toBeCloseTo(0, 10)
-  })
-
-  it("is not the demo's own position, which went dark as the camera moved", () => {
-    expect([DECAY_LIGHT.x, DECAY_LIGHT.z]).not.toEqual([-2, -7])
   })
 })

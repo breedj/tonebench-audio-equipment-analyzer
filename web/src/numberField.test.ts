@@ -95,6 +95,46 @@ describe('a number input with both a min and a step', () => {
   })
 })
 
+/*
+ * The second guard, and a different half of the same lesson: `min` and `max` bound what a
+ * spinner offers and mark the box invalid, and neither stops a figure being typed past them. The
+ * decay-analysis fields are where that costs something, because each one fires its analysis the
+ * moment it changes — there is no Run button to refuse first — so 300 typed into Slices reached
+ * `CsdSettings.Validate` and came back on screen as the raw exception text, "Between 2 and 200
+ * blocks. (Parameter 'BlockCount') Actual value was 300." (reported 2026-10-31).
+ *
+ * Scoped to that one panel on purpose. Every other number input with a `max` sits on a settings
+ * panel whose `invalid` computed refuses the run with a sentence of its own, which is a different
+ * and defensible answer; these have nowhere to put one.
+ */
+const DECAY_PANEL = 'src/components/ImpulseResponseDisplayPanel.vue'
+
+/** Every `type="number"` input in the panel, as `{ model, hasMax, clamps }`. */
+function decayPanelNumberInputs(): { model: string; hasMax: boolean; clamps: boolean }[] {
+  const source = readFileSync(resolve(process.cwd(), DECAY_PANEL), 'utf8')
+  const inputs = source.match(/<input\b[^>]*?type="number"[^>]*?>/gs) ?? []
+  return inputs.map((tag) => ({
+    model: /v-model[\w.]*="([^"]+)"/.exec(tag)?.[1] ?? '(unbound)',
+    hasMax: /\bmax=/.test(tag),
+    clamps: /@change=/.test(tag),
+  }))
+}
+
+describe('a decay-analysis number input', () => {
+  it('is spelled the way this test can read, so the check is not vacuous', () => {
+    const bounded = decayPanelNumberInputs().filter((input) => input.hasMax)
+    expect(bounded.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('clamps on change, because its attributes only bound the spinner', () => {
+    const unclamped = decayPanelNumberInputs()
+      .filter((input) => input.hasMax && !input.clamps)
+      .map((input) => input.model)
+
+    expect(unclamped).toEqual([])
+  })
+})
+
 describe('formatSliderValue', () => {
   /** The report: a dragged Tilt wrote 29.299999999999997 into the model and the caption printed it. */
   it('rounds a dragged figure to one decimal', () => {

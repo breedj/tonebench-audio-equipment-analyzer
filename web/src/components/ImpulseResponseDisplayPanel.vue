@@ -321,6 +321,47 @@ function clampCsdSpan() {
   csdSpanMs.value = clampNumberField(csdSpanMs.value, 0.05, 500)
 }
 
+/*
+ * <p><b>The six fields below clamp because an attribute is a spinner limit and not a clamp.</b>
+ * `min` and `max` bound what the arrows offer and mark the box invalid; the browser lets a figure
+ * be typed straight past either, and these fields have no Run button to refuse it — every one of
+ * them fires its analysis on change. So 300 in Slices reached `CsdSettings.Validate` and came back
+ * as the raw exception text, <i>"Between 2 and 200 blocks. (Parameter 'BlockCount') Actual value
+ * was 300."</i> (reported 2026-10-31), and the same was true of the four beside it.</p>
+ *
+ * <p>The figures are the DSP's own — `CumulativeSpectralDecay.MaxBlockCount`, `MaxRiseTimeMs` and
+ * `MaxStartBeforePeakMs`, `BurstDecay.MaxSupportedPeriods` and `MaxPointsPerPeriod` — written here
+ * and in the attributes beside each box, so the spinner and the clamp cannot disagree. Range (dB)
+ * is the one with no server behind it: it scales the colour map, and a range of zero or less has
+ * no scale at all.</p>
+ *
+ * <p>Unlike the three above, each of these floors <em>is</em> a multiple of its own step, so the
+ * `min` attributes stay where they are — see {@link clampNumberField} for why that matters.</p>
+ */
+function clampCsdSlices() {
+  csdSlices.value = clampNumberField(csdSlices.value, 2, 200)
+}
+
+function clampCsdStartBeforePeak() {
+  csdStartBeforePeakMs.value = clampNumberField(csdStartBeforePeakMs.value, 0, 50)
+}
+
+function clampCsdRiseTime() {
+  csdRiseTimeMs.value = clampNumberField(csdRiseTimeMs.value, 0.02, 1)
+}
+
+function clampBurstMaxPeriods() {
+  burstMaxPeriods.value = clampNumberField(burstMaxPeriods.value, 2, 100)
+}
+
+function clampBurstPointsPerPeriod() {
+  burstPointsPerPeriod.value = clampNumberField(burstPointsPerPeriod.value, 1, 8)
+}
+
+function clampDecayRange() {
+  decayRangeDb.value = clampNumberField(decayRangeDb.value, 10, 70)
+}
+
 /** The band the harmonic curves actually cover — the widest order's, since the others stop earlier. */
 function fitToHarmonics() {
   const curves = harmonics.value
@@ -845,6 +886,7 @@ const referenceLabel = computed(() => {
         Range (dB)
         <input
           v-model.number="decayRangeDb"
+          @change="clampDecayRange"
           type="number"
           min="10"
           max="70"
@@ -923,6 +965,7 @@ const referenceLabel = computed(() => {
             Slices
             <input
               v-model.number="csdSlices"
+              @change="clampCsdSlices"
               type="number"
               min="2"
               max="200"
@@ -938,6 +981,7 @@ const referenceLabel = computed(() => {
             Start before peak (ms)
             <input
               v-model.number="csdStartBeforePeakMs"
+              @change="clampCsdStartBeforePeak"
               type="number"
               min="0"
               max="50"
@@ -953,6 +997,7 @@ const referenceLabel = computed(() => {
           Rise time (ms)
           <input
             v-model.number="csdRiseTimeMs"
+            @change="clampCsdRiseTime"
             type="number"
             min="0.02"
             max="1"
@@ -969,6 +1014,7 @@ const referenceLabel = computed(() => {
             Max periods
             <input
               v-model.number="burstMaxPeriods"
+              @change="clampBurstMaxPeriods"
               type="number"
               min="2"
               max="100"
@@ -981,6 +1027,7 @@ const referenceLabel = computed(() => {
             Points per period
             <input
               v-model.number="burstPointsPerPeriod"
+              @change="clampBurstPointsPerPeriod"
               type="number"
               min="1"
               max="8"

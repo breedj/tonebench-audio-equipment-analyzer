@@ -1,6 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- the package's own declarations export `Graph3d` as `any` (see below).
 import { Graph3d } from 'vis-graph3d/standalone'
+import { surfaceQuadGradient } from './surfaceGradient'
 
 /**
  * <p>The typed face of <c>vis-graph3d</c>, which is what <c>DecaySurface3dChart</c> talks to.</p>
@@ -194,7 +195,123 @@ export function createGraph3d(
   data: Graph3dPoint[],
   options: Graph3dOptions,
 ): Graph3dInstance {
+  patchSurfaceGradients()
   return new Graph3d(host, data, options) as Graph3dInstance
+}
+
+/** One corner of a surface cell as the library holds it, which is all the patch below reads. */
+interface LibraryQuadCorner {
+  screen: { x: number; y: number }
+  point: { value: number }
+}
+
+/** The private members of the library the patch reaches for, named so a rename is a build error. */
+interface LibraryInternals {
+  valueRange: { min: number }
+  scale: { value: number }
+  /** Set by the patched colormap to the brightness the library asked for; see below. */
+  _surfaceShade?: number | undefined
+  /** Whether the polygon being filled is a surface cell rather than anything else. */
+  _inSurfaceCell?: boolean
+}
+
+type ColormapFn = (this: LibraryInternals, x: number, v?: number) => string
+type DrawCellFn = (this: LibraryInternals, ctx: CanvasRenderingContext2D, point: unknown) => void
+type PolygonFn = (
+  this: LibraryInternals,
+  ctx: CanvasRenderingContext2D,
+  points: LibraryQuadCorner[],
+  fillStyle?: string | CanvasGradient,
+  strokeStyle?: string | CanvasGradient,
+) => void
+
+let surfaceGradientsPatched = false
+
+/**
+ * <p><b>Fills each surface cell with a gradient over its own level axis instead of one flat
+ * colour.</b> The reasoning, and the measurement that produced it, are in
+ * {@link ./surfaceGradient}; this is the plumbing.</p>
+ *
+ * <p><b>Why it is a patch.</b> The library offers no vertex colours and no hook into the fill: the
+ * colour of a cell is decided inside <c>_redrawSurfaceGraphPoint</c> and handed straight to
+ * <c>_polygon</c>, both private. Reimplementing the first of those would mean copying its lighting
+ * model — the surface normal, the view angle, the gray-bottom test — into this app, where it would
+ * drift from the library's on the next release and say nothing about having done so. Wrapping the
+ * three instead leaves every one of those decisions where it is and changes only the paint, so what
+ * a version bump can break is the three names below, and all three are checked before anything is
+ * replaced: a release that renames one leaves the chart drawing exactly as it did before this.</p>
+ *
+ * <p><b>The shade is read rather than recomputed</b>, which is the whole reason the colormap is
+ * wrapped as well. <c>_redrawSurfaceGraphPoint</c> works out a brightness from the cell's angle to
+ * the viewer (the <c>showShadow</c> term) and passes it to <c>_colormap</c> as a second argument
+ * that nothing else exposes, so the wrapper notes it in passing and the two end colours are then
+ * built the same way the mean colour was. Recovering it from the fill colour's digits instead
+ * would be a division by whatever the red channel happened to be.</p>
+ *
+ * <p>Applied once per process and only from {@link createGraph3d}, so a build that never draws a
+ * surface never touches the library's prototype.</p>
+ */
+function patchSurfaceGradients(): void {
+  if (surfaceGradientsPatched) return
+  surfaceGradientsPatched = true
+
+  const proto = (Graph3d as unknown as { prototype: Record<string, unknown> }).prototype
+  const colormap = proto._colormap as ColormapFn | undefined
+  const drawCell = proto._redrawSurfaceGraphPoint as DrawCellFn | undefined
+  const polygon = proto._polygon as PolygonFn | undefined
+  if (typeof colormap !== 'function' || typeof drawCell !== 'function' || typeof polygon !== 'function') {
+    return
+  }
+
+  proto._colormap = function (this: LibraryInternals, x: number, v?: number): string {
+    this._surfaceShade = v === undefined ? 1 : v
+    return colormap.call(this, x, v)
+  }
+
+  proto._redrawSurfaceGraphPoint = function (
+    this: LibraryInternals,
+    ctx: CanvasRenderingContext2D,
+    point: unknown,
+  ): void {
+    this._inSurfaceCell = true
+    // Cleared rather than left over: a cell the library decides to paint gray never reaches the
+    // colormap at all, and a stale shade would be the previous cell's.
+    this._surfaceShade = undefined
+    try {
+      drawCell.call(this, ctx, point)
+    } finally {
+      this._inSurfaceCell = false
+    }
+  }
+
+  proto._polygon = function (
+    this: LibraryInternals,
+    ctx: CanvasRenderingContext2D,
+    points: LibraryQuadCorner[],
+    fillStyle?: string | CanvasGradient,
+    strokeStyle?: string | CanvasGradient,
+  ): void {
+    const shade = this._surfaceShade
+    if (this._inSurfaceCell && shade !== undefined && typeof fillStyle === 'string') {
+      const ends = surfaceQuadGradient(points.map((corner) => ({ screen: corner.screen, value: corner.point.value })))
+      if (ends) {
+        const gradient = ctx.createLinearGradient(ends.from.x, ends.from.y, ends.to.x, ends.to.y)
+        gradient.addColorStop(0, colormap.call(this, levelFraction(this, ends.fromValue), shade))
+        gradient.addColorStop(1, colormap.call(this, levelFraction(this, ends.toValue), shade))
+        // The cell is stroked in its own fill colour to close the hairline seams between cells
+        // (see `showSurfaceGrid` in the chart's options), so that stroke has to follow the
+        // gradient too — while a mesh line, which is the axis colour, is left alone.
+        if (strokeStyle === fillStyle) strokeStyle = gradient
+        fillStyle = gradient
+      }
+    }
+    polygon.call(this, ctx, points, fillStyle, strokeStyle)
+  }
+}
+
+/** Where a level sits on the colour scale, the way the library's own cell fill works it out. */
+function levelFraction(chart: LibraryInternals, value: number): number {
+  return (value - chart.valueRange.min) * chart.scale.value
 }
 
 /**

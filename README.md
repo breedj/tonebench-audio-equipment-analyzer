@@ -2,6 +2,15 @@
 Cross platform audio analyzer for qa40x devices with sound card support.
 Developed with the help of Claude.ai
 
+<img width="1666" height="807" alt="image" src="https://github.com/user-attachments/assets/f667c795-e92d-4f44-9f6a-183194f699bb" />
+<img width="1244" height="906" alt="image" src="https://github.com/user-attachments/assets/17400dac-f2f4-41a7-9384-73924c95e5f7" />
+<img width="1920" height="913" alt="image" src="https://github.com/user-attachments/assets/e45aa13e-4c2a-4663-a2ca-61d8da6bd0f2" />
+<img width="908" height="786" alt="image" src="https://github.com/user-attachments/assets/2b61fafa-6f4c-4178-bd06-dc5f662cff35" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/e0e1f35a-488d-4182-8445-f96957ba2d28" />
+<img width="1652" height="979" alt="image" src="https://github.com/user-attachments/assets/10e5a2b4-2072-4cb6-b46d-2c13db30fad4" />
+
+
+
 ## What it measures
 
 Ten measurement kinds, each with its own settings, charts and stored results:

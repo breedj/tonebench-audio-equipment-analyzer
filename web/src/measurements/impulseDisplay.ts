@@ -140,7 +140,11 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     // its own default because it decides what the *unfilled* stack looks like, which is a separate
     // answer and the one that applies once this is turned off.
     decayFilled: true,
-    decayMeshFrequency: false,
+    // The frequency lines on: one per slice, each the spectrum at that moment, which is the curve
+    // a waterfall is read for — and on the 3D surface they are the only thing that says where one
+    // slice ends and the next begins. The time lines stay off: both at once is a mesh, and over a
+    // cumulative spectral decay's twenty-odd thousand cells that is a wash rather than a mesh.
+    decayMeshFrequency: true,
     decayMeshTime: false,
     // The six view sliders, spread rather than listed, so that a new measurement and the Surface
     // view panel's Reset view button cannot come to disagree about what the default view is.
@@ -148,7 +152,9 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     decayRangeDb: 30,
     csd: { ...DEFAULT_CSD_ANALYSIS },
     burstMaxPeriods: 30,
-    burstPointsPerPeriod: 8,
+    // `BurstDecay`'s own remark: three is enough to see a decay, and more is mostly more curves —
+    // the slice count is `periods x this + 1`, so eight drew 241 of them against 91.
+    burstPointsPerPeriod: 3,
     burstResolution: 'PreferFrequency',
   }
 }

@@ -3497,9 +3497,9 @@ const impulseFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.freqToHz)
 const impulseDecayFreqToHz = ref(DEFAULT_IMPULSE_DISPLAY.decayFreqToHz)
 
 // The two decay surfaces. How they are drawn is shared between them; what is analysed is not.
-const impulseDecayMode = ref<import('./api/client').DecayChartMode>('Waterfall')
-const impulseDecayPalette = ref<import('./api/client').DecayPalette>('Jet')
-const impulseDecayColoredCurves = ref(true)
+const impulseDecayMode = ref<import('./api/client').DecayChartMode>(DEFAULT_IMPULSE_DISPLAY.decayMode)
+const impulseDecayPalette = ref<import('./api/client').DecayPalette>(DEFAULT_IMPULSE_DISPLAY.decayPalette)
+const impulseDecayColoredCurves = ref(DEFAULT_IMPULSE_DISPLAY.decayColoredCurves)
 const impulseDecayFilled = ref(DEFAULT_IMPULSE_DISPLAY.decayFilled)
 const impulseDecayMeshFrequency = ref(DEFAULT_IMPULSE_DISPLAY.decayMeshFrequency)
 const impulseDecayMeshTime = ref(DEFAULT_IMPULSE_DISPLAY.decayMeshTime)
@@ -3509,7 +3509,7 @@ const impulseDecayMoveX = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveX)
 const impulseDecayMoveY = ref(DEFAULT_IMPULSE_DISPLAY.decayMoveY)
 const impulseDecayMagnification = ref(DEFAULT_IMPULSE_DISPLAY.decayMagnification)
 const impulseDecayExplodeZ = ref(DEFAULT_IMPULSE_DISPLAY.decayExplodeZ)
-const impulseDecayRangeDb = ref(30)
+const impulseDecayRangeDb = ref(DEFAULT_IMPULSE_DISPLAY.decayRangeDb)
 
 const initialCsd = DEFAULT_CSD_ANALYSIS
 const impulseCsdFftLength = ref(initialCsd.fftLength)
@@ -3519,8 +3519,8 @@ const impulseCsdStartBeforePeakMs = ref(initialCsd.startBeforePeakMs)
 const impulseCsdWindowMode = ref<import('./api/client').CsdWindowModeName>(initialCsd.windowMode)
 const impulseCsdRiseTimeMs = ref(initialCsd.riseTimeMs)
 
-const impulseBurstMaxPeriods = ref(30)
-const impulseBurstPointsPerPeriod = ref(8)
+const impulseBurstMaxPeriods = ref(DEFAULT_IMPULSE_DISPLAY.burstMaxPeriods)
+const impulseBurstPointsPerPeriod = ref(DEFAULT_IMPULSE_DISPLAY.burstPointsPerPeriod)
 
 /**
  * The lowest frequency the deepest slice can still answer for — where the burst decay's curves stop
@@ -3536,7 +3536,7 @@ const impulseBurstFullDepthHz = computed(() => {
   const deepest = surface.slices[surface.slices.length - 1]
   return deepest.firstValidColumn > 0 ? surface.freqHz[deepest.firstValidColumn] : 0
 })
-const impulseBurstResolution = ref<import('./api/client').BurstDecayResolutionName>('PreferFrequency')
+const impulseBurstResolution = ref<import('./api/client').BurstDecayResolutionName>(DEFAULT_IMPULSE_DISPLAY.burstResolution)
 
 // The CSD defaults used to follow the measurement's sample rate from here, re-deriving them on a
 // rate change unless the user had touched them. They are ARTA's four numbers now, written down

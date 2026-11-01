@@ -78,9 +78,12 @@ describe('the decay views’ top of band', () => {
 describe('the two mesh-line settings', () => {
   const read = (stored: Record<string, unknown>) => impulseDisplayFromParams(JSON.stringify(stored))
 
-  it('are both off on a new measurement', () => {
+  // Asked for 2026-11-01: the frequency lines on, the time lines off. Both at once is a wash over
+  // a cumulative spectral decay's cell count, and neither leaves the 3D surface with nothing to
+  // say where one slice ends and the next begins.
+  it('open a new measurement with the frequency lines and not the time lines', () => {
     const d = defaultImpulseDisplay()
-    expect(d.decayMeshFrequency).toBe(false)
+    expect(d.decayMeshFrequency).toBe(true)
     expect(d.decayMeshTime).toBe(false)
   })
 
@@ -112,10 +115,20 @@ describe('the two mesh-line settings', () => {
     })
   })
 
-  it('are off for a measurement that says nothing about a mesh at all', () => {
+  it('fall back to the app default for a measurement that says nothing about a mesh at all', () => {
     expect(read({ frequencySpanHz: 96000 })).toMatchObject({
-      decayMeshFrequency: false,
+      decayMeshFrequency: true,
       decayMeshTime: false,
     })
+  })
+
+  /**
+   * The half of the changed-defaults rule that matters: the frequency lines went on by default on
+   * 2026-11-01, and a measurement that stored its own answer keeps it. The old single checkbox
+   * counts as an answer too, which is what the case above this one is about.
+   */
+  it('keep a stored off, now that on is the default', () => {
+    expect(read({ chartDecayMeshFrequency: false })).toMatchObject({ decayMeshFrequency: false })
+    expect(read({ chartDecayMeshLines: false })).toMatchObject({ decayMeshFrequency: false })
   })
 })

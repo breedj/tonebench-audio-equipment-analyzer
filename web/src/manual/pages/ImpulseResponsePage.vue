@@ -503,9 +503,9 @@ const { showPage } = useManual()
       moment, which is the curve a waterfall is read for. The time lines run the other way, one per
       frequency column: each traces how that frequency decays. Both at once is a mesh, and on a
       cumulative spectral decay&rsquo;s twenty-odd thousand cells that is a wash rather than a mesh
-      &mdash; which is why both start off, and why ruling one direction is usually the more
-      readable of the three. On a coarser analysis, or magnified into a corner of one, the lines are
-      what show the shape.
+      &mdash; which is why a new measurement starts with the frequency lines alone, and why ruling
+      one direction is usually the most readable of the three. On a coarser analysis, or magnified
+      into a corner of one, the lines are what show the shape.
     </p>
     <p>
       Each names the quantity its lines run along, not one of the chart&rsquo;s axes, so the boxes
@@ -523,9 +523,12 @@ const { showPage } = useManual()
     </p>
     <p>
       <strong>Points per period</strong> is how finely the burst decay is sampled in time, and so how
-      many curves the waterfall has to draw. Eight is the default, and at any ordinary chart size every
-      one of them is drawn — what separates adjacent curves is the level between them, not the depth
-      offset, so a dense stack stays legible.
+      many curves the waterfall has to draw — the slice count is the maximum depth times this, plus
+      one. Three is the default, which over thirty periods is ninety-one curves: three is enough to
+      follow a decay, and more is mostly more curves. Raise it where a ring dies away inside a period
+      or two and you want that shape resolved. At any ordinary chart size every curve is drawn
+      whatever the setting — what separates adjacent ones is the level between them, not the depth
+      offset, so even the densest stack stays legible.
     </p>
     <p>
       Where a slice's curve begins part-way across, the analysis has no answer for the frequencies to

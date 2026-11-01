@@ -1,5 +1,6 @@
 import type { DecayChartMode, DecayPalette, DecaySurface } from '../api/client'
 import type { Graph3dPoint, Graph3dRgb } from '../charts/graph3d'
+import { MESH_LINE_COLOR, type SurfaceMesh } from '../charts/surfaceMesh'
 import {
   DECAY_DEPTH_PERCENT,
   DECAY_ROTATION_DEG,
@@ -169,6 +170,31 @@ export function decayPointFrequencyHz(point: Graph3dPoint, cloud: DecayPointClou
 /** The time or period a point of the cloud stands at — the floor axis that is not the frequency. */
 export function decayPointTime(point: Graph3dPoint, cloud: DecayPointCloud): number {
   return cloud.acrossIsFrequency ? DECAY_DEPTH_SIGN * point.y : point.x
+}
+
+/**
+ * <p>Which of the library's two floor axes each <b>mesh lines</b> checkbox rules, for this view.</p>
+ *
+ * <p><b>The checkboxes name a quantity and the library names an axis, and the two are not fixed to
+ * one another.</b> The by-period waterfall reads time across the curves and stacks them in
+ * frequency, which is the across/depth pair of the ordinary one swapped — so a mesh bound to the x
+ * axis would be the frequency lines in one view and the time lines in the other, with nothing on
+ * screen saying which. That is the same trap the tooltip's readout is written around, one control
+ * along.</p>
+ *
+ * <p>Exactly one floor axis carries the frequency on either waterfall; an orientation that somehow
+ * carried it on neither still answers, by reading the other axis as the time one.</p>
+ */
+export function decayMeshAxes(
+  cloud: Pick<DecayPointCloud, 'acrossIsFrequency' | 'depthIsFrequency'>,
+  wanted: { frequency: boolean; time: boolean },
+  color: string = MESH_LINE_COLOR,
+): SurfaceMesh {
+  return {
+    alongX: cloud.acrossIsFrequency ? wanted.frequency : wanted.time,
+    alongY: cloud.depthIsFrequency ? wanted.frequency : wanted.time,
+    color,
+  }
 }
 
 /** Milliseconds or periods, to as many places as the number needs and no more. */

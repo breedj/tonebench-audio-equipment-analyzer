@@ -1734,8 +1734,18 @@ export interface ImpulseResponseParameters {
   chartDecayPalette?: DecayPalette | null
   chartDecayColoredCurves?: boolean | null
   chartDecayFilled?: boolean | null
-  /** Rule the 3D surface along every cell edge. Null on anything stored before 2026-10-30. */
+  /**
+   * Rule the 3D surface along every cell edge. Read on the way in and never written since
+   * 2026-11-01, when it became the two below — a measurement that carries it opens with both on.
+   */
   chartDecayMeshLines?: boolean | null
+  /**
+   * Rule the 3D surface along the frequency axis, and along the time or period axis. One line per
+   * slice and one per column respectively, which are different pictures and so two controls. Null
+   * on anything stored before 2026-11-01, where `chartDecayMeshLines` answers for both.
+   */
+  chartDecayMeshFrequency?: boolean | null
+  chartDecayMeshTime?: boolean | null
   chartDecayRotationDeg?: number | null
   chartDecayDepthPercent?: number | null
   /** The 3D surface's own view — see ImpulseResponseParameters on the server. Null on an older type. */

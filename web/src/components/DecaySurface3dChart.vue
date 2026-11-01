@@ -12,12 +12,14 @@ import {
   decayExportTitle,
   decayPointFrequencyHz,
   decayPointTime,
+  decayMeshAxes,
   decayOptionsKey,
   decayPoints,
   decayVerticalRatio,
   type DecayPointCloud,
 } from '../measurements/decay3d'
 import {
+  applySurfaceMesh,
   applyVerticalRatio,
   createGraph3d,
   destroyGraph3d,
@@ -56,8 +58,14 @@ const props = defineProps<{
   /** Accepted so the two charts are prop-compatible; the Canvas 2D painter's, and unread here. */
   coloredCurves: boolean
   filled: boolean
-  /** Rule the surface along every cell edge — this chart's counterpart to those two. */
-  meshLines: boolean
+  /**
+   * Rule the surface along its cell edges — this chart's counterpart to those two, and two
+   * controls rather than one since 2026-11-01. Each names a <em>quantity</em>, not one of the
+   * library's axes: the by-period waterfall swaps which floor axis is which, so `decayMeshAxes` is
+   * what turns the pair into a direction. See `charts/surfaceMesh.ts`.
+   */
+  meshFrequency: boolean
+  meshTime: boolean
   rotationDeg: number
   depthPercent: number
   /**
@@ -173,14 +181,12 @@ function plotWidth(): number {
  */
 function theme(dark: boolean) {
   return {
-    // <p><b>The mesh takes this ink, and that is the library's doing rather than a choice.</b>
-    // `_redrawSurfaceGraphPoint` strokes each cell with `this.axisColor` — its own source marks
-    // that line "should be customizable" — so the mesh cannot be coloured apart from the axes.
-    // On the dark style the ink is a near-white that already reads as white against the palette;
-    // it is lifted the rest of the way when the mesh is actually on, which is imperceptible on an
-    // axis label and is the difference between a white mesh and an off-white one. A light export
-    // keeps its dark ink, since white lines would whiten every tick and label on it too.</p>
-    ink: dark ? (props.meshLines ? '#ffffff' : '#d4d4d4') : '#404040',
+    // <p>The axes and their labels, and theirs alone. The mesh used to take this ink too — the
+    // library strokes each cell with `this.axisColor` — which is why a light page drew its mesh in
+    // near-black, reported 2026-11-01 as hard to see on Jet's dark blue. The lines are painted by
+    // this app now (see `charts/surfaceMesh.ts`), so this ink answers only the question it was
+    // ever right for: what reads against the page.</p>
+    ink: dark ? '#d4d4d4' : '#404040',
     grid: dark ? '#3f3f46' : '#d4d4d4',
     back: dark ? '#15181d' : '#ffffff',
   }
@@ -226,12 +232,8 @@ function buildOptions(
     // light to position. It is what keeps a decay's steps reading as steps rather than as flat
     // colour — the two light-angle sliders went with the old engine, there being nothing to turn.
     showShadow: true,
-    // <p>Off by default, and not for speed — measured at 388 ms against 395 ms, inside the noise.
-    // It strokes every cell border, and at a cumulative spectral decay's twenty-odd thousand cells
-    // that is a wash rather than a mesh; on a coarser analysis, or magnified into a corner of one,
-    // it is what shows the shape, so it is the user's call. With it off each quad is stroked in
-    // its own fill colour, which closes the hairline seams between them.</p>
-    showSurfaceGrid: props.meshLines,
+    // The mesh is not an option: it is a field, applied by `applySurfaceMesh` and read by the
+    // patched painter, so turning a line on costs one redraw rather than a grid rebuild.
     showGrayBottom: false,
     zoomable: true,
     ctrlToZoom: false,
@@ -289,6 +291,17 @@ function cameraFromProps() {
   }
 }
 
+/**
+ * Which directions the surface is ruled in, for this view. The two checkboxes name quantities and
+ * the library names axes — see `decayMeshAxes`, which is where that mapping is tested.
+ */
+function meshFor(points: DecayPointCloud | null) {
+  return decayMeshAxes(points ?? { acrossIsFrequency: true, depthIsFrequency: false }, {
+    frequency: props.meshFrequency,
+    time: props.meshTime,
+  })
+}
+
 function surfaceCloud(): DecayPointCloud | null {
   const surface = props.surface
   if (!surface || surface.slices.length === 0) return null
@@ -315,6 +328,7 @@ function build() {
       element,
       cloud.points,
       buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()),
+      meshFor(cloud),
     )
     rememberApplied()
     failure.value = null
@@ -367,8 +381,8 @@ onBeforeUnmount(() => {
  * Only the palette, the theme and the surface itself go through <c>setOptions</c>, which rebuilds
  * the grid on the way — and none of those three is a slider.</p>
  */
-type Pending = { camera: boolean; layout: boolean; options: boolean }
-const pending: Pending = { camera: false, layout: false, options: false }
+type Pending = { camera: boolean; layout: boolean; options: boolean; mesh: boolean }
+const pending: Pending = { camera: false, layout: false, options: false, mesh: false }
 
 function schedule(what: keyof Pending) {
   pending[what] = true
@@ -379,8 +393,11 @@ function schedule(what: keyof Pending) {
     redrawFrame = 0
     if (disposed || !chart) return
     const work = { ...pending }
-    pending.camera = pending.layout = pending.options = false
+    pending.camera = pending.layout = pending.options = pending.mesh = false
     try {
+      // First, and never on its own path: it is a field the renderer reads, so whichever of the
+      // three below ends up redrawing carries it.
+      if (work.mesh) applySurfaceMesh(chart, meshFor(cloud))
       // Most general first, so a pass that needs the options does not then redraw again for the
       // camera: setOptions already carries the camera it is given.
       if (work.options) {
@@ -462,6 +479,9 @@ function refreshSurface() {
     failure.value = null
     return
   }
+  // Before the data, because `setData` redraws — and a mode change hands over a surface whose
+  // floor axes have swapped, so which direction the frequency lines run has swapped with it.
+  applySurfaceMesh(chart, meshFor(cloud))
   chart.setData(cloud.points)
   if (decayOptionsKey(props.surface, props.mode, props.rangeDb) !== appliedOptionsKey) {
     chart.setOptions(buildOptions(cloud, plotWidth(), chartHeight.value, isDark.value, cameraFromProps()))
@@ -487,17 +507,22 @@ watch(
 )
 
 /**
- * The palette, the page's own theme and the mesh. None of the three is a slider, so the rebuild
- * `setOptions` costs is affordable — and all three are options rather than fields, the mesh
- * because it is `showSurfaceGrid` and the ink it strokes with.
+ * The palette and the page's own theme. Neither is a slider, so the rebuild `setOptions` costs is
+ * affordable.
  *
  * <p>Every prop `buildOptions` reads has to be in this list. One that is not reaches the chart
  * only when something else happens to rebuild the options, which is to say it silently does
  * nothing — which is what the mesh checkbox did until it was ticked and measured.</p>
  */
 watch(
-  () => [props.palette, isDark.value, props.meshLines],
+  () => [props.palette, isDark.value],
   () => schedule('options'),
+)
+
+/** The two mesh checkboxes, which are a field and so cost a redraw rather than a rebuild. */
+watch(
+  () => [props.meshFrequency, props.meshTime],
+  () => schedule('mesh'),
 )
 
 /** The key's own dependencies: what it is made of, rather than where the camera is. */
@@ -536,6 +561,7 @@ async function exportPng({ width, height }: ChartExportOptions): Promise<Blob> {
         offscreen,
         points.points,
         buildOptions(points, width, plotHeight, false, camera),
+        meshFor(points),
       )
 
     }
@@ -581,7 +607,12 @@ defineExpose({ exportPng })
 
 <template>
   <div ref="container" class="relative w-full">
-    <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
+    <!-- <p>z-[5], not z-10: the measurement bar at the top of every screen is `sticky z-10`, and
+         this chart comes after it in the DOM — so at the same level the button painted *over* the
+         bar as the page scrolled under it (reported 2026-11-01). Below the bar and above the
+         overlay canvas that follows it here, which is what it needs a level for at all; the other
+         thirteen charts' toggles have none, and so already paint under the bar.</p> -->
+    <ExpandToggle class="absolute right-2 top-2 z-[5]" :target="container" />
 
     <!-- <p><b>The host is the empty well when there is nothing to draw.</b> The library cannot be
          built with an empty surface at all (see `refreshSurface`), so with nothing measured there

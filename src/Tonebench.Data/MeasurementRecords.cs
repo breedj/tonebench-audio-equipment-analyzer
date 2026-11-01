@@ -2315,7 +2315,22 @@ public sealed record ImpulseResponseParameters(
     /// <see cref="ChartDecayFilled"/> and <c>ChartDecayColoredCurves</c>, which are the flat one's.
     /// Null on anything stored before 2026-10-30, which reads as off.
     /// </summary>
+    /// <remarks>
+    /// Read on the way in and no longer written, the way <c>ChartCsdBlockShiftSamples</c> is: it
+    /// became the two below on 2026-11-01, and a measurement that carries it opens with both of
+    /// them set to what it says. Asked for because the two directions draw different pictures —
+    /// along frequency is one curve per slice, along time one rake per column — and ruling both at
+    /// once on a cumulative spectral decay's twenty-odd thousand cells is a wash.
+    /// </remarks>
     bool? ChartDecayMeshLines = null,
+    /// <summary>
+    /// Rule the 3D surface along the frequency axis, and along the time or period axis. Each names
+    /// a quantity rather than one of the chart engine's axes, because the by-period waterfall
+    /// swaps which floor axis is which. Null on anything stored before 2026-11-01, where
+    /// <see cref="ChartDecayMeshLines"/> answers for both.
+    /// </summary>
+    bool? ChartDecayMeshFrequency = null,
+    bool? ChartDecayMeshTime = null,
     /// <summary>
     /// The oblique projection: how far the stack leans, in degrees from straight down and positive
     /// to the left, and how much of the chart's height the depth axis takes. Both were constants

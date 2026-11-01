@@ -2,6 +2,13 @@
 // @ts-ignore -- the package's own declarations export `Graph3d` as `any` (see below).
 import { Graph3d } from 'vis-graph3d/standalone'
 import { surfaceQuadGradient } from './surfaceGradient'
+import {
+  NO_SURFACE_MESH,
+  surfaceMeshIsEmpty,
+  surfaceMeshIsWhole,
+  surfaceMeshSegments,
+  type SurfaceMesh,
+} from './surfaceMesh'
 
 /**
  * <p>The typed face of <c>vis-graph3d</c>, which is what <c>DecaySurface3dChart</c> talks to.</p>
@@ -65,7 +72,9 @@ export interface Graph3dOptions {
   showPerspective?: boolean
   showGrid?: boolean
   showShadow?: boolean
-  showSurfaceGrid?: boolean
+  // `showSurfaceGrid` is deliberately absent: it rules every cell edge in `axisColor`, which is
+  // all four edges or none and in the same ink as the tick labels. This app rules one direction at
+  // a time and in its own ink — see `applySurfaceMesh` and `charts/surfaceMesh.ts`.
   showGrayBottom?: boolean
   showXAxis?: boolean
   showYAxis?: boolean
@@ -149,6 +158,12 @@ export interface Graph3dInstance {
   verticalRatio: number
   colormap?: (fraction: number) => Graph3dRgb
   /**
+   * Not the library's: the mesh this chart rules its surface with, read by the patch below. Written
+   * through {@link applySurfaceMesh}, which is a plain field write — the renderer reads it on its
+   * next pass, so a mesh change costs one redraw and no grid rebuild.
+   */
+  _surfaceMesh?: SurfaceMesh
+  /**
    * Private, and called only through {@link applyVerticalRatio}, which checks for it first.
    * It recomputes the three axis scales and the camera's arm location from the current ranges —
    * which is what reads {@link verticalRatio}, and what `redraw()` on its own does not do.
@@ -177,6 +192,16 @@ export function applyVerticalRatio(chart: Graph3dInstance, ratio: number): boole
 }
 
 /**
+ * <p>Sets which lines the surface is ruled with. A plain field write, like the two centres: the
+ * renderer reads it on its next pass, so unlike the <c>showSurfaceGrid</c> option it replaced this
+ * costs no grid rebuild. The caller redraws when it is ready — see the rule in
+ * {@link Graph3dInstance} about never redrawing twice.</p>
+ */
+export function applySurfaceMesh(chart: Graph3dInstance, mesh: SurfaceMesh): void {
+  chart._surfaceMesh = mesh
+}
+
+/**
  * <p>Builds a chart into <c>host</c>.</p>
  *
  * <p><b>There is no counterpart to destroy it.</b> The library has no <c>destroy()</c> — its own
@@ -194,10 +219,27 @@ export function createGraph3d(
   host: HTMLElement,
   data: Graph3dPoint[],
   options: Graph3dOptions,
+  mesh: SurfaceMesh = NO_SURFACE_MESH,
 ): Graph3dInstance {
-  patchSurfaceGradients()
-  return new Graph3d(host, data, options) as Graph3dInstance
+  patchSurfacePainting()
+  // <p><b>The mesh has to be readable during the constructor, which draws before it returns.</b>
+  // So it is parked here for the length of that call and moved onto the instance afterwards; the
+  // patched painter reads the instance first and falls back to this. Redraws are synchronous and
+  // the library never defers one, so nothing else can be painting while this is set — and the
+  // alternative, building the chart and then redrawing it to apply the mesh, is the one thing
+  // {@link Graph3dInstance} says never to do.</p>
+  meshBeingBuilt = mesh
+  try {
+    const chart = new Graph3d(host, data, options) as Graph3dInstance
+    chart._surfaceMesh = mesh
+    return chart
+  } finally {
+    meshBeingBuilt = undefined
+  }
 }
+
+/** See {@link createGraph3d}: the mesh of the chart whose constructor is running, if one is. */
+let meshBeingBuilt: SurfaceMesh | undefined
 
 /** One corner of a surface cell as the library holds it, which is all the patch below reads. */
 interface LibraryQuadCorner {
@@ -213,6 +255,8 @@ interface LibraryInternals {
   _surfaceShade?: number | undefined
   /** Whether the polygon being filled is a surface cell rather than anything else. */
   _inSurfaceCell?: boolean
+  /** The mesh this chart rules with; see {@link Graph3dInstance._surfaceMesh}. */
+  _surfaceMesh?: SurfaceMesh
 }
 
 type ColormapFn = (this: LibraryInternals, x: number, v?: number) => string
@@ -225,12 +269,13 @@ type PolygonFn = (
   strokeStyle?: string | CanvasGradient,
 ) => void
 
-let surfaceGradientsPatched = false
+let surfacePaintingPatched = false
 
 /**
- * <p><b>Fills each surface cell with a gradient over its own level axis instead of one flat
- * colour.</b> The reasoning, and the measurement that produced it, are in
- * {@link ./surfaceGradient}; this is the plumbing.</p>
+ * <p><b>Two changes to how a surface cell is painted: it is filled with a gradient over its own
+ * level axis instead of one flat colour, and it is ruled in one direction rather than all or
+ * nothing.</b> The reasoning behind the first is in {@link ./surfaceGradient} and behind the
+ * second in {@link ./surfaceMesh}; this is the plumbing for both.</p>
  *
  * <p><b>Why it is a patch.</b> The library offers no vertex colours and no hook into the fill: the
  * colour of a cell is decided inside <c>_redrawSurfaceGraphPoint</c> and handed straight to
@@ -251,9 +296,9 @@ let surfaceGradientsPatched = false
  * <p>Applied once per process and only from {@link createGraph3d}, so a build that never draws a
  * surface never touches the library's prototype.</p>
  */
-function patchSurfaceGradients(): void {
-  if (surfaceGradientsPatched) return
-  surfaceGradientsPatched = true
+function patchSurfacePainting(): void {
+  if (surfacePaintingPatched) return
+  surfacePaintingPatched = true
 
   const proto = (Graph3d as unknown as { prototype: Record<string, unknown> }).prototype
   const colormap = proto._colormap as ColormapFn | undefined
@@ -298,14 +343,39 @@ function patchSurfaceGradients(): void {
         const gradient = ctx.createLinearGradient(ends.from.x, ends.from.y, ends.to.x, ends.to.y)
         gradient.addColorStop(0, colormap.call(this, levelFraction(this, ends.fromValue), shade))
         gradient.addColorStop(1, colormap.call(this, levelFraction(this, ends.toValue), shade))
-        // The cell is stroked in its own fill colour to close the hairline seams between cells
-        // (see `showSurfaceGrid` in the chart's options), so that stroke has to follow the
-        // gradient too — while a mesh line, which is the axis colour, is left alone.
+        // The cell is stroked in its own fill colour to close the hairline seams between cells,
+        // so that stroke has to follow the gradient too — unless the mesh is about to claim it.
         if (strokeStyle === fillStyle) strokeStyle = gradient
         fillStyle = gradient
       }
     }
+
+    // <p><b>The mesh, in two cases that look like one.</b> Ruling <em>every</em> edge is exactly
+    // the outline the library already strokes, so that case is one assignment and costs nothing
+    // over the hairline-closing stroke it replaces — which is what `showSurfaceGrid` did, with the
+    // axis ink. Ruling <em>one direction</em> cannot be said that way: the quad is one closed path,
+    // so its other two edges still have to be stroked in the fill colour or the seams open, and the
+    // chosen two are drawn over them in a pass of their own.</p>
+    //
+    // <p>Each cell therefore ends by drawing its own mesh edges, after its fill. That ordering is
+    // what makes the picture right under the painter's algorithm: a shared edge is drawn by both
+    // the cells that own it, so whichever is painted last leaves the line on top of its own
+    // fill.</p>
+    const configured = this._inSurfaceCell ? this._surfaceMesh ?? meshBeingBuilt : undefined
+    const mesh = configured && !surfaceMeshIsEmpty(configured) ? configured : undefined
+    const whole = mesh !== undefined && surfaceMeshIsWhole(mesh)
+    if (mesh && whole) strokeStyle = mesh.color
+
     polygon.call(this, ctx, points, fillStyle, strokeStyle)
+
+    if (mesh === undefined || whole || points.length < 4) return
+    ctx.strokeStyle = mesh.color
+    ctx.beginPath()
+    for (const [from, to] of surfaceMeshSegments(mesh)) {
+      ctx.moveTo(points[from].screen.x, points[from].screen.y)
+      ctx.lineTo(points[to].screen.x, points[to].screen.y)
+    }
+    ctx.stroke()
   }
 }
 

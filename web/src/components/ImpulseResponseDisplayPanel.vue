@@ -105,7 +105,8 @@ const decayMode = defineModel<DecayChartMode>('decayMode', { required: true })
 const decayPalette = defineModel<DecayPalette>('decayPalette', { required: true })
 const decayColoredCurves = defineModel<boolean>('decayColoredCurves', { required: true })
 const decayFilled = defineModel<boolean>('decayFilled', { required: true })
-const decayMeshLines = defineModel<boolean>('decayMeshLines', { required: true })
+const decayMeshFrequency = defineModel<boolean>('decayMeshFrequency', { required: true })
+const decayMeshTime = defineModel<boolean>('decayMeshTime', { required: true })
 const decayRotationDeg = defineModel<number>('decayRotationDeg', { required: true })
 const decayMoveX = defineModel<number>('decayMoveX', { required: true })
 const decayMoveY = defineModel<number>('decayMoveY', { required: true })
@@ -178,6 +179,14 @@ const VIEWS: { value: ImpulseView; label: string }[] = [
 
 /** The two views that are analyses of the impulse rather than readings off it. */
 const isDecayView = computed(() => view.value === 'Csd' || view.value === 'BurstDecay')
+
+/**
+ * What the decay surface's second floor axis counts — milliseconds for a cumulative spectral decay
+ * and periods for a burst decay, which is that surface's own `sliceAxis`. It names the second mesh
+ * checkbox, so the label says what the chart's own axis says.
+ */
+const decayDepthQuantity = computed(() => (view.value === 'BurstDecay' ? 'periods' : 'time'))
+const decayDepthQuantityLabel = computed(() => (view.value === 'BurstDecay' ? 'Period' : 'Time'))
 
 /**
  * Puts every one of the six view sliders back where a new measurement starts, from the one function
@@ -737,15 +746,31 @@ const referenceLabel = computed(() => {
           Filled surface
         </label>
 
-        <!-- The 3D surface's counterpart to the two above: they describe how a stack of curves is
-             drawn and this describes how a solid one is, so each is shown only to its own chart. -->
+        <!-- <p>The 3D surface's counterpart to the two above: they describe how a stack of curves
+             is drawn and these describe how a solid one is, so each is shown only to its own
+             chart.</p>
+
+             <p><b>Two checkboxes rather than one</b>, asked for 2026-11-01 — "I like to see them
+             separately" — because the two directions really do say different things, and ruling
+             both at once on a cumulative spectral decay's twenty-odd thousand cells is a wash
+             rather than a mesh. Each names the <i>quantity</i> its lines run along, not one of the
+             chart's axes: the by-period waterfall swaps which floor axis is which, and a checkbox
+             that changed meaning with the view would be worse than no checkbox.</p> -->
         <label
           v-if="props.surface3d"
           class="tb-check-row"
-          title="Rule the surface along every cell edge. Off by default: a cumulative spectral decay has twenty-odd thousand cells and one line each is a wash rather than a mesh — but on a coarser analysis, or magnified into a corner of one, it is what shows the shape. The lines take the axis ink, so they are white on the dark style and dark on a light export."
+          title="Rule the surface along the frequency axis — one line per slice, tracing the spectrum at that moment. White, since the lines are drawn on the palette rather than on the page."
         >
-          <input v-model="decayMeshLines" type="checkbox" class="tb-check" />
-          Mesh lines
+          <input v-model="decayMeshFrequency" type="checkbox" class="tb-check" />
+          Frequency mesh lines
+        </label>
+        <label
+          v-if="props.surface3d"
+          class="tb-check-row"
+          :title="`Rule the surface along the ${decayDepthQuantity} axis — one line per frequency column, tracing how that frequency decays. White, since the lines are drawn on the palette rather than on the page.`"
+        >
+          <input v-model="decayMeshTime" type="checkbox" class="tb-check" />
+          {{ decayDepthQuantityLabel }} mesh lines
         </label>
 
         <!-- Hidden rather than disabled under a filled surface: it decides the colour of the

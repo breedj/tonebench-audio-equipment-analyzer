@@ -9,6 +9,7 @@ import {
   paletteIndex,
   paletteLut,
 } from './decay'
+import { MESH_LINE_COLOR } from '../charts/surfaceMesh'
 import { defaultImpulseDisplay } from './impulseDisplay'
 import {
   DECAY_DEPTH_SIGN,
@@ -25,6 +26,7 @@ import {
   decayColormap,
   decayDepthLabel,
   decayExportTitle,
+  decayMeshAxes,
   decayModeIs3d,
   decayOptionsKey,
   decayPointFrequencyHz,
@@ -266,6 +268,62 @@ describe('reading a point back', () => {
         expect([0, 0.5].some((t) => Math.abs(time - t) < 1e-9), `${mode} ${time}`).toBe(true)
       }
     }
+  })
+})
+
+describe('decayMeshAxes', () => {
+  /**
+   * The checkboxes name a quantity; the library names an axis. The by-period waterfall swaps which
+   * floor axis is which, so a mesh bound to the x axis would mean frequency in one view and time
+   * in the other — the readout's own trap, one control along.
+   */
+  it('puts the frequency lines on whichever floor axis carries the frequency', () => {
+    for (const mode of MODES) {
+      const cloud = decayPoints(dense(), mode, 30)
+      const frequencyOnly = decayMeshAxes(cloud, { frequency: true, time: false })
+      const timeOnly = decayMeshAxes(cloud, { frequency: false, time: true })
+
+      expect(frequencyOnly.alongX, mode).toBe(cloud.acrossIsFrequency)
+      expect(frequencyOnly.alongY, mode).toBe(cloud.depthIsFrequency)
+      // Exactly one direction each, and never the same one — which is what makes the two
+      // checkboxes draw different pictures rather than the same one twice.
+      expect([frequencyOnly.alongX, frequencyOnly.alongY].filter(Boolean), mode).toHaveLength(1)
+      expect(timeOnly.alongX, mode).toBe(!frequencyOnly.alongX)
+      expect(timeOnly.alongY, mode).toBe(!frequencyOnly.alongY)
+    }
+  })
+
+  it('rules every edge when both are asked for, and none when neither is', () => {
+    for (const mode of MODES) {
+      const cloud = decayPoints(dense(), mode, 30)
+      expect(decayMeshAxes(cloud, { frequency: true, time: true })).toMatchObject({
+        alongX: true,
+        alongY: true,
+      })
+      expect(decayMeshAxes(cloud, { frequency: false, time: false })).toMatchObject({
+        alongX: false,
+        alongY: false,
+      })
+    }
+  })
+
+  it('takes the white mesh ink unless it is given one', () => {
+    const cloud = decayPoints(dense(), 'Waterfall', 30)
+    expect(decayMeshAxes(cloud, { frequency: true, time: true }).color).toBe(MESH_LINE_COLOR)
+    expect(decayMeshAxes(cloud, { frequency: true, time: true }, '#123456').color).toBe('#123456')
+  })
+
+  /** An orientation carrying the frequency on neither axis still answers, reading both as time. */
+  it('reads an axis that is not the frequency one as the time one', () => {
+    const neither = { acrossIsFrequency: false, depthIsFrequency: false }
+    expect(decayMeshAxes(neither, { frequency: false, time: true })).toMatchObject({
+      alongX: true,
+      alongY: true,
+    })
+    expect(decayMeshAxes(neither, { frequency: true, time: false })).toMatchObject({
+      alongX: false,
+      alongY: false,
+    })
   })
 })
 

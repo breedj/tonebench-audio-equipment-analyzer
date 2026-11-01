@@ -428,7 +428,8 @@ export async function renderView(
               palette: display.decayPalette,
               coloredCurves: display.decayColoredCurves,
               filled: display.decayFilled,
-              meshLines: display.decayMeshLines,
+              meshFrequency: display.decayMeshFrequency,
+              meshTime: display.decayMeshTime,
               rotationDeg: display.decayRotationDeg,
               depthPercent: display.decayDepthPercent,
               // The four the 3D chart reads and the flat one ignores. Passed either way: a prop a

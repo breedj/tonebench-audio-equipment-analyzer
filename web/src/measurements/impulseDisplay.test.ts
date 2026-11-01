@@ -74,3 +74,48 @@ describe('the decay views’ top of band', () => {
     }
   })
 })
+
+describe('the two mesh-line settings', () => {
+  const read = (stored: Record<string, unknown>) => impulseDisplayFromParams(JSON.stringify(stored))
+
+  it('are both off on a new measurement', () => {
+    const d = defaultImpulseDisplay()
+    expect(d.decayMeshFrequency).toBe(false)
+    expect(d.decayMeshTime).toBe(false)
+  })
+
+  /**
+   * They were one checkbox until 2026-11-01. A measurement saved with it on asked for every edge,
+   * so it opens with both — read on the way in, with nothing rewritten, the way the CSD's block
+   * shift is. The one that was *off* must stay off, or every older measurement gains a mesh.
+   */
+  it('read the one checkbox they replaced, when they have nothing of their own', () => {
+    expect(read({ chartDecayMeshLines: true })).toMatchObject({
+      decayMeshFrequency: true,
+      decayMeshTime: true,
+    })
+    expect(read({ chartDecayMeshLines: false })).toMatchObject({
+      decayMeshFrequency: false,
+      decayMeshTime: false,
+    })
+  })
+
+  it('each win over it, so a measurement saved since can rule one direction', () => {
+    expect(read({ chartDecayMeshLines: true, chartDecayMeshFrequency: false })).toMatchObject({
+      decayMeshFrequency: false,
+      // Nothing of its own, so this half still reads the old field.
+      decayMeshTime: true,
+    })
+    expect(read({ chartDecayMeshFrequency: true, chartDecayMeshTime: false })).toMatchObject({
+      decayMeshFrequency: true,
+      decayMeshTime: false,
+    })
+  })
+
+  it('are off for a measurement that says nothing about a mesh at all', () => {
+    expect(read({ frequencySpanHz: 96000 })).toMatchObject({
+      decayMeshFrequency: false,
+      decayMeshTime: false,
+    })
+  })
+})

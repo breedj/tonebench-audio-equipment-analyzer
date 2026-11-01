@@ -63,12 +63,15 @@ export interface ImpulseDisplay {
   /** Fill between the curves, and draw them in one colour. See DecaySurfaceChart. */
   decayFilled: boolean
   /**
-   * Rule the 3D surface with a line along every cell edge. Off by default: there are twenty-odd
-   * thousand cells on a cumulative spectral decay and one line per cell is a wash rather than a
-   * mesh — but on a coarse analysis, or magnified into a corner of one, it is what shows the
-   * shape. Read by the 3D chart alone.
+   * Rule the 3D surface with lines along its cell edges — one setting per quantity since
+   * 2026-11-01, because the two draw different pictures: along frequency is one curve per slice,
+   * the spectrum at that moment, and along time is one rake per column, how that frequency
+   * decays. Both off by default; there are twenty-odd thousand cells on a cumulative spectral
+   * decay and ruling every edge of all of them is a wash rather than a mesh. Read by the 3D chart
+   * alone.
    */
-  decayMeshLines: boolean
+  decayMeshFrequency: boolean
+  decayMeshTime: boolean
   /** The oblique projection: the lean in degrees and the depth as a percentage of the plot. */
   decayRotationDeg: number
   decayDepthPercent: number
@@ -137,7 +140,8 @@ export function defaultImpulseDisplay(): ImpulseDisplay {
     // its own default because it decides what the *unfilled* stack looks like, which is a separate
     // answer and the one that applies once this is turned off.
     decayFilled: true,
-    decayMeshLines: false,
+    decayMeshFrequency: false,
+    decayMeshTime: false,
     // The six view sliders, spread rather than listed, so that a new measurement and the Surface
     // view panel's Reset view button cannot come to disagree about what the default view is.
     ...decayViewDefaults(),
@@ -220,7 +224,18 @@ export function impulseDisplayFromParams(
   }
   if (typeof stored.chartDecayColoredCurves === 'boolean') display.decayColoredCurves = stored.chartDecayColoredCurves
   if (typeof stored.chartDecayFilled === 'boolean') display.decayFilled = stored.chartDecayFilled
-  if (typeof stored.chartDecayMeshLines === 'boolean') display.decayMeshLines = stored.chartDecayMeshLines
+  // The one checkbox these two replaced, read on the way in and never written: a measurement saved
+  // with the mesh on asked for every edge, so it opens with both. Nothing migrates the stored
+  // document — the old field simply stops being written, as `chartCsdBlockShiftSamples` did.
+  const wholeMesh = typeof stored.chartDecayMeshLines === 'boolean' ? stored.chartDecayMeshLines : null
+  display.decayMeshFrequency =
+    typeof stored.chartDecayMeshFrequency === 'boolean'
+      ? stored.chartDecayMeshFrequency
+      : wholeMesh ?? display.decayMeshFrequency
+  display.decayMeshTime =
+    typeof stored.chartDecayMeshTime === 'boolean'
+      ? stored.chartDecayMeshTime
+      : wholeMesh ?? display.decayMeshTime
   if (typeof stored.chartDecayRotationDeg === 'number' && Number.isFinite(stored.chartDecayRotationDeg)) {
     display.decayRotationDeg = stored.chartDecayRotationDeg
   }

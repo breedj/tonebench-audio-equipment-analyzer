@@ -8,6 +8,7 @@ import { useAppTheme } from '../composables/useAppTheme'
 import type { DecayLayout, DecayPick, OrientedSurface, WallRib } from '../measurements/decay'
 import { decayExportTitle } from '../measurements/decay3d'
 import { exportGridTheme } from '../charts/palette'
+import { MESH_LINE_COLOR } from '../charts/surfaceMesh'
 import {
   acrossX,
   advancesTrailingEdge,
@@ -173,13 +174,13 @@ function projectionFor(plotWidth: number, plotHeight: number) {
 }
 
 /**
- * What the curves are drawn in when the surface is filled. White in both themes, deliberately: it
- * is drawn on saturated colour rather than on the page, so it reads either way, and it is what the
- * mesh over a filled surface looks like everywhere else. The one boundary it cannot mark is the
- * front curve on a light page, where the body below it is the page too — and there the colour step
- * from the fill draws the edge on its own.
+ * What the curves are drawn in when the surface is filled: the shared mesh ink, white in both
+ * themes for the reason given where it is defined — it is drawn on saturated colour rather than on
+ * the page. Shared with the 3D chart since 2026-11-01, so "a mesh line is white" is one fact
+ * rather than two. The one boundary it cannot mark is the front curve on a light page, where the
+ * body below it is the page too — and there the colour step from the fill draws the edge on its
+ * own.
  */
-const MESH_LINE_COLOR = '#ffffff'
 
 const isWaterfall = computed(() => props.mode !== 'Sonogram')
 
@@ -1213,7 +1214,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="container" class="relative w-full">
-    <ExpandToggle class="absolute right-2 top-2 z-10" :target="container" />
+    <!-- <p>z-[5], not z-10: the measurement bar at the top of every screen is `sticky z-10`, and
+         this chart comes after it in the DOM — so at the same level the button painted *over* the
+         bar as the page scrolled under it (reported 2026-11-01). Below the bar and above the
+         overlay canvas that follows it here, which is what it needs a level for at all; the other
+         thirteen charts' toggles have none, and so already paint under the bar.</p> -->
+    <ExpandToggle class="absolute right-2 top-2 z-[5]" :target="container" />
     <canvas
       ref="canvas"
       class="block w-full"

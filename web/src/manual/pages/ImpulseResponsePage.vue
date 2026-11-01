@@ -493,12 +493,26 @@ const { showPage } = useManual()
       rather than filled flat, so it carries the same smooth gradient the surface does and a
       resonance reads as a ridge instead of a staircase. And <strong>Filled</strong> and <strong>Coloured
       curves</strong> describe how a stack of curves is drawn, so they are not shown at all on the
-      3D surface. Its own counterpart is <strong>Mesh lines</strong>, which rules the solid along
-      every cell edge. It is off to begin with: a cumulative spectral decay has twenty-odd thousand
-      cells and one line each is a wash rather than a mesh, so the surface is normally read by its
-      colour and its shading. On a coarser analysis, or magnified into a corner of one, the lines
-      are what show the shape. They take the axis ink, so they are white on the dark style and dark
-      on a light export, and like every other setting here they are stored with the measurement.
+      3D surface. Its own counterpart is a pair of mesh settings, <strong>Frequency mesh
+      lines</strong> and <strong>Time mesh lines</strong> &mdash; <strong>Period mesh lines</strong>
+      on a burst decay, following that surface&rsquo;s own axis.
+    </p>
+    <p>
+      <strong>The two rule different pictures, which is why they are two boxes.</strong> The
+      frequency lines run along the frequency axis, one per slice: each is the spectrum at that
+      moment, which is the curve a waterfall is read for. The time lines run the other way, one per
+      frequency column: each traces how that frequency decays. Both at once is a mesh, and on a
+      cumulative spectral decay&rsquo;s twenty-odd thousand cells that is a wash rather than a mesh
+      &mdash; which is why both start off, and why ruling one direction is usually the more
+      readable of the three. On a coarser analysis, or magnified into a corner of one, the lines are
+      what show the shape.
+    </p>
+    <p>
+      Each names the quantity its lines run along, not one of the chart&rsquo;s axes, so the boxes
+      keep their meaning in the by-period projection, which swaps the two floor axes over. The lines
+      are white in either theme and on a light export: they are drawn on the palette rather than on
+      the page, so they do not follow it the way a tick label does. Like every other setting here,
+      both are stored with the measurement.
     </p>
     <p>
       <strong>A decay surface cannot be overlaid.</strong> Curves can share a chart and a colour map

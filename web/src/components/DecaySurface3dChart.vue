@@ -232,8 +232,12 @@ function buildOptions(
     // light to position. It is what keeps a decay's steps reading as steps rather than as flat
     // colour — the two light-angle sliders went with the old engine, there being nothing to turn.
     showShadow: true,
-    // The mesh is not an option: it is a field, applied by `applySurfaceMesh` and read by the
-    // patched painter, so turning a line on costs one redraw rather than a grid rebuild.
+    // The mesh this app draws is not an option but a field, applied by `applySurfaceMesh` and read
+    // by the patched painter, so turning a line on costs one redraw rather than a grid rebuild.
+    // The library's own grid is turned off here all the same: its default is true, it rules all
+    // four edges of every cell in the axis ink, and the painter patch is allowed not to apply — so
+    // this is what stands between a reader and a black grid if it ever does not.
+    showSurfaceGrid: false,
     showGrayBottom: false,
     zoomable: true,
     ctrlToZoom: false,

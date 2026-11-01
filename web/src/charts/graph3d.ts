@@ -72,9 +72,19 @@ export interface Graph3dOptions {
   showPerspective?: boolean
   showGrid?: boolean
   showShadow?: boolean
-  // `showSurfaceGrid` is deliberately absent: it rules every cell edge in `axisColor`, which is
-  // all four edges or none and in the same ink as the tick labels. This app rules one direction at
-  // a time and in its own ink — see `applySurfaceMesh` and `charts/surfaceMesh.ts`.
+  /**
+   * <p><b>Pass false. This app rules its own surface</b> — one direction at a time and in its own
+   * ink, through {@link applySurfaceMesh} — where the library's grid is all four edges of every
+   * cell or none, in <c>axisColor</c>, the same ink as the tick labels.</p>
+   *
+   * <p>It is passed rather than left out because <b>the library's own default is
+   * <c>true</c></b> and the patch below is allowed not to apply: a release that renames one of the
+   * three private members it wraps leaves the library painting on its own, and then this option is
+   * the only thing between a reader and a near-black grid over every cell. Left out for one
+   * afternoon on 2026-11-01 and reported within the hour — a surface ruled in the axis ink looks
+   * deliberate, so nothing about it reads as a fault.</p>
+   */
+  showSurfaceGrid?: boolean
   showGrayBottom?: boolean
   showXAxis?: boolean
   showYAxis?: boolean
@@ -294,9 +304,11 @@ let surfacePaintingPatched = false
  * would be a division by whatever the red channel happened to be.</p>
  *
  * <p>Applied once per process and only from {@link createGraph3d}, so a build that never draws a
- * surface never touches the library's prototype.</p>
+ * surface never touches the library's prototype. Exported for its own test, which calls the
+ * wrapped painter with a stub canvas — the one half of this chart that can be checked without
+ * one.</p>
  */
-function patchSurfacePainting(): void {
+export function patchSurfacePainting(): void {
   if (surfacePaintingPatched) return
   surfacePaintingPatched = true
 
@@ -336,6 +348,16 @@ function patchSurfacePainting(): void {
     fillStyle?: string | CanvasGradient,
     strokeStyle?: string | CanvasGradient,
   ): void {
+    const mesh = this._inSurfaceCell ? activeMesh(this) : undefined
+
+    // <p><b>A surface cell's outline is this app's business and not the library's.</b> Whatever
+    // <c>showSurfaceGrid</c> decided is discarded here and the mesh below is the only thing that
+    // rules a surface, so the two cannot disagree — and the option, which this app pins to false
+    // anyway, is left as the fallback for a patch that did not apply rather than as a second
+    // opinion that quietly outranks this one. Closing the hairline seams in the fill colour is
+    // what an unruled cell wants, and is what the gradient below then follows.</p>
+    if (this._inSurfaceCell) strokeStyle = fillStyle
+
     const shade = this._surfaceShade
     if (this._inSurfaceCell && shade !== undefined && typeof fillStyle === 'string') {
       const ends = surfaceQuadGradient(points.map((corner) => ({ screen: corner.screen, value: corner.point.value })))
@@ -361,10 +383,8 @@ function patchSurfacePainting(): void {
     // what makes the picture right under the painter's algorithm: a shared edge is drawn by both
     // the cells that own it, so whichever is painted last leaves the line on top of its own
     // fill.</p>
-    const configured = this._inSurfaceCell ? this._surfaceMesh ?? meshBeingBuilt : undefined
-    const mesh = configured && !surfaceMeshIsEmpty(configured) ? configured : undefined
     const whole = mesh !== undefined && surfaceMeshIsWhole(mesh)
-    if (mesh && whole) strokeStyle = mesh.color
+    if (mesh !== undefined && whole) strokeStyle = mesh.color
 
     polygon.call(this, ctx, points, fillStyle, strokeStyle)
 
@@ -377,6 +397,15 @@ function patchSurfacePainting(): void {
     }
     ctx.stroke()
   }
+}
+
+/**
+ * The mesh the cell being painted is ruled with, or undefined where it is ruled with nothing. The
+ * instance first and {@link meshBeingBuilt} second, for the constructor case.
+ */
+function activeMesh(chart: LibraryInternals): SurfaceMesh | undefined {
+  const configured = chart._surfaceMesh ?? meshBeingBuilt
+  return configured && !surfaceMeshIsEmpty(configured) ? configured : undefined
 }
 
 /** Where a level sits on the colour scale, the way the library's own cell fill works it out. */

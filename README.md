@@ -1,5 +1,5 @@
 # Tonebench - Audio Equipment Analyzer
-Cross platform audio analyzer for qa40x devices with sound card support.
+Cross platform audio analyzer for QA403 devices with sound card support.
 Developed with the help of Claude.ai
 
 <img width="1666" height="807" alt="image" src="https://github.com/user-attachments/assets/f667c795-e92d-4f44-9f6a-183194f699bb" />

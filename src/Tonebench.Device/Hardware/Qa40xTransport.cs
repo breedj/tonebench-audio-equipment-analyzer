@@ -20,7 +20,7 @@ namespace Tonebench.Device.Hardware;
 public sealed class Qa40xDeviceLostException(string message) : Exception(message);
 
 /// <summary>
-/// Thrown by <see cref="Qa40xTransport.Open"/> when no QA403 is found. Public, unlike its two
+/// Thrown by <see cref="Qa40xTransport.Open"/> when no QA40x analyzer is found. Public, unlike its two
 /// siblings here, because "nothing plugged in" is an ordinary state the app has to handle rather
 /// than a transport-internal failure: <c>DeviceLifecycleHostedService</c> catches this one to keep
 /// startup going, and logs it without a stack trace since there is nothing to diagnose.
@@ -28,7 +28,7 @@ public sealed class Qa40xDeviceLostException(string message) : Exception(message
 public sealed class Qa40xDeviceNotFoundException(string message) : Exception(message);
 
 /// <summary>
-/// Thrown by <see cref="Qa40xTransport.Open"/> when a QA403 is present but its interface cannot be
+/// Thrown by <see cref="Qa40xTransport.Open"/> when a QA40x analyzer is present but its interface cannot be
 /// claimed — i.e. another process still holds the handle. Distinct from
 /// <see cref="Qa40xDeviceNotFoundException"/> and from any later protocol failure so the log says
 /// which of the two "device unreachable after exit" causes is in play.
@@ -36,7 +36,7 @@ public sealed class Qa40xDeviceNotFoundException(string message) : Exception(mes
 internal sealed class Qa40xDeviceBusyException(string message, Exception inner) : Exception(message, inner);
 
 /// <summary>
-/// LibUsbDotNet 3.x plumbing for the QA403: device open/claim/close, the 5-byte big-endian
+/// LibUsbDotNet 3.x plumbing for the QA40x family: device open/claim/close, the 5-byte big-endian
 /// register read/write framing (docs/protocol.md §2.1/§2.2), and queued bulk data transfers on
 /// the streaming endpoint pair. No protocol semantics beyond raw framing live here — register
 /// meanings are in <see cref="Qa40xRegisters"/>, calibration in <see cref="Qa40xCalibration"/>.
@@ -74,16 +74,47 @@ internal sealed class Qa40xTransport : IDisposable
     private UsbEndpointReader? _dataReader;
 
     /// <summary>
-    /// Opens the QA403, claims interface 0 (Usb.cs:104-109), and opens all four endpoints.
+    /// Which model answered, available only once <see cref="Open"/> has succeeded.
+    ///
+    /// <para>This is the <i>only</i> place the model can be established, which is why it is detected
+    /// here rather than configured: the product id that opened is the one fact on the bus that names
+    /// the hardware. <c>Qa40xUsbDevice</c> reads it for its capabilities, its generator ceiling and
+    /// the name it reports.</para>
+    /// </summary>
+    public Qa40xModel? Model { get; private set; }
+
+    /// <summary>
+    /// Opens a QA40x analyzer, claims interface 0 (Usb.cs:104-109), and opens all four endpoints.
     /// Synchronous: every LibUsbDotNet call it makes (Find/Open/SetConfiguration/ClaimInterface/
     /// OpenEndpoint*) is itself synchronous.
+    ///
+    /// <para><b>Each known product id is tried in turn, and the VID is never matched on its own.</b>
+    /// 0x16c0 is a shared "free" VID block rather than QuantAsylum's own, so it identifies neither
+    /// the model nor the vendor: the QA451 programmable load is 0x16c0:0x4e35
+    /// (<see cref="Qa451Protocol.Qa451ProductId"/>) and a great many unrelated V-USB devices share
+    /// the block too. A VID-only finder would therefore claim interface 0 of whatever answered
+    /// first — see <see cref="Qa40xModel.All"/> for the order and why the QA403 leads it.</para>
     /// </summary>
     public void Open()
     {
-        var finder = new UsbDeviceFinder { Vid = Qa40xRegisters.Qa403VendorId, Pid = Qa40xRegisters.Qa403ProductId };
-        var device = _context.Find(finder)
-            ?? throw new Qa40xDeviceNotFoundException(
-                $"No QA403 found (VID 0x{Qa40xRegisters.Qa403VendorId:x4}, PID 0x{Qa40xRegisters.Qa403ProductId:x4}).");
+        IUsbDevice? device = null;
+        Qa40xModel? model = null;
+        foreach (var candidate in Qa40xModel.All)
+        {
+            device = _context.Find(new UsbDeviceFinder { Vid = Qa40xRegisters.Qa40xVendorId, Pid = candidate.ProductId });
+            if (device is not null)
+            {
+                model = candidate;
+                break;
+            }
+        }
+
+        if (device is null || model is null)
+        {
+            var tried = string.Join(", ", Qa40xModel.All.Select(m => $"{m.ProductName} 0x{m.ProductId:x4}"));
+            throw new Qa40xDeviceNotFoundException(
+                $"No QA40x analyzer found (VID 0x{Qa40xRegisters.Qa40xVendorId:x4}; tried {tried}).");
+        }
 
         // Open/claim failures are reported distinctly from every later failure because they separate
         // the two very different reasons a QA403 goes unreachable after this app exits, which
@@ -110,13 +141,14 @@ internal sealed class Qa40xTransport : IDisposable
             try { device.Dispose(); } catch { /* best-effort */ }
 
             throw new Qa40xDeviceBusyException(
-                "Found a QA403 but could not open and claim interface 0. Another process still holds it — "
+                $"Found a {model.ProductName} but could not open and claim interface 0. Another process still holds it — "
                     + "check for a leftover Tonebench.App process and end it. "
                     + $"Underlying error: {ex.Message}",
                 ex);
         }
 
         _device = device;
+        Model = model;
         _regWriter = device.OpenEndpointWriter(WriteEndpointID.Ep01);
         _regReader = device.OpenEndpointReader(ReadEndpointID.Ep01);
         _dataWriter = device.OpenEndpointWriter(WriteEndpointID.Ep02);

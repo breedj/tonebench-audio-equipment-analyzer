@@ -7,11 +7,30 @@ namespace Tonebench.Device.Hardware;
 /// </summary>
 internal static class Qa40xRegisters
 {
-    /// <summary>USB VID for QA403 (reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:43).</summary>
-    public const int Qa403VendorId = 0x16c0;
+    /// <summary>
+    /// USB VID shared by the whole QA40x family (reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:30
+    /// and :43 pass the same 0x16c0 for both models; qa40x-rs-main types.rs:7 calls it QA40X_VID).
+    ///
+    /// <para>Named for the family rather than for the QA403 because it is not a model fact: 0x16c0 is
+    /// a shared "free" VID block, so it identifies neither the model nor even the vendor. The QA451
+    /// programmable load sits on it too (<see cref="Qa451Protocol.Qa451VendorId"/>), as do a great
+    /// many unrelated V-USB devices — which is why <c>Qa40xTransport</c> matches an explicit PID list
+    /// and never this VID alone.</para>
+    /// </summary>
+    public const int Qa40xVendorId = 0x16c0;
 
     /// <summary>USB PID for QA403 (reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:43).</summary>
     public const int Qa403ProductId = 0x4e39;
+
+    /// <summary>
+    /// USB PID for QA402 (reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:29-30, whose
+    /// "Connect to QA402" button passes it to the same <c>Usb.Open(vid, pid)</c> the QA403 button
+    /// uses; PyQa40x analyzer.py:56 and qa40x-rs-main types.rs:8 agree).
+    ///
+    /// <para><b>No QA402 has ever been attached to this bench.</b> See <see cref="Qa40xModel"/> for
+    /// what the sources do and do not establish about it.</para>
+    /// </summary>
+    public const int Qa402ProductId = 0x4e37;
 
     /// <summary>Connection-verify scratch register: write a random uint32, read it back, must match (Usb.cs:189-204).</summary>
     public const byte ConnectionVerify = 0;
@@ -146,7 +165,10 @@ internal static class Qa40xRegisters
     /// <summary>Read-request flag: OR this into a register address to turn a write frame into a two-step read (Usb.cs:223, protocol.md §2.2).</summary>
     public const byte ReadFlag = 0x80;
 
-    /// <summary>Input full-scale ranges the QA403 supports, in ascending dBV order (Form1.cs:70-81, DeviceCapabilities.Qa403).</summary>
+    /// <summary>
+    /// Input full-scale ranges the QA403 supports, in ascending dBV order (Form1.cs:70-81,
+    /// DeviceCapabilities.Qa403). The QA402's ladder is the same — see <see cref="Qa40xModel"/>.
+    /// </summary>
     public static readonly IReadOnlyList<double> InputRangesDbv = [0, 6, 12, 18, 24, 30, 36, 42];
 
     /// <summary>Output full-scale ranges the QA403 supports, in ascending dBV order (Form1.cs:86-94, DeviceCapabilities.Qa403).</summary>
@@ -188,6 +210,16 @@ internal static class Qa40xRegisters
     /// Sample rate Hz -> register-9 index. Ported verbatim from PyQa40x control.py:18
     /// (<c>samplerate2reg = {48000: 0, 96000: 1, 192000: 2}</c>), extended with QA403's 384 kHz
     /// per qa40x-rs-main (docs/protocol.md §2.4: index 3, QA403-only).
+    ///
+    /// <para><b>This function encodes; it does not decide.</b> Index 3 exists on the QA403 alone, and
+    /// this method will happily encode 384 kHz for any caller — so whether a rate is *allowed* is a
+    /// question for <see cref="DeviceCapabilities.SampleRatesHz"/>, checked twice before the register
+    /// is written: by <c>DeviceSessionService.RequireSupportedSampleRate</c> on the app's own path,
+    /// and by <c>Qa40xUsbDevice.StreamAsync</c> for a caller holding the device directly. Neither is
+    /// tidiness: writing an index the connected model does not implement is exactly the class of
+    /// thing that cycled this QA403's output protection relay and needed a power cycle (see
+    /// <see cref="DeviceCapabilities.Qa403Experimental"/>), and on a QA402 nothing here has ever been
+    /// tested. Keeping the encoder total also keeps it a pure table rather than a policy.</para>
     /// </summary>
     public static uint SampleRateHzToRegister(double sampleRateHz) => sampleRateHz switch
     {

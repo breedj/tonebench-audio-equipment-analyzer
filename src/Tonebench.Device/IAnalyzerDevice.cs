@@ -43,6 +43,20 @@ public interface IAnalyzerDevice
     DeviceTelemetry? Telemetry => null;
 
     /// <summary>
+    /// True when this app has never been run against the connected model's hardware, so its
+    /// measurements rest on documentation rather than on verification. False by default — only a
+    /// device that knows it may be driving an untested model says otherwise.
+    ///
+    /// <para>A default member for the reason <see cref="Telemetry"/> is one: the test doubles need no
+    /// edit. The one implementation that overrides it is <c>Qa40xUsbDevice</c>, for the QA402, whose
+    /// protocol is taken from four independent sources that all treat it as the QA403's
+    /// (<c>Qa40xModel</c> records them) but which nobody here has attached. It is surfaced rather
+    /// than logged alone because the caveat belongs beside the readings: an analyzer is only as
+    /// trustworthy as the claim that it is being driven correctly.</para>
+    /// </summary>
+    bool ModelUnverified => false;
+
+    /// <summary>
     /// Whether this device steps its own input range while streaming. False on anything whose range
     /// is chosen for it: the simulator, whose range the browser's own peak watcher steps, and any
     /// device with a single fixed range.

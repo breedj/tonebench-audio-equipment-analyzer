@@ -1,4 +1,4 @@
-# QuantAsylum QA403 audio analyzer — USB access for non-root users on Linux.
+# QuantAsylum QA40x audio analyzers — USB access for non-root users on Linux.
 #
 # Install:
 #   sudo cp packaging/udev/99-qa403.rules /etc/udev/rules.d/
@@ -6,5 +6,15 @@
 #   sudo udevadm trigger
 #   sudo usermod -aG plugdev $USER   # then log out/in (or reboot) for the group change to apply
 #
+# The filename still says qa403 on purpose: it is the name the installed packages already place in
+# /etc/udev/rules.d, and renaming it would leave an upgraded machine holding both copies.
+#
+# One rule per product id this app will open — see Qa40xModel.All, which UdevRulesTests reads and
+# compares against this file, so a model added there cannot ship without Linux access. Matching on
+# the vendor id alone would be wrong as well as lazy: 16c0 is a shared "free" VID block, not
+# QuantAsylum's own, so a VID-only rule would hand out write access to unrelated hardware.
+#
 # VID:PID 16c0:4e39 is the QA403 (docs/protocol.md §1, reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:43).
 SUBSYSTEM=="usb", ATTR{idVendor}=="16c0", ATTR{idProduct}=="4e39", MODE="0660", GROUP="plugdev"
+# VID:PID 16c0:4e37 is the QA402 (docs/protocol.md §1, reference/qa40x-baremetal/QA40x_BareMetal/Form1.cs:29-30).
+SUBSYSTEM=="usb", ATTR{idVendor}=="16c0", ATTR{idProduct}=="4e37", MODE="0660", GROUP="plugdev"

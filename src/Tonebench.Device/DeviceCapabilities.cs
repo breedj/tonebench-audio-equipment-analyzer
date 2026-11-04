@@ -54,4 +54,36 @@ public sealed record DeviceCapabilities(
     /// </summary>
     public static DeviceCapabilities Qa403Experimental { get; } =
         Qa403 with { SampleRatesHz = [48_000, 96_000, 192_000, 384_000] };
+
+    /// <summary>
+    /// The QA402, the QA403's discontinued predecessor. <b>Identical to <see cref="Qa403"/> in every
+    /// field</b>, and written out anyway for two reasons: so the differences have a documented home,
+    /// and so a divergence found later has somewhere to go that is not a conditional buried in the
+    /// device. qa40x-rs-main keeps its own per-model table for the same reason and says so
+    /// (types.rs:96-97: "Both models expose the same four output ranges as far as we know; if a unit
+    /// ever differs, give it its own list here").
+    ///
+    /// <para><b>The sample rates are where this is not merely a copy.</b> There is deliberately no
+    /// <c>Qa402Experimental</c>: register 9 index 3 is documented as QA403-only (docs/protocol.md
+    /// §2.4), so the experimental 384 kHz setting must not reach a QA402 at all — see
+    /// <see cref="Qa40xModel.Capabilities"/>, which ignores the flag for this model. The QA402's own
+    /// brief calls it a "24-bit/192 KSPS Audio Analyzer", so 192 kHz is the top of the device rather
+    /// than a restriction this app imposes.</para>
+    ///
+    /// <para>The two ladders are asserted equal to the QA403's by <c>Qa40xModelTests</c> rather than
+    /// written as a <c>with</c>-derivation, so that making them differ is a deliberate act that
+    /// fails a test and forces a citation — which is the thing this family has no measurement for.
+    /// Their shared values come from code that runs on both models without branching
+    /// (baremetal Form1.cs:70-94, PyQa40x control.py:16-17), and from
+    /// <c>reference/ASIO40x-.../qa403.h:16-24</c>, whose QA403 class — used for the QA402 too —
+    /// enumerates the same eight input steps.</para>
+    ///
+    /// <para><b>Nothing here is measured.</b> No QA402 has been attached to this bench; see
+    /// <see cref="Qa40xModel"/> for what the four reference trees do and do not establish.</para>
+    /// </summary>
+    public static DeviceCapabilities Qa402 { get; } = new(
+        SampleRatesHz: [48_000, 96_000, 192_000],
+        InputRangesDbv: [0, 6, 12, 18, 24, 30, 36, 42],
+        OutputRangesDbv: [-12, -2, 8, 18],
+        MaxChannelCount: 2);
 }

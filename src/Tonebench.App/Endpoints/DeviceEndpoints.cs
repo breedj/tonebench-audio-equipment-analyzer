@@ -264,7 +264,7 @@ internal static class ConnectFailure
     public static string MessageFor(Exception ex) => ex switch
     {
         Qa40xDeviceNotFoundException =>
-            "No QA403 was found. Check that it is connected over USB and switched on, then press Connect again.",
+            "No QA40x analyzer was found. Check that it is connected over USB and switched on, then press Connect again.",
         _ => ex.Message,
     };
 }
@@ -396,6 +396,17 @@ public sealed record DeviceStatusResponse(
     /// <see cref="Tonebench.Device.IAnalyzerDevice.Telemetry"/>.
     /// </summary>
     DeviceTelemetryResponse? Telemetry = null,
+    /// <summary>
+    /// True when the connected analyzer is a model this app has never been run against — today only
+    /// the QA402, whose protocol is taken from four reference trees that all treat it as identical to
+    /// the QA403's but which nobody here has attached. The status bar shows an amber badge.
+    ///
+    /// <para>A bool rather than a <see cref="ProductName"/> string match on the client, so that
+    /// "which models are verified" stays one fact in one place
+    /// (<c>Qa40xModel</c>) instead of a literal duplicated across the wire. See
+    /// <see cref="Tonebench.Device.IAnalyzerDevice.ModelUnverified"/>.</para>
+    /// </summary>
+    bool ModelUnverified = false,
     /// <summary>
     /// The chosen input, or null when the analyzer is not the sound card — the same null convention
     /// as the <c>Simulated*</c> fields, so the status bar gates its sound-card controls on this

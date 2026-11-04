@@ -225,9 +225,9 @@ everything. Uninstalling never removes any of it.
 
 **The status bar says "Disconnected".**
 Check the USB cable and try another port. On Linux, make sure you logged out and back in after
-being added to `plugdev`, and that `ls -l /dev/bus/usb/*/*` shows the QA403's device node with group
-`plugdev` (find the device with `lsusb -d 16c0:4e39`). Then press **Connect** in the status bar; a
-restart of the program is not needed.
+being added to `plugdev`, and that `ls -l /dev/bus/usb/*/*` shows the analyzer's device node with
+group `plugdev` (find it with `lsusb -d 16c0:4e39` for a QA403, or `lsusb -d 16c0:4e37` for a
+QA402). Then press **Connect** in the status bar; a restart of the program is not needed.
 
 **The QA403 does not respond even after replugging.**
 Quit the analyzer, unplug the QA403, wait a few seconds, plug it back in and start the analyzer

@@ -944,6 +944,7 @@ public sealed class DeviceSessionService(
             RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
             OutputClippedDuringAcquisition: OutputClippedDuringAcquisition,
             Telemetry: ToResponse(_device.Telemetry),
+            ModelUnverified: _device.ModelUnverified,
             SoundCardInputDevice: SoundCardField(c => c.InputDeviceName),
             SoundCardOutputDevice: SoundCardField(c => c.OutputDeviceName),
             SoundCardCalibrated: _kind == DeviceKind.SoundCard

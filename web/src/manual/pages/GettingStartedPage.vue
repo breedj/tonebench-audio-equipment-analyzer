@@ -9,7 +9,8 @@ const { showPage } = useManual()
     <h1>Getting started</h1>
 
     <p>
-      This app drives a QuantAsylum QA403 over USB, does its own signal processing, and stores every
+      This app drives a QuantAsylum QA403 — or its predecessor the QA402 — over USB, does its own
+      signal processing, and stores every
       result in a project file you name and place yourself. Nothing is uploaded anywhere and nothing
       installs itself; the analyzer window is an ordinary browser tab talking to a server running on
       this machine.
@@ -34,6 +35,18 @@ const { showPage } = useManual()
       and press Connect again. When a request to the analyzer fails, the message appears on the bar
       next to the pill, with its own <strong>Retry</strong> where retrying means reopening the
       device.
+    </p>
+    <p>
+      The <strong>QA402</strong>, the QA403's discontinued predecessor, also works: it is found
+      automatically and the pill names whichever model answered. The two share one USB protocol —
+      the same registers, the same range ladders, the same calibration — and QuantAsylum's own
+      software and libraries make no distinction between them either. Two differences matter here.
+      The QA402 tops out at 192 kHz, so the experimental 384 kHz capture rate is not offered on one;
+      and because nobody has yet run this app against a QA402, the status bar shows an amber
+      <strong>Unverified model</strong> badge beside the pill. The measurements are very probably
+      right — treat them as unconfirmed, and please
+      <button type="button" class="manual-link" @click="showPage('reporting-issues')">report</button>
+      what you find, which is what will let the badge go away.
     </p>
     <p>
       <strong>Simulated</strong> means there is no real hardware in the loop at all — the app was

@@ -205,19 +205,44 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// </summary>
     public Func<bool>? Allow384kHz { get; init; }
 
-    /// <inheritdoc />
-    public DeviceCapabilities Capabilities =>
-        Allow384kHz?.Invoke() == true ? DeviceCapabilities.Qa403Experimental : DeviceCapabilities.Qa403;
+    /// <summary>
+    /// Which model is on the other end, set from the product id that opened
+    /// (<see cref="Qa40xTransport.Model"/>) and cleared with the connection.
+    ///
+    /// <para>Assigned immediately after <c>transport.Open()</c> rather than alongside
+    /// <see cref="_transport"/> at the end of <see cref="ConnectAsync"/>, because
+    /// <see cref="Capabilities"/> is read in between — <c>new Qa40xAutoRanger(Capabilities.InputRangesDbv)</c>
+    /// — and a ranger built from the wrong ladder would be wrong for the life of the session.</para>
+    /// </summary>
+    private Qa40xModel? _model;
 
     /// <summary>
-    /// 192 kHz. The QA403's DAC does not work at 384 kHz — see
-    /// <see cref="DeviceCapabilities.Qa403Experimental"/>, where the measurements and the protection-relay
-    /// incident are recorded.
+    /// The connected model's capabilities, or the <b>QA403's</b> while nothing is connected.
+    ///
+    /// <para>That fallback is the behaviour this property has always had, kept deliberately: the app
+    /// asks for ranges before a device answers (<c>GET /api/device/ranges</c> populates the settings
+    /// panels on a bench with nothing plugged in), and the two models' ladders are identical anyway,
+    /// so the only field that could mislead is the 384 kHz rate — which the experimental checkbox
+    /// gates, and which a QA402 then refuses on connect.</para>
     /// </summary>
-    public double MaxGeneratorSampleRateHz => 192_000.0;
+    public DeviceCapabilities Capabilities =>
+        (_model ?? Qa40xModel.Qa403).Capabilities(Allow384kHz?.Invoke() == true);
+
+    /// <summary>
+    /// 192 kHz on either model, for two different reasons — see
+    /// <see cref="Qa40xModel.MaxGeneratorSampleRateHz"/>. On the QA403 it is a hardware-protection
+    /// rule rather than a quality preference: its DAC does not work at 384 kHz, and the near-DC
+    /// content it produces there cycled the output protection relay until the device was power-cycled
+    /// (<see cref="DeviceCapabilities.Qa403Experimental"/> records the measurements). On the QA402 it
+    /// is simply the top of the device.
+    /// </summary>
+    public double MaxGeneratorSampleRateHz => (_model ?? Qa40xModel.Qa403).MaxGeneratorSampleRateHz;
 
     /// <inheritdoc/>
     public DeviceTelemetry? Telemetry => _telemetry;
+
+    /// <inheritdoc/>
+    public bool ModelUnverified => _model is { Verified: false };
 
     /// <summary>
     /// Whether <see cref="StreamAsync"/> is allowed to step the input range on its own (clip /
@@ -331,7 +356,27 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         try
         {
             transport.Open();
-            logger.LogInformation("QA403 USB interface claimed");
+
+            // Before anything reads Capabilities — the autoranger below is built from its input
+            // ladder. Open() cannot succeed without identifying the model, so the null-forgiveness
+            // is the invariant rather than a hope.
+            _model = transport.Model!;
+            logger.LogInformation("{Model} USB interface claimed", _model.ProductName);
+
+            // The QA402 path is reasoned from documents, not measured: no QA402 has ever been
+            // attached to this bench. Warning rather than Information because a log file sent in is
+            // the only durable record of which hardware produced a measurement, and every figure
+            // from this session inherits the caveat. See Qa40xModel for what the sources establish.
+            if (!_model.Verified)
+            {
+                logger.LogWarning(
+                    "{Model} support is untested on real hardware — the protocol is taken from QuantAsylum's own "
+                        + "PyQa40x and bare-metal examples and from ASIO40x, all of which treat the QA402 and QA403 "
+                        + "as one protocol, but nothing here has been verified against a {Model}. Treat measurements "
+                        + "accordingly and please report what you find.",
+                    _model.ProductName,
+                    _model.ProductName);
+            }
 
             // Recovery *before* the connection verify, not after. The QA403 keeps streaming across a
             // host process going away: register 8 is device state, and nothing on the USB side
@@ -429,9 +474,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             _deviceLostRaised = 0;
             _stopRequested = false;
 
-            var info = new DeviceInfo("QA403", serialRaw.ToString(), firmwareRaw.ToString(), IsSimulated: false);
+            var info = new DeviceInfo(_model.ProductName, serialRaw.ToString(), firmwareRaw.ToString(), IsSimulated: false);
             logger.LogInformation(
-                "Connected to QA403 (serial {Serial}, fw {Firmware})", info.SerialNumber, info.FirmwareVersion);
+                "Connected to {Model} (serial {Serial}, fw {Firmware})",
+                info.ProductName, info.SerialNumber, info.FirmwareVersion);
             return info;
         }
         catch
@@ -571,6 +617,30 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             throw new InvalidOperationException("Device is not connected. Call ConnectAsync first.");
         if (config.SampleRateHz <= 0)
             throw new ArgumentOutOfRangeException(nameof(config), "SampleRateHz must be positive.");
+
+        // The rate has to be one this *model* implements. Defence in depth, not the only guard:
+        // DeviceSessionService.RequireSupportedSampleRate already refuses an unsupported rate, and
+        // that is the one production path into StreamAsync, so the app never reached here with a bad
+        // rate. What this covers is a caller that holds an IAnalyzerDevice directly — a test, or a
+        // future runner that streams without going through the session — and the fact that the rule
+        // being enforced is the *device's*, so this is the layer that should own it.
+        //
+        // It belongs here rather than in Qa40xRegisters.SampleRateHzToRegister, which is a pure
+        // encoding table and will happily encode 384 kHz for anyone. 384 kHz is documented as
+        // QA403-only (docs/protocol.md §2.4), and writing an index the connected device does not
+        // implement is the class of thing that cycled this QA403's output protection relay until it
+        // needed a power cycle (DeviceCapabilities.Qa403Experimental) — which is why this refuses
+        // rather than clamping: playing at a rate other than the one asked for is its own wrong
+        // answer, the same reasoning as the generator ceiling above. It also names the model, which
+        // the session's own message cannot.
+        if (!Capabilities.SampleRatesHz.Contains(config.SampleRateHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(config),
+                config.SampleRateHz,
+                $"{(_model ?? Qa40xModel.Qa403).ProductName} does not support {config.SampleRateHz:0} Hz. Supported: "
+                    + $"{string.Join(", ", Capabilities.SampleRatesHz.Select(r => $"{r:0}"))} Hz.");
+        }
         if (config.ChannelCount < 1 || config.ChannelCount > Capabilities.MaxChannelCount)
             throw new ArgumentOutOfRangeException(nameof(config), $"ChannelCount must be between 1 and {Capabilities.MaxChannelCount}.");
         if (config.BlockFrameCount < 1)
@@ -959,6 +1029,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         // Sensor readings from a device that is no longer there. Dropped rather than left to go
         // quietly stale, so nothing can put a plausible rail voltage beside a disconnected unit.
         _telemetry = null;
+
+        // _model is deliberately *not* cleared, unlike the reading above. It is not a measurement
+        // that goes stale but a record of which hardware this instance last opened, and the ranges
+        // endpoint is read while disconnected: clearing it would make a bench with a QA402 fall back
+        // to reporting the QA403's capabilities, 384 kHz included. Every successful ConnectAsync
+        // overwrites it, so a replug with a different model cannot be believed for longer than that.
 
         if (_activePump is not null)
         {

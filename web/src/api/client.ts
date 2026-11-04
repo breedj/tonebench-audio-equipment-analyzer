@@ -14,6 +14,12 @@ export interface DeviceStatus {
   serialNumber: string
   firmwareVersion: string
   isSimulated: boolean
+  /**
+   * True when the connected analyzer is a model this app has never been run against — today only the
+   * QA402. A server flag rather than a `productName` comparison here, so the list of verified models
+   * lives in one place (`Qa40xModel`) instead of being duplicated on the client.
+   */
+  modelUnverified: boolean
   inputRangeDbv: number
   outputRangeDbv: number
   acquiring: boolean

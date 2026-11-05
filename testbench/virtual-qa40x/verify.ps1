@@ -3,13 +3,17 @@
     PASS/FAIL/KNOWN/SKIP table for the virtual QA40x bench.
 
 .DESCRIPTION
-    Checks the prerequisites, the attach chain, the register round-trip against the 20 ms budget that
-    decides whether this approach works at all, and the Category=VirtualDevice suite. Mirrors
-    linux-testbench/02-verify.sh: a record function, a summary table, non-zero exit on any FAIL.
+    Checks the prerequisites, the register round-trip against the 20 ms budget that decides whether
+    this approach works at all, and the Category=VirtualDevice suite.
 
-    -IncludeGate also runs the commit gate, which is the regression that would hurt most — the
-    default filter must still pass with a virtual device attached. It is slow (the whole suite), so
-    it is opt-in.
+    It re-attaches the bench first, and that is deliberate rather than tidy: a server left idle for
+    an hour has been seen to come back with its register reply FIFO desynced, which fails every test
+    with a mis-read serial and a calibration page of zeros. A harness that trusted whatever was
+    already attached would report that as a code regression. -NoRestart skips it if you are debugging
+    a live bench and want it left alone.
+
+    -IncludeGate also runs the commit gate, which is the regression that would hurt most: the default
+    filter must still pass with a virtual device attached. It is slow, so it is opt-in.
 
 .EXAMPLE
     powershell -File verify.ps1
@@ -17,7 +21,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$IncludeGate
+    [switch]$IncludeGate,
+    [switch]$NoRestart
 )
 
 $ErrorActionPreference = "Continue"
@@ -47,8 +52,10 @@ function Invoke-Wsl([string]$Command) {
     return ((& wsl.exe -e bash -lc $Command 2>&1) | Out-String)
 }
 
-Write-Host "Virtual QA40x bench verification — $Stamp" -ForegroundColor Cyan
+Write-Host "Virtual QA40x bench verification - $Stamp" -ForegroundColor Cyan
 Write-Host "log: $LogPath`n" -ForegroundColor DarkGray
+
+$bench = Join-Path $PSScriptRoot "bench.ps1"
 
 # --- prerequisites -------------------------------------------------------------------------------
 
@@ -61,85 +68,59 @@ if (Test-Path $UsbipExe) {
 $realQa403 = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
     Where-Object { $_.InstanceId -match "VID_16C0&PID_4E39" }
 if ($realQa403) {
-    Record "FAIL" "no real QA403 attached" ("found $($realQa403[0].InstanceId) — it wins every probe, " +
+    Record "FAIL" "no real QA403 attached" ("found $($realQa403[0].InstanceId) - it wins every probe, " +
         "so the virtual QA402 is unreachable")
 } else {
     Record "PASS" "no real QA403 attached" "the probe order cannot shadow the virtual QA402"
 }
 
-# --- the attach chain ----------------------------------------------------------------------------
+# --- a known-good bench --------------------------------------------------------------------------
 
-& (Join-Path $PSScriptRoot "bench.ps1") -Status | Out-Null
+if ($NoRestart) {
+    Record "SKIP" "bench restarted for a known state" "-NoRestart given; testing whatever is attached"
+} else {
+    & $bench -Detach *> $null
+    $attachOut = & $bench -Attach 2>&1 | Out-String
+    Add-Content -Path $LogPath -Value $attachOut
+    if ($LASTEXITCODE -eq 0) {
+        Record "PASS" "bench restarted for a known state" "a stale server desyncs its register replies"
+    } else {
+        Record "FAIL" "bench restarted for a known state" "bench.ps1 -Attach failed; see $LogPath"
+    }
+}
+
+& $bench -Status *> $null
 if ($LASTEXITCODE -eq 0) {
     Record "PASS" "attach chain (bench.ps1 -Status)" "server listening, device present on WINUSB"
 } else {
-    Record "FAIL" "attach chain (bench.ps1 -Status)" "run bench.ps1 -Attach (or -Build first)"
-}
-
-# --- the number that decides everything ----------------------------------------------------------
-# A register read is two USB round trips, each bounded by RegisterTimeoutMs, and the calibration page
-# does 128 of them. Printed even on a pass: a clean run says only that the budget was not exceeded,
-# never how much of it was used.
-
-$regStats = Invoke-Wsl @'
-python3 - <<'PY' 2>/dev/null
-import json, glob, os
-files = sorted(glob.glob(os.path.expanduser("~/vqa40x-usb*.jsonl")), key=os.path.getmtime)
-if not files:
-    print("NOLOG"); raise SystemExit
-recs = []
-for line in open(files[-1]):
-    line = line.strip()
-    if line:
-        try: recs.append(json.loads(line))
-        except Exception: pass
-pend, lat = None, []
-for r in recs:
-    if r.get("kind") == "reg_read_req": pend = r
-    elif r.get("kind") == "reg_read" and pend is not None:
-        lat.append(r["t"] - pend["t"]); pend = None
-if not lat:
-    print("NOREADS")
-else:
-    print("N=%d MAX=%.4f MEAN=%.4f" % (len(lat), max(lat), sum(lat)/len(lat)))
-PY
-'@
-if ($regStats -match "MAX=([0-9.]+)") {
-    $maxMs = [double]$Matches[1]
-    $detail = ($regStats.Trim() + " ms, budget $RegisterBudgetMs ms per phase")
-    if ($maxMs -lt $RegisterBudgetMs) {
-        Record "PASS" "register round-trip inside the 20 ms budget" $detail
-    } else {
-        Record "FAIL" "register round-trip inside the 20 ms budget" $detail
-    }
-} elseif ($regStats -match "NOLOG|NOREADS") {
-    Record "SKIP" "register round-trip inside the 20 ms budget" "no --record log yet; attach and run the suite first"
-} else {
-    Record "SKIP" "register round-trip inside the 20 ms budget" "could not read the log (python3 in WSL?)"
+    Record "FAIL" "attach chain (bench.ps1 -Status)" "run bench.ps1 -Attach, or -Build first"
 }
 
 # --- the suite -----------------------------------------------------------------------------------
+# Before the latency check, because the latency figures come out of the log this run writes.
 
 Push-Location $CodeRoot
 try {
     $virtual = & dotnet test --filter "Category=VirtualDevice" --nologo 2>&1 | Out-String
     Add-Content -Path $LogPath -Value $virtual
-    if ($virtual -match "Failed:\s*0" -or ($virtual -match "Passed!" )) {
-        $m = [regex]::Match($virtual, "Passed:\s*(\d+)")
-        $n = if ($m.Success) { $m.Groups[1].Value } else { "?" }
-        Record "PASS" "Category=VirtualDevice suite" "$n passed"
-    } elseif ($virtual -match "ArrivesWithChannelsCrossed|right\s+-?[0-9.]+ dBV, left") {
-        Record "KNOWN" "Category=VirtualDevice suite" "channels crossed — the emulator is unpatched, run bench.ps1 -Build"
+
+    $failedMatch = [regex]::Match($virtual, "Failed:\s*(\d+)")
+    $passedMatch = [regex]::Match($virtual, "Passed:\s*(\d+)")
+    $nFailed = if ($failedMatch.Success) { [int]$failedMatch.Groups[1].Value } else { -1 }
+    $nPassed = if ($passedMatch.Success) { $passedMatch.Groups[1].Value } else { "?" }
+
+    if ($nFailed -eq 0) {
+        Record "PASS" "Category=VirtualDevice suite" "$nPassed passed"
+    } elseif ($virtual -match "ArrivesOnLeftAndNotOnRight.*\[FAIL\]" -and $virtual -match "unpatched") {
+        Record "KNOWN" "Category=VirtualDevice suite" "channels crossed - run bench.ps1 -Build to patch the emulator"
     } else {
-        $m = [regex]::Match($virtual, "Failed:\s*(\d+)")
-        $n = if ($m.Success) { $m.Groups[1].Value } else { "?" }
-        Record "FAIL" "Category=VirtualDevice suite" "$n failed — see $LogPath"
+        Record "FAIL" "Category=VirtualDevice suite" "$nFailed failed - see $LogPath"
     }
 
     if ($IncludeGate) {
         $gate = & dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --nologo 2>&1 | Out-String
         Add-Content -Path $LogPath -Value $gate
-        if ($gate -match "Failed:\s*[1-9]" -or $gate -match "error") {
+        if ($gate -match "Failed!" -or $gate -match "error\s") {
             Record "FAIL" "commit gate with a virtual device attached" "see $LogPath"
         } else {
             Record "PASS" "commit gate with a virtual device attached" "the virtual tests stayed out of it"
@@ -152,12 +133,36 @@ finally {
     Pop-Location
 }
 
+# --- the number that decides everything ----------------------------------------------------------
+# Printed even on a pass: a clean run says only that the budget was not exceeded, never how much of
+# it was used. UNANSWERED counts register reads whose reply never arrived, which is what a stale
+# USB/IP connection looks like from the log's side.
+
+$statsScript = (Invoke-Wsl "wslpath -a '$(Join-Path $PSScriptRoot "regstats.py")'").Trim()
+$regStats = (Invoke-Wsl "python3 -I '$statsScript' ~ 2>&1").Trim()
+
+if ($regStats -match "MAX=([0-9.]+)") {
+    $maxMs = [double]$Matches[1]
+    $detail = "$regStats ms, budget $RegisterBudgetMs ms per phase"
+    if ($maxMs -lt $RegisterBudgetMs) {
+        Record "PASS" "register round-trip inside the 20 ms budget" $detail
+    } else {
+        Record "FAIL" "register round-trip inside the 20 ms budget" $detail
+    }
+} elseif ($regStats -match "NOLOG|NOREADS") {
+    Record "SKIP" "register round-trip inside the 20 ms budget" "no --record log with register reads yet"
+} else {
+    Record "SKIP" "register round-trip inside the 20 ms budget" "could not read the log: $regStats"
+}
+
 # --- summary -------------------------------------------------------------------------------------
 
 Write-Host "`nSummary" -ForegroundColor Cyan
 $results | Format-Table -AutoSize Verdict, Name | Out-String | Write-Host
 
-$failed = ($results | Where-Object { $_.Verdict -eq "FAIL" }).Count
+# @() is load-bearing: without it a single match is a scalar whose .Count is not the match count, and
+# the harness reports success with a FAIL row on screen. That happened.
+$failed = @($results | Where-Object { $_.Verdict -eq "FAIL" }).Count
 if ($failed -gt 0) {
     Write-Host "$failed FAIL" -ForegroundColor Red
     exit 1

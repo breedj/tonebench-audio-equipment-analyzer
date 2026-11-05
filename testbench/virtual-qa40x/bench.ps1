@@ -148,7 +148,7 @@ function Invoke-Attach {
 
     # Stop a stale server before rebinding 3240, then start detached so it outlives this script.
     $start = @"
-pkill -f 'target/release/vqa40x' 2>/dev/null || true
+pkill -x vqa40x 2>/dev/null || true
 sleep 0.3
 cd ~ && setsid nohup $WslBinary --model $Model --serial $Serial --listen 0.0.0.0:3240 \
     --record ~/vqa40x-usb.jsonl > $WslLog 2>&1 < /dev/null &
@@ -188,7 +188,7 @@ function Invoke-Detach {
             & $UsbipExe detach -p $p 2>&1 | Out-String | Write-Host
         }
     }
-    Write-Host (Invoke-Wsl "pkill -f 'target/release/vqa40x' && echo 'server stopped' || echo 'server was not running'").Trim()
+    Write-Host (Invoke-Wsl "pkill -x vqa40x && echo 'server stopped' || echo 'server was not running'").Trim()
 }
 
 function Invoke-Status {
@@ -221,7 +221,7 @@ function Invoke-Status {
                 -KeyName "DEVPKEY_Device_Service" -ErrorAction SilentlyContinue).Data
         Write-Host "device   : $($dev[0].InstanceId) [$($dev[0].Status)] driver=$svc"
         if ($svc -ne "WINUSB") {
-            Write-Host "           expected WINUSB — libusb cannot open it otherwise"
+            Write-Host "           expected WINUSB - libusb cannot open it otherwise"
             $ok = $false
         }
     } else {

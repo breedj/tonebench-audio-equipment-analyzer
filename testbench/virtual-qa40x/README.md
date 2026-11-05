@@ -38,19 +38,33 @@ front rather than letting you find out from a test failure.
    Verified on this bench: `Signer Name: Microsoft Windows Hardware Compatibility Publisher`.
    Installs to `C:\Program Files\USBip\usbip.exe`.
 
-2. **The emulator binary.** `bench.ps1 -Attach` downloads it into `bin/` (gitignored by
-   `.gitignore`'s `[Bb]in/`) and verifies the hash before extracting. Pinned:
+2. **The emulator, built from source with the channel-order patch.** The prebuilt release binaries
+   are no use here — they carry the crossed-channel bug — so `bench.ps1 -Build` clones the pinned tag
+   into WSL, applies `adc-channel-order.patch`, and compiles. It is idempotent: re-running it
+   re-checks the patch rather than failing on an already-patched tree.
+
+   ```powershell
+   powershell -File testbench/virtual-qa40x/bench.ps1 -Build
+   ```
+
+   Needs `rustup` and `build-essential` **inside WSL** — nothing on the Windows side:
+
+   ```bash
+   sudo apt-get install -y build-essential pkg-config
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+   ```
+
+   Pinned to `v0.5.0`, commit `549e855`, which was also the tip of `main` when this was written. The
+   release assets are recorded here for provenance rather than used by the script — these are the
+   hashes of what the findings below were first measured against:
 
    | | |
    |---|---|
-   | Version | `v0.5.0` (commit `549e855`) |
-   | Linux asset | `vqa40x-v0.5.0-x86_64-unknown-linux-musl.tar.gz` |
-   | SHA-256 | `8863c7fe6c29afa7a98f412e7cb51748a529cdf8d1437ab62d4106287fb6031b` |
-   | Windows asset | `vqa40x-v0.5.0-x86_64-pc-windows-msvc.zip` |
-   | SHA-256 | `45417749342d12d889ad80642d5925ad26be0f2a3074b1cd641b19e62e1eb287` |
+   | `vqa40x-v0.5.0-x86_64-unknown-linux-musl.tar.gz` | `8863c7fe6c29afa7a98f412e7cb51748a529cdf8d1437ab62d4106287fb6031b` |
+   | `vqa40x-v0.5.0-x86_64-pc-windows-msvc.zip` | `45417749342d12d889ad80642d5925ad26be0f2a3074b1cd641b19e62e1eb287` |
 
-3. **A patched build**, for the channel order — see below. Needs `rustup` and `build-essential`
-   inside WSL; nothing on the Windows side.
+   The build lands in WSL at `~/vqa40x-src/virtual-qa40x-rs/target/release/vqa40x`, outside this
+   repository; `-Attach` refuses with a pointer to `-Build` if it is not there.
 
 ## The port-3240 problem, and why the server runs in WSL
 
@@ -71,7 +85,8 @@ conflict comes straight back.
 ## Use
 
 ```powershell
-powershell -File testbench/virtual-qa40x/bench.ps1 -Attach    # download, start, attach, report
+powershell -File testbench/virtual-qa40x/bench.ps1 -Build     # one-off: clone, patch, compile (in WSL)
+powershell -File testbench/virtual-qa40x/bench.ps1 -Attach    # start the server, attach, report
 powershell -File testbench/virtual-qa40x/bench.ps1 -Status    # server / port / PnP, non-zero if broken
 powershell -File testbench/virtual-qa40x/bench.ps1 -Detach    # detach and stop
 powershell -File testbench/virtual-qa40x/verify.ps1           # PASS/FAIL/KNOWN table
@@ -173,6 +188,32 @@ working — but it is the *emulator's* descriptors, not a real QA403's. Settling
 4. **No analog front end**, so there is no 24 dB attenuator relay and no range-dependent analog
    behaviour — which is exactly why the amplitude theory here is named
    `CalibrationPage_DecodesAndScalesConsistently_AtEveryInputRange` rather than claiming A2's finding.
+
+## Things that will bite
+
+- **A bench left idle comes back broken, so re-attach before a run.** Measured 2026-11-05: a server
+  attached and then left for an hour answered the next connect with its **register reply FIFO
+  desynced** — `usbip port`, the PnP entry and the server's own log all looked perfectly healthy, and
+  all 12 tests failed. The symptoms are specific and worth recognising rather than re-diagnosing: the
+  serial reads back as an FNV hash of the serial string instead of its hex digits (`1652120642`
+  instead of `67240962`), register `0x19` returns a page of **zeros** even though `0x0D` was written
+  `0x10`, and the `--record` log shows far more `reg_read_req` than `reg_read` records with hundreds
+  of `unlink`s. The emulator's reply queue is a FIFO that is not matched to requests, so one lost
+  reply shifts every later read for the rest of the session. `bench.ps1 -Detach` then `-Attach` fixes
+  it in seconds; `verify.ps1` does exactly that before it tests anything, which is why it takes a
+  `-NoRestart` switch rather than assuming a healthy bench.
+- **Keep these scripts pure ASCII.** PowerShell 5.1 reads a BOM-less `.ps1` as ANSI, so a UTF-8 em
+  dash arrives as three mojibake bytes — and one of them breaks the *tokenizer*, not just the text:
+  a single em dash inside a double-quoted string produced `Missing closing '}'` errors reported 40
+  lines away, in a different function. Same mechanism CLAUDE.md records for a BOM-less `.iss` and for
+  `.bat` files read in the console's OEM codepage. `[System.Management.Automation.Language.Parser]::ParseFile`
+  is the quick way to check a script without running it.
+- **`pkill -f` matches the shell running it.** These scripts drive WSL through
+  `wsl -e bash -lc "<script>"`, so the wrapper's own command line contains whatever pattern the
+  script greps for. `pkill -f 'target/release/vqa40x'` killed its own parent shell and left `-Attach`
+  reporting that the server never came up. `pkill -x vqa40x` matches the process *name* instead.
+- **WSL2 must be in NAT mode**, and the WSL address changes across restarts. `bench.ps1` reads it
+  fresh each time rather than caching it.
 
 ## Why `testbench/` and not `packaging/`
 

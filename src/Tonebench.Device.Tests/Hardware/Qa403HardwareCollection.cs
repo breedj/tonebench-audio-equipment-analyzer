@@ -1,8 +1,14 @@
 namespace Tonebench.Device.Tests.Hardware;
 
 /// <summary>
-/// Every test class that opens the real QA403 belongs here, because there is one QA403 and
-/// <c>Qa40xTransport.Open</c> claims USB interface 0 exclusively.
+/// Every test class that opens a QA40x analyzer over USB belongs here — real, or the virtual one
+/// <c>virtual-qa40x-rs</c> serves over USB/IP — because <c>Qa40xTransport.Open</c> claims USB
+/// interface 0 exclusively and there is no way to ask for one device rather than another: it probes
+/// <c>Qa40xModel.All</c> and takes the first product id that answers. So any two such classes contend
+/// for the same handle whichever device happens to be attached. The virtual and real suites are
+/// normally selected by different filters and so never run together, but that is a property of a
+/// command line rather than of the code; sharing this collection costs one attribute and survives
+/// someone combining them.
 ///
 /// <para>xunit runs test <i>classes</i> in parallel by default, and collections are what stops it:
 /// classes sharing a collection never overlap. This was invisible while

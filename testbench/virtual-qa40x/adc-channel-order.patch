@@ -1,0 +1,46 @@
+diff --git a/crates/vqa40x-core/src/analyzer.rs b/crates/vqa40x-core/src/analyzer.rs
+index 6df868b..f5ffc66 100644
+--- a/crates/vqa40x-core/src/analyzer.rs
++++ b/crates/vqa40x-core/src/analyzer.rs
+@@ -546,9 +546,24 @@ impl Analyzer {
+             };
+             let il = sample(vl, 0);
+             let ir = sample(vr, 1);
+-            // Wire order is swapped: right sample first.
+-            out.extend_from_slice(&ir.to_le_bytes());
++            // Wire order on the ADC is straight through: LEFT sample first.
++            //
++            // The L/R swap is the DAC's alone. Measured on a real QA403 (serial
++            // 1077527945) with the generator and calibration bypassed: driving wire
++            // slot 1 alone returns at -6.00 dBFS on RX slot 0 (slot 1 down at
++            // -94 dBFS), and driving slot 0 alone mirrors it -- so TX slot N comes
++            // back on RX slot 1-N, not on slot N.
++            //
++            // QuantAsylum's own PyQa40x agrees: it swaps the outputs only
++            // (analyzer.py:113) and deinterleaves the ADC straight through
++            // (analyzer.py:174-175, `left = interleaved[0::2]`). ASIO401 agrees too --
++            // its channel swap is applied in CopyToQA40xBuffer (output) while the
++            // input path's swapChannels is false for the QA403. QA40x_BareMetal swaps
++            // both directions, which double-swaps and crosses the channels; it never
++            // caught that because it prints per-channel peaks only, never which
++            // frequency arrived where.
+             out.extend_from_slice(&il.to_le_bytes());
++            out.extend_from_slice(&ir.to_le_bytes());
+         }
+         s.emitted += n as u64;
+         out
+diff --git a/crates/vqa40x-core/src/lib.rs b/crates/vqa40x-core/src/lib.rs
+index e9eb848..d6462f7 100644
+--- a/crates/vqa40x-core/src/lib.rs
++++ b/crates/vqa40x-core/src/lib.rs
+@@ -11,7 +11,9 @@
+ //!   firmware version, serial, capability word, calibration readout and the
+ //!   bootloader-entry magic.
+ //! * **Audio streaming** — bulk EP2, 16 KiB transfers of interleaved int32
+-//!   little-endian stereo (right sample first on the wire). The fake ADC loops
++//!   little-endian stereo. The DAC takes the right sample first on the wire; the
++//!   ADC returns the left sample first, because the L/R swap is the DAC's alone
++//!   (measured on real hardware -- see the ADC encode in `analyzer.rs`). The fake ADC loops
+ //!   the fake DAC back with configurable latency, gain, distortion, noise and
+ //!   an optional independent generator, using the same volts model as the
+ //!   factory calibration page it serves.

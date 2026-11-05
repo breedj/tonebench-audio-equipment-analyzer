@@ -31,6 +31,15 @@ namespace Tonebench.Device.Tests.Hardware;
 /// one held. If A2 fails, the calibration page layout differs between the models and
 /// <see cref="Qa40xCalibration"/> needs a per-model table — that is the one finding that would turn
 /// this from a parametrisation into real work.</para>
+///
+/// <para><b>An emulator cannot stand in for this.</b> <see cref="Qa402VirtualDeviceTests"/> runs the
+/// same mechanics against <c>virtual-qa40x-rs</c> attached over USB/IP, sharing this class's capture
+/// loops through <see cref="Qa40xLoopbackMeasurement"/>. That is worth having — it is the only
+/// coverage the QA402 product id, and the whole of <c>Qa40xTransport</c>, get without hardware — but
+/// it is not this, and it says so itself: a green virtual run <i>includes</i> an assertion that the
+/// amber Unverified badge is still there. Only this class can close the distinction above, because
+/// the calibration page is the part an emulator built from the same references cannot independently
+/// confirm.</para>
 /// </summary>
 [Trait("Category", "Hardware")]
 [Collection(nameof(Qa403HardwareCollection))]
@@ -108,34 +117,10 @@ public class Qa402HardwareTests(ITestOutputHelper output)
             CancellationToken.None);
 
         var config = new AcquisitionConfig(sampleRateHz, ChannelCount: 1, BlockFrameCount: 4096);
-        double sumSquares = 0.0;
-        long samplesSeen = 0;
-        long targetSamples = (long)(sampleRateHz * captureSeconds);
-        bool firstBlock = true;
-
-        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
-        {
-            using (block)
-            {
-                if (!firstBlock)
-                {
-                    foreach (var s in block.Samples)
-                    {
-                        sumSquares += (double)s * s;
-                        samplesSeen++;
-                    }
-                }
-
-                firstBlock = false;
-            }
-
-            if (samplesSeen >= targetSamples)
-                break;
-        }
+        double measuredDbv = await Qa40xLoopbackMeasurement.SingleChannelRmsDbvAsync(
+            device, config, captureSeconds, CancellationToken.None);
 
         await device.StopAsync();
-
-        double measuredDbv = 20.0 * Math.Log10(Math.Sqrt(sumSquares / samplesSeen));
         output.WriteLine($"Input range {inputRangeDbv,5} dBV: measured {measuredDbv:F3} dBV");
 
         Assert.True(
@@ -174,37 +159,10 @@ public class Qa402HardwareTests(ITestOutputHelper output)
             CancellationToken.None);
 
         var config = new AcquisitionConfig(sampleRateHz, ChannelCount: 2, BlockFrameCount: 4096);
-        double leftSumSquares = 0.0;
-        double rightSumSquares = 0.0;
-        long frames = 0;
-        bool firstBlock = true;
-
-        await foreach (var block in device.StreamAsync(config, CancellationToken.None))
-        {
-            using (block)
-            {
-                if (!firstBlock)
-                {
-                    var samples = block.Samples;
-                    for (int i = 0; i + 1 < samples.Length; i += 2)
-                    {
-                        leftSumSquares += (double)samples[i] * samples[i];
-                        rightSumSquares += (double)samples[i + 1] * samples[i + 1];
-                        frames++;
-                    }
-                }
-
-                firstBlock = false;
-            }
-
-            if (frames >= (long)sampleRateHz)
-                break;
-        }
+        var (leftDbv, rightDbv) = await Qa40xLoopbackMeasurement.StereoRmsDbvAsync(
+            device, config, (long)sampleRateHz, CancellationToken.None);
 
         await device.StopAsync();
-
-        double leftDbv = 20.0 * Math.Log10(Math.Sqrt(leftSumSquares / frames));
-        double rightDbv = 20.0 * Math.Log10(Math.Sqrt(rightSumSquares / frames));
         output.WriteLine($"Left {leftDbv:F2} dBV, right {rightDbv:F2} dBV");
 
         Assert.True(

@@ -18,9 +18,12 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      # Only Tonebench.Device.Tests/Hardware/Qa40xUsbDeviceHardwareTests.cs carries this trait — every
-      # other test in the solution runs here, matching CLAUDE.md's documented pre-commit command.
-      - run: dotnet test Tonebench.sln --filter "Category!=Hardware" --configuration Release
+      # Three categories, and the gate subtracts two of them. Category=Hardware needs a real QA403 or
+      # QA451 on a bench; Category=VirtualDevice needs virtual-qa40x-rs attached over USB/IP (see
+      # testbench/virtual-qa40x/README.md). CI has neither. Everything else runs here, matching
+      # CLAUDE.md's documented pre-commit command — a test carrying no Category trait satisfies both
+      # !=, which is what keeps the untraited bulk of the suite in this run.
+      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --configuration Release
 
   build:
     needs: test

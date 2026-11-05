@@ -5,6 +5,11 @@
 packaging/linux/deb/* text eol=lf
 packaging/udev/* text eol=lf
 
+# Applied with `git apply` inside WSL against an LF-only Rust repository, so CRLF makes every hunk
+# fail to match and bench.ps1 -Build reports a patch that "does not apply". Same class as the
+# postinst above: the file is consumed by Linux tooling, not by anything on Windows.
+testbench/virtual-qa40x/*.patch text eol=lf
+
 # The charting engine. Git would autodetect it, but this file has rules precisely because
 # line-ending conversion has bitten before, and a corrupted wasm fails only at run time.
 *.wasm binary

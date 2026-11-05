@@ -79,7 +79,7 @@ const { showPage } = useManual()
     <h2>You can learn all of this with no hardware at all</h2>
     <p>
       In the status bar along the bottom of the window there is a box marked
-      <strong>Analyzer</strong>. Switch it from <strong>QA403</strong> to <strong>Simulator</strong>
+      <strong>Analyzer</strong>. Switch it from <strong>QA40x</strong> to <strong>Simulator</strong>
       and the app invents the signals instead of measuring them. Every screen works, every button
       does what it normally does, and the numbers are realistic.
     </p>

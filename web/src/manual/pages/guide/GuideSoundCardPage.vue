@@ -24,7 +24,7 @@ const { showPage } = useManual()
     <h2>Switching to it</h2>
     <p>
       At the bottom of the window there is a dropdown marked <strong>Analyzer</strong>. Change it
-      from <strong>QA403</strong> to <strong>Sound card</strong>. A little
+      from <strong>QA40x</strong> to <strong>Sound card</strong>. A little
       <strong>cogwheel</strong> appears next to it — that opens the sound-card settings, and
       everything below happens in there.
     </p>

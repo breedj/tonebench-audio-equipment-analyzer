@@ -20,7 +20,7 @@ const { showPage } = useManual()
     <h2>Selecting it</h2>
     <p>
       The <strong>Analyzer</strong> dropdown in the status bar switches between the
-      <strong>QA403</strong> and the <strong>Simulator</strong>, live, with no restart. It is
+      <strong>QA40x</strong> and the <strong>Simulator</strong>, live, with no restart. It is
       unavailable while a measurement is running — stop first. Starting the app with
       <code>--simulate</code> (or <code>run-simulator.bat</code>) only picks which analyzer it
       <em>starts</em> on. With the simulator selected the status bar shows <strong>Simulated</strong>

@@ -11,8 +11,17 @@ import ExternalGainPopover from './ExternalGainPopover.vue'
 
 // Real instruments first, the synthetic one last: the two entries above it are things on the
 // bench, and the simulator is the odd one out rather than the middle of a scale.
+//
+// The first entry is spelled QA40x rather than QA403 because it names the *backend*, not a model:
+// `Qa40xTransport.Open` tries every product id in `Qa40xModel.All`, so this one option opens a
+// QA402 as readily as a QA403 and the user never picks between them. It read "QA403" with a QA402
+// connected and the pill beside it reading "QA402 connected" (reported 2026-11-05), and the same
+// label is what `devicePill` prints while nothing is attached — so a removed QA402 said "QA403
+// removed". The same reasoning renamed `Qa403VendorId` to `Qa40xVendorId`; what keeps the 403 is
+// whatever names the one model (`Qa403ProductId`, `DeviceCapabilities.Qa403`), and a connected
+// analyzer's own `productName` still reaches the pill, so the model is never guessed at.
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
-  { value: 'Hardware', label: 'QA403' },
+  { value: 'Hardware', label: 'QA40x' },
   { value: 'SoundCard', label: 'Sound card' },
   { value: 'Simulated', label: 'Simulator' },
 ]

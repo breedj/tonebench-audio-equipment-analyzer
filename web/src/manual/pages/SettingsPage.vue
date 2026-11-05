@@ -321,7 +321,8 @@ const { showPage } = useManual()
           <td>Analyzer</td>
           <td>
             <p>
-              Which analyzer to use: the real <strong>QA403</strong> over USB, or the
+              Which analyzer to use: the real <strong>QA40x</strong> over USB — a QA403 or a QA402,
+              whichever answers — or the
               <strong>Simulator</strong>. This is a live switch, not a restart —
               <code>--simulate</code> now only picks which one the app <em>starts</em> on.
             </p>

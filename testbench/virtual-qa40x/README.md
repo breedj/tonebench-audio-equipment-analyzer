@@ -84,6 +84,21 @@ conflict comes straight back.
 
 ## Use
 
+Day to day it is two batch files, for the two things you do every session:
+
+```
+testbench\virtual-qa40x\attach.bat
+testbench\virtual-qa40x\detach.bat
+```
+
+They work from any directory, forward their arguments (`attach.bat -Serial 1234_5678`), and pause on
+failure rather than closing the window on the message — `run.bat`'s reasoning, and it matters more
+here because those messages are the whole interface: a real QA403 winning the probe, no patched build
+yet, `usbip-win2` missing. On success they do not pause, so from a terminal the three status lines
+stay and from a double-click they flash past; `bench.ps1 -Status` is how you check after the fact.
+
+Everything else is `bench.ps1` directly:
+
 ```powershell
 powershell -File testbench/virtual-qa40x/bench.ps1 -Build     # one-off: clone, patch, compile (in WSL)
 powershell -File testbench/virtual-qa40x/bench.ps1 -Attach    # start the server, attach, report

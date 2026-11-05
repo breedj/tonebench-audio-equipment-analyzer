@@ -89,9 +89,17 @@ Source: "{#PublishDir}\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion
 ; is the app's graceful-shutdown path, and only a process that owns its console gets the ~5 s Windows
 ; allows a close handler (see the dotnet-run rule in run.bat and CLAUDE.md).
 Name: "{group}\{#AppShortName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Comment: "Start the analyzer with a QA403 or a sound card"
-Name: "{group}\{#AppShortName} (simulator)"; Filename: "{app}\{#AppExe}"; Parameters: "--simulate"; WorkingDir: "{app}"; Comment: "Start the analyzer against the simulated device"
 Name: "{group}\Uninstall {#AppShortName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
+
+[InstallDelete]
+; One entry per platform (2026-11-05): the simulator is reached from the status bar's Analyzer
+; dropdown, which remembers the choice, so the [Icons] line that passed --simulate is gone. This
+; section is what deleting that line cannot do on its own — Inno never removes an icon a previous
+; version created and the current one does not, so an upgrade would keep the old shortcut in the
+; Start Menu group for ever. Not [UninstallDelete] (see the header): nothing of the user's is
+; touched, only a shortcut this installer itself put there.
+Type: files; Name: "{group}\{#AppShortName} (simulator).lnk"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

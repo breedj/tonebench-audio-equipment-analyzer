@@ -56,9 +56,10 @@ program — and a moment later your browser opens on `http://127.0.0.1:8399` wit
 - **To quit, close the console window** (or press Ctrl+C in it). The program then shuts the QA403
   down cleanly and saves its data; wait for the window to disappear before unplugging the device.
   Closing only the browser tab leaves the analyzer running — just open the address again.
-- **Tonebench - Audio Equipment Analyzer (simulator)** in the Start Menu runs without any hardware, against a
-  simulated device and several simulated amplifiers and loudspeakers. Use it to explore the
-  measurements before connecting anything.
+- **No hardware?** Pick *Simulator* from the **Analyzer** dropdown in the status bar. It runs
+  against a simulated device and several simulated amplifiers and loudspeakers, and the choice is
+  remembered — the program comes back up on it next time. Use it to explore the measurements
+  before connecting anything.
 
 If the browser shows "connection refused", the console window has probably closed — start the
 program again and read what the window says.
@@ -143,9 +144,9 @@ package installs:
 Adding *you* to `plugdev` is the one step a package cannot do, hence the second command.
 
 The analyzer runs in a terminal window and opens your browser on `http://127.0.0.1:8399`. **To
-quit, close the terminal window or press Ctrl+C** in it; the QA403 is shut down cleanly first. The
-menu entry has a right-click action *Tonebench - Audio Equipment Analyzer (simulator)* for running without hardware
-(`tonebench --simulate` from a shell).
+quit, close the terminal window or press Ctrl+C** in it; the QA403 is shut down cleanly first.
+To run without hardware, pick *Simulator* from the **Analyzer** dropdown in the status bar; the
+choice is remembered, and `tonebench --simulate` from a shell starts on it straight away.
 
 Upgrade by installing the newer .deb the same way. Remove with
 `sudo apt remove tonebench`; your projects and settings are left in place.

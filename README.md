@@ -94,7 +94,8 @@ The user-facing guide is [INSTALL.md](INSTALL.md); the short version follows.
 Download `tonebench-<version>-win-x64-setup.exe` from the
 [releases page](https://github.com/breedj/tonebench-audio-equipment-analyzer/releases) and run it. It installs
 per user (into `%LOCALAPPDATA%\Programs\Tonebench`, no administrator prompt) and adds
-**Tonebench - Audio Equipment Analyzer** and **Tonebench - Audio Equipment Analyzer (simulator)** to the Start Menu. The binaries are
+**Tonebench - Audio Equipment Analyzer** to the Start Menu — one entry, the simulator being a choice in
+the app's own Analyzer dropdown rather than a second shortcut. The binaries are
 not code-signed, so SmartScreen shows "Windows protected your PC" the first time — click *More info*,
 then *Run anyway*, or check the download against the release's `SHA256SUMS.txt` first.
 [INSTALL.md](INSTALL.md#why-windows-warns-about-this-download) explains the warning, and why a

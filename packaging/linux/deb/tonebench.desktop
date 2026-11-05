@@ -10,8 +10,3 @@ Icon=tonebench
 Terminal=true
 Categories=AudioVideo;Audio;Science;Electronics;
 Keywords=QA403;QuantAsylum;soundcard;audio;analyzer;THD;spectrum;
-Actions=Simulate;
-
-[Desktop Action Simulate]
-Name=Tonebench - Audio Equipment Analyzer (simulator)
-Exec=tonebench --simulate

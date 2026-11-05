@@ -248,7 +248,7 @@ const emit = defineEmits<{
   setRangingMode: [mode: RangingModeName]
   setInputRange: [dbv: number]
   openSoundCard: []
-  openQa403: []
+  openQa40x: []
   openLoad: []
   setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
@@ -496,20 +496,26 @@ const telemetryStaleTitle =
 const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
 
 /**
- * Whose gear button is the QA403's.
+ * Whose gear button is the QA40x's.
  *
  * <p>The simulator is included deliberately: it models a QA403 and mirrors its generator rate
  * ceiling, so the experimental 384 kHz opt-in is read on that bench too — and it is the one setting
  * in that dialog which is not about hardware being present. The ranging delay hides itself there,
  * as it always did. The same reasoning already makes the external gain popover call that bench "the
- * QA403 bench".</p>
+ * QA40x bench".</p>
+ *
+ * <p><b>QA40x rather than QA403</b>, like the picker entry beside it: this is keyed on the
+ * <em>kind</em>, so it is the gear a QA402 bench gets too. The dialog's 384 kHz opt-in is in fact
+ * QA403-only — <c>Qa40xModel.Capabilities</c> ignores the flag for a QA402 — but the row says so
+ * itself, and a title naming one model while opening on either is the fault this spelling exists
+ * to remove.</p>
  */
-const isQa403 = computed(() => props.status?.deviceKind === 'Hardware' || props.status?.deviceKind === 'Simulated')
+const isQa40x = computed(() => props.status?.deviceKind === 'Hardware' || props.status?.deviceKind === 'Simulated')
 
-const qa403Title = computed(() =>
+const qa40xTitle = computed(() =>
   props.status?.deviceKind === 'Simulated'
-    ? "The QA403's own settings — the experimental 384 kHz rate, which the simulator mirrors. The auto-ranging delay needs a real analyzer."
-    : "The QA403's own settings: the experimental 384 kHz sample rate and the auto-ranging step-down delay.",
+    ? "The QA40x's own settings — the experimental 384 kHz rate, which the simulator mirrors. The auto-ranging delay needs a real analyzer."
+    : "The QA40x's own settings: the experimental 384 kHz sample rate (a QA403 only) and the auto-ranging step-down delay.",
 )
 
 /**
@@ -531,13 +537,15 @@ const gainDeclared = computed(() => gainLeftDb.value !== 0 || gainRightDb.value 
 /**
  * Which document the popover writes to, named so a bench can tell where its figure went. A bare
  * name, no article: since the 2026-10-12 redesign the popover sets it in a badge ("Stored with
- * [QA403]"), and "the QA403 bench" inside a pill read as "the QA403 bench bench".
+ * [QA40x]"), and "the QA40x bench" inside a pill read as "the QA40x bench bench".
  *
  * The simulator and the real analyzer share one name because they share one document — the
  * simulator models a QA403 — so naming it separately would promise a second figure that does not
- * exist.
+ * exist. QA40x for that same reason one model further along: a QA402 bench writes to that one
+ * document too, so a badge reading "Stored with QA403" there named a file the figure had not gone
+ * into.
  */
-const gainBenchLabel = computed(() => (isSoundCard.value ? 'Sound card' : 'QA403'))
+const gainBenchLabel = computed(() => (isSoundCard.value ? 'Sound card' : 'QA40x'))
 
 const gainOpen = ref(false)
 
@@ -619,23 +627,23 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       Unverified model
     </span>
     <!-- Which analyzer the session is talking to. Always offered, and independent of whether it is
-         connected: switching to the QA403 with none attached is how you arm the Connect button. -->
+         connected: switching to the QA40x with none attached is how you arm the Connect button. -->
     <label v-if="status" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="analyzerSwitchTitle">
       Analyzer
       <select :class="BAR_SELECT" :value="status.deviceKind" :disabled="status.acquiring" @change="onDeviceKindChange">
         <option v-for="kind in DEVICE_KINDS" :key="kind.value" :value="kind.value">{{ kind.label }}</option>
       </select>
     </label>
-    <!-- The QA403's own settings, in the same place and with the same glyph as the sound card's
+    <!-- The QA40x's own settings, in the same place and with the same glyph as the sound card's
          below. Keyed on the selected analyzer, not on a connection: these are stored settings,
          and one of them (the rate) decides what the FFT screen offers before anything is up. -->
     <button
-      v-if="isQa403"
+      v-if="isQa40x"
       type="button"
       class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-      aria-label="QA403 settings"
-      :title="qa403Title"
-      @click="emit('openQa403')"
+      aria-label="QA40x settings"
+      :title="qa40xTitle"
+      @click="emit('openQa40x')"
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="3" />
@@ -776,7 +784,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
     </template>
 
     <!--
-      The app starts whether or not a QA403 is attached (a missing one used to abort startup
+      The app starts whether or not a QA40x is attached (a missing one used to abort startup
       outright), so "offline" is a normal state to arrive in rather than a failure. Covers the
       mid-session unplug too: the server releases the dead handle and reports connected=false, so
       the same button brings the device back once it is plugged in again. Hidden while the error
@@ -787,7 +795,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       type="button"
       class="h-7 rounded-md border border-neutral-300 px-2.5 font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
       :disabled="connecting"
-      title="Look for a QA403 on USB and connect to it."
+      title="Look for a QA40x on USB and connect to it — every product id in Qa40xModel.All is tried, QA403 first."
       @click="emit('connect')"
     >
       {{ connecting ? 'Connecting…' : 'Connect' }}

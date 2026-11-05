@@ -23,7 +23,7 @@ const { showPage } = useManual()
     <h2>Choosing it</h2>
     <p>
       The <strong>Analyzer</strong> dropdown in the status bar offers <strong>Sound card</strong>
-      beside the QA403 and the simulator, live, with no restart. Selecting it puts a
+      beside the QA40x and the simulator, live, with no restart. Selecting it puts a
       <strong>cogwheel</strong> next to the dropdown, which opens the sound-card settings — that
       button is where everything on this page happens, and it is there before a card has been
       chosen, because choosing one is the first thing to do.

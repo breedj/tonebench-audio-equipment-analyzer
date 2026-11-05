@@ -76,13 +76,14 @@ export function telemetryRows(status: DeviceStatus | null): TelemetryRow[] {
 
   // The real analyzer, whether or not it is answering right now. The simulator is deliberately not
   // included although it models a QA403 elsewhere in this bar: it has no sensors, so there is
-  // nothing for a dash to stand in for.
-  const isQa403 = status.deviceKind === 'Hardware'
+  // nothing for a dash to stand in for. QA40x, because the kind covers the QA402 as well, whose
+  // 0x11/0x12/0x16 sensors are the same three.
+  const isQa40x = status.deviceKind === 'Hardware'
   const telemetry = status.telemetry
 
   const rows: TelemetryRow[] = []
 
-  if (status.connected || isQa403) {
+  if (status.connected || isQa40x) {
     rows.push({
       key: 'serial',
       label: 'S/N',
@@ -103,7 +104,7 @@ export function telemetryRows(status: DeviceStatus | null): TelemetryRow[] {
     })
   }
 
-  if (telemetry || isQa403) {
+  if (telemetry || isQa40x) {
     rows.push({
       key: 'voltage',
       label: '',

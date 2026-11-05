@@ -66,7 +66,7 @@ import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
 import ProgrammableLoadDialog from './components/ProgrammableLoadDialog.vue'
-import Qa403Dialog from './components/Qa403Dialog.vue'
+import Qa40xDialog from './components/Qa40xDialog.vue'
 import SoundCardDialog from './components/SoundCardDialog.vue'
 import { useProgrammableLoad } from './composables/useProgrammableLoad'
 import { useSoundCard } from './composables/useSoundCard'
@@ -632,7 +632,7 @@ const metricPickerOpen = ref(false)
 const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
-const qa403DialogOpen = ref(false)
+const qa40xDialogOpen = ref(false)
 const loadDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
@@ -2376,25 +2376,25 @@ function closeSoundCardDialog() {
 }
 
 /**
- * And so does closing the QA403's, for the same reason: the experimental 384 kHz checkbox moves the
+ * And so does closing the QA40x's, for the same reason: the experimental 384 kHz checkbox moves the
  * analyzer's reported sample-rate list, which `ranges` is otherwise only fetched at mount — so
  * without this the box appears to do nothing until the page is reloaded. (It used to hang off
  * Configuration, which is where that checkbox was until 2026-10-05.) The device itself needs no
  * reconnect; it reads the setting through a Func, so the open connection already reports the new
  * list (see Qa40xUsbDevice.Allow384kHz).
  */
-function closeQa403Dialog() {
-  qa403DialogOpen.value = false
+function closeQa40xDialog() {
+  qa40xDialogOpen.value = false
   void refreshRanges()
 }
 
 /**
- * The QA403 dialog's footer link to the full Configuration — the two overlap (ranging, the capture
+ * The QA40x dialog's footer link to the full Configuration — the two overlap (ranging, the capture
  * delay), and the dialog's own three settings are a shortcut rather than a separate place. One
  * dialog at a time, so it closes on the way, which also means the ranges are re-read.
  */
-function openConfigurationFromQa403() {
-  closeQa403Dialog()
+function openConfigurationFromQa40x() {
+  closeQa40xDialog()
   configDialogOpen.value = true
 }
 
@@ -6146,7 +6146,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
       @open-sound-card="soundCardDialogOpen = true"
-      @open-qa403="qa403DialogOpen = true"
+      @open-qa40x="qa40xDialogOpen = true"
       @open-load="loadDialogOpen = true"
       @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
@@ -6255,11 +6255,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
     <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
     <!-- The status's own poll feeds this rather than a second one of its own: the step-down delay is
          read back off the device, and ConfigDialog's draft-string bug was a dialog that polled. -->
-    <Qa403Dialog
-      :open="qa403DialogOpen"
+    <Qa40xDialog
+      :open="qa40xDialogOpen"
       :status="status"
-      @close="closeQa403Dialog"
-      @configuration="openConfigurationFromQa403"
+      @close="closeQa40xDialog"
+      @configuration="openConfigurationFromQa40x"
     />
     <!-- Always mounted, like the others, and fed by the app's own load poll — never one of its own.
          Harmless on a bench with no load: the box that opens it does not exist there. -->

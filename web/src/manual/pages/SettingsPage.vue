@@ -13,7 +13,7 @@ const { showPage } = useManual()
       The gear button at the top right. Everything in it is global — it applies whichever
       measurement is selected, whichever analyzer is attached, and is not part of any measurement's
       saved settings. The settings that belong to one <em>analyzer</em> are not here: each has its own
-      gear on the status bar, beside the Analyzer picker — <strong>QA403 settings</strong> below, and
+      gear on the status bar, beside the Analyzer picker — <strong>QA40x settings</strong> below, and
       <button type="button" class="manual-link" @click="showPage('sound-card')">Using a sound card</button>
       for a card. The measurement band is not here either: it belongs to one measurement, so it sits
       behind the FFT screen's <strong>Metrics</strong> button with the tiles it governs — see
@@ -115,7 +115,7 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
-    <h2>QA403 settings</h2>
+    <h2>QA40x settings</h2>
     <p>
       The gear beside the status bar's <strong>Analyzer</strong> picker, in the same place the sound
       card's settings live. Both of these were on Configuration's Acquisition tab until October 2026
@@ -350,7 +350,7 @@ const { showPage } = useManual()
               under a nonlinear amplifier model, which drops the stack whatever the box says.
             </p>
             <p>
-              Selecting the QA403 with none attached is not an error: the session simply ends up
+              Selecting the QA40x with none attached is not an error: the session simply ends up
               disconnected, exactly as it does when the app starts with nothing plugged in, and
               <strong>Connect</strong> picks it up when you attach one.
             </p>
@@ -359,10 +359,10 @@ const { showPage } = useManual()
         <tr>
           <td>Gear, beside Analyzer</td>
           <td>
-            That analyzer's own settings: <strong>QA403 settings</strong> under the QA403 and the
+            That analyzer's own settings: <strong>QA40x settings</strong> under the QA40x and the
             simulator, and the sound card's card picker and calibration under a card. It follows the
             analyzer that is <em>selected</em> rather than one that is connected, so a setting can be
-            made before the hardware is up — and under the QA403 one of them (the sample rate)
+            made before the hardware is up — and under the QA40x one of them (the sample rate)
             decides what the FFT screen offers in the first place.
           </td>
         </tr>

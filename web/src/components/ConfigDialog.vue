@@ -88,7 +88,7 @@ const lastRecordingSummary = computed(() => {
  * gone (2026-10-14) because its one field broke that promise — the metrics bandwidth is saved in an
  * FFT type's params_json and re-applied with it, so it belongs to the measurement; it is now beside
  * the tiles it qualifies, in the metrics picker (MetricPickerDialog.vue). The two settings that are not — the experimental 384 kHz rate and the auto-ranging
- * step-down delay — moved to the QA403's own dialog on the status bar (Qa403Dialog.vue), beside the
+ * step-down delay — moved to the QA40x's own dialog on the status bar (Qa40xDialog.vue), beside the
  * sound card's. A field that appears only when particular hardware is plugged in does not belong in
  * a dialog whose first line promises that nothing here depends on the device.
  */
@@ -150,7 +150,7 @@ function onLoadKindChange(event: Event) {
  * the same reason.)</p>
  *
  * <p>The poll itself has gone — the two device settings that needed it moved to
- * <c>Qa403Dialog.vue</c>, which stages its own field the same way — but the draft stays: any watcher
+ * <c>Qa40xDialog.vue</c>, which stages its own field the same way — but the draft stays: any watcher
  * or sibling write re-renders this dialog, and a field that cannot survive a re-render is a field
  * waiting for the next one.</p>
  *
@@ -586,7 +586,7 @@ async function clearStoredCalibration() {
                2026-10-05, and someone who knew where they were will come back here first. -->
           <p class="text-xs text-neutral-500 dark:text-neutral-400">
             The experimental 384 kHz sample rate and the auto-range step-down delay belong to the
-            analyzer rather than to the bench, and are now in <strong>QA403 settings</strong> — the
+            analyzer rather than to the bench, and are now in <strong>QA40x settings</strong> — the
             gear beside the status bar's Analyzer picker.
           </p>
         </template>

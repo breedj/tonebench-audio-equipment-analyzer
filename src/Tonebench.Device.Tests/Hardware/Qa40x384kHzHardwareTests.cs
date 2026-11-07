@@ -77,7 +77,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
     [Fact]
     public async Task AdcClock_At384kHz_DeliversFramesAtThatRateAgainstTheWallClock()
     {
-        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        using var device = ExperimentalDevice();
         await device.ConnectAsync(CancellationToken.None);
 
         // Pinned: an autorange relay click mid-window punches a ~110 ms hole in the stream, which
@@ -165,7 +165,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
     {
         const int Records = 16;
 
-        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        using var device = ExperimentalDevice();
         await device.ConnectAsync(CancellationToken.None);
         device.AutoRangeEnabled = false;
         await device.SetInputRangeAsync(0.0, CancellationToken.None);
@@ -247,7 +247,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
         double[] referenceTones = [1_000, 10_000, 20_000, 50_000, 80_000, 90_000];
         double[] experimentalTones = [1_000, 10_000, 20_000, 50_000, 80_000, 90_000, 120_000, 150_000, 180_000];
 
-        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        using var device = ExperimentalDevice();
         await device.ConnectAsync(CancellationToken.None);
         device.AutoRangeEnabled = false;
         await device.SetInputRangeAsync(LoopbackInputRangeDbv, CancellationToken.None);
@@ -363,7 +363,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
         const double CaptureSeconds = 40.0;
         const double ReferenceHz = 30_000.0;
 
-        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        using var device = ExperimentalDevice();
         await device.ConnectAsync(CancellationToken.None);
         device.AutoRangeEnabled = false;
         await device.SetInputRangeAsync(LoopbackInputRangeDbv, CancellationToken.None);
@@ -548,7 +548,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
     {
         const double ToneHz = 1_000.0;
 
-        using var device = new Qa40xUsbDevice(NullLogger<Qa40xUsbDevice>.Instance);
+        using var device = ExperimentalDevice();
         await device.ConnectAsync(CancellationToken.None);
         device.AutoRangeEnabled = false;
         await device.SetInputRangeAsync(LoopbackInputRangeDbv, CancellationToken.None);
@@ -739,7 +739,7 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
         const double TargetSeconds = 120.0;
 
         var logger = new CapturingLogger<Qa40xUsbDevice>();
-        using var device = new Qa40xUsbDevice(logger);
+        using var device = ExperimentalDevice(logger);
         await device.ConnectAsync(CancellationToken.None);
         device.AutoRangeEnabled = false;
         await device.SetInputRangeAsync(LoopbackInputRangeDbv, CancellationToken.None);
@@ -809,6 +809,36 @@ public class Qa40x384kHzHardwareTests(ITestOutputHelper output)
     // ---------------------------------------------------------------------------------------
     // Shared helpers.
     // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The device under test, with the experimental rate switched on.
+    ///
+    /// <para>Every test in this file streams at 384 kHz, and since 2026-11-04
+    /// <see cref="Qa40xUsbDevice.StreamAsync"/> refuses a rate that is not in the connected model's
+    /// <see cref="IAnalyzerDevice.Capabilities"/> list — defence in depth behind
+    /// <c>DeviceSessionService.RequireSupportedSampleRate</c>, which has always refused one. 384 kHz
+    /// is in that list only while <see cref="Qa40xUsbDevice.Allow384kHz"/> says so, that being
+    /// Configuration's off-by-default <c>Experimental384kConfig</c> checkbox read through a
+    /// <see cref="Func{TResult}"/>. So each of these tests has to opt in exactly as the app does;
+    /// without it they fail with "QA403 does not support 384000 Hz" out of a managed capability
+    /// check, before any USB transfer, which reads as a device fault and is not one.</para>
+    ///
+    /// <para><b>One helper rather than six object initialisers, so a seventh test cannot forget</b>
+    /// — which is how this went unnoticed for two days: that membership check arrived with three
+    /// test files of its own and left this one alone, and every test here is
+    /// <c>Category=Hardware</c>, so the breakage was invisible to the default run and only a bench
+    /// session could surface it.</para>
+    ///
+    /// <para>Note the flag is necessary and not sufficient: <see cref="Qa40xModel.Capabilities"/>
+    /// ignores it for a <b>QA402</b>, 384 kHz being QA403-only, so the same refusal against a QA402
+    /// on the bench is correct rather than a regression here — read the model name in the
+    /// message.</para>
+    /// </summary>
+    private static Qa40xUsbDevice ExperimentalDevice(ILogger<Qa40xUsbDevice>? logger = null) =>
+        new(logger ?? NullLogger<Qa40xUsbDevice>.Instance)
+        {
+            Allow384kHz = () => true,
+        };
 
     /// <summary>
     /// Streams until <paramref name="targetFrames"/> frames have been collected, deinterleaved per

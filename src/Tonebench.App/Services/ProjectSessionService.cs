@@ -63,7 +63,7 @@ public sealed class ProjectSessionService(
             if (!File.Exists(full))
                 throw new ProjectFileException($"'{full}' does not exist.");
             if (!await LooksLikeSqliteAsync(full, ct))
-                throw new ProjectFileException($"'{full}' is not a QA403 project file (not an SQLite database).");
+                throw new ProjectFileException($"'{full}' is not a Tonebench project file (not an SQLite database).");
 
             await CloseCoreAsync(ct);
 
@@ -72,7 +72,7 @@ public sealed class ProjectSessionService(
             await using (var connection = await SqliteConnectionFactory.OpenAtAsync(full, create: false, ct))
             {
                 if (!await TableExistsAsync(connection, "schema_version"))
-                    throw new ProjectFileException($"'{full}' is an SQLite database but not a QA403 project file.");
+                    throw new ProjectFileException($"'{full}' is an SQLite database but not a Tonebench project file.");
 
                 await new MigrationRunner().RunAsync(connection, ct);
                 row = await SingleProjectAsync(connection, full);

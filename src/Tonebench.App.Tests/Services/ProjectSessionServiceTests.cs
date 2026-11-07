@@ -125,7 +125,7 @@ public class ProjectSessionServiceTests : IDisposable
         SqliteConnection.ClearAllPools();
 
         var ex = await Assert.ThrowsAsync<ProjectFileException>(() => _session.OpenAsync(In("other.tbench"), CancellationToken.None));
-        Assert.Contains("not a QA403 project file", ex.Message);
+        Assert.Contains("not a Tonebench project file", ex.Message);
 
         await using var check = await SqliteConnectionFactory.OpenAtAsync(In("other.tbench"), create: false, CancellationToken.None);
         Assert.Equal(0L, await check.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'schema_version';"));

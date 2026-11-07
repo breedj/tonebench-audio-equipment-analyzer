@@ -56,7 +56,7 @@ internal sealed class LinuxHidRawTransport(int vendorId, int productId) : IHidTr
             throw new Qa451DeviceLostException(
                 $"Found a QA451 at {node} but cannot open it for writing. Install the udev rule for "
                     + $"VID 0x{vendorId:x4} PID 0x{productId:x4} and make sure this user is in the group it "
-                    + "grants (the QA403 ships the same arrangement in packaging/udev).",
+                    + "grants (the QA40x ships the same arrangement in packaging/udev).",
                 ex);
         }
         catch (IOException ex)

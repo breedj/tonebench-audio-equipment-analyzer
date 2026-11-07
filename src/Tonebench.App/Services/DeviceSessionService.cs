@@ -848,7 +848,7 @@ public sealed class DeviceSessionService(
     private void EnsureConnected()
     {
         if (_info is null)
-            throw new InvalidOperationException("No device connected. Attach the QA403 and press Connect in the status bar.");
+            throw new InvalidOperationException("No device connected. Attach the analyzer and press Connect in the status bar.");
     }
 
     /// <summary>
@@ -860,7 +860,7 @@ public sealed class DeviceSessionService(
     /// session is disconnected and the message is the actionable half.
     /// </summary>
     private static InvalidOperationException DeviceLostError(Qa40xDeviceLostException inner) =>
-        new("The QA403 was disconnected. Plug it back in and press Connect in the status bar.", inner);
+        new("The QA40x was disconnected. Plug it back in and press Connect in the status bar.", inner);
 
     /// <summary>
     /// Status, preceded by a throttled liveness check — what <c>GET /api/device</c> serves.
@@ -982,7 +982,7 @@ public sealed class DeviceSessionService(
     {
         _deviceLost = true;
         _info = null;
-        logger.LogWarning("QA403 disconnected — session marked device-less; press Connect once it is plugged back in");
+        logger.LogWarning("QA40x disconnected — session marked device-less; press Connect once it is plugged back in");
 
         int generation = _connectionGeneration;
         _ = Task.Run(() => TearDownAfterLossAsync(generation));
@@ -1610,7 +1610,7 @@ public sealed class DeviceSessionService(
         {
             throw new ArgumentOutOfRangeException(
                 nameof(config),
-                $"BlockFrameCount must be at least {MinBlockFrameCount} (the real QA403's hardware queue depth, "
+                $"BlockFrameCount must be at least {MinBlockFrameCount} (the real QA40x's hardware queue depth, "
                     + "per docs/tonebench-stack-spec.md §2.1) — smaller values turn the acquisition loop into a "
                     + "near-tight spin at the simulated sample rate and can starve the app under load.");
         }
@@ -2069,12 +2069,12 @@ public sealed class DeviceSessionService(
     {
         // Logged step by step because the failure this guards against is a *hang*, not an exception:
         // whichever line has no matching "done" in the log is the one that blocked.
-        logger.LogInformation("QA403 teardown: shutdown begin (acquiring={Acquiring}, stream={StreamRunning})",
+        logger.LogInformation("QA40x teardown: shutdown begin (acquiring={Acquiring}, stream={StreamRunning})",
             _isAcquiring, _streamTask is { IsCompleted: false });
 
         _isAcquiring = false;
         await spectrumPipeline.StopAsync();
-        logger.LogInformation("QA403 teardown: spectrum pipeline stopped");
+        logger.LogInformation("QA40x teardown: spectrum pipeline stopped");
 
         // Before the stream comes down, so the file is closed and its header patched while the
         // writer still has time -- a recording abandoned by the shutdown watchdog is a file whose
@@ -2082,6 +2082,6 @@ public sealed class DeviceSessionService(
         await EndStreamRecordingAsync();
 
         await StopStreamIfRunningAsync();
-        logger.LogInformation("QA403 teardown: device stream stopped and pump joined");
+        logger.LogInformation("QA40x teardown: device stream stopped and pump joined");
     }
 }

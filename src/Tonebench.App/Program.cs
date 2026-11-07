@@ -481,7 +481,7 @@ static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
             Thread.Sleep(deadline);
 
             Log.Error(
-                "Shutdown did not complete within {Seconds}s — forcing process exit. The last 'QA403 teardown:' line "
+                "Shutdown did not complete within {Seconds}s — forcing process exit. The last 'QA40x teardown:' line "
                     + "above is the step that blocked. The device has already been sent StreamingStop; killing the "
                     + "process is what releases the USB handle so the next connect can claim it.",
                 deadline.TotalSeconds);
@@ -491,7 +491,7 @@ static void StartShutdownWatchdog(IHostApplicationLifetime lifetime)
         })
         {
             IsBackground = true,
-            Name = "QA403 shutdown watchdog",
+            Name = "QA40x shutdown watchdog",
         };
 
         watchdog.Start();

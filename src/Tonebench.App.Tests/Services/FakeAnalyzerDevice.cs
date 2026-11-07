@@ -103,7 +103,7 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
     private Task FailAsLost(string phase)
     {
         RaiseDeviceLost();
-        return Task.FromException(new Qa40xDeviceLostException($"QA403 {phase} failed with Io — device appears disconnected."));
+        return Task.FromException(new Qa40xDeviceLostException($"QA40x {phase} failed with Io — device appears disconnected."));
     }
 
     private void RaiseDeviceLost() => _deviceLost?.Invoke(this, EventArgs.Empty);

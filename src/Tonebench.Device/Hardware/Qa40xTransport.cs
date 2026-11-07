@@ -267,7 +267,7 @@ internal sealed class Qa40xTransport : IDisposable
             var (error, length) = await TransferAsync(
                 () => reader.ReadAsync(scratch, 0, scratch.Length, 50), "data-endpoint drain").ConfigureAwait(false);
             if (error is Error.NoDevice)
-                throw new Qa40xDeviceLostException("QA403 data-endpoint drain failed with NoDevice — device appears disconnected.");
+                throw new Qa40xDeviceLostException("QA40x data-endpoint drain failed with NoDevice — device appears disconnected.");
             if (length <= 0)
                 break;
 
@@ -304,7 +304,7 @@ internal sealed class Qa40xTransport : IDisposable
             // removed. Anything else (Timeout, Busy, Overflow...) is a transfer problem on a device
             // that is still there, and must keep its own exception rather than being reported as an
             // unplug.
-            throw new Qa40xDeviceLostException($"QA403 {phase} failed with {ex.ErrorCode} — device appears disconnected.");
+            throw new Qa40xDeviceLostException($"QA40x {phase} failed with {ex.ErrorCode} — device appears disconnected.");
         }
     }
 
@@ -312,7 +312,7 @@ internal sealed class Qa40xTransport : IDisposable
     private static void ThrowIfDeviceLost(Error error, string phase)
     {
         if (error is Error.NoDevice or Error.Io or Error.Pipe)
-            throw new Qa40xDeviceLostException($"QA403 {phase} failed with {error} — device appears disconnected.");
+            throw new Qa40xDeviceLostException($"QA40x {phase} failed with {error} — device appears disconnected.");
     }
 
     /// <summary>5-byte register frame: [reg][value:4 big-endian] (Extensions.cs:11-16, Usb.cs:276-284).</summary>

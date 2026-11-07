@@ -42,16 +42,16 @@ public sealed class DeviceLifecycleHostedService(
         }
         catch (Qa40xDeviceNotFoundException)
         {
-            // No stack trace: nothing is wrong, there is simply no QA403 on the bus. Anything else
+            // No stack trace: nothing is wrong, there is simply no QA40x on the bus. Anything else
             // (interface busy, verify failure, calibration read) does get one — those are faults.
             logger.LogWarning(
-                "No QA403 found on USB — starting without one. Attach the device and press Connect in the status bar.");
+                "No QA40x analyzer found on USB — starting without one. Attach the device and press Connect in the status bar.");
         }
         catch (Exception ex)
         {
             logger.LogWarning(
                 ex,
-                "Could not connect to the QA403 at startup ({Reason}) — starting without a device. Press Connect in the status bar to retry.",
+                "Could not connect to the QA40x at startup ({Reason}) — starting without a device. Press Connect in the status bar to retry.",
                 ex.Message);
         }
     }

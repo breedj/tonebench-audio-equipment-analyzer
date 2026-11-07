@@ -350,7 +350,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     {
         var transport = new Qa40xTransport
         {
-            TraceTeardown = step => logger.LogInformation("QA403 teardown: {Step}", step),
+            TraceTeardown = step => logger.LogInformation("QA40x teardown: {Step}", step),
         };
 
         try
@@ -359,9 +359,12 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
             // Before anything reads Capabilities — the autoranger below is built from its input
             // ladder. Open() cannot succeed without identifying the model, so the null-forgiveness
-            // is the invariant rather than a hope.
-            _model = transport.Model!;
-            logger.LogInformation("{Model} USB interface claimed", _model.ProductName);
+            // is the invariant rather than a hope. Held in a local as well as the field because
+            // every log line in this method names the model: a local cannot go null across the
+            // awaits below, where the field's flow state would have to be re-proved at each one.
+            var model = transport.Model!;
+            _model = model;
+            logger.LogInformation("{Model} USB interface claimed", model.ProductName);
 
             // The QA402 path is reasoned from documents, not measured: no QA402 has ever been
             // attached to this bench. Warning rather than Information because a log file sent in is
@@ -374,8 +377,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                         + "PyQa40x and bare-metal examples and from ASIO40x, all of which treat the QA402 and QA403 "
                         + "as one protocol, but nothing here has been verified against a {Model}. Treat measurements "
                         + "accordingly and please report what you find.",
-                    _model.ProductName,
-                    _model.ProductName);
+                    model.ProductName,
+                    model.ProductName);
             }
 
             // Recovery *before* the connection verify, not after. The QA403 keeps streaming across a
@@ -392,7 +395,10 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             await transport.WriteRegisterAsync(Qa40xRegisters.StreamingEnable, Qa40xRegisters.StreamingStop, ct).ConfigureAwait(false);
             int flushed = await transport.DrainDataEndpointAsync(ct).ConfigureAwait(false);
             if (flushed > 0)
-                logger.LogWarning("QA403 was still streaming on connect — flushed {Bytes} stale bytes off EP2", flushed);
+                logger.LogWarning(
+                    "{Model} was still streaming on connect — flushed {Bytes} stale bytes off EP2",
+                    model.ProductName,
+                    flushed);
 
             // Connection verify: write a random uint32 to register 0, read it back (Usb.cs:189-204).
             // Retried once: the first exchange after the recovery above can still pick up a stale
@@ -400,7 +406,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             if (!await TryVerifyAsync(transport, ct).ConfigureAwait(false)
                 && !await TryVerifyAsync(transport, ct).ConfigureAwait(false))
             {
-                throw new InvalidOperationException("QA403 connection verification failed (register 0 readback did not match).");
+                throw new InvalidOperationException(
+                    $"{model.ProductName} connection verification failed (register 0 readback did not match).");
             }
 
             // Front-panel I2S expansion port off, in the reference's own position: after the stream
@@ -421,11 +428,11 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 // Logged on the way through, at Debug, because there is no other way to see this
                 // happen: the port is write-only, nothing on screen reflects it, and a write that was
                 // swallowed above looks exactly like one that was never reached.
-                logger.LogDebug("QA403 front-panel I2S stopped at connect (register 0x0A = 0)");
+                logger.LogDebug("{Model} front-panel I2S stopped at connect (register 0x0A = 0)", model.ProductName);
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not Qa40xDeviceLostException)
             {
-                logger.LogDebug(ex, "QA403 did not accept the front-panel I2S stop at connect — continuing");
+                logger.LogDebug(ex, "{Model} did not accept the front-panel I2S stop at connect — continuing", model.ProductName);
             }
 
             // Input range programmed to what this instance believes it is, in the same position and
@@ -648,7 +655,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         if (config.BlockFrameCount % RequiredBlockFrameMultiple != 0)
         {
             throw new ArgumentException(
-                $"BlockFrameCount must be a multiple of {RequiredBlockFrameMultiple} samples (QA403 output buffer "
+                $"BlockFrameCount must be a multiple of {RequiredBlockFrameMultiple} samples (QA40x output buffer "
                     + $"constraint, docs/tonebench-stack-spec.md §2.1) — got {config.BlockFrameCount}. A non-multiple "
                     + "would emit garbled audio rather than a clear error, so this is enforced up front.",
                 nameof(config));
@@ -810,7 +817,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 // A single combined number would have said "something fell behind" and left the next
                 // person to guess which half — exactly the guess this split exists to remove.
                 logger.LogWarning(
-                    "QA403 stream lost data: {Chunks} RX chunks ({ChunkFrames} frames) dropped before calibration, "
+                    "QA40x stream lost data: {Chunks} RX chunks ({ChunkFrames} frames) dropped before calibration, "
                         + "{Blocks} assembled blocks ({BlockFrames} frames) dropped after it — FFT records over this run "
                         + "contain splices and any noise-floor reading from them is suspect",
                     dropped, dropped * TransferChunkFrames,
@@ -873,7 +880,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "QA403 liveness ping failed without a disconnect signal — treating the device as still present");
+            logger.LogDebug(ex, "QA40x liveness ping failed without a disconnect signal — treating the device as still present");
             return true;
         }
     }
@@ -905,7 +912,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         foreach (var stall in stalls)
         {
             logger.LogWarning(
-                "QA403 DAC starvation [{Cause}] iter {Iteration}: iteration {IterationMs:0.0} ms "
+                "QA40x DAC starvation [{Cause}] iter {Iteration}: iteration {IterationMs:0.0} ms "
                     + "(read wait {ReadWaitMs:0.0}, write wait {WriteWaitMs:0.0}, submit {SubmitMs:0.0}, "
                     + "register+prime {RegisterMs:0.0}), TX slack now {SlackMs:0.0} ms of {PrimedMs:0.0}; "
                     + "GC pause {GcPauseMs:0.0} ms total (gen0 {Gen0}/gen1 {Gen1}/gen2 {Gen2}), "
@@ -942,7 +949,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     private void LogDropBurst(long chunkDelta, long blockDelta, long chunkTotal, long blockTotal, AcquisitionConfig config)
     {
         logger.LogWarning(
-            "QA403 lost data now: +{ChunkDelta} RX chunks ({ChunkFrames} frames, before calibration), "
+            "QA40x lost data now: +{ChunkDelta} RX chunks ({ChunkFrames} frames, before calibration), "
                 + "+{BlockDelta} blocks ({BlockFrames} frames, after it); run totals {ChunkTotal}/{BlockTotal}. "
                 + "Any FFT record spanning this instant is spliced",
             chunkDelta, chunkDelta * TransferChunkFrames,
@@ -967,7 +974,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
 
         logger.Log(
             level,
-            "QA403 transfer summary at {SampleRateHz:0} Hz: {Iterations} iterations, worst {WorstMs:0.0} ms, "
+            "QA40x transfer summary at {SampleRateHz:0} Hz: {Iterations} iterations, worst {WorstMs:0.0} ms, "
                 + "TX slack floor {MinSlackMs:0.0} ms of {PrimedMs:0.0} (≈{LostMs:0.0} ms of DAC time lost), "
                 + "{ShortWrites} short writes ({ShortWriteBytes} bytes), "
                 + "{ShortReads} short reads ({ShortReadBytes} bytes), "
@@ -1018,7 +1025,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         catch (Exception ex)
         {
             _telemetryAvailable = false;
-            logger.LogDebug(ex, "QA403 telemetry registers did not answer — not asking again on this connection");
+            logger.LogDebug(ex, "QA40x telemetry registers did not answer — not asking again on this connection");
         }
     }
 
@@ -1058,7 +1065,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             {
                 // Nothing left to salvage: the device is gone either way, and the next connect opens
                 // a new transport regardless of how this one ended.
-                logger.LogWarning(ex, "QA403 transport dispose failed after disconnect");
+                logger.LogWarning(ex, "QA40x transport dispose failed after disconnect");
             }
         }
 
@@ -1070,7 +1077,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         if (Interlocked.Exchange(ref _deviceLostRaised, 1) == 1)
             return;
 
-        logger.LogWarning("QA403 disconnected ({Context}) — handle released; reconnect the device and press Connect", context);
+        logger.LogWarning("QA40x disconnected ({Context}) — handle released; reconnect the device and press Connect", context);
         DeviceLost?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1101,11 +1108,11 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         {
             transport.WriteRegisterAsync(Qa40xRegisters.StreamingEnable, Qa40xRegisters.StreamingStop, CancellationToken.None)
                 .GetAwaiter().GetResult();
-            logger.LogInformation("QA403 teardown: StreamingStop written");
+            logger.LogInformation("QA40x teardown: StreamingStop written");
         }
         catch (Exception ex)
         {
-            logger.LogWarning("QA403 teardown: final StreamingStop failed ({Error}) — releasing the handle anyway", ex.Message);
+            logger.LogWarning("QA40x teardown: final StreamingStop failed ({Error}) — releasing the handle anyway", ex.Message);
         }
 
         transport.Dispose();
@@ -1214,7 +1221,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             _thread = new Thread(Run)
             {
                 IsBackground = true,
-                Name = "QA403 block assembler",
+                Name = "QA40x block assembler",
 
                 // Above the pool's normal priority, below the pump's: this must not be preempted by
                 // the DSP work it exists to be independent of, and must not preempt transfer refill.
@@ -1232,7 +1239,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             _stop.Cancel();
 
             if (_thread is { } thread && !thread.Join(TimeSpan.FromSeconds(2)))
-                _logger.LogWarning("QA403 block assembler did not exit within 2 s");
+                _logger.LogWarning("QA40x block assembler did not exit within 2 s");
 
             _stop.Dispose();
 
@@ -1357,7 +1364,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "QA403 block assembler faulted");
+                _logger.LogError(ex, "QA40x block assembler faulted");
             }
             finally
             {
@@ -1644,7 +1651,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             _thread = new Thread(PumpLoop)
             {
                 IsBackground = true,
-                Name = "QA403 USB transfer pump",
+                Name = "QA40x USB transfer pump",
 
                 // Above the thread pool's normal priority so a saturated pool — which is the state
                 // this whole design is defending against — cannot preempt transfer refill.
@@ -1673,7 +1680,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 await Task.Run(() =>
                 {
                     if (!thread.Join(TimeSpan.FromSeconds(2)))
-                        logger.LogWarning("QA403 transfer pump did not exit within 2 s — disposal may block in libusb_close");
+                        logger.LogWarning("QA40x transfer pump did not exit within 2 s — disposal may block in libusb_close");
                 }).ConfigureAwait(false);
             }
 
@@ -1780,7 +1787,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "QA403 transfer pump faulted");
+                logger.LogError(ex, "QA40x transfer pump faulted");
             }
             finally
             {
@@ -1818,7 +1825,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "QA403 StreamingStop write failed during teardown");
+                    logger.LogWarning(ex, "QA40x StreamingStop write failed during teardown");
                 }
 
                 _rx.Channel.Writer.TryComplete();

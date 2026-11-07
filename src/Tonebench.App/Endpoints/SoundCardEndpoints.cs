@@ -45,7 +45,8 @@ public static class SoundCardEndpoints
             // enabled in its own panel. Hence the per-direction tallies beside the device count
             // (SoundCardHostApiOption.DeviceCount), and hence reading the inventory's own host-API
             // list rather than re-deriving one from the devices that survived.
-            loggers.CreateLogger("Tonebench.SoundCard").LogInformation(
+            ILogger log = loggers.CreateLogger("Tonebench.SoundCard");
+            log.LogInformation(
                 "Audio devices enumerated by {Version}: available {Available}, host APIs [{HostApis}], "
                     + "{Inputs} input(s), {Outputs} output(s), {FullDuplex} full duplex{Problem}",
                 catalog.Version is { Length: > 0 } v ? v : "PortAudio",
@@ -57,6 +58,28 @@ public static class SoundCardEndpoints
                 catalog.Outputs.Count,
                 catalog.Inputs.Count(o => o.IsFullDuplex),
                 catalog.Problem is { Length: > 0 } p ? $" — {p}" : string.Empty);
+
+            // **And the devices themselves, one line each.** The summary above answers "what did
+            // each host API find"; this answers "what was the picker given", which is a different
+            // question and the more useful one, because the dropdown's two rules both run in the
+            // browser: the host-API filter behind the Advanced checkbox, and the collapse to one
+            // entry per card (web/src/soundcard/cardList.ts). Given the device table those are
+            // deterministic, so a log holding it reproduces the user's own dropdown exactly —
+            // including the entries the collapse dropped, which a screenshot of that dropdown
+            // cannot show. Asked for 2026-11-07, after answering a report of a card that "was not
+            // discovered" needed both a log file and a screenshot, and the screenshot was the half
+            // that could not say why.
+            //
+            // At Information rather than Debug: it is bounded — one burst per dialog open, 59
+            // lines on this bench — and it is the half of a report that cannot be re-asked for
+            // once the user has moved on, so it must not depend on the Detailed logging setting.
+            //
+            // A device reporting *no channels at all* is still absent from these lines, being in
+            // neither device list by construction. That is the state the summary's own
+            // DeviceCount exists for, and the two lines together are what tell it apart from a
+            // driver that is simply not installed.
+            foreach (SoundCardOption device in catalog.DistinctDevices())
+                log.LogInformation("Audio device: {Device}", device.Describe());
 
             return Results.Ok(catalog);
         });

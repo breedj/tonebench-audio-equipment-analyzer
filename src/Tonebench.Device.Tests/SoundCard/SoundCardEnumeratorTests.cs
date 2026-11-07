@@ -402,4 +402,77 @@ public class SoundCardEnumeratorTests
             ["Asio", "Wasapi", "Mme"],
             new SoundCardEnumerator(fake).HostApiOptions().Select(o => o.Kind));
     }
+
+    // ---- what the log writes about a device ----------------------------------------------------
+
+    private static SoundCardOption Option(
+        string hostApi, string name, string? card = null, int inputs = 2, int outputs = 0,
+        bool duplex = false, int preference = 4) =>
+        new(hostApi, name, card ?? name, "Wasapi", inputs, outputs, duplex, "Trusted", preference,
+            HasControlPanel: false);
+
+    /// <summary>
+    /// The host API, the device, its channel counts each way, and the card it belongs to where that
+    /// is not simply its own name — which together are what the picker is given, and therefore the
+    /// only way a log can say why a card was or was not offered.
+    /// </summary>
+    [Fact]
+    public void Describe_NamesTheHostApiTheDeviceAndItsChannels()
+    {
+        Assert.Equal(
+            "Windows WASAPI 'Microfoon (2- E-MU Tracker Pre)' -> card '2- E-MU Tracker Pre' 2/0 ch",
+            Option("Windows WASAPI", "Microfoon (2- E-MU Tracker Pre)", "2- E-MU Tracker Pre").Describe());
+
+        Assert.Equal(
+            "ASIO 'MOTU M Series' 8/4 ch, full duplex",
+            Option("ASIO", "MOTU M Series", inputs: 8, outputs: 4, duplex: true, preference: 0).Describe());
+    }
+
+    /// <summary>
+    /// Under ASIO and WDM-KS the device <i>is</i> the card, so the card is left out rather than
+    /// repeated: every line of those two host APIs would otherwise carry the same string twice.
+    /// </summary>
+    [Fact]
+    public void Describe_NamesTheCardOnlyWhereItDiffersFromTheDeviceName()
+    {
+        Assert.DoesNotContain("card", Option("ASIO", "ASIO4ALL v2", preference: 0).Describe());
+        Assert.Contains("card", Option("MME", "In 1-2 (MOTU M Series)", "MOTU M Series").Describe());
+    }
+
+    /// <summary>
+    /// The regression this is stated as: the two lists are two views of one device table, so a
+    /// full-duplex device is in both — and the log line that added their lengths reported this
+    /// bench's single MOTU under ASIO as two devices.
+    /// </summary>
+    [Fact]
+    public void DistinctDevices_CountAFullDuplexDeviceOnce()
+    {
+        SoundCardOption motu = Option("ASIO", "MOTU M Series", inputs: 8, outputs: 4, duplex: true, preference: 0);
+        var inventory = new SoundCardInventory(
+            Available: true, Version: "PortAudio", HostApis: [], Inputs: [motu], Outputs: [motu]);
+
+        Assert.Equal(["MOTU M Series"], inventory.DistinctDevices().Select(o => o.Name));
+    }
+
+    /// <summary>
+    /// One name under two host APIs is two devices, and they are both kept: that pair is precisely
+    /// what the picker's collapse has to choose between, so a log missing one of them cannot say
+    /// why it chose as it did.
+    /// </summary>
+    [Fact]
+    public void DistinctDevices_KeepOneNameUnderTwoHostApis()
+    {
+        var inventory = new SoundCardInventory(
+            Available: true, Version: "PortAudio", HostApis: [],
+            Inputs:
+            [
+                Option("Windows WASAPI", "E-MU Tracker Pre USB"),
+                Option("ASIO", "E-MU Tracker Pre USB", preference: 0),
+            ],
+            Outputs: []);
+
+        Assert.Equal(
+            ["ASIO", "Windows WASAPI"],
+            inventory.DistinctDevices().Select(o => o.HostApi));
+    }
 }

@@ -31,7 +31,33 @@ public sealed record SoundCardOption(
     /// panel configures the <i>mixer</i>, which exclusive mode bypasses, so offering it would point
     /// at settings that do not apply.
     /// </summary>
-    bool HasControlPanel);
+    bool HasControlPanel)
+{
+    /// <summary>
+    /// The one line the log writes for this device, e.g. <c>Windows WASAPI 'Microfoon (2- E-MU
+    /// Tracker Pre)' -> card '2- E-MU Tracker Pre' 2/0 ch</c>.
+    ///
+    /// <para>The card name is printed <b>only where it differs from the device name</b> — under
+    /// ASIO and WDM-KS the device is its own card, and repeating it would double the length of
+    /// every line that has nothing to say. Where it does appear it is the field that matters most:
+    /// the picker collapses the list to one entry per card
+    /// (<c>web/src/soundcard/cardList.ts</c>), so two host APIs that name one interface differently
+    /// — or two interfaces that happen to name it the same — is the whole of what that rule can get
+    /// wrong, and this is the only place it can be seen.</para>
+    ///
+    /// <para>Here rather than at the call site so it can be tested: a diagnostic nobody checks is
+    /// how the gap this was written for arose in the first place.</para>
+    /// </summary>
+    public string Describe()
+    {
+        string card = string.Equals(InterfaceName, Name, StringComparison.Ordinal)
+            ? string.Empty
+            : $" -> card '{InterfaceName}'";
+
+        return $"{HostApi} '{Name}'{card} {MaxInputChannels}/{MaxOutputChannels} ch"
+            + (IsFullDuplex ? ", full duplex" : string.Empty);
+    }
+}
 
 /// <summary>
 /// One host API the native library carries, with what it found under it.
@@ -85,7 +111,30 @@ public sealed record SoundCardInventory(
     IReadOnlyList<SoundCardHostApiOption> HostApis,
     IReadOnlyList<SoundCardOption> Inputs,
     IReadOnlyList<SoundCardOption> Outputs,
-    string? Problem = null);
+    string? Problem = null)
+{
+    /// <summary>
+    /// Every device once, ordered as the picker offers them: <see cref="Inputs"/> and
+    /// <see cref="Outputs"/> are two views of one device table, and a full-duplex device is in
+    /// both.
+    ///
+    /// <para>Deduplicated on host API <i>and</i> name, because the same name under two host APIs is
+    /// two different devices — and because adding the two lists' lengths is exactly the fault the
+    /// enumeration log line had until 2026-11-07, where this bench's one MOTU under ASIO was
+    /// counted as two.</para>
+    ///
+    /// <para><b>A method rather than a property</b>, although it computes nothing a caller could
+    /// not: this record is the body of <c>GET /api/soundcard/devices</c>, and
+    /// <c>System.Text.Json</c> serialises a get-only property — which would send the whole device
+    /// table a third time.</para>
+    /// </summary>
+    public IReadOnlyList<SoundCardOption> DistinctDevices() =>
+        [.. Inputs
+            .Concat(Outputs)
+            .DistinctBy(o => (o.HostApi, o.Name))
+            .OrderBy(o => o.Preference)
+            .ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)];
+}
 
 /// <summary>
 /// The result of asking whether a particular pairing will work, and at which rates.

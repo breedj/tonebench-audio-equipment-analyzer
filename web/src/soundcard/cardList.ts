@@ -1,4 +1,4 @@
-import type { SoundCardOption } from '../api/client'
+import type { SoundCardHostApiOption, SoundCardOption } from '../api/client'
 
 /**
  * Which cards the picker offers, and under which host API.
@@ -16,6 +16,86 @@ import type { SoundCardOption } from '../api/client'
  * ASIO driver) where this app lists card × host API. Both axes are legitimate; showing them
  * multiplied together is not.</p>
  */
+
+/** One thing the device picker can say about a host API that offered it nothing. */
+export interface HostApiNote {
+  hostApi: string
+  /** What the host API reported. */
+  text: string
+  /** What to do about it, where there is anything to do. */
+  hint: string | null
+}
+
+/**
+ * What to say about a host API that offered this picker nothing.
+ *
+ * <p>Added 2026-11-07, after a user reported that his interface "was not discovered and thus I
+ * could not choose it" — with an ASIO4ALL driver in front of it, which this app does support and
+ * does not filter. Nothing on screen or in the log could say which of three states the machine was
+ * in, and they need three different answers: the host API is not in this build; it is, and no
+ * driver answered; or a driver answered and reported <b>no channels</b>, which is ASIO4ALL with
+ * nothing ticked in its own panel, or a card another application is holding. Only the first is
+ * ours, and the third is the one the user can fix in a minute once told.</p>
+ *
+ * <p>Two rules, and the split is about noise rather than about information:</p>
+ *
+ * <ul>
+ *   <li><b>Devices but no channels is always reported.</b> It is genuinely wrong, it is rare, and
+ *   it is actionable.</li>
+ *   <li><b>No devices at all is reported only when the card list is empty.</b> A machine with no
+ *   ASIO interface is the ordinary case, and a standing "ASIO found no devices" on every QA403
+ *   bench's dialog would be a line nobody needs. With an empty dropdown in front of them, what was
+ *   tried is exactly what the reader wants.</li>
+ * </ul>
+ *
+ * <p>Scoped to {@link DEFAULT_HOST_API_KINDS} — the APIs whose <c>Trust</c> this app accepts. An
+ * empty DirectSound says nothing worth a line, in Advanced mode as much as out of it, since those
+ * host APIs are hidden because their measurements cannot be believed rather than because they are
+ * redundant.</p>
+ */
+export function hostApiNotes(
+  hostApis: readonly SoundCardHostApiOption[],
+  cardCount: number,
+): HostApiNote[] {
+  const notes: HostApiNote[] = []
+  for (const api of hostApis) {
+    if (!(DEFAULT_HOST_API_KINDS as readonly string[]).includes(api.kind)) continue
+
+    const asio = api.kind === 'Asio'
+    if (api.deviceCount > 0 && api.inputCount === 0 && api.outputCount === 0) {
+      notes.push({
+        hostApi: api.name,
+        // "driver" under ASIO, where a device is one, and "device" elsewhere, where it is an
+        // endpoint. The ASIO branch is the one this note exists for and the one whose wording a
+        // reader will act on.
+        text:
+          api.deviceCount === 1
+            ? `${api.name} listed 1 ${asio ? 'driver' : 'device'}, and it reports no input or output channels.`
+            : `${api.name} listed ${api.deviceCount} ${asio ? 'drivers' : 'devices'}, and none of them reports any input or output channels.`,
+        hint: asio
+          ? 'An ASIO driver that cannot reach its hardware reports nothing rather than failing: ' +
+            'check the card is not in use by another application, and open the driver’s own ' +
+            'control panel to enable its inputs and outputs. ASIO4ALL in particular shows no ' +
+            'channels until the card is ticked there.'
+          : null,
+      })
+      continue
+    }
+
+    if (api.deviceCount === 0 && cardCount === 0) {
+      notes.push({
+        hostApi: api.name,
+        text: `${api.name} is available but found no devices.`,
+        hint: asio
+          ? 'So the audio library does carry ASIO, and no ASIO driver answered. A card plugged in ' +
+            'after the app started needs it restarted — PortAudio reads the ASIO list once.'
+          : null,
+      })
+    }
+  }
+
+  return notes
+}
 
 /** The host API kinds the picker offers by default — see {@link buildCards}. */
 export const DEFAULT_HOST_API_KINDS = ['Asio', 'Wasapi', 'Alsa', 'Jack'] as const

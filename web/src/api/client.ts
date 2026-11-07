@@ -261,10 +261,33 @@ export interface SoundCardControlPanelResult {
   nothingAppeared: boolean
 }
 
+/** Mirrors Tonebench.Device.SoundCard.SoundCardHostApiOption. */
+export interface SoundCardHostApiOption {
+  name: string
+  /** 'Asio', 'Wasapi', 'WdmKs', 'DirectSound', 'Mme', 'Alsa', 'Jack' or 'Other'. */
+  kind: string
+  /**
+   * Every device listed under this host API, **those reporting no channels at all included** — a
+   * driver that starts but cannot reach its hardware. See {@link hostApiNotes}.
+   */
+  deviceCount: number
+  /** Devices with at least one input channel, i.e. the ones the picker can offer. */
+  inputCount: number
+  outputCount: number
+  trust: string
+  preference: number
+}
+
 export interface SoundCardInventory {
   /** False when PortAudio itself would not start — the dialog says so rather than showing "no cards". */
   available: boolean
   version: string
+  /**
+   * Every host API the audio library carries, those that found nothing included. That is what
+   * tells "this build has no ASIO" from "ASIO is here and no driver answered" — states the two
+   * device lists below cannot distinguish, since neither holds anything for either of them.
+   */
+  hostApis: SoundCardHostApiOption[]
   inputs: SoundCardOption[]
   outputs: SoundCardOption[]
   problem: string | null

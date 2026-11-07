@@ -297,4 +297,109 @@ public class SoundCardEnumeratorTests
             "Channels 3/4 need 4 input channels and 'In' has 2, and channels 3/4 need 4 output channels and 'Out' has 2.",
             problem);
     }
+
+    // ---- the host-API inventory ----------------------------------------------------------------
+
+    /// <summary>
+    /// Every host API the library carries is reported, <b>those that found nothing included</b>.
+    ///
+    /// <para>This is the regression stated as such. Until 2026-11-07 nothing above the interop
+    /// could see the host-API list: the inventory carried only the two device lists, and the log
+    /// line grouped <i>those</i> by host API name — so an API with no usable devices appeared
+    /// nowhere at all. A user reported that his interface "was not discovered and thus I could not
+    /// choose it", behind an ASIO4ALL driver which this app supports and does not filter, and
+    /// neither the screen nor the log could say which of three states the machine was in: no ASIO
+    /// in the build, ASIO with no driver answering, or a driver answering and reporting no
+    /// channels. They need three different answers and looked identical.</para>
+    /// </summary>
+    [Fact]
+    public void HostApiOptions_ReportAnApiThatFoundNothing()
+    {
+        using var fake = new FakePortAudio();
+        fake.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
+        var wasapi = fake.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
+        fake.AddDevice(wasapi, "In 1-2 (MOTU M Series)", inputs: 2, outputs: 0);
+
+        var options = new SoundCardEnumerator(fake).HostApiOptions();
+
+        SoundCardHostApiOption asio = Assert.Single(options, o => o.Kind == "Asio");
+        Assert.Equal(0, asio.DeviceCount);
+        Assert.Equal(0, asio.InputCount);
+        Assert.Equal(0, asio.OutputCount);
+        Assert.Equal("Trusted", asio.Trust);
+    }
+
+    /// <summary>
+    /// A driver that starts and reports <b>no channels</b> is counted as a device, and separately
+    /// as no inputs and no outputs — which is the whole reason <c>DeviceCount</c> is not simply the
+    /// two directions added up. That state is ASIO4ALL with nothing ticked in its own panel, or a
+    /// card another application is holding, and it is the one of the three a user can fix in a
+    /// minute once told. It is dropped from both of the inventory's device lists, so without this
+    /// it is indistinguishable from the driver not being installed.
+    /// </summary>
+    [Fact]
+    public void HostApiOptions_CountADriverThatReportsNoChannels_AsADeviceAllTheSame()
+    {
+        using var fake = new FakePortAudio();
+        var asio = fake.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
+        fake.AddDevice(asio, "ASIO4ALL v2", inputs: 0, outputs: 0);
+
+        SoundCardHostApiOption option = Assert.Single(new SoundCardEnumerator(fake).HostApiOptions());
+
+        Assert.Equal(1, option.DeviceCount);
+        Assert.Equal(0, option.InputCount);
+        Assert.Equal(0, option.OutputCount);
+        Assert.Equal("ASIO 1 dev/0 in/0 out", option.Describe());
+    }
+
+    /// <summary>
+    /// A device counts toward each direction it carries, so the measured Windows topology — one
+    /// interface split into separate input and output endpoints — reads as three devices, two in,
+    /// one out, rather than as three of each.
+    /// </summary>
+    [Fact]
+    public void HostApiOptions_CountEachDirectionSeparately()
+    {
+        using FakePortAudio fake = FakePortAudio.WithASplitInterface();
+
+        var options = new SoundCardEnumerator(fake).HostApiOptions();
+
+        SoundCardHostApiOption wasapi = Assert.Single(options, o => o.Kind == "Wasapi");
+        Assert.Equal(3, wasapi.DeviceCount);
+        Assert.Equal(2, wasapi.InputCount);
+        Assert.Equal(1, wasapi.OutputCount);
+        Assert.Equal("Windows WASAPI 3 dev/2 in/1 out", wasapi.Describe());
+    }
+
+    /// <summary>A full-duplex device counts once as a device and once in each direction.</summary>
+    [Fact]
+    public void HostApiOptions_CountAFullDuplexDeviceOnce()
+    {
+        using var fake = new FakePortAudio();
+        var asio = fake.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
+        fake.AddDevice(asio, "MOTU M Series", inputs: 8, outputs: 4);
+
+        SoundCardHostApiOption option = Assert.Single(new SoundCardEnumerator(fake).HostApiOptions());
+
+        Assert.Equal(1, option.DeviceCount);
+        Assert.Equal(1, option.InputCount);
+        Assert.Equal(1, option.OutputCount);
+    }
+
+    /// <summary>
+    /// Ordered as the picker offers them — the host APIs that reach the hardware first — so the log
+    /// line reads in the same order as the dropdown it is being compared against.
+    /// </summary>
+    [Fact]
+    public void HostApiOptions_AreOrderedAsThePickerOffersThem()
+    {
+        using var fake = new FakePortAudio();
+        fake.AddHostApi("MME", SoundCardHostApiKind.Mme);
+        fake.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
+        fake.AddHostApi("ASIO", SoundCardHostApiKind.Asio);
+
+        Assert.Equal(
+            ["Asio", "Wasapi", "Mme"],
+            new SoundCardEnumerator(fake).HostApiOptions().Select(o => o.Kind));
+    }
 }

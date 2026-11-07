@@ -34,19 +34,25 @@ public static class SoundCardEndpoints
             // start -- but a sound-card bench has already paid it by the time this GET runs.
             //
             // Worth having because "ASIO is not in the list" and "your card has no ASIO driver"
-            // look identical from a screenshot, and only the first is ours. The count beside each
-            // name says which of them found anything.
+            // look identical from a screenshot, and only the first is ours.
+            //
+            // **Every host API, including the ones that found nothing**, which is the part this
+            // line lacked until 2026-11-07: it grouped the two *device* lists by host API name, so
+            // an API with no usable devices appeared nowhere — exactly the two states a report of
+            // "the program did not discover my card" has to be told apart by. ASIO present with no
+            // driver answering, and ASIO absent from the build, both logged as silence; so did an
+            // ASIO driver that started and reported no channels, which is ASIO4ALL with nothing
+            // enabled in its own panel. Hence the per-direction tallies beside the device count
+            // (SoundCardHostApiOption.DeviceCount), and hence reading the inventory's own host-API
+            // list rather than re-deriving one from the devices that survived.
             loggers.CreateLogger("Tonebench.SoundCard").LogInformation(
-                "Audio devices enumerated by {Version}: available {Available}, host APIs {HostApis}, "
+                "Audio devices enumerated by {Version}: available {Available}, host APIs [{HostApis}], "
                     + "{Inputs} input(s), {Outputs} output(s), {FullDuplex} full duplex{Problem}",
                 catalog.Version is { Length: > 0 } v ? v : "PortAudio",
                 catalog.Available,
-                string.Join(
-                    ", ",
-                    catalog.Inputs.Concat(catalog.Outputs)
-                        .GroupBy(o => o.HostApi)
-                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                        .Select(g => $"{g.Key} ({g.Count()})")),
+                catalog.HostApis.Count > 0
+                    ? string.Join("; ", catalog.HostApis.Select(a => a.Describe()))
+                    : "none",
                 catalog.Inputs.Count,
                 catalog.Outputs.Count,
                 catalog.Inputs.Count(o => o.IsFullDuplex),

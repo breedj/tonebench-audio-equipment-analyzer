@@ -6,6 +6,7 @@ import { useManual } from '../manual/useManual'
 import {
   buildCards,
   clampChannelOffset,
+  hostApiNotes,
   keyOf,
   reselectCardKey,
   savedCardNeedsAdvanced,
@@ -165,6 +166,13 @@ const hiddenCardCount = computed(() =>
       buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], false).length,
   ),
 )
+
+/**
+ * What to say about a host API that offered nothing — see <c>hostApiNotes</c>, which holds the rule
+ * and the reasoning. Rendered under the card dropdown rather than at the top of the dialog: it is
+ * about the list beside it, not about the dialog.
+ */
+const apiNotes = computed(() => hostApiNotes(inventory.value?.hostApis ?? [], cards.value.length))
 
 const selectedCard = computed(() => cards.value.find((c) => c.key === form.cardKey) ?? null)
 
@@ -521,6 +529,23 @@ function mvRms(value: number | null | undefined) {
             </button>
           </span>
         </div>
+
+        <!-- What a host API that offered nothing reported. Under the dropdown because it is about
+             that list: an empty one otherwise says only "no cards", which is the same picture
+             whether the machine has no interface, the driver declined to start, or the driver
+             started and reported no channels. See hostApiNotes for the rule and the reasoning. -->
+        <p
+          v-for="note in apiNotes"
+          :key="note.hostApi"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ note.text }}
+          <!-- Its own span, dimmed: the first sentence is what the host API reported and this is
+               what to do about it. Not a trailing mustache inside a <template>, which is how this
+               was first written — Vue condenses away the leading space of an element's children,
+               so the two sentences ran together with no gap. -->
+          <span v-if="note.hint" class="opacity-80">{{ note.hint }}</span>
+        </p>
 
         <label v-if="cardInputs.length > 1" class="sc-row">
           <span class="sc-label">Input</span>

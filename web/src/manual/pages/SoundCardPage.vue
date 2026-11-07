@@ -257,7 +257,13 @@ const { showPage } = useManual()
     <p class="manual-callout">
       <strong>ASIO4ALL is not ASIO.</strong> It is a wrapper presenting an ASIO interface over
       WDM-KS, so you get the API's shape without the vendor's clocking — the bottom lane's label on
-      the second-from-bottom lane's path. If a card offers only ASIO4ALL, treat it as WDM-KS.
+      the second-from-bottom lane's path. If a card offers only ASIO4ALL, treat it as WDM-KS. It is
+      supported, and two things about it surprise people: it appears in the
+      <strong>Sound card</strong> list under its own name, <strong>ASIO4ALL v2</strong>, and not
+      under the card's — so look for that rather than for the interface — and it reports no channels
+      at all until the card is ticked in its own control panel, which is the same thing as not being
+      there. Open that panel from any other audio application, enable the card's input and output,
+      and restart Tonebench.
     </p>
 
     <h3>Which to pick</h3>
@@ -621,11 +627,33 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>The card is not in the list at all</td>
+          <td>
+            Look under the host API rather than the name you expect: a generic driver such as
+            ASIO4ALL is listed under <em>its</em> name, and the same card appears once per host API.
+            Tick <strong>Advanced</strong> to show the host APIs normally hidden — DirectSound, MME
+            and WDM-KS — since a card reachable only through those is worth seeing even though a
+            measurement through the first two cannot be believed. If it is still missing, the dialog
+            says in amber what each host API reported, which separates “no driver answered” from “a
+            driver answered and reported no channels”.
+          </td>
+        </tr>
+        <tr>
+          <td>“ASIO listed 1 driver, and it reports no input or output channels”</td>
+          <td>
+            The driver started but could not reach the hardware, which it reports as nothing rather
+            than as a failure. Either another application is holding the card, or — with a generic
+            driver such as ASIO4ALL — nothing is enabled in the driver's own control panel. Fix it
+            there and restart the app.
+          </td>
+        </tr>
+        <tr>
           <td>No ASIO devices at all</td>
           <td>
-            The card's ASIO driver is not installed. Install the manufacturer's driver and restart
-            the app — the device list is read once at start-up, so a newly installed driver needs a
-            restart rather than the Refresh button.
+            No ASIO driver answered — which the dialog says outright when the list is empty, and
+            which also confirms the app itself does carry ASIO. Install the manufacturer's driver
+            and restart the app: the device list is read once at start-up, so a newly installed
+            driver needs a restart rather than the Refresh button.
           </td>
         </tr>
         <tr>

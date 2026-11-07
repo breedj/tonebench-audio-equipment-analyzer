@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { SoundCardOption } from '../api/client'
+import type { SoundCardHostApiOption, SoundCardOption } from '../api/client'
 import {
   buildCards,
   clampChannelOffset,
+  hostApiNotes,
   keyOf,
   reselectCardKey,
   savedCardNeedsAdvanced,
@@ -241,5 +242,101 @@ describe('clampChannelOffset', () => {
 describe('keyOf', () => {
   it('separates the same device name under two host APIs', () => {
     expect(keyOf('ASIO', 'MOTU M Series')).not.toBe(keyOf('Windows WASAPI', 'MOTU M Series'))
+  })
+})
+
+
+describe('hostApiNotes', () => {
+  function api(
+    partial: Partial<SoundCardHostApiOption> & Pick<SoundCardHostApiOption, 'name' | 'kind'>,
+  ): SoundCardHostApiOption {
+    return {
+      deviceCount: 0,
+      inputCount: 0,
+      outputCount: 0,
+      trust: 'Trusted',
+      preference: 0,
+      ...partial,
+    }
+  }
+
+  /**
+   * The report this exists for (2026-11-07): an interface "not discovered and thus I could not
+   * choose it", behind an ASIO4ALL driver. A driver that starts and reports no channels is dropped
+   * from both device lists, so the dialog showed nothing and the only three explanations needed
+   * three different answers.
+   */
+  it('names an ASIO driver that reported no channels, and says what to do', () => {
+    const notes = hostApiNotes([api({ name: 'ASIO', kind: 'Asio', deviceCount: 1 })], 0)
+
+    expect(notes).toHaveLength(1)
+    // Verbatim: the first cut of this read "and it reports any input or output channels", which is
+    // the opposite of what happened, and a toContain('channels') passed against it.
+    expect(notes[0]!.text).toBe('ASIO listed 1 driver, and it reports no input or output channels.')
+    expect(notes[0]!.hint).toContain('control panel')
+    expect(notes[0]!.hint).toContain('ASIO4ALL')
+  })
+
+  /** Always, not only on an empty list: it is genuinely wrong, rare, and fixable. */
+  it('names a channel-less driver even when other cards were found', () => {
+    const notes = hostApiNotes([api({ name: 'ASIO', kind: 'Asio', deviceCount: 1 })], 3)
+
+    expect(notes).toHaveLength(1)
+  })
+
+  /**
+   * An empty host API is the ordinary case — most benches have no ASIO interface — so a standing
+   * line about it on every QA403 bench's dialog would be noise. With an empty dropdown in front of
+   * the reader, what was tried is exactly what they want.
+   */
+  it('reports an empty host API only when no card was found at all', () => {
+    const apis = [api({ name: 'ASIO', kind: 'Asio' })]
+
+    expect(hostApiNotes(apis, 1)).toEqual([])
+    expect(hostApiNotes(apis, 0)).toHaveLength(1)
+    expect(hostApiNotes(apis, 0)[0]!.text).toContain('found no devices')
+    // The useful half: it proves ASIO is in this build, so the missing driver is not ours.
+    expect(hostApiNotes(apis, 0)[0]!.hint).toContain('does carry ASIO')
+  })
+
+  /** Nothing to say about a host API this picker would not offer anyway. */
+  it('says nothing about the host APIs the picker does not offer', () => {
+    const apis = [
+      api({ name: 'Windows DirectSound', kind: 'DirectSound', deviceCount: 4, preference: 5 }),
+      api({ name: 'MME', kind: 'Mme', preference: 6 }),
+      api({ name: 'Windows WDM-KS', kind: 'WdmKs', deviceCount: 2, preference: 3 }),
+    ]
+
+    expect(hostApiNotes(apis, 0)).toEqual([])
+  })
+
+  it('says nothing about a host API that found usable devices', () => {
+    const apis = [
+      api({ name: 'ASIO', kind: 'Asio', deviceCount: 1, inputCount: 1, outputCount: 1 }),
+      api({ name: 'Windows WASAPI', kind: 'Wasapi', deviceCount: 3, inputCount: 2, outputCount: 1, preference: 4 }),
+    ]
+
+    expect(hostApiNotes(apis, 2)).toEqual([])
+  })
+
+  /** One direction is enough to be worth offering — the measured Windows topology has nothing else. */
+  it('says nothing about a host API with inputs but no outputs', () => {
+    const apis = [api({ name: 'Windows WASAPI', kind: 'Wasapi', deviceCount: 1, inputCount: 1, preference: 4 })]
+
+    expect(hostApiNotes(apis, 1)).toEqual([])
+  })
+
+  /** Non-ASIO host APIs get the reading, not the advice: there is no driver panel to send anyone to. */
+  it('offers no hint for a host API with nothing to try', () => {
+    const notes = hostApiNotes(
+      [api({ name: 'Windows WASAPI', kind: 'Wasapi', deviceCount: 2, preference: 4 })],
+      0,
+    )
+
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text).toBe(
+      'Windows WASAPI listed 2 devices, and none of them reports any input or output channels.',
+    )
+    expect(notes[0]!.hint).toBeNull()
   })
 })

@@ -72,6 +72,50 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     public IEnumerable<SoundCardDeviceDescriptor> OutputDevices => portAudio.Devices.Where(d => d.HasOutput);
 
     /// <summary>
+    /// Every host API the native library carries, each with what it found, ordered as the picker
+    /// would offer them.
+    ///
+    /// <para><b>Including the ones that found nothing</b>, which is the whole point — see
+    /// <see cref="SoundCardHostApiOption"/>. The counts are taken over the device table rather than
+    /// from PortAudio's own per-API <c>deviceCount</c>: the two agree, and counting here is what
+    /// also yields the per-direction tallies that say whether anything under an API is usable.</para>
+    /// </summary>
+    public IReadOnlyList<SoundCardHostApiOption> HostApiOptions()
+    {
+        var options = new List<SoundCardHostApiOption>(portAudio.HostApis.Count);
+        foreach (SoundCardHostApi api in portAudio.HostApis)
+        {
+            int count = 0;
+            int inputs = 0;
+            int outputs = 0;
+            foreach (SoundCardDeviceDescriptor d in portAudio.Devices)
+            {
+                if (d.HostApiIndex != api.Index)
+                    continue;
+
+                count++;
+                if (d.HasInput)
+                    inputs++;
+                if (d.HasOutput)
+                    outputs++;
+            }
+
+            options.Add(new SoundCardHostApiOption(
+                Name: api.Name,
+                Kind: api.Kind.ToString(),
+                DeviceCount: count,
+                InputCount: inputs,
+                OutputCount: outputs,
+                Trust: Trust(api.Kind).ToString(),
+                Preference: PreferenceOf(api.Kind)));
+        }
+
+        return [.. options
+            .OrderBy(o => o.Preference)
+            .ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)];
+    }
+
+    /// <summary>
     /// Which of <see cref="CandidateRatesHz"/> this pair actually accepts, probed one at a time.
     /// </summary>
     public IReadOnlyList<double> SupportedRatesHz(

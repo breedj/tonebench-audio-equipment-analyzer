@@ -33,6 +33,42 @@ public sealed record SoundCardOption(
     /// </summary>
     bool HasControlPanel);
 
+/// <summary>
+/// One host API the native library carries, with what it found under it.
+///
+/// <para><b>Reported including the ones that found nothing</b>, which is the whole point of it. A
+/// host API with no usable devices appears in neither <see cref="SoundCardInventory.Inputs"/> nor
+/// <see cref="SoundCardInventory.Outputs"/>, so without this list "ASIO is not offered because this
+/// build has none" and "ASIO is here and no driver answered" are the same screenshot and the same
+/// log line — and only the first is ours to fix.</para>
+/// </summary>
+/// <param name="Kind">The <see cref="SoundCardHostApiKind"/> name, so the client can apply its own rules without parsing <paramref name="Name"/>.</param>
+/// <param name="DeviceCount">
+/// Every device PortAudio listed under this API, <b>including those reporting no channels at
+/// all</b>. That case is the one worth naming: an ASIO driver which starts but cannot reach its
+/// hardware — ASIO4ALL with nothing ticked in its own panel, or a card another application holds —
+/// lands here as a device with 0 in and 0 out, where a driver that is simply not installed does not
+/// appear at all. The two need different advice and looked identical until this existed.
+/// </param>
+/// <param name="InputCount">Devices with at least one input channel, i.e. those the picker can offer.</param>
+/// <param name="OutputCount">Devices with at least one output channel.</param>
+public sealed record SoundCardHostApiOption(
+    string Name,
+    string Kind,
+    int DeviceCount,
+    int InputCount,
+    int OutputCount,
+    string Trust,
+    int Preference)
+{
+    /// <summary>
+    /// The terse form the log writes, e.g. <c>ASIO 1 dev/0 in/0 out</c>. Here rather than at the
+    /// call site so one description serves the log and anything else that has to quote it, and so
+    /// it can be tested — a diagnostic nobody checks is how this gap arose in the first place.
+    /// </summary>
+    public string Describe() => $"{Name} {DeviceCount} dev/{InputCount} in/{OutputCount} out";
+}
+
 /// <summary>What the picker needs to draw itself.</summary>
 /// <param name="Available">
 /// False when the native library could not be loaded or started at all — a machine with no audio
@@ -42,6 +78,11 @@ public sealed record SoundCardOption(
 public sealed record SoundCardInventory(
     bool Available,
     string Version,
+    /// <summary>
+    /// Every host API the native library carries, those that found nothing included — see
+    /// <see cref="SoundCardHostApiOption"/> for why that is not merely informational.
+    /// </summary>
+    IReadOnlyList<SoundCardHostApiOption> HostApis,
     IReadOnlyList<SoundCardOption> Inputs,
     IReadOnlyList<SoundCardOption> Outputs,
     string? Problem = null);
@@ -86,12 +127,15 @@ public static class SoundCardCatalog
             return new SoundCardInventory(
                 Available: true,
                 Version: pa.VersionText,
+                HostApis: new SoundCardEnumerator(pa).HostApiOptions(),
                 Inputs: [.. options.Where(o => o.MaxInputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)],
                 Outputs: [.. options.Where(o => o.MaxOutputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)]);
         }
         catch (Exception ex)
         {
-            return new SoundCardInventory(false, string.Empty, [], [], ex.Message);
+            return new SoundCardInventory(
+                Available: false, Version: string.Empty,
+                HostApis: [], Inputs: [], Outputs: [], Problem: ex.Message);
         }
     }
 

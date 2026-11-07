@@ -56,6 +56,30 @@ if (-not $Version) {
 }
 Write-Host "Version $Version"
 
+# A vendored native DLL must not need the Visual C++ redistributable, and this is the check rather
+# than a note, because nothing about the failure points at it: the DLL ships *inside* the exe and is
+# self-extracted, so it is present and correct on the user's disk while Windows reports its missing
+# dependency with the same status as a missing file — which .NET surfaces as
+# "DllNotFoundException: Dll was not found." Seen in the wild 2026-11-05 on Windows 10 1903, where
+# libusb was upstream's VS2022 build (/MD, so it imports VCRUNTIME140.dll) and the QA402 could never
+# attach. tonebench.iss is PrivilegesRequired=lowest and cannot install a redistributable, and
+# INSTALL.md promises none is needed, so the dependency is the thing that has to go: portaudio.dll is
+# built with /MT (packaging/native/portaudio.md) and libusb-1.0.dll is upstream 1.0.30's MinGW64
+# build, which needs only the in-box msvcrt.dll (packaging/native/libusb.md).
+# Scanned out of the import names rather than read with dumpbin, which is not on every runner — the
+# same technique as the bundle check further down, and enough: a DLL cannot import VCRUNTIME140
+# without naming it.
+foreach ($native in @("libusb-1.0.dll", "portaudio.dll")) {
+    $nativePath = Join-Path $root "native\win-x64\$native"
+    if (-not (Test-Path $nativePath)) { throw "Vendored native library is missing: $nativePath" }
+    $nativeText = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($nativePath))
+    foreach ($forbidden in @("VCRUNTIME", "MSVCP")) {
+        if ($nativeText.Contains($forbidden)) {
+            throw "$native names $forbidden, so it needs the Visual C++ redistributable that this per-user installer cannot supply — see packaging/native/libusb.md"
+        }
+    }
+}
+
 if (-not $NoPublish) {
     if (-not $SkipFrontend) {
         Push-Location (Join-Path $root "web")

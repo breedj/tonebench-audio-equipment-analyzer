@@ -51,6 +51,14 @@
        (docs/tonebench-stack-spec.md §2.1/§9.4). Vendored at code/native/win-x64. Linux relies on
        the distro's libusb-1.0-0 package instead (packaging/linux/install.sh installs it if
        missing) — see docs/tonebench-stack-spec.md §9.4's bundle-vs-depend tradeoff.
+       The vendored Windows DLL is upstream 1.0.30's **MinGW64** build, not its VS2022 one, and that
+       is a hard requirement rather than a preference: the MS builds link the CRT dynamically (/MD),
+       so they import VCRUNTIME140.dll, which is the Visual C++ redistributable and is NOT part of
+       Windows — and this installer is PrivilegesRequired=lowest, so it cannot install one. A user
+       without it got `DllNotFoundException: Dll was not found.` out of LibUsbDotNet's
+       NativeMethods.Init for a DLL that was sitting right there, self-extracted, beside an
+       e_sqlite3.dll that had loaded 35 ms earlier. packaging/native/libusb.md has the measurements;
+       build.ps1 fails the build if a vendored DLL imports a VC++ runtime again.
        Keyed on RuntimeIdentifier so a win-x64 publish copies the DLL regardless of which OS the
        publish runs on (e.g. a CI runner) — but ALSO on the RID being empty, which is what a plain
        `dotnet build`/`dotnet run` (i.e. run.bat, every dev run) has. Testing the RID alone left the

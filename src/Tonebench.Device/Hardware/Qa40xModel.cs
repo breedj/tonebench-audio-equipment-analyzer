@@ -48,9 +48,16 @@ namespace Tonebench.Device.Hardware;
 /// status bar's pill prints.</param>
 /// <param name="Verified">
 /// Whether this model has been exercised against real hardware by this project. False for the QA402,
-/// and that is surfaced rather than buried: <c>DeviceStatusResponse.ModelUnverified</c> carries it to
-/// the status bar and <c>ConnectAsync</c> logs it at Warning. A measurement is only as trustworthy as
-/// the claim that the device was driven correctly, and for the QA402 that claim rests on documents.
+/// and <c>ConnectAsync</c> logs that at Warning — a log file sent in is the only durable record of
+/// which hardware produced a measurement, and every figure from that session inherits the caveat.
+///
+/// <para>It is deliberately <i>not</i> on the status bar any more (2026-11-08). The amber
+/// <i>Unverified model</i> badge, and the <c>ModelUnverified</c> flag that existed only to carry this
+/// one to it, are gone: the badge stood beside every reading for the length of a session and said the
+/// whole model was unconfirmed, where an owner's bench has since measured the QA402's plumbing and
+/// what is left open is narrower — A2, the calibration page's absolute scaling.
+/// <c>Qa402HardwareTests</c> records what that bench settled and what it did not, and is still what
+/// licenses setting this flag true.</para>
 /// </param>
 /// <param name="AdcChannelsSwapped">
 /// Whether the <b>ADC</b> frame puts the right channel in wire slot 0. False on the QA403, true on

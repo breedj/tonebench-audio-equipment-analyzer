@@ -10,7 +10,7 @@ namespace Tonebench.Device.Tests.Hardware;
 ///
 /// <para><b>Nothing in this file can make <see cref="Qa40xModel.Qa402"/>'s <c>Verified</c> flag
 /// true. It asserts the opposite</b> — see
-/// <see cref="TheVirtualQa402_IsStillReportedAsUnverified"/>. The measurement that could set that
+/// <see cref="TheVirtualQa402_DoesNotMakeTheModelVerified"/>. The measurement that could set that
 /// flag lives in <see cref="Qa402HardwareTests"/>, which is skipped and must stay skipped until a
 /// real QA402 is attached. An emulator confirms that this app matches <i>our model</i> of a QA402,
 /// built from the same four references the support was built from; it cannot confirm the hardware,
@@ -41,25 +41,20 @@ public class Qa402VirtualDeviceTests(ITestOutputHelper output)
 
     /// <summary>
     /// The guard that makes the <c>Verified</c> confusion structurally impossible rather than merely
-    /// discouraged: a green run of this suite <i>includes</i> "the amber Unverified badge is still
-    /// there". Setting <c>Verified = true</c> because this file passed would break this test and
+    /// discouraged: a green run of this suite <i>includes</i> "the QA402 is still not a verified
+    /// model". Setting <c>Verified = true</c> because this file passed would break this test and
     /// <see cref="Qa40xModelTests"/>'s own check at the same moment.
+    ///
+    /// <para>It needs no device of its own — it is a fact about <see cref="Qa40xModel"/>, asserted
+    /// here as well as in <see cref="Qa40xModelTests"/> so that it is part of what a green virtual
+    /// run means.</para>
     /// </summary>
     [Fact]
-    public async Task TheVirtualQa402_IsStillReportedAsUnverified()
-    {
-        var (device, _) = await VirtualQa40xBench.ConnectOrFailAsync(output, CancellationToken.None);
-        using (device)
-        {
-            Assert.True(
-                device.ModelUnverified,
-                "The QA402 must keep reporting itself unverified. An emulator cannot license that "
-                    + "flag — only Qa402HardwareTests against real hardware can.");
-            Assert.False(
-                Qa40xModel.Qa402.Verified,
-                "Qa40xModel.Qa402.Verified must stay false until a real QA402 has been measured.");
-        }
-    }
+    public void TheVirtualQa402_DoesNotMakeTheModelVerified()
+        => Assert.False(
+            Qa40xModel.Qa402.Verified,
+            "Qa40xModel.Qa402.Verified must stay false until a real QA402 has been measured. An "
+                + "emulator cannot license it — only Qa402HardwareTests against real hardware can.");
 
     /// <summary>
     /// A1 — detection. Exercises the product-id list and the probe order against a device answering

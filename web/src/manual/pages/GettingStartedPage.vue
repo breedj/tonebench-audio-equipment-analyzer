@@ -42,11 +42,13 @@ const { showPage } = useManual()
       the same registers, the same range ladders, the same calibration — and QuantAsylum's own
       software and libraries make no distinction between them either. Two differences matter here.
       The QA402 tops out at 192 kHz, so the experimental 384 kHz capture rate is not offered on one;
-      and because nobody has yet run this app against a QA402, the status bar shows an amber
-      <strong>Unverified model</strong> badge beside the pill. The measurements are very probably
-      right — treat them as unconfirmed, and please
+      and its inputs arrive in the opposite channel order, which the app knows about and corrects.
+      Far less bench time has gone into the QA402 than into the QA403: an owner has confirmed that it
+      is found and named correctly, that the generator is right and that the channels land where they
+      should, but absolute level has not yet been compared against a reference. So if you own one,
+      please
       <button type="button" class="manual-link" @click="showPage('reporting-issues')">report</button>
-      what you find, which is what will let the badge go away.
+      what you find.
     </p>
     <p>
       <strong>Simulated</strong> means there is no real hardware in the loop at all — the app was

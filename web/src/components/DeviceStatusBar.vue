@@ -616,16 +616,6 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
     >
       Simulated
     </span>
-    <!-- Said out loud for the same reason Uncalibrated is, below: the measurement may be perfectly
-         good, and nobody here has ever checked. Driven by a server flag rather than by matching the
-         product name, so which models are verified stays one fact in Qa40xModel. -->
-    <span
-      v-if="status?.connected && status.modelUnverified"
-      class="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-      :title="`Tonebench has never been run against a ${status.productName}. Its USB protocol is taken from QuantAsylum's own PyQa40x and bare-metal examples and from the ASIO40x driver, all of which treat it as identical to the QA403 — but nothing here has been verified against this model. Measurements are probably right; treat them as unconfirmed, and please report what you find.`"
-    >
-      Unverified model
-    </span>
     <!-- Which analyzer the session is talking to. Always offered, and independent of whether it is
          connected: switching to the QA40x with none attached is how you arm the Connect button. -->
     <label v-if="status" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="analyzerSwitchTitle">

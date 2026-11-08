@@ -132,9 +132,9 @@ public class Qa40xModelTests
     }
 
     /// <summary>
-    /// Only the QA403 is verified, and that flag is what puts the amber badge on the status bar and
-    /// the warning in the log. Pinned so that marking the QA402 verified is a deliberate edit made
-    /// when somebody has actually run one.
+    /// Only the QA403 is verified, and that flag is what puts the warning in the log at connect —
+    /// nothing on screen any more. Pinned so that marking the QA402 verified is a deliberate edit
+    /// made when somebody has actually run one.
     /// </summary>
     [Fact]
     public void OnlyTheQa403_IsMarkedVerified()

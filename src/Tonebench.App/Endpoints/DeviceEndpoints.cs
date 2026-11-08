@@ -397,17 +397,6 @@ public sealed record DeviceStatusResponse(
     /// </summary>
     DeviceTelemetryResponse? Telemetry = null,
     /// <summary>
-    /// True when the connected analyzer is a model this app has never been run against — today only
-    /// the QA402, whose protocol is taken from four reference trees that all treat it as identical to
-    /// the QA403's but which nobody here has attached. The status bar shows an amber badge.
-    ///
-    /// <para>A bool rather than a <see cref="ProductName"/> string match on the client, so that
-    /// "which models are verified" stays one fact in one place
-    /// (<c>Qa40xModel</c>) instead of a literal duplicated across the wire. See
-    /// <see cref="Tonebench.Device.IAnalyzerDevice.ModelUnverified"/>.</para>
-    /// </summary>
-    bool ModelUnverified = false,
-    /// <summary>
     /// The chosen input, or null when the analyzer is not the sound card — the same null convention
     /// as the <c>Simulated*</c> fields, so the status bar gates its sound-card controls on this
     /// rather than on a device-kind string comparison.

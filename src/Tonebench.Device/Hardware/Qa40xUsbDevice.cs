@@ -241,9 +241,6 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     /// <inheritdoc/>
     public DeviceTelemetry? Telemetry => _telemetry;
 
-    /// <inheritdoc/>
-    public bool ModelUnverified => _model is { Verified: false };
-
     /// <summary>
     /// Whether <see cref="StreamAsync"/> is allowed to step the input range on its own (clip /
     /// under-range detection via <see cref="Qa40xAutoRanger"/>). Not part of <see cref="IAnalyzerDevice"/>

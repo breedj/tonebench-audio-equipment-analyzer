@@ -57,8 +57,8 @@ namespace Tonebench.Device.Tests.Hardware;
 /// same mechanics against <c>virtual-qa40x-rs</c> attached over USB/IP, sharing this class's capture
 /// loops through <see cref="Qa40xLoopbackMeasurement"/>. That is worth having — it is the only
 /// coverage the QA402 product id, and the whole of <c>Qa40xTransport</c>, get without hardware — but
-/// it is not this, and it says so itself: a green virtual run <i>includes</i> an assertion that the
-/// amber Unverified badge is still there. Only this class can close the distinction above, because
+/// it is not this, and it says so itself: a green virtual run <i>includes</i> an assertion that this
+/// model is still not marked verified. Only this class can close the distinction above, because
 /// the calibration page is the part an emulator built from the same references cannot independently
 /// confirm.</para>
 /// </summary>
@@ -91,10 +91,6 @@ public class Qa402HardwareTests(ITestOutputHelper output)
         Assert.False(info.IsSimulated);
         Assert.Equal("QA402", info.ProductName);
         Assert.False(string.IsNullOrWhiteSpace(info.SerialNumber));
-
-        // The badge and the log warning both ride on this, so it is part of the acceptance criterion
-        // rather than an implementation detail: it must read true until this class has been run.
-        Assert.True(device.ModelUnverified);
 
         output.WriteLine($"QA402 serial {info.SerialNumber}, firmware {info.FirmwareVersion}");
     }

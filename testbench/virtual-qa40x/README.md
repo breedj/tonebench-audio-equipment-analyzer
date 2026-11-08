@@ -14,9 +14,8 @@ found it through `reference/qa40x-rs-main/.../README.md`, which links it.
 > the same four references the support was built from. The calibration-page equivalence rests on one
 > third-party sentence (`ASIO40x/calibration.h:13`) plus a forum reply, and the emulator's embedded
 > page was read from the author's own unit. **A green run here must never set
-> `Qa40xModel.Qa402.Verified`** or remove the amber *Unverified model* badge — only
-> `Qa402HardwareTests` against real silicon can do that, and `Qa402VirtualDeviceTests` asserts the
-> badge is still present precisely so this stays true.
+> `Qa40xModel.Qa402.Verified`** — only `Qa402HardwareTests` against real silicon can do that, and
+> `Qa402VirtualDeviceTests` asserts that the flag is still false precisely so this stays true.
 
 ## Why it is a QA402 and not a QA403
 

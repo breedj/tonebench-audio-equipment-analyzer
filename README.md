@@ -163,6 +163,10 @@ only; nothing has been tried on an Intel Mac. Nobody on the project owns a Mac, 
 as a test rather than as a supported install, and please send the log if something is wrong (Help
 has a *Report an issue* button that collects it for you).
 
+If you are the one doing that first run, **[`MACOS-TESTING.md`](MACOS-TESTING.md)** is written for
+you: the same setup as an ordered test, with what a pass looks like at each stage, the three traps
+that waste an afternoon, and what to send back.
+
 ```bash
 brew install libusb portaudio
 # .NET 10 SDK (arm64 build, not the x64 one under Rosetta): https://dotnet.microsoft.com/download

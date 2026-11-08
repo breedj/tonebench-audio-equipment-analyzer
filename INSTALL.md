@@ -179,6 +179,29 @@ simulator). You can move the folder anywhere; the program never writes into it.
 
 ---
 
+## macOS
+
+**There is no macOS download, and this page cannot help you install one.** macOS runs from source
+only: there is no `.dmg`, no `.app` bundle and no installer, so the four downloads above are Windows
+and Linux only. Saying so plainly rather than leaving the platform unmentioned, because the absence
+is a decision and not an oversight.
+
+What there is: Apple Silicon Macs can build and run the app from a git checkout, following
+[Installing on macOS in README.md](README.md#installing-on-macos) — `brew install libusb portaudio`,
+the .NET 10 SDK, then `./run.sh`. It is **unverified**: nobody on the project owns a Mac, so a first
+run is a test. Three things that page covers and that are easy to be caught by:
+
+- The QA403 needs **no driver and no permissions step** — there is no macOS equivalent of the Linux
+  udev rule, and none is needed.
+- A **sound card** is read through Core Audio, which resamples rather than retuning the card, so set
+  the interface's rate in *Audio MIDI Setup* to the rate you are measuring.
+- The first capture asks for **microphone permission** and a denial is silent — Core Audio then
+  returns digital silence rather than an error, which reads as a dead input.
+
+The QA451 programmable load is not supported on macOS.
+
+---
+
 ## Upgrading from QA403 Audio Analyzer
 
 The app was called *QA403 Audio Analyzer* up to and including version 0.2.0. Three things are worth
@@ -206,11 +229,11 @@ it; use *Save As* if you would rather have the new extension.
 
 ## Where your data is
 
-| | Windows | Linux |
-|---|---|---|
-| Your projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Tonebench Projects` |
-| Settings and calibrations | `%LOCALAPPDATA%\Tonebench\tonebench-config.db` | `~/.local/share/Tonebench/tonebench-config.db` |
-| Logs (last 14 days) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` |
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Your projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Documents/Tonebench Projects` | `~/Documents/Tonebench Projects` |
+| Settings and calibrations | `%LOCALAPPDATA%\Tonebench\tonebench-config.db` | `~/.local/share/Tonebench/tonebench-config.db` | `~/Library/Application Support/Tonebench/tonebench-config.db` |
+| Logs (last 14 days) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` | `~/Library/Application Support/Tonebench/logs` |
 
 Projects can be saved anywhere you like from the *Project* menu; the folder above is only the
 default. Settings include the impedance-fixture and loopback calibrations, which describe *your*

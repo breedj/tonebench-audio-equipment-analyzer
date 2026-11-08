@@ -44,6 +44,12 @@ dotnet run --project src/Tonebench.App -- --simulate
 `--no-browser` skips the automatic browser launch. `--project <path>` opens that project file at
 startup, ahead of the "Show welcome page on startup" preference.
 
+For day-to-day use prefer the launch scripts — `run.bat` / `run-simulator.bat` on Windows, `run.sh` /
+`run-simulator.sh` on macOS and Linux. They build the frontend and then start the **built binary
+directly** rather than through `dotnet run`, which matters: `dotnet run` is a parent process that
+holds the app and is killed first when the console window closes, so the USB teardown and the SQLite
+checkpoint never run. That damaged a project database twice before the scripts existed.
+
 ## Projects
 
 A project is one SQLite file with the `.tbench` extension, created and opened from the Project menu
@@ -150,14 +156,68 @@ sudo apt-get install -y libusb-1.0-0 libfontconfig1   # or your distribution's e
 
 Without this, the app will fail to open the device with a permissions error. Then run `./Tonebench.App`.
 
+## Installing on macOS
+
+**There is no macOS download — macOS runs from source only, and it is unverified.** Apple Silicon
+only; nothing has been tried on an Intel Mac. Nobody on the project owns a Mac, so treat a first run
+as a test rather than as a supported install, and please send the log if something is wrong (Help
+has a *Report an issue* button that collects it for you).
+
+```bash
+brew install libusb portaudio
+# .NET 10 SDK (arm64 build, not the x64 one under Rosetta): https://dotnet.microsoft.com/download
+# Node 22 or later
+cd code
+./run.sh                 # or ./run-simulator.sh, which needs no hardware
+```
+
+**No driver and no permissions step are needed for the QA403.** It presents a vendor-specific bulk
+USB interface that no macOS system driver claims, so libusb can open it directly — there is no udev
+equivalent to install, no group to join, no kernel extension and no entitlement. If you were looking
+for the macOS counterpart of `99-qa403.rules`, there isn't one and that is correct.
+
+`run.sh` points the dynamic loader at Homebrew's library directory for you. If you launch the app
+some other way — `dotnet run`, `dotnet test`, or the built binary by hand — libusb will not be found,
+because Homebrew on Apple Silicon installs into `/opt/homebrew/lib` and that is not on the loader's
+default search path. Add this to your shell profile:
+
+```bash
+export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_FALLBACK_LIBRARY_PATH"
+```
+
+Two macOS-specific things to know before you trust a measurement:
+
+- **A sound card is read through Core Audio, which resamples rather than retuning the card.** Set
+  the interface to the sample rate you are measuring in *Audio MIDI Setup* first; otherwise
+  PortAudio converts and the numbers are the converter's. The Sound card dialog says so too. The
+  QA403 itself is unaffected — it is a USB device, not an audio device.
+- **The first capture asks for microphone permission, and a denial is silent.** Because the app runs
+  as a plain binary rather than an `.app` bundle, macOS attributes the request to the terminal that
+  launched it. If you deny it — or denied it for that terminal some time ago — Core Audio hands the
+  app **digital silence instead of an error**, which looks like a dead input or an impossibly good
+  noise floor. Enable your terminal under System Settings ▸ Privacy & Security ▸ Microphone, or run
+  `tccutil reset Microphone` and relaunch to be asked again.
+
+The QA451 programmable load is **not supported on macOS**: its transport is written for Windows'
+`hid.dll` and Linux's `hidraw`, and macOS would need a third one over IOKit.
+
 ## Where your data lives
 
-| | Windows | Linux |
-|---|---|---|
-| Projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Tonebench Projects` |
-| Configuration (`tonebench-config.db`) | `%LOCALAPPDATA%\Tonebench` | `~/.local/share/Tonebench` |
-| Logs (`tonebench-<date>.log`, 14 days kept) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` |
-| Diagnostic captures | `%LOCALAPPDATA%\Tonebench\diagnostics` | `~/.local/share/Tonebench/diagnostics` |
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Projects (`.tbench` files) | `Documents\Tonebench Projects` | `~/Documents/Tonebench Projects` | `~/Documents/Tonebench Projects` |
+| Configuration (`tonebench-config.db`) | `%LOCALAPPDATA%\Tonebench` | `~/.local/share/Tonebench` | `~/Library/Application Support/Tonebench` |
+| Logs (`tonebench-<date>.log`, 14 days kept) | `%LOCALAPPDATA%\Tonebench\logs` | `~/.local/share/Tonebench/logs` | `~/Library/Application Support/Tonebench/logs` |
+| Diagnostic captures | `%LOCALAPPDATA%\Tonebench\diagnostics` | `~/.local/share/Tonebench/diagnostics` | `~/Library/Application Support/Tonebench/diagnostics` |
+
+The projects folder follows the OS's own Documents folder, so on Linux it honours
+`$XDG_DOCUMENTS_DIR` where that is set. (It was documented as `~/Tonebench Projects` until
+2026-11-08; that had been wrong since the move to .NET 8, which changed where .NET reports the
+Documents folder on both Linux and macOS.)
+
+On macOS, if you have iCloud's *Desktop & Documents Folders* syncing switched on, keep projects
+somewhere else — the Project menu will save anywhere. A `.tbench` file is a SQLite database, and a
+folder that evicts files to iCloud placeholders is not a safe place for one.
 
 Nothing is ever written next to the executable, which is what makes an upgrade a plain file
 replacement and an uninstall safe. The startup console prints these paths. (The single-file

@@ -29,12 +29,16 @@ public class RecentProjectsTests
         Assert.Equal("/p2", list[^1].Path);
     }
 
-    /// <summary>Paths compare the way the host's file system does: one file, one entry, on Windows in any case.</summary>
+    /// <summary>
+    /// Paths compare the way the host's file system does: one file, one entry, in any case on
+    /// Windows and macOS, where the default volume folds case. Linux is the one platform that
+    /// compares exactly, so it is the one that sees two files here.
+    /// </summary>
     [Fact]
     public void Touch_DedupesByPath_WithTheHostsCaseRule()
     {
         var list = RecentProjects.Touch([Entry("/Bench/amp.tbench")], Entry("/bench/AMP.tbench"));
-        Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, list.Count);
+        Assert.Equal(OperatingSystem.IsLinux() ? 2 : 1, list.Count);
     }
 
     [Fact]

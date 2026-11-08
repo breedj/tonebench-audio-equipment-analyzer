@@ -200,7 +200,8 @@ const { showPage } = useManual()
     <p>
       The last tab of the Configuration dialog, and what to reach for when something looks wrong.
       All three write into folders under the app's own data directory
-      (<code>%LOCALAPPDATA%\Tonebench</code> on Windows, <code>~/.local/share/Tonebench</code> on Linux),
+      (<code>%LOCALAPPDATA%\Tonebench</code> on Windows, <code>~/.local/share/Tonebench</code> on Linux,
+      <code>~/Library/Application Support/Tonebench</code> on macOS),
       and each has a button that opens its folder in the file manager — so "send me the files"
       needs no path typed.
     </p>
@@ -503,7 +504,7 @@ const { showPage } = useManual()
             stays until the file is repaired (for a project, until it is closed). Close it, keep a copy
             of the file before anything else, then rebuild it: every readable row can be copied into a
             fresh database, and only the damaged rows are lost. The configuration database is
-            <code>tonebench-config.db</code> under <code>%LOCALAPPDATA%\Tonebench</code>.
+            <code>tonebench-config.db</code> in the app's data folder (see above).
           </td>
         </tr>
         <tr>

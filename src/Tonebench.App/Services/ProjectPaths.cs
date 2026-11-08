@@ -24,14 +24,23 @@ public static class ProjectPaths
     public static readonly string[] OpenableExtensions = [Extension, LegacyExtension];
 
     /// <summary>
-    /// Where new projects go unless the user says otherwise: <c>Documents\Tonebench Projects</c>. On
-    /// Linux .NET maps <c>MyDocuments</c> to <c>$HOME</c>, so it is <c>~/Tonebench Projects</c> there —
-    /// visible user data either way, rather than something under an application-data folder that
-    /// nobody browses or backs up. Never created here; the session creates it when the first file
-    /// is written into it. <c>MyDocuments</c> can come back <b>empty</b> — on Linux it is derived from
-    /// <c>$HOME</c>, and a service account or a CI runner may have none — which would make this a
-    /// relative path that the file browser cannot walk up from; the fallbacks are the user profile,
-    /// then the current directory, so it is always absolute.
+    /// Where new projects go unless the user says otherwise: <c>Documents\Tonebench Projects</c> —
+    /// visible user data, rather than something under an application-data folder that nobody
+    /// browses or backs up. Never created here; the session creates it when the first file is
+    /// written into it. <c>MyDocuments</c> can come back <b>empty</b> — it is derived from
+    /// <c>$HOME</c> on Unix, and a service account or a CI runner may have none — which would make
+    /// this a relative path that the file browser cannot walk up from; the fallbacks are the user
+    /// profile, then the current directory, so it is always absolute.
+    ///
+    /// <para><b>On Unix this is <c>~/Documents/Tonebench Projects</c>, not <c>~/Tonebench
+    /// Projects</c>.</b> This comment claimed the latter until 2026-11-08 and had been wrong since
+    /// the project moved to .NET 8: that release changed <c>MyDocuments</c> on Linux from
+    /// <c>$HOME</c> to <c>$XDG_DOCUMENTS_DIR</c> (or <c>$HOME/Documents</c>), and on macOS from
+    /// <c>$HOME</c> to <c>NSDocumentDirectory</c>. Found while porting to macOS, where the same
+    /// change is what makes the folder idiomatic for free — so the rule is one line of behaviour on
+    /// all three platforms, and no branch belongs here. Note <c>LocalApplicationData</c> did
+    /// <i>not</i> move on Linux, so <c>TonebenchAppData</c>'s <c>~/.local/share</c> is still right
+    /// and the two must not be "corrected" together.</para>
     /// </summary>
     public static string DefaultFolder { get; } = Path.Combine(DocumentsFolder(), "Tonebench Projects");
 

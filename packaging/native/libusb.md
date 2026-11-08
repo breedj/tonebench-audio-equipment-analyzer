@@ -133,3 +133,28 @@ DLL.
   single-file exe really absorbed the DLL (a `--simulate` smoke test never loads libusb, so a
   publish that lost it would otherwise pass).
 - `packaging/udev/99-qa403.rules` — the Linux counterpart, one rule per `Qa40xModel.All` entry.
+
+## macOS
+
+Nothing is vendored, as on Linux: `brew install libusb` and depend on it. Two things make it
+different from the Linux case, and both are why `run.sh` exists.
+
+**The file name is already handled, and not by us.** LibUsbDotNet 3.0.224 registers its *own*
+`DllImportResolver` and its candidate list covers all three platforms — `libusb-1.0.dll`,
+`libusb-1.0.so.0`, `libusb-1.0.0.dylib`. (That is also the answer to a question this file never
+addressed: the `.deb` depends on `libusb-1.0-0`, which ships only the versioned `.so.0`, and the
+runtime's own probing for a bare `libusb-1.0` would never find it. Their resolver is what does.)
+So there is nothing to add on our side, and nothing we *could* add — `SetDllImportResolver` allows
+one resolver per assembly and that slot is theirs. Contrast PortAudio, whose resolver is ours
+because the `DllImport` is ours.
+
+**What is not handled is where the loader looks.** Homebrew on Apple Silicon installs into
+`/opt/homebrew/lib`, and dyld's default search path is `/usr/local/lib` and `/usr/lib` — so a
+resolver that asks for a leaf name finds nothing on exactly the machine this is written for. Hence
+`run.sh` exporting `DYLD_FALLBACK_LIBRARY_PATH`, and the README telling anyone who launches the app
+another way (`dotnet run`, `dotnet test`, the binary by hand) to put it in their shell profile.
+A future `.app` bundle should carry the dylib in `Contents/Frameworks` instead: the hardened runtime
+a notarized bundle needs strips every `DYLD_*` variable.
+
+**No udev counterpart, and none needed.** The QA403's interface is vendor-specific and no macOS
+system driver claims it, so libusb opens it with no kext, dext or entitlement.

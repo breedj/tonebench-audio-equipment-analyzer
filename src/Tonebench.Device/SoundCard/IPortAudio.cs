@@ -2,9 +2,10 @@
 
 /// <summary>
 /// One of PortAudio's host APIs — ASIO, WASAPI, WDM-KS, DirectSound, MME on Windows; ALSA, JACK,
-/// PulseAudio on Linux. Which of them exist is a property of the native library, not of this
-/// codebase: the list comes from <c>Pa_GetHostApiCount</c> at run time, so an ASIO-enabled rebuild
-/// of the DLL makes ASIO appear here with no code change (see <c>packaging/native/portaudio.md</c>).
+/// PulseAudio on Linux; Core Audio on macOS. Which of them exist is a property of the native
+/// library, not of this codebase: the list comes from <c>Pa_GetHostApiCount</c> at run time, so an
+/// ASIO-enabled rebuild of the DLL makes ASIO appear here with no code change (see
+/// <c>packaging/native/portaudio.md</c>).
 /// </summary>
 public sealed record SoundCardHostApi(int Index, string Name, SoundCardHostApiKind Kind);
 
@@ -16,7 +17,7 @@ public enum SoundCardHostApiKind
 {
     Other = 0,
 
-    /// <summary>The only one that presents a card as a single full-duplex device, and the only one with sample-accurate channel selectors.</summary>
+    /// <summary>The only one <i>on Windows</i> that presents a card as a single full-duplex device (see <see cref="CoreAudio"/> for the macOS counterpart), and the only one anywhere with sample-accurate channel selectors.</summary>
     Asio,
 
     /// <summary>Usable only in exclusive mode — shared mode is locked to the Windows mixer's rate and resamples silently.</summary>
@@ -36,6 +37,20 @@ public enum SoundCardHostApiKind
 
     /// <summary>Linux.</summary>
     Jack,
+
+    /// <summary>
+    /// macOS, and the only host API there. Like <see cref="Asio"/> it presents a card <i>once</i>,
+    /// full-duplex, rather than one endpoint per direction — so the pairing logic in
+    /// <c>SoundCardEnumerator</c> takes the ASIO shape here.
+    ///
+    /// <para>Unlike ASIO it is <b>not</b> trusted: PortAudio's macOS backend resamples by default.
+    /// <c>SoundCardEnumerator.Trust</c> carries the measurement and the way out of it. It still has
+    /// to be <i>named</i> rather than left as <see cref="Other"/>, for two reasons that have
+    /// nothing to do with trust — <c>PreferenceOf</c> would rank it last in a picker it is the only
+    /// entry in, and the client's own <c>DEFAULT_HOST_API_KINDS</c> filter is a list of kinds, so
+    /// an unnamed one is a dropdown with nothing in it.</para>
+    /// </summary>
+    CoreAudio,
 }
 
 /// <summary>One device as PortAudio reports it. Note a Windows device is usually one direction only — see <see cref="SoundCardEnumerator"/>.</summary>

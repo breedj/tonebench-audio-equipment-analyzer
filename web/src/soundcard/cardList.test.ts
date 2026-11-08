@@ -25,7 +25,9 @@ function option(partial: Partial<SoundCardOption> & Pick<SoundCardOption, 'hostA
 
   const preference =
     partial.preference ??
-    ({ Asio: 0, Jack: 1, Alsa: 2, WdmKs: 3, Wasapi: 4, DirectSound: 5, Mme: 6 }[kind] ?? 7)
+    ({ Asio: 0, CoreAudio: 0, Jack: 1, Alsa: 2, WdmKs: 3, Wasapi: 4, DirectSound: 5, Mme: 6 }[
+      kind
+    ] ?? 7)
 
   return {
     interfaceName: partial.name,

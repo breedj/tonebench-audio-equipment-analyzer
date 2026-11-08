@@ -136,14 +136,33 @@ internal sealed class Qa40xTransport : IDisposable
             device.SetConfiguration(1);
             device.ClaimInterface(0);
         }
+        // There is a third reason, and until 2026-11-08 it wore the first one's message: the handle
+        // is free and nothing is streaming, but this process is not *allowed* to open the device.
+        // LIBUSB_ERROR_ACCESS is its own code, so it need not be guessed at — and "another process
+        // still holds it" sends the reader hunting for a zombie that is not there. The commonest
+        // cause by far is a Linux bench with no udev rule installed (or a user not in plugdev),
+        // which is the one setup step the .deb cannot perform for you; on Windows it is a device
+        // with no WinUSB/libusbK driver bound. The platform's own fix is named because the three
+        // are different, and the message is the only thing a remote tester has to go on.
         catch (Exception ex)
         {
             try { device.Dispose(); } catch { /* best-effort */ }
 
+            string cause = ex is UsbException { ErrorCode: Error.Access }
+                ? "This process is not allowed to open it. "
+                    + (OperatingSystem.IsLinux()
+                        ? "On Linux that is the udev rule: install packaging/udev/99-qa403.rules into "
+                            + "/etc/udev/rules.d, reload with `udevadm control --reload-rules && udevadm trigger`, "
+                            + "and make sure your user is in the plugdev group (a group change needs a new login)."
+                        : OperatingSystem.IsMacOS()
+                            ? "On macOS a vendor-specific interface normally needs no driver or entitlement, so this "
+                                + "is unexpected — something else may have claimed the device."
+                            : "On Windows that usually means no WinUSB or libusbK driver is bound to it.")
+                : "Another process still holds it — check for a leftover Tonebench.App process and end it. ";
+
             throw new Qa40xDeviceBusyException(
-                $"Found a {model.ProductName} but could not open and claim interface 0. Another process still holds it — "
-                    + "check for a leftover Tonebench.App process and end it. "
-                    + $"Underlying error: {ex.Message}",
+                $"Found a {model.ProductName} but could not open and claim interface 0. {cause}"
+                    + $" Underlying error: {ex.Message}",
                 ex);
         }
 

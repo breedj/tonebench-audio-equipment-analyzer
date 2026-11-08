@@ -16,9 +16,10 @@ internal static class PortAudioInterop
 {
     /// <summary>
     /// The name the imports below use. It is resolved by <see cref="Resolve"/> rather than being a
-    /// real file name, because the two platforms spell it differently: a vendored
+    /// real file name, because the three platforms spell it differently: a vendored
     /// <c>portaudio.dll</c> beside the exe on Windows, the distro's <c>libportaudio.so.2</c> on
-    /// Linux (see <c>packaging/native/portaudio.md</c>).
+    /// Linux (see <c>packaging/native/portaudio.md</c>), and Homebrew's
+    /// <c>libportaudio.2.dylib</c> on macOS.
     /// </summary>
     private const string Library = "portaudio";
 
@@ -43,9 +44,25 @@ internal static class PortAudioInterop
         // The Linux package is libportaudio2, which installs libportaudio.so.2; the unversioned
         // .so is in the -dev package and is not something a user of the .deb will have. Try the
         // versioned name first and fall back, rather than depending on a development package.
+        //
+        // macOS needs the absolute paths as well as the leaf names, and that is the whole reason
+        // this branch is three entries rather than two. dyld's default search covers
+        // /usr/local/lib and /usr/lib; Homebrew on Apple Silicon installs into /opt/homebrew/lib,
+        // which is on neither -- so a leaf name alone finds nothing on exactly the machine this
+        // was written for. The leaf names come first so a copy beside the binary (what an .app
+        // bundle would do) or a DYLD_*_LIBRARY_PATH the user has set still wins, and because on an
+        // Intel Mac Homebrew's own prefix *is* /usr/local. MacPorts is the third prefix.
         foreach (string candidate in OperatingSystem.IsWindows()
             ? ["portaudio.dll"]
-            : (string[])["libportaudio.so.2", "libportaudio.so"])
+            : OperatingSystem.IsMacOS()
+                ? (string[])
+                [
+                    "libportaudio.2.dylib",
+                    "libportaudio.dylib",
+                    "/opt/homebrew/lib/libportaudio.2.dylib",
+                    "/opt/local/lib/libportaudio.2.dylib",
+                ]
+                : (string[])["libportaudio.so.2", "libportaudio.so"])
         {
             if (NativeLibrary.TryLoad(candidate, assembly, path, out IntPtr handle))
                 return handle;

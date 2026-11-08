@@ -22,10 +22,12 @@ namespace Tonebench.Device.SoundCard;
 /// analogue of the QA403's dedicated pump thread, and it keeps the rule that nothing but transfer
 /// management happens between one transfer and the next.</para>
 ///
-/// <para>On Linux the apartment request is skipped — <see cref="Thread.SetApartmentState"/> throws
-/// there, and ALSA and JACK have no equivalent requirement — but the work still runs on this one
-/// dedicated thread, because PortAudio's own documentation is clear that a stream belongs to the
-/// thread that opened it.</para>
+/// <para>Off Windows the apartment request is skipped — <see cref="Thread.SetApartmentState"/>
+/// throws there, and ALSA, JACK and Core Audio have no equivalent requirement — but the work still
+/// runs on this one dedicated thread, because PortAudio's own documentation is clear that a stream
+/// belongs to the thread that opened it. Note the thread's <see cref="ThreadPriority.AboveNormal"/>
+/// is a no-op on Unix without privileges, so the measured anti-underrun benefit it was raised for
+/// is a Windows figure and does not carry over.</para>
 /// </summary>
 internal sealed class StaDispatcher : IDisposable
 {

@@ -48,10 +48,11 @@ export interface HostApiNote {
  *   tried is exactly what the reader wants.</li>
  * </ul>
  *
- * <p>Scoped to {@link DEFAULT_HOST_API_KINDS} — the APIs whose <c>Trust</c> this app accepts. An
+ * <p>Scoped to {@link DEFAULT_HOST_API_KINDS} — the APIs the picker offers without Advanced. An
  * empty DirectSound says nothing worth a line, in Advanced mode as much as out of it, since those
  * host APIs are hidden because their measurements cannot be believed rather than because they are
- * redundant.</p>
+ * redundant. (That list is <i>mostly</i> the ones whose <c>Trust</c> this app accepts; CoreAudio is
+ * in it for a different reason, which {@link DEFAULT_HOST_API_KINDS} gives.)</p>
  */
 export function hostApiNotes(
   hostApis: readonly SoundCardHostApiOption[],
@@ -97,8 +98,19 @@ export function hostApiNotes(
   return notes
 }
 
-/** The host API kinds the picker offers by default — see {@link buildCards}. */
-export const DEFAULT_HOST_API_KINDS = ['Asio', 'Wasapi', 'Alsa', 'Jack'] as const
+/**
+ * The host API kinds the picker offers by default — see {@link buildCards}.
+ *
+ * <p>Four of the five are here because their <c>Trust</c> is one this app accepts.
+ * <b>CoreAudio is the exception and it is not optional:</b> its trust is <c>Resamples</c> (PortAudio's
+ * macOS backend converts rather than retuning the device — see <c>SoundCardEnumerator.Trust</c>),
+ * but it is the <i>only</i> host API that exists on macOS, so leaving it out does not hide a
+ * doubtful choice the way hiding DirectSound does — it empties the dropdown on the whole platform
+ * while the backend has found the card and every log line reads healthy. The honest answer is to
+ * offer it and let the dialog's own warning say what to do about the rate, which is what
+ * <c>trustWarning</c> does.</p>
+ */
+export const DEFAULT_HOST_API_KINDS = ['Asio', 'Wasapi', 'Alsa', 'Jack', 'CoreAudio'] as const
 
 /** One entry of the Sound card dropdown. */
 export interface SoundCard {

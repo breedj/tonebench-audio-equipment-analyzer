@@ -136,3 +136,25 @@ regardless of apartment.
   it is missing — the `--simulate` smoke test never loads it, so nothing else would catch it.
 - `packaging/windows/tonebench.iss` needs **no** entry: a native `.dll` ends up inside the exe.
 - `packaging/linux/deb/control` and `packaging/linux/install.sh` name `libportaudio2` instead.
+
+## macOS
+
+Not vendored — `brew install portaudio`, as on Linux. The resolver in `PortAudioInterop` carries
+the macOS names, and unlike the Linux arm it also carries **absolute** paths
+(`/opt/homebrew/lib/libportaudio.2.dylib`, `/opt/local/lib/...`). That is not belt-and-braces:
+Homebrew on Apple Silicon installs into `/opt/homebrew/lib`, which is on neither of dyld's default
+search paths (`/usr/local/lib`, `/usr/lib`), so the leaf name alone cannot find a `brew install`.
+The leaf names are tried first all the same, so a copy beside the binary or a `DYLD_*` override
+still wins. Note the soname convention is the reverse of Linux's: the version goes *before* the
+extension — `libportaudio.2.dylib`, never `libportaudio.dylib.2`.
+
+**There is no ASIO, so no patch and no SDK.** Core Audio is the only host API, which makes the
+local `apply-asio-guard.py` and the whole ASIO build recipe above irrelevant here; it also means
+`PaAsio_ShowControlPanel` is not an exported symbol, which is why `PortAudioNative.ShowControlPanel`
+catches `EntryPointNotFoundException` as well as the two `PaError` codes.
+
+**Core Audio resamples by default**, which is a correctness matter rather than a packaging one:
+PortAudio's backend defaults to `paMacCorePlayNice` (0x00) — "do as much sample rate conversion as
+possible and as little mucking with the device as possible" — so `SoundCardEnumerator.Trust` reports
+Core Audio as `Resamples`, and that method's remarks hold the `paMacCoreStreamInfo` work that would
+earn it a better answer.

@@ -2,8 +2,20 @@ namespace Tonebench.Data;
 
 /// <summary>
 /// The one place that names the per-user data folder: <c>%LOCALAPPDATA%\Tonebench</c> on Windows,
-/// <c>~/.local/share/Tonebench</c> on Linux. Everything the app writes for itself — the configuration
+/// <c>~/.local/share/Tonebench</c> on Linux, <c>~/Library/Application Support/Tonebench</c> on macOS.
+/// Everything the app writes for itself — the configuration
 /// database, the logs, the diagnostic captures — lives here and <b>never next to the binary</b>.
+///
+/// <para><b>All three come from one unbranched call</b> to
+/// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/>, and that is worth stating
+/// because the macOS answer looks like something somebody forgot. .NET 8 changed
+/// <see cref="Environment.SpecialFolder.LocalApplicationData"/> on macOS from <c>$HOME/.local/share</c>
+/// to <c>NSApplicationSupportDirectory</c>, i.e. to the Apple convention, so this type gets the
+/// idiomatic folder on every platform without knowing which one it is on. <b>Do not add a branch</b>
+/// to "fix" macOS into <c>~/.local/share</c> to match Linux: that would move an existing bench's
+/// configuration database — its loopback and impedance-fixture calibrations, which cannot be
+/// recreated — out from under it, and <see cref="MigrateLegacyConfigDatabase"/> only knows about
+/// the QA403-era rename.</para>
 ///
 /// <para>Beside the exe was fine while the app was only ever run from its build output. An installed
 /// binary is different: the Windows installer owns its folder and the .deb puts the executable under

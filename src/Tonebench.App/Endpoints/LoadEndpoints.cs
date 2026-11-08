@@ -46,6 +46,12 @@ public static class LoadEndpoints
         // The retry behind the Connect button, and what a bench uses after replugging a load that
         // had latched an over-current fault. A failure is a 503 with the device's own message
         // rather than a 500: nothing is wrong with the request.
+        //
+        // PlatformNotSupportedException is in the filter for macOS, where HidTransport.Create
+        // refuses outright: the throw happens inside ConnectAsync (the constructor only captures
+        // the factory in a Func), so without it this answered 500 with a stack trace for a gap the
+        // app knows about and has a sentence for. LoadSessionService has already put that sentence
+        // on _error, so the status this returns carries it.
         group.MapPost("/connect", async (LoadSessionService load, CancellationToken ct) =>
         {
             try
@@ -53,7 +59,8 @@ public static class LoadEndpoints
                 await load.ConnectAsync(ct);
                 return Results.Ok(await load.GetStatusAsync(ct));
             }
-            catch (Exception ex) when (ex is Qa451DeviceNotFoundException or Qa451DeviceLostException)
+            catch (Exception ex) when (ex is Qa451DeviceNotFoundException or Qa451DeviceLostException
+                or PlatformNotSupportedException)
             {
                 return Results.Json(await load.GetStatusAsync(ct), statusCode: StatusCodes.Status503ServiceUnavailable);
             }

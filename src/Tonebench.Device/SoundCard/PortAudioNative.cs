@@ -119,7 +119,25 @@ internal sealed class PortAudioNative : IPortAudio
         return _dispatcher.Invoke(() =>
         {
             IntPtr owner = OperatingSystem.IsWindows() ? PortAudioInterop.GetDesktopWindow() : IntPtr.Zero;
-            int error = PortAudioInterop.PaAsio_ShowControlPanel(deviceIndex, owner);
+
+            int error;
+            try
+            {
+                error = PortAudioInterop.PaAsio_ShowControlPanel(deviceIndex, owner);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // A PortAudio built without ASIO does not export this symbol at all, so the
+                // P/Invoke fails before any PaError can come back — the two codes handled below
+                // cover "no ASIO host API in a build that has the function", not "no function".
+                // Every non-Windows build is in that position (Homebrew's and the distros' are
+                // compiled without the ASIO SDK). Unreachable today, because
+                // SoundCardCatalog.ShowControlPanel short-circuits on HostApiKind == Asio and no
+                // such device can exist in those builds; kept so the next caller of this method
+                // does not have to know that.
+                return false;
+            }
+
             if (error == PaError.NoError)
                 return true;
 
@@ -241,6 +259,7 @@ internal sealed class PortAudioNative : IPortAudio
         PaHostApiTypeId.Mme => SoundCardHostApiKind.Mme,
         PaHostApiTypeId.Alsa => SoundCardHostApiKind.Alsa,
         PaHostApiTypeId.Jack => SoundCardHostApiKind.Jack,
+        PaHostApiTypeId.CoreAudio => SoundCardHostApiKind.CoreAudio,
         _ => SoundCardHostApiKind.Other,
     };
 

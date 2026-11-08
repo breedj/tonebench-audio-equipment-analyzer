@@ -197,8 +197,9 @@
     <h2>Where the zip lives</h2>
     <p>
       In an <code>issue-reports</code> folder beside the logs:
-      <code>%LOCALAPPDATA%\Tonebench\issue-reports</code> on Windows and
-      <code>~/.local/share/Tonebench/issue-reports</code> on Linux, which
+      <code>%LOCALAPPDATA%\Tonebench\issue-reports</code> on Windows,
+      <code>~/.local/share/Tonebench/issue-reports</code> on Linux and
+      <code>~/Library/Application Support/Tonebench/issue-reports</code> on macOS, which
       <strong>Open folder</strong> opens. The <strong>newest five</strong> are kept and older ones are
       deleted when a new one is built — they are copies of files that still exist, and chasing one
       fault tends to produce several.

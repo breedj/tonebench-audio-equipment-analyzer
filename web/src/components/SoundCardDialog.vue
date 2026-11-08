@@ -229,11 +229,23 @@ const pairingWarning = computed(() => {
   return 'These may not be the same interface. Two cards run on two clocks, and the drift between them is reported as DUT response — nothing downstream can tell the difference.'
 })
 
-/** DirectSound and MME accept any rate by resampling in software, so their numbers are the mixer's. */
+/**
+ * DirectSound and MME accept any rate by resampling in software, so their numbers are the mixer's.
+ *
+ * <p>Core Audio lands here too, and it needs its own sentence rather than the Windows one: there is
+ * no second host API on macOS to prefer instead, so "prefer ASIO" names nothing the reader can do.
+ * What they <i>can</i> do is set the card's own rate in Audio MIDI Setup to the rate being measured,
+ * after which PortAudio's converter is a no-op. Keyed on the kind rather than on the platform,
+ * because the trust is a property of the host API and the dialog may be read on a machine that is
+ * not the one measuring.</p>
+ */
 const trustWarning = computed(() => {
   const bad = [selectedInput.value, selectedOutput.value].filter((o) => o?.trust === 'Resamples')
   if (bad.length === 0) return null
-  return 'This host API resamples in software: it will accept any rate, but what the converter ran at is the Windows mixer’s, not what is asked for. Prefer ASIO where the card has a driver.'
+  const coreAudio = bad.some((o) => o?.hostApiKind === 'CoreAudio')
+  return coreAudio
+    ? 'Core Audio resamples rather than retuning the card: it will accept any rate, but what the converter ran at is the rate the device is set to. Set the card to the rate you are measuring in Audio MIDI Setup, or treat the numbers as indicative.'
+    : 'This host API resamples in software: it will accept any rate, but what the converter ran at is the Windows mixer’s, not what is asked for. Prefer ASIO where the card has a driver.'
 })
 
 const canSave = computed(

@@ -418,11 +418,14 @@ finally
 /// roughly 5 s before it terminates regardless, so every timeout on this path is sized to fit inside
 /// it — pump join 2 s &lt; ShutdownTimeout 3 s &lt; watchdog 3.5 s &lt; this wait 4.5 s.
 ///
-/// On Linux the same signal is a real SIGHUP: the .deb's desktop entry runs the app in a terminal
-/// (<c>Terminal=true</c>, because the console is the log and its close button the way to quit), and
-/// closing that terminal delivers SIGHUP, whose default action is the same termination mid-transfer.
-/// So the handler is registered on every platform; only the blocking wait is Windows-specific, since
-/// nothing on Linux kills the process when the handler returns — the host simply finishes stopping.
+/// On Linux and macOS the same signal is a real SIGHUP: the .deb's desktop entry runs the app in a
+/// terminal (<c>Terminal=true</c>, because the console is the log and its close button the way to
+/// quit), and closing that terminal — or a macOS Terminal window running <c>run.sh</c> — delivers
+/// SIGHUP, whose default action is the same termination mid-transfer. So the handler is registered on
+/// every platform; only the blocking wait is Windows-specific, since nothing on Unix kills the
+/// process when the handler returns — the host simply finishes stopping. (That is also why
+/// <c>run.sh</c> must <c>exec</c> the binary: with a shell left in between, the app is not the
+/// terminal's child and this handler is not what receives the signal.)
 static IDisposable? RegisterConsoleCloseShutdown(IHostApplicationLifetime lifetime, ManualResetEventSlim shutdownComplete)
 {
     try

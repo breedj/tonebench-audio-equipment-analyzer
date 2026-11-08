@@ -238,6 +238,31 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// Whether a measurement through this host API can be believed. DirectSound and MME resample in
     /// software and will accept any rate — measured, both "supported" 48, 96 and 192 kHz on a card
     /// whose WASAPI shared mode admitted to only 48.
+    ///
+    /// <para><b>Core Audio is <see cref="SoundCardHostApiTrust.Resamples"/> and that is not a
+    /// placeholder.</b> PortAudio's macOS backend defaults to <c>paMacCorePlayNice</c> (0x00),
+    /// whose own header comment reads "do as much sample rate conversion as possible and as little
+    /// mucking with the device as possible" — so with no host-API-specific stream info supplied it
+    /// inserts an <c>AudioConverter</c> rather than setting the device's nominal rate, which is
+    /// behaviourally what DirectSound and MME do. The app asks for
+    /// <c>SoundCardStreamRequest.Exclusive</c> unconditionally, but that is materialised only for
+    /// WASAPI (<c>PortAudioNative.BuildParameters</c>), so on Core Audio it currently buys nothing
+    /// and <see cref="SoundCardHostApiTrust.RequiresExclusive"/> would be a claim this code does
+    /// not honour.</para>
+    ///
+    /// <para>The fix, for whoever can run it: build a <c>paMacCoreStreamInfo</c> on the
+    /// <c>Exclusive</c> path — <c>{ unsigned long size; PaHostApiTypeId hostApiType; unsigned long
+    /// version; unsigned long flags; }</c>, version <c>0x01</c>, filled by hand (there is no
+    /// setup helper) — with <c>paMacCore_ChangeDeviceParameters</c> (0x01) and
+    /// <c>paMacCore_FailIfConversionRequired</c> (0x02), the second being documented as meaningful
+    /// only in combination with the first. Then this becomes
+    /// <see cref="SoundCardHostApiTrust.RequiresExclusive"/> honestly. It is deliberately not
+    /// written here: those figures come from a 2006-era third-party copy of <c>pa_mac_core.h</c>
+    /// rather than from the header of the library the machine will actually load, and every
+    /// <c>unsigned long</c> there is 8 bytes on LP64 where the WASAPI struct's equivalents are 4 —
+    /// the trap the "---- scalars ----" note in <c>PortAudioInterop</c> exists for. Nobody here has
+    /// a Mac to check it against, and the practical answer meanwhile is to set the card's rate in
+    /// Audio MIDI Setup to the rate being measured, which is what the dialog's warning says.</para>
     /// </summary>
     public static SoundCardHostApiTrust Trust(SoundCardHostApiKind kind) => kind switch
     {
@@ -252,10 +277,15 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// The order the picker offers host APIs in: the ones that reach the hardware first, the ones
     /// that resample last. ASIO leads because it is also the only one that presents a card as a
     /// single full-duplex device.
+    ///
+    /// <para>Core Audio shares rank 0 with ASIO rather than being slotted in beside it, and the
+    /// tie is unreachable: ASIO exists only on Windows and Core Audio only on macOS, so no device
+    /// table can ever hold both. Giving it a rank of its own would mean choosing, with nothing to
+    /// choose on.</para>
     /// </summary>
     public static int PreferenceOf(SoundCardHostApiKind kind) => kind switch
     {
-        SoundCardHostApiKind.Asio => 0,
+        SoundCardHostApiKind.Asio or SoundCardHostApiKind.CoreAudio => 0,
         SoundCardHostApiKind.Jack => 1,
         SoundCardHostApiKind.Alsa => 2,
         SoundCardHostApiKind.WdmKs => 3,

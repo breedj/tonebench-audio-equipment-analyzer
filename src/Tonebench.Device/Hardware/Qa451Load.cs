@@ -23,8 +23,13 @@ internal static class HidTransport
             return new LinuxHidRawTransport(vendorId, productId);
         }
 
+        // Named rather than left as a bare "unsupported platform", because the only OS that can
+        // reach this is macOS and a reader there deserves to know it is a gap somebody decided on
+        // rather than a fault. A third transport over IOKit/IOHIDManager is what it would take;
+        // nothing else about the driver is platform-specific.
         throw new PlatformNotSupportedException(
-            "A QA451 can be driven on Windows (hid.dll) and Linux (hidraw) only.");
+            "A QA451 can be driven on Windows (hid.dll) and Linux (hidraw) only. macOS would need a "
+                + "third transport over IOKit/IOHIDManager, which is not written.");
     }
 }
 

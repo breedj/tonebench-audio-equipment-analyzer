@@ -55,8 +55,8 @@ const { showPage } = useManual()
         <strong>Description</strong> and a <strong>File location</strong>. The location follows the
         name — the app's projects folder plus the name as a file name — until you edit it or pick one
         with <strong>Browse…</strong>. The projects folder is <code>Documents\Tonebench Projects</code>
-        on Windows and <code>~/Tonebench Projects</code> on Linux, created the first time a project is
-        saved into it. <code>.tbench</code> is added when you leave it off. A name that is already
+        on Windows and <code>~/Documents/Tonebench Projects</code> on macOS and Linux, created the
+        first time a project is saved into it. <code>.tbench</code> is added when you leave it off. A name that is already
         taken in that folder is refused rather than overwritten.
       </li>
       <li>

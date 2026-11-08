@@ -8,7 +8,7 @@
     port 3240 and usbip.exe has no port option), why it is a QA402 and never a QA403, and what the
     bench can and cannot establish.
 
-    -Build is a one-off: it clones the pinned tag, applies adc-channel-order.patch and compiles.
+    -Build is a one-off: it clones the pinned tag and compiles it as it stands.
     Needs rustup and build-essential inside WSL; nothing on the Windows side.
 
 .EXAMPLE
@@ -94,12 +94,13 @@ function Assert-NoRealQa403 {
 
 function Invoke-Build {
     Assert-Wsl
-    $patch = Join-Path $PSScriptRoot "adc-channel-order.patch"
-    if (-not (Test-Path $patch)) { throw "Missing $patch" }
-    $wslPatch = (Invoke-Wsl "wslpath -a '$patch'").Trim()
-
-    Write-Host "Cloning v$Version and applying the channel-order patch..."
-    # git apply is idempotent-checked with --reverse --check: already applied is not an error.
+    Write-Host "Cloning and building v$Version as it stands..."
+    # No patch. The stock emulator emits the right ADC sample first, which is what a real
+    # QA402 does (measured 2026-11-07, serial 3738123988) and what this app now expects via
+    # Qa40xModel.AdcChannelsSwapped. adc-channel-order.patch used to make it emit left first,
+    # i.e. behave like a QA403; it was wrong and is deleted. The reset below is what undoes it
+    # on a clone that still carries it -- this is a throwaway build tree at a pinned tag, so
+    # nothing of yours should live in it.
     $script = @"
 set -e
 . "`$HOME/.cargo/env" 2>/dev/null || true
@@ -110,11 +111,7 @@ if [ ! -d $WslSrcDir ]; then
   git clone --depth 1 --branch v$Version -q https://github.com/GarageDeveloper/virtual-qa40x-rs.git $WslSrcDir
 fi
 cd $WslSrcDir
-if git apply --reverse --check '$wslPatch' 2>/dev/null; then
-  echo 'patch already applied'
-else
-  git apply '$wslPatch' && echo 'patch applied'
-fi
+git reset --hard -q && echo 'tree at the pinned tag'
 cargo build --release 2>&1 | tail -3
 ls -l target/release/vqa40x
 "@
@@ -137,7 +134,7 @@ function Invoke-Attach {
 
     $have = (Invoke-Wsl "test -x $WslBinary && echo yes || echo no").Trim()
     if ($have -notmatch "yes") {
-        throw "No patched emulator at $WslBinary (in WSL). Run: bench.ps1 -Build"
+        throw "No emulator at $WslBinary (in WSL). Run: bench.ps1 -Build"
     }
 
     if (Get-VirtualDevice) {

@@ -35,8 +35,10 @@ namespace Tonebench.Device.Hardware;
 /// <c>0x1C CAPABILITY2</c>, a model-dependent constant this app never reads). A fourth runs the other
 /// way and is also not read: <c>0x13 TELEM_ISO_CURRENT</c> is a real sensor on the QA402 the
 /// reference capture came from and answers a constant on this QA403 — see
-/// <see cref="Qa40xRegisters.DecodeTelemetry"/>'s own remarks. Everything else — the two range
-/// ladders, the calibration page layout, the wire format, the L/R swap — is shared only insofar as
+/// <see cref="Qa40xRegisters.DecodeTelemetry"/>'s own remarks. A fifth was measured on a real QA402
+/// on 2026-11-07 and is the one place this family is now known <i>not</i> to be uniform: the ADC's
+/// channel order, <see cref="AdcChannelsSwapped"/>. Everything else — the two range ladders, the
+/// calibration page layout, the wire format, the DAC's own L/R swap — is shared only insofar as
 /// dual-model code that never branches can establish it. The one third-party statement about the
 /// calibration page is <c>reference/ASIO40x-.../calibration.h:13</c>: "Factory calibration data
 /// stored in the QA402/QA403 flash."</para>
@@ -50,19 +52,49 @@ namespace Tonebench.Device.Hardware;
 /// the status bar and <c>ConnectAsync</c> logs it at Warning. A measurement is only as trustworthy as
 /// the claim that the device was driven correctly, and for the QA402 that claim rests on documents.
 /// </param>
-internal sealed record Qa40xModel(int ProductId, string ProductName, bool Verified)
+/// <param name="AdcChannelsSwapped">
+/// Whether the <b>ADC</b> frame puts the right channel in wire slot 0. False on the QA403, true on
+/// the QA402 — the one difference between these two models found by measurement rather than read
+/// out of a reference, and the only thing in this record that changes a sample value rather than a
+/// capability.
+///
+/// <para>The <i>DAC</i>'s swap is unconditional and shared (<c>TransferPump.BuildTxChunk</c>): all
+/// four references agree on it, and a DMM on a QA402's output BNCs confirmed it directly. What
+/// differs is the way back. On the QA403, driving wire slot 1 alone returns on RX slot 0, so logical
+/// left — which the TX swap puts on slot 1 — arrives on slot 0 and needs no second swap. On the
+/// QA402 (serial 3738123988, 2026-11-07), a logical-right tone looped right-to-right read back as
+/// <i>left</i>, so the physical right input lands in slot 0 and the slots must be exchanged.</para>
+///
+/// <para>That makes the QA403 the odd one out, which is what the references were disagreeing about
+/// all along: PyQa40x and ASIO401 read the ADC straight through (right for a QA403, wrong for a
+/// QA402) while qa40x-baremetal and qa40x-rs swap it (right for a QA402, wrong for a QA403), and
+/// baremetal's comment claims "QA402, QA403, QA404" where only one of the three is its own case.
+/// ASIO401 came closest: its input <c>swapChannels</c> is <c>true</c> for a QA401 and <c>false</c>
+/// for a QA403, keyed on the device — it simply assumes a QA402 behaves like a QA403, which is the
+/// assumption this field exists to correct.</para>
+///
+/// <para>So a QA404 is an open question rather than a safe guess, and so is a QA401, which this app
+/// does not open at all.</para>
+/// </param>
+internal sealed record Qa40xModel(
+    int ProductId,
+    string ProductName,
+    bool Verified,
+    bool AdcChannelsSwapped)
 {
     /// <summary>
     /// The QA403: the model this project was built against and the only one any measurement here was
     /// taken on.
     /// </summary>
-    public static Qa40xModel Qa403 { get; } = new(Qa40xRegisters.Qa403ProductId, "QA403", Verified: true);
+    public static Qa40xModel Qa403 { get; } = new(
+        Qa40xRegisters.Qa403ProductId, "QA403", Verified: true, AdcChannelsSwapped: false);
 
     /// <summary>
     /// The QA402, the QA403's discontinued predecessor. Same ladders, same registers, same
     /// calibration page, one fewer sample rate — and untested here.
     /// </summary>
-    public static Qa40xModel Qa402 { get; } = new(Qa40xRegisters.Qa402ProductId, "QA402", Verified: false);
+    public static Qa40xModel Qa402 { get; } = new(
+        Qa40xRegisters.Qa402ProductId, "QA402", Verified: false, AdcChannelsSwapped: true);
 
     /// <summary>
     /// Every model this app will open, <b>in the order the transport tries them</b>.

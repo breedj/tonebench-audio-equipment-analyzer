@@ -38,10 +38,11 @@ front rather than letting you find out from a test failure.
    Verified on this bench: `Signer Name: Microsoft Windows Hardware Compatibility Publisher`.
    Installs to `C:\Program Files\USBip\usbip.exe`.
 
-2. **The emulator, built from source with the channel-order patch.** The prebuilt release binaries
-   are no use here — they carry the crossed-channel bug — so `bench.ps1 -Build` clones the pinned tag
-   into WSL, applies `adc-channel-order.patch`, and compiles. It is idempotent: re-running it
-   re-checks the patch rather than failing on an already-patched tree.
+2. **The emulator, built from source.** `bench.ps1 -Build` clones the pinned tag into WSL and
+   compiles it as it stands. It is idempotent: re-running it resets the tree to the tag and
+   rebuilds, which is also what undoes the `adc-channel-order.patch` an older bench applied. The
+   stated reason for not using the prebuilt release binaries was that patch, so they may now do
+   just as well -- untried.
 
    ```powershell
    powershell -File testbench/virtual-qa40x/bench.ps1 -Build
@@ -123,30 +124,37 @@ so a real QA402 gets told to run the other suite instead of silently standing in
 Change it in one place only — `VirtualQa40xBench.SentinelSerialArgument`, which
 `VirtualQa40xBenchTests` pins against this script.
 
-## The one patch, and why it belongs in the emulator
+## There is no patch any more, and the emulator was right all along
 
-The L/R swap on a real QA40x is the **DAC's alone**: driving wire slot 1 alone returns on RX slot 0
-(measured on serial 1077527945; CLAUDE.md, *"The L/R swap is on the DAC only"*). PyQa40x — 
-QuantAsylum's own library — swaps outputs only, and ASIO401 agrees. `QA40x_BareMetal` swaps both
-directions, which is the one place a vendored reference is known to be wrong.
+**Build it as it stands.** `virtual-qa40x-rs` v0.5.0 swaps L/R on **both** directions, and because
+it answers as a **QA402**, that is correct: a real QA402's ADC frame carries the right sample first.
+If you have an older clone in WSL still carrying `adc-channel-order.patch`, `bench.ps1 -Build` now
+runs `git reset --hard` on that tree to undo it.
 
-`virtual-qa40x-rs` v0.5.0 inherits that double swap, so **channels come back crossed**. Measured
-against the stock build: Tonebench put the tone on TX slot 1 and it returned on RX **slot 1** at
-−5.81 dBFS while slot 0 carried only the −140 dBFS noise floor. All nine QA403 loopback tests failed
-from that single cause — including all eight amplitude ranges, because they read the left channel.
+This cost a week of confidence in the wrong direction, so it is worth the paragraph. Until
+2026-11-08 CLAUDE.md said *"The L/R swap is on the DAC only"* and named `ProcessRxBuffer` as a thing
+never to touch. On a **QA403** that is right, and measured (serial 1077527945: driving wire slot 1
+alone returns on RX slot 0). The error was generalising it to the family. So when the stock emulator
+put Tonebench's logical-left tone on TX slot 1 and returned it on RX **slot 1** — at −5.81 dBFS,
+with slot 0 holding only the −140 dBFS floor — that reading was taken for an emulator bug and
+patched out on 2026-11-05.
 
-The fix is three lines in `crates/vqa40x-core/src/analyzer.rs` (emit `il` before `ir`). **Never fix
-`ProcessRxBuffer` to match** — CLAUDE.md forbids it by name. Patched, the same capture returns the
-tone on slot 0 at −5.81 dBFS against the measured −6.00 dBFS, and all 23 of the emulator's own tests
-still pass (nothing in its suite covered which wire slot carries which channel, which is why the bug
-survived).
+It was not a bug. **A real QA402 does exactly that**, confirmed in hardware on 2026-11-07 (serial
+3738123988, firmware 60, reported by its owner): the generator was verified independently with a DMM
+on the output BNCs, and then a right-to-right loopback of a logical-right tone read back on *left*.
+The emulator had reproduced the real device to the slot, and the patch made it impersonate a QA403.
+
+What changed instead is this app: `Qa40xModel.AdcChannelsSwapped` is false for a QA403 and true for
+a QA402, read by `BlockAssembler`. So the stock emulator is now the **regression test** rather than
+something to work around — `Loopback_ToneOnLeftOnly_ArrivesOnLeftAndNotOnRight` passes against an
+unpatched build and fails with left and right swapped against a patched one. That failure now means
+*your WSL tree is stale*, which is the opposite of what it used to mean.
 
 ```bash
 # inside WSL
 sudo apt-get install -y build-essential pkg-config
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 git clone --depth 1 --branch v0.5.0 https://github.com/GarageDeveloper/virtual-qa40x-rs.git
-# edit crates/vqa40x-core/src/analyzer.rs: swap the two out.extend_from_slice calls after `let ir =`
 cargo build --release
 ```
 

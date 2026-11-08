@@ -142,4 +142,25 @@ public class Qa40xModelTests
         Assert.True(Qa40xModel.Qa403.Verified);
         Assert.False(Qa40xModel.Qa402.Verified);
     }
+
+    /// <summary>
+    /// The ADC's channel order, which is the one thing these two models are known to do differently
+    /// and the only field here that changes a sample rather than a capability.
+    ///
+    /// <para>Both values are measured. The QA403's comes from this bench (driving wire slot 1 alone
+    /// returns on RX slot 0, so the TX swap already puts logical left where the reader expects it);
+    /// the QA402's from serial 3738123988 on 2026-11-07, where a logical-right tone looped
+    /// right-to-right read back as left. Pinned in both directions because getting either wrong
+    /// crosses every stereo measurement on that model while leaving each channel's own figures
+    /// perfectly plausible — there is nothing in a THD or a level reading to say it happened.</para>
+    ///
+    /// <para>The QA403 case is the regression that would cost most: it is the verified model, and a
+    /// well-meaning "the family is uniform" simplification is exactly what would break it.</para>
+    /// </summary>
+    [Fact]
+    public void OnlyTheQa402_SwapsItsAdcChannels()
+    {
+        Assert.False(Qa40xModel.Qa403.AdcChannelsSwapped);
+        Assert.True(Qa40xModel.Qa402.AdcChannelsSwapped);
+    }
 }

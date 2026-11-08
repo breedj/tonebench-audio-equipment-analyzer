@@ -705,7 +705,8 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         // see BlockAssembler. Measured on real hardware before this existed: a 100 s sweep dropped 75
         // RX chunks, i.e. the reader of the pump's 683 ms channel went unscheduled for longer than
         // that, repeatedly, while the FFT worker had the pool.
-        var assembler = new BlockAssembler(pump.Reader, calibration, config, logger);
+        var assembler = new BlockAssembler(
+            pump.Reader, calibration, config, logger, (_model ?? Qa40xModel.Qa403).AdcChannelsSwapped);
         long reportedChunkDrops = 0;
         long reportedBlockDrops = 0;
 
@@ -1177,6 +1178,7 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
     {
         private readonly ChannelReader<RxChunk> _source;
         private readonly Qa40xCalibration _calibration;
+        private readonly bool _adcChannelsSwapped;
         private readonly AcquisitionConfig _config;
         private readonly ILogger _logger;
         private readonly Channel<PcmBlock> _output;
@@ -1185,12 +1187,17 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
         private Thread? _thread;
 
         public BlockAssembler(
-            ChannelReader<RxChunk> source, Qa40xCalibration calibration, AcquisitionConfig config, ILogger logger)
+            ChannelReader<RxChunk> source,
+            Qa40xCalibration calibration,
+            AcquisitionConfig config,
+            ILogger logger,
+            bool adcChannelsSwapped)
         {
             _source = source;
             _calibration = calibration;
             _config = config;
             _logger = logger;
+            _adcChannelsSwapped = adcChannelsSwapped;
 
             // Roughly a second of assembled audio. Drop-oldest for the same reason the RX channel uses
             // it — blocking here would push back onto this thread, which would stop draining the RX
@@ -1303,33 +1310,50 @@ public sealed class Qa40xUsbDevice(ILogger<Qa40xUsbDevice> logger) : IAnalyzerDe
                             blockBuffer ??= ArrayPool<float>.Shared.Rent(_config.BlockFrameCount * _config.ChannelCount);
 
                             // Deinterleaved and calibrated straight into the outgoing block — no
-                            // intermediate per-chunk float arrays. There is deliberately **no channel
-                            // swap here**. The QA403's swap is on the DAC only — PyQa40x states it as
-                            // "On QA402 and QA403, *outputs* need to be swapped" (analyzer.py:113) and
-                            // correspondingly reads its ADC data straight through, left =
-                            // interleaved[0::2] / right = interleaved[1::2] (analyzer.py:174-175),
-                            // applying its channel-0 ("left") calibration record to wire slot 0.
-                            // TransferPump.BuildTxChunk already applies the swap on the way out, so
-                            // applying it again here would swap twice and cross the channels: a tone
-                            // generated on logical left would come back on logical right.
+                            // intermediate per-chunk float arrays. Which wire slot is the left
+                            // channel is the *model's* answer, not a constant: see
+                            // Qa40xModel.AdcChannelsSwapped, which is false for a QA403 and true for a
+                            // QA402. The TX swap is unconditional and belongs to both models
+                            // (TransferPump.BuildTxChunk); only the ADC frame differs.
                             //
-                            // This was measured on real hardware rather than inferred. Driving a raw
-                            // sine on wire slot 1 alone put it at -6.00 dBFS on RX slot 0 with RX slot
-                            // 1 at -94 dBFS, and driving slot 0 alone mirrored it exactly — TX slot N
-                            // returns on RX slot 1-N. qa40x-baremetal does swap on receive
-                            // (Acquisition.cs:193, FromByteStream(rxData, out r.Right, out r.Left)) and
-                            // an earlier version of this code followed it, which is what crossed the
-                            // channels; that reference sends 1 kHz left / 2 kHz right but only ever
-                            // prints per-channel *peaks*, never which frequency arrived where, so a
-                            // crossed pair is invisible to it.
+                            // Both halves are measured rather than inferred, on different hardware.
+                            // On the QA403 (serial 1077527945): a raw sine on wire slot 1 alone came
+                            // back at -6.00 dBFS on RX slot 0 with slot 1 at -94 dBFS, and driving
+                            // slot 0 alone mirrored it — TX slot N returns on RX slot 1-N, so with
+                            // logical left on TX slot 1 it arrives on RX slot 0 and must NOT be
+                            // swapped back. On the QA402 (serial 3738123988, 2026-11-07): the
+                            // generator was confirmed correct with a DMM on the output BNCs, and a
+                            // right-to-right loopback of a logical-right tone read back on LEFT —
+                            // i.e. the physical right input lands in wire slot 0, so the ADC frame is
+                            // right-first and the slots must be swapped.
+                            //
+                            // That makes the QA403 the odd one out, which is why the references split:
+                            // PyQa40x ("On QA402 and QA403, *outputs* need to be swapped",
+                            // analyzer.py:113) and ASIO401 read the ADC straight through and are right
+                            // for a QA403 and wrong for a QA402, while qa40x-baremetal
+                            // (Acquisition.cs:193) and qa40x-rs swap it and are right for a QA402 and
+                            // wrong for a QA403. ASIO401 is the one that saw it coming: its
+                            // swapChannels is true for a QA401 and false for a QA403, keyed on the
+                            // device, and it only *assumes* a QA402 matches the QA403.
+                            //
+                            // Calibration follows the logical channel rather than the wire slot. The
+                            // factory page's two records correct the two analog front ends, so they
+                            // are indexed by the channel on the panel; on a QA403 the two readings
+                            // coincide (slot 0 IS left), so this is a no-op there. The correction is
+                            // about +-1 dB in total and the two channels differ by far less, which the
+                            // QA403 loopback test bounds at under 0.1 dB across all eight ranges — so
+                            // if the page turns out to be frame-ordered instead, the cost is hundredths
+                            // of a decibel on a QA402 rather than a crossed pair.
                             int byteOffset = i * BytesPerFrame;
                             int slot0Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset));
                             int slot1Raw = BinaryPrimitives.ReadInt32LittleEndian(chunk.Buffer.AsSpan(byteOffset + 4));
+                            int leftRaw = _adcChannelsSwapped ? slot1Raw : slot0Raw;
+                            int rightRaw = _adcChannelsSwapped ? slot0Raw : slot1Raw;
 
                             int baseIndex = framesInBlock * _config.ChannelCount;
-                            blockBuffer[baseIndex] = (float)_calibration.RawToVolts(slot0Raw, chunk.InputRangeDbv, 0);
+                            blockBuffer[baseIndex] = (float)_calibration.RawToVolts(leftRaw, chunk.InputRangeDbv, 0);
                             if (_config.ChannelCount > 1)
-                                blockBuffer[baseIndex + 1] = (float)_calibration.RawToVolts(slot1Raw, chunk.InputRangeDbv, 1);
+                                blockBuffer[baseIndex + 1] = (float)_calibration.RawToVolts(rightRaw, chunk.InputRangeDbv, 1);
                             framesInBlock++;
 
                             if (framesInBlock == _config.BlockFrameCount)

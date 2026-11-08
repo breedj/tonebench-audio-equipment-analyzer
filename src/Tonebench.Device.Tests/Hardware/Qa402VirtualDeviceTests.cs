@@ -127,21 +127,26 @@ public class Qa402VirtualDeviceTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A3's mechanics — and this one needs a <b>patched</b> emulator, which is worth knowing before
-    /// it fails.
+    /// A3's mechanics, and since 2026-11-08 the <b>regression test for the QA402's ADC channel
+    /// order</b> — worth reading before it fails, because what a failure means has inverted.
     ///
-    /// <para>The L/R swap is the DAC's alone: driving wire slot 1 alone returns on RX slot 0, measured
-    /// on this bench's QA403 (CLAUDE.md, "The L/R swap is on the DAC only"). <c>virtual-qa40x-rs</c>
-    /// v0.5.0 swaps on <i>both</i> directions, inherited from qa40x-rs and from QA40x_BareMetal — the
-    /// one place a vendored reference is known to be wrong — so it double-swaps and crosses the
-    /// channels. Measured against the unpatched build on 2026-11-05: Tonebench put the tone on TX
-    /// slot 1 and it came back on RX slot 1 at −5.81 dBFS while slot 0 held only the −140 dBFS noise
-    /// floor, so this test read the floor and failed by ~125 dB.</para>
+    /// <para>This test used to require a <i>patched</i> emulator. <c>virtual-qa40x-rs</c> v0.5.0
+    /// swaps L/R on both directions, and since it answers as a QA402 that is correct — but CLAUDE.md
+    /// then said the swap was the DAC's alone, full stop, so the stock build looked broken: measured
+    /// 2026-11-05, Tonebench put the tone on TX slot 1 and it came back on RX slot 1 at
+    /// −5.81 dBFS with slot 0 at the −140 dBFS floor, and this test read the floor and failed by
+    /// ~125 dB. <c>adc-channel-order.patch</c> made the emulator emit left first to satisfy it.</para>
     ///
-    /// <para>The fix is one line in the emulator's ADC encode (emit left first), not in
-    /// <c>ProcessRxBuffer</c> — CLAUDE.md forbids that explicitly. Patched, the same capture reads
-    /// the tone on slot 0 at −5.81 dBFS against the measured −6.00 dBFS. If this test fails with left
-    /// and right swapped, the bench is running an unpatched emulator.</para>
+    /// <para><b>The emulator was right.</b> A real QA402 (serial 3738123988, 2026-11-07) does exactly
+    /// what the stock build did: its generator is correct — checked with a DMM on the output BNCs —
+    /// and a right-to-right loopback of a logical-right tone reads back on <i>left</i>, so the
+    /// physical right input lands in wire slot 0. The patch is deleted and
+    /// <c>Qa40xModel.AdcChannelsSwapped</c> carries the difference instead: false for a QA403, true
+    /// for a QA402.</para>
+    ///
+    /// <para>So this now passes against an <b>unpatched</b> emulator. If it fails with left and right
+    /// swapped, the WSL tree is stale — run <c>bench.ps1 -Build</c>, which resets it — rather than
+    /// touching <c>BlockAssembler</c>.</para>
     /// </summary>
     [Fact]
     public async Task Loopback_ToneOnLeftOnly_ArrivesOnLeftAndNotOnRight()
@@ -161,8 +166,9 @@ public class Qa402VirtualDeviceTests(ITestOutputHelper output)
             Assert.True(
                 leftDbv - rightDbv > 40.0,
                 $"Driving logical left only: left {leftDbv:F2} dBV, right {rightDbv:F2} dBV. If right "
-                    + "carries the tone and left is at the noise floor, the emulator is unpatched and "
-                    + "swaps on receive as well as on transmit — fix the emulator, not ProcessRxBuffer "
+                    + "carries the tone and left is at the noise floor, this WSL tree still has the "
+                    + "deleted adc-channel-order.patch applied, so the emulator is impersonating a "
+                    + "QA403: run bench.ps1 -Build to reset it. Do not 'fix' AdcChannelsSwapped "
                     + "(see this test's remarks and CLAUDE.md).");
         }
     }

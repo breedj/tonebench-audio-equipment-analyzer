@@ -20,8 +20,7 @@ only wants to get it running.
 - **The .NET 10 SDK, arm64 build** — from <https://dotnet.microsoft.com/download>. Not the x64
   build, and not under Rosetta: an x64 process cannot load the arm64 libraries this needs.
 - **Node 22 or later**, and **Homebrew**.
-- **Access to the repository**, which is private — ask Joost to add your GitHub account before you
-  start.
+- **Git.** The repository is public, so the clone in stage 1 needs no account and no access request.
 - *Optional:* a QA403 analyzer, and a USB audio interface with a cable from an output back to an
   input. Each unlocks later stages; neither is needed for the first five.
 

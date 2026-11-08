@@ -1250,9 +1250,11 @@ public sealed class ImpulseResponseRunner(
 
             if (outcome == ResponseCaptureSupport.ProbeCorrection.BelowFloor)
             {
-                throw new InvalidOperationException(
-                    $"The requested output level of {target:0.##} dBV would need a generator level below "
-                        + $"{MinGeneratorDbv:0.##} dBV. The DUT's gain looks too high to measure this way.");
+                // Shared with the chirp's identical refusal rather than a second copy of it -- see
+                // OutputLevelReach.FloorMessage for what the four copies had drifted into.
+                throw new InvalidOperationException(OutputLevelReach.FloorMessage(
+                    target, request.LevelUnit, request.LoadOhms, MinGeneratorDbv,
+                    OutputLevelReach.ResponseGeneratorModeLabel));
             }
 
             if (outcome == ResponseCaptureSupport.ProbeCorrection.AcceptCeiling)

@@ -993,9 +993,13 @@ public sealed class FrequencyResponseRunner(
 
             if (outcome == ResponseCaptureSupport.ProbeCorrection.BelowFloor)
             {
-                throw new InvalidOperationException(
-                    $"The requested output level of {target:0.##} dBV would need a generator level below "
-                        + $"{MinGeneratorDbv:0.##} dBV. The DUT's gain looks too high to measure this way.");
+                // The floor rather than the ceiling, so the fault is a DUT with too much gain for an
+                // output-referred target -- a preamp asked for a few millivolts out. One message for
+                // all four probes, which is also what fixes it naming no lever; see
+                // OutputLevelReach.FloorMessage.
+                throw new InvalidOperationException(OutputLevelReach.FloorMessage(
+                    target, request.LevelUnit, request.LoadOhms, MinGeneratorDbv,
+                    OutputLevelReach.ResponseGeneratorModeLabel));
             }
 
             if (outcome == ResponseCaptureSupport.ProbeCorrection.AcceptCeiling)

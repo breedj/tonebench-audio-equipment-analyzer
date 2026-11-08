@@ -940,9 +940,11 @@ public sealed class ThdSweepRunner(
 
             if (genDbv <= ProbeStartDbv)
             {
-                throw new InvalidOperationException(
-                    $"Could not hold the requested output level — this DUT needs less than {ProbeStartDbv:0} dBV of drive to reach it, "
-                        + "which is below the generator level this probe will go to. Lower the target level, or insert attenuation ahead of the DUT.");
+                // This copy was the least wrong of the four and still goes through the shared
+                // message: a fourth hand-written string is exactly how the other three drifted apart.
+                throw new InvalidOperationException(OutputLevelReach.FloorMessage(
+                    wantedOutDbv, request.LevelUnit, request.LoadOhms, ProbeStartDbv,
+                    OutputLevelReach.SweepGeneratorModeLabel));
             }
 
             genDbv = Math.Min(genDbv, maxGenDbv);

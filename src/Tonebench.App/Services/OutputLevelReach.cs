@@ -17,6 +17,12 @@ namespace Tonebench.App.Services;
 /// on was taken at that ceiling, so a shortfall is a fact about the DUT. A probe that merely ran out
 /// of iterations is in a different position: its last correction was applied and never measured, so
 /// the newest reading is one step stale and would fail runs that were about to be right.</para>
+///
+/// <para><b>The floor is the other end of the same question</b> and lives here too, as
+/// <see cref="FloorMessage"/>: a probe can also run out of generator downwards, when the DUT's gain
+/// is high enough that reaching the target would need less drive than the search will produce. That
+/// one was four hand-written strings until 2026-11-08 and had already drifted, which is the whole
+/// argument for both of them being here.</para>
 /// </summary>
 public static class OutputLevelReach
 {
@@ -54,6 +60,68 @@ public static class OutputLevelReach
             + $"({percent:0.#} %) with the generator at its {generatorCeilingDbv:0.##} dBV ceiling. "
             + "Check that the DUT is powered on and connected the way the measurement expects, "
             + "and that it can produce this level.";
+    }
+
+    /// <summary>
+    /// What the generator-driven level mode is called on the response screens, which is one of
+    /// <b>two</b> spellings because two panels still carry their own copy of the mode list: the
+    /// frequency-response and impulse-response screens label the control <i>Set generator by</i>
+    /// and its first option <i>Input voltage</i>, while the THD sweep, stepped response, crosstalk
+    /// and output-impedance screens label it <i>Level mode</i> / <i>Generator voltage</i>.
+    ///
+    /// <para>Constants here rather than a sentence written into each runner, because
+    /// <see cref="FloorMessage"/> has to name the control the reader is actually looking at — a
+    /// message naming the other screen's spelling sends them hunting for a control that is not
+    /// there, which is how the report this was written for was first answered. Move
+    /// <c>FrequencyResponseConfigPanel</c>'s and <c>ImpulseResponseConfigPanel</c>'s local
+    /// <c>LEVEL_MODES</c> onto <c>measurements/levelMode.ts</c> and these collapse into one.</para>
+    /// </summary>
+    public const string ResponseGeneratorModeLabel = "Input voltage";
+
+    /// <inheritdoc cref="ResponseGeneratorModeLabel"/>
+    public const string SweepGeneratorModeLabel = "Generator voltage";
+
+    /// <summary>
+    /// What a run says when the level probe runs out of generator at the <b>bottom</b> rather than
+    /// the top: the DUT's gain is high enough that reaching the target would need less drive than
+    /// the search will go to.
+    ///
+    /// <para>The mirror of <see cref="Message"/> and here for the same reason. It was four
+    /// hand-written strings, one per probe, and they had drifted: the chirp's and the impulse's
+    /// said only that "the DUT's gain looks too high to measure this way", naming no lever, while
+    /// the stepped family's said <i>"Check that the DUT is connected and powered"</i> — the
+    /// opposite fault, and the wording <see cref="ThdSweepRunner"/>'s copy had already been
+    /// corrected away from. Reported 2026-11-08 by a user measuring a tape head preamp who asked
+    /// for 5 mV of DUT output and was told his gain was too high after he had turned it down.</para>
+    ///
+    /// <para><b>The figure that explains it is the gain an output-referred target can still
+    /// measure</b>, which is the target minus the floor and so collapses as the target falls:
+    /// 60 dB at a 0 dBV target against the chirp's −60 dBV floor, 14 dB at 5 mV, and −6 dB there on
+    /// the stepped family's −40 dBV floor (<c>ProbeStartDbv</c> being two-sided, where the chirp
+    /// starts at −40 and may go on down to −60). That is why a preamp hits this at all, and why
+    /// turning its gain down does not help — the lever is to drive the DUT's input directly.</para>
+    /// </summary>
+    public static string FloorMessage(
+        double targetDbv,
+        ThdSweepLevelUnit unit,
+        double loadOhms,
+        double generatorFloorDbv,
+        string generatorModeLabel)
+    {
+        double wanted = FromDbv(targetDbv, unit, loadOhms);
+        double gainLimitDb = targetDbv - generatorFloorDbv;
+
+        // A target below the floor leaves a *negative* limit, i.e. only a DUT that attenuates could
+        // reach it. True either way, and worth saying in the direction the reader has to act on.
+        string reach = gainLimitDb > 0.0
+            ? $"a DUT with less than {gainLimitDb:0.#} dB of gain"
+            : $"a DUT that attenuates by more than {-gainLimitDb:0.#} dB";
+
+        return $"The requested output level of {Format(wanted)} {unit.Label()} would need the generator at or below "
+            + $"{generatorFloorDbv:0.##} dBV, which is as low as the level search goes — at that target an "
+            + $"output-referred level can only measure {reach}. To measure a DUT with more gain, set the level "
+            + $"by {generatorModeLabel} instead and enter what you want at the DUT's input; otherwise raise the "
+            + "target, or attenuate ahead of the DUT.";
     }
 
     /// <summary>A level in dBV back in the unit it was asked for — <see cref="ThdSweepLevelUnits.ToDbv"/> inverted.</summary>

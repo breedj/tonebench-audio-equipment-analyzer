@@ -371,9 +371,14 @@ internal static class SteppedCaptureSupport
 
             if (genDbv <= ProbeStartDbv)
             {
-                throw new InvalidOperationException(
-                    $"Could not reach the requested output level — the generator would need to go below {ProbeStartDbv:0} dBV. "
-                        + "Check that the DUT is connected and powered.");
+                // This named the opposite fault until 2026-11-08 ("check that the DUT is connected
+                // and powered"): running out of generator at the *bottom* means the DUT has too much
+                // gain, not too little signal. ProbeStartDbv is two-sided here -- where the probe
+                // starts and the level it will not go below -- so this floor sits 20 dB above the
+                // chirp's and the gain an output-referred target can measure is that much less.
+                throw new InvalidOperationException(OutputLevelReach.FloorMessage(
+                    wantedOutDbv, levelUnit, loadOhms, ProbeStartDbv,
+                    OutputLevelReach.SweepGeneratorModeLabel));
             }
 
             genDbv = Math.Min(genDbv, maxGenDbv);

@@ -238,7 +238,7 @@ const { showPage } = useManual()
       quote its level, and the target means what you expect.
     </p>
     <p>
-      Three things follow from this:
+      Four things follow from this:
     </p>
     <ul>
       <li>
@@ -253,11 +253,26 @@ const { showPage } = useManual()
         says so. Ask for less, or move the reference band to where the DUT has more gain.
       </li>
       <li>
+        The search has a <em>floor</em> as well, at −60 dBV, and a DUT with gain meets it from the
+        other direction: reaching the target needs <em>less</em> drive than that. The output level
+        you can ask for is therefore bounded by the DUT's gain, and the bound tightens as the level
+        falls — at 0 dBV out it allows 60 dB of gain, at 5 mV only about 14 dB. Past it the run is
+        refused rather than measured at a level you did not set.
+      </li>
+      <li>
         Changing the bandwidth reference <em>after</em> a run re-finds the corners on the curves
         already on screen but cannot re-drive the DUT: the level was decided before the sweep. Run
         again for the new target to apply.
       </li>
     </ul>
+    <p>
+      That floor is the one to recognise, because it looks like a complaint about the DUT and is
+      really a complaint about the question. A preamp — a phono, microphone or tape head stage — is
+      specified by what you put <em>into</em> it, not by a level you set at its output, so the
+      output-referred modes are the wrong tool for one however its gain is set. Put
+      <strong>Set generator by</strong> back to <strong>Input voltage</strong>, enter the level you
+      want at the DUT's input, and read the curve as <strong>Gain (dB)</strong>.
+    </p>
     <p>
       If the reference band holds no bin of the probe's short record — a band a few hertz wide at
       the bottom of a 96 kHz span, say — the level is set against the median of the whole sweep

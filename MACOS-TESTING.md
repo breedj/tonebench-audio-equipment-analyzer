@@ -1,14 +1,44 @@
 # Running Tonebench on a Mac — test run
 
 Tonebench drives a QuantAsylum QA403 analyzer over raw USB, or any sound card through PortAudio. It
-is built and used on Windows and Linux. The macOS port exists but **has never been run** — not once,
-by anyone. You would be the first.
+is built and used on Windows and Linux. The macOS port has never been run **on a bench** — no
+measurement has ever been taken on a Mac, by anyone.
 
-So this is a test run rather than an install. Nothing here is expected to be smooth, and a failure is
-a useful result rather than a wasted afternoon. The stages below are ordered so that each one you
-reach rules something out, and each says what a pass looks like and what to send back when it doesn't.
+Everything a machine can check is already checked. CI builds the app and runs the full non-hardware
+test suite on an Apple Silicon and an Intel runner on every push, and proves it starts, serves and
+renders a PDF report on both — see *What is already known* below. So what is left is exactly what no
+runner has: **a sound card, a QA403, and closing the terminal window.** Those are stages 4, 6 and 7,
+and they are the reason you are reading this.
+
+It is still a test run rather than an install. Nothing is expected to be smooth, and a failure is a
+useful result rather than a wasted afternoon. Each stage says what a pass looks like and what to send
+back when it doesn't.
 
 About an hour, less if you stop early. The first five stages need no measurement hardware at all.
+
+## What is already known
+
+GitHub Actions run 42706216525, 9 November 2026. Both architectures, identical results:
+
+| | `macos-latest` (Apple Silicon) | `macos-15-intel` |
+|---|---|---|
+| What the app reported at startup | macOS 26.7.2, Arm64, .NET 10.0.14 | macOS 15.7.9, X64, .NET 10.0.14 |
+| `brew install libusb portaudio` | bottles poured | bottles poured |
+| Test suite | **7229 passed, 0 failed** | **7229 passed, 0 failed** |
+| Starts and serves | yes, on `127.0.0.1:8399` | yes |
+| Data folder | `~/Library/Application Support/Tonebench` | same |
+| PDF report renders | yes | yes |
+| Shutdown on SIGTERM | `Host stopped cleanly; process exiting` | same |
+
+Assembly for assembly, those are the same counts the Linux job produced in the same workflow.
+
+Three things follow. The **data folder** is what CI could most usefully have contradicted — stage 2
+still carries a *Stop and report* for it — and it is right, which means .NET's `GetFolderPath` lands
+where the whole port assumes. The **shutdown** line covers SIGTERM, which is what Ctrl+C does, but
+**not** closing the terminal window: that sends SIGHUP, is handled by different code, and is the
+single most valuable thing you can confirm. And the **Intel column is information, not a claim of
+support** — the build and the suite pass there, but Core Audio and USB are untested on *both*
+architectures, so Intel stays out of scope.
 
 `README.md`'s *Installing on macOS* section is the short version of the same thing, for anyone who
 only wants to get it running.
@@ -80,8 +110,9 @@ dotnet build
 dotnet test --filter "Category!=Hardware&Category!=VirtualDevice"
 ```
 
-**Pass:** a clean build, about **2025** frontend tests and about **7229** .NET tests, all green.
-Those are the counts on Windows; a small difference is fine, a failure is not.
+**Pass:** a clean build, about **2025** frontend tests and **7229** .NET tests, all green. CI gets
+exactly 7229 on both Mac architectures, so a failure here is a difference between your machine and a
+clean runner — which is worth knowing, and worth reporting.
 
 **If it fails:** send the full list of failing test names rather than patching anything. One test is
 expected to behave differently per platform (`RecentProjectsTests`, which checks how file paths
@@ -133,9 +164,11 @@ left behind.
 
 **Why this one:** an unclean exit leaves the USB device claimed and a database write unfinished. That
 damaged a project file twice on Windows before it was fixed, which is why the launch script is
-written the way it is. The window-close case is reasoned from how Linux behaves and has never been
-observed on a Mac, so it is the single most valuable thing you can confirm. If the log is cut off
-mid-teardown, send both logs.
+written the way it is. **CI already covers the Ctrl+C half** — it kills the app with SIGTERM, which
+is the same path, and gets the clean line. **The window close is a different signal** (SIGHUP),
+handled by different code, reasoned from how Linux behaves and never once observed on a Mac. That
+makes it the single most valuable thing in this document. If the log is cut off mid-teardown, send
+both logs.
 
 ## Stage 5 — projects, and how paths compare
 
@@ -144,7 +177,9 @@ a path that differs from the first **only in upper and lower case** — for exam
 `~/Documents/amp.tbench` and then `~/documents/AMP.tbench`.
 
 **Pass:** the recent-projects list holds **one** entry, not two. A Mac disk treats those as the same
-file, and the app now does too.
+file, and the app now does too. CI proves the comparer itself is right — `RecentProjectsTests` is in
+the green suite above, and a runner's disk is case-insensitive — so what you are checking here is the
+flow through the UI, which no test covers.
 
 ## Stage 6 — a sound card, if you have an interface
 
@@ -236,5 +271,6 @@ uploaded anywhere — sending it is your decision.
 
 ---
 
-Windows and Linux are the tested platforms; everything above is the first attempt at a third one.
+Windows and Linux are the tested platforms. A Mac can now build this and run every test, which CI
+checks on each push — but no Mac has yet measured anything, and that is the part only you can do.
 Thank you for trying it.

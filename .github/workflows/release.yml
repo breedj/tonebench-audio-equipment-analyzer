@@ -25,6 +25,84 @@ jobs:
       # !=, which is what keeps the untraited bulk of the suite in this run.
       - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --configuration Release
 
+  # The first Mac ever to run this code. macOS is Apple Silicon, runs-from-source only, and nobody
+  # on the project owns one — MACOS-TESTING.md exists to hand that to a volunteer. A GitHub standard
+  # macOS runner is free and unlimited on a public repository, so stages 1 to 3 of that manual can
+  # be answered here instead of waiting for a person. What is still only a person's to do: Core
+  # Audio, a QA403 on USB, and the terminal-close shutdown.
+  #
+  # Standalone and continue-on-error, both deliberately. `build` has `needs: test`, so putting this
+  # in that job would let an untried platform stop the win-x64 and linux-x64 packages being
+  # produced. Being outside the chain it cannot, and continue-on-error means a red leg reports green
+  # — so read the log, not the badge, until that is flipped off.
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is the arm64 M1 image, which is the supported platform. macos-15-intel is
+        # informational: it tests the standing hypothesis that Intel from source already works
+        # (run.sh's Homebrew branch is [ -d ]-guarded so it no-ops there, and both library resolvers
+        # find their leaf names through dyld's default /usr/local/lib, which is Intel Homebrew's own
+        # prefix — see PortAudioInterop.cs). Green here means the build and the suite pass, NOT that
+        # Intel is supported: Core Audio and USB are untested there as everywhere else on macOS.
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Neither is touched by a --simulate run (PortAudio is only initialised by
+      # GET /api/soundcard/devices), so this is here to prove MACOS-TESTING.md's stage 0 line works
+      # on a clean machine, and so that a step which does touch them later needs no edit.
+      - name: Install the native libraries the manual asks for
+        run: brew install libusb portaudio
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --configuration Release
+
+      # Deliberately `dotnet build` and the framework-dependent binary, i.e. exactly what run.sh
+      # does — NOT `dotnet publish -r osx-arm64`. The publish property group sets
+      # EnableCompressionInSingleFile, which is unsupported for osx-*; publishing here would start a
+      # packaging project rather than test the only macOS story that exists. This covers stages 2
+      # and 3 of the manual: the app starts, serves, and QuestPDF's libQuestPdfSkia.dylib loads and
+      # renders — the second being the thing only a running binary can prove.
+      - name: Smoke test (--simulate)
+        run: |
+          dotnet build src/Tonebench.App/Tonebench.App.csproj -c Release --nologo
+          cd src/Tonebench.App/bin/Release/net10.0
+          ./Tonebench.App --simulate --no-browser &
+          PID=$!
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8399/api/update-check >/dev/null 2>&1; then
+              echo "App responded."
+              HEAD=$(curl -fs -H 'Content-Type: application/json' \
+                -d '{"title":"smoke","subtitle":null,"generated":"now","notes":null,"chapters":[]}' \
+                http://127.0.0.1:8399/api/reports/pdf | head -c 5)
+              kill $PID
+              if [ "$HEAD" = "%PDF-" ]; then
+                echo "PDF rendered, smoke test passed."
+                exit 0
+              fi
+              echo "PDF endpoint did not return a PDF (got '$HEAD')" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "App did not respond within 30s" >&2
+          kill $PID || true
+          exit 1
+
   build:
     needs: test
     strategy:

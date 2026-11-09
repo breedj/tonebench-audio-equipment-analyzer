@@ -15,8 +15,8 @@ only wants to get it running.
 
 ## What you need
 
-- **An Apple Silicon Mac** (M1 or later) on macOS 14 or newer. Intel Macs are not covered — nothing
-  was built for them and nothing was tried.
+- **An Apple Silicon Mac** (M1 or later) on macOS 15 or newer — .NET 10 stopped supporting macOS 14
+  in September 2026. Intel Macs are not covered — nothing was built for them and nothing was tried.
 - **The .NET 10 SDK, arm64 build** — from <https://dotnet.microsoft.com/download>. Not the x64
   build, and not under Rosetta: an x64 process cannot load the arm64 libraries this needs.
 - **Node 22 or later**, and **Homebrew**.
@@ -64,14 +64,16 @@ ls -l "$(brew --prefix)/lib" | grep -E 'libusb-1.0|libportaudio'
 in** — it should be `/opt/homebrew/lib`. If it is somewhere else, say so: that is the single likeliest
 thing to need changing.
 
-**Stop:** if `dotnet --info` reports `osx-x64` you have the Intel SDK. Nothing further will work.
-Install the arm64 one.
+**Stop:** if `dotnet --info` reports `osx-x64` on an Apple Silicon Mac you have the x64 SDK, most
+likely running under Rosetta. Install the arm64 one: an x64 process cannot load Homebrew's arm64
+libraries, so the build will look perfectly healthy and the first capture will fail. (An actual
+Intel Mac is a different case — untested and out of scope, see Known limits.)
 
 ## Stage 1 — get the code and build it
 
 ```bash
-git clone -b macos-support https://github.com/breedj/tonebench-audio-equipment-analyzer.git
-cd tonebench-audio-equipment-analyzer/code
+git clone https://github.com/breedj/tonebench-audio-equipment-analyzer.git
+cd tonebench-audio-equipment-analyzer
 
 cd web && npm ci && npm run build && npm test && cd ..
 dotnet build

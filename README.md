@@ -171,8 +171,7 @@ that waste an afternoon, and what to send back.
 brew install libusb portaudio
 # .NET 10 SDK (arm64 build, not the x64 one under Rosetta): https://dotnet.microsoft.com/download
 # Node 22 or later
-cd code
-./run.sh                 # or ./run-simulator.sh, which needs no hardware
+./run.sh                 # from the repository root — or ./run-simulator.sh, which needs no hardware
 ```
 
 **No driver and no permissions step are needed for the QA403.** It presents a vendor-specific bulk

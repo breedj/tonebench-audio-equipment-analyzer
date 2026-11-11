@@ -680,6 +680,7 @@ const { showPage } = useManual()
     <p class="manual-see-also">
       See also
       <a href="#" @click.prevent="showPage('wiring-basics')">Wiring basics</a>,
+      <a href="#" @click.prevent="showPage('clock-drift')">Clock drift</a>,
       <a href="#" @click.prevent="showPage('frequency-response')">Frequency response</a> and
       <a href="#" @click.prevent="showPage('settings')">Settings</a>.
     </p>

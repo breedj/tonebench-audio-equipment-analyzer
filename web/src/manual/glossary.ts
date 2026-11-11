@@ -152,6 +152,16 @@ export const GLOSSARY: GlossaryEntry[] = [
     see: ['output-impedance'],
   },
   {
+    term: 'Clock drift',
+    definition:
+      'How far the input device’s sample clock runs from the output device’s, in parts per million. Zero when one card does both directions, since there is then one clock; tens to a couple of hundred ppm when they are two cards, which is two ordinary crystals and normal. Tone measurements are untouched by it, but anything measured from a chirp reads it as a delay that grows with frequency — i.e. as the DUT’s own phase and group delay. Measured by Sound card ▸ Measure the drift.',
+  },
+  {
+    term: 'ppm',
+    definition:
+      'Parts per million: one ppm is a millionth, so 100 ppm is 0.01 %. Used here for clock drift, where the quantities are far too small to read comfortably as a percentage — 100 ppm on a 1 kHz tone is a tenth of a hertz.',
+  },
+  {
     term: 'dBc',
     definition:
       'Decibels relative to the carrier — here, relative to the fundamental tone in the same record. A harmonic at −60 dBc is a thousandth of the fundamental’s voltage, whatever that fundamental’s absolute level happens to be.',

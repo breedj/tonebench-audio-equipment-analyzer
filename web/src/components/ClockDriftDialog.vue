@@ -8,6 +8,7 @@ import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
 import HeaderIcon from './HeaderIcon.vue'
 import { clampNumberField } from '../numberField'
+import CollapsibleSection from './CollapsibleSection.vue'
 import Modal from './Modal.vue'
 
 /**
@@ -166,45 +167,63 @@ async function close() {
   >
 
     <div class="flex flex-col gap-3 p-4">
-      <!-- Said before the explanation, and in amber, because it is the one thing a reader needs
-           to know BEFORE pressing anything. Found the hard way on 2026-11-11: a test run during
-           development played a 1 kHz tone out of the bench's output, which was patched to a pair
-           of headphones somebody was wearing. The measurement cannot avoid playing a tone -- that
-           is what it measures -- so the honest answer is to say so first and keep the default
-           level modest. -->
+      <!-- Two things a reader needs BEFORE pressing anything, so they go above the explanation
+           and in amber rather than inside it.
+
+           The loopback is advice rather than a requirement -- the measurement really does work
+           through a DUT, since a DUT changes a tone's level and phase and not its frequency -- but
+           it is the right advice: a loopback gives the strongest, cleanest tone, which is the one
+           thing this measurement needs and the one way it goes quietly wrong. The cable is also
+           already there, since both calibration steps use it.
+
+           The tone warning was found the hard way on 2026-11-11: a test run during development
+           played 1 kHz out of the bench's output, which was patched to a pair of headphones
+           somebody was wearing. The measurement cannot avoid playing a tone -- that is what it
+           measures -- so the honest answer is to say so first. -->
       <p
-        class="dialog-card shrink-0 rounded border border-amber-300 px-3 py-2 text-[12px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        class="shrink-0 rounded-xl border border-amber-300 px-3 py-2 text-[12px] leading-relaxed text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
       >
-        <strong>This plays a tone out of the output card</strong> for as long as the test runs, at
-        the level below. Take headphones off, and turn a monitoring amplifier down, before you
-        press Measure.
+        <strong>Connect the output back to the input</strong> — the same loopback the calibration
+        steps use. It will measure through a DUT as well, but a loopback gives the cleanest tone and
+        so the best reading. And <strong>it plays that tone for as long as the test runs</strong>, at
+        the level below: take headphones off, and turn a monitoring amplifier down, before you press
+        Measure.
       </p>
 
-      <p class="dialog-card shrink-0 text-[12px] leading-relaxed">
-        Two cards run on two crystals, and neither is obliged to produce exactly the rate it was
-        asked for. This plays a tone on the output card and reads its frequency on the input card:
-        the difference between what was played and what came back <em>is</em> the difference between
-        the two clocks. It measures through whatever is connected — a DUT in the path is fine, since
-        a DUT changes a tone's level and phase and not its frequency — so the bench does not have to
-        be re-wired. What it does need is the output reaching the input, and a tone loud enough to
-        stand clear of the input's own hum.
-      </p>
-
-      <!-- Asked on 2026-11-11, and the answer belongs on the screen that prompts it: a reader who
-           has just been told to calibrate a card before trusting its levels will reasonably assume
-           the same of this. The Level box above now names its own unit, so this no longer has to
-           explain away a label that said volts on a card that has none. -->
-      <p class="dialog-card shrink-0 text-[12px] leading-relaxed">
-        <strong>Calibration is not needed for this.</strong> The answer is a ratio of two
-        frequencies, so the volts scale never enters it — an uncalibrated card gives the same drift
-        figure as a calibrated one, and even a badly wrong level would not bias it, since clipping
-        adds harmonics without moving the fundamental. On an uncalibrated card the Level box reads
-        in <strong>dBFS</strong>, where 0 is the clipping point, and −20 is a good place to measure
-        from.
-      </p>
+      <!-- Folded away, and shut by default: neither paragraph is needed to run the test, and the
+           dialog is read top to bottom by someone who wants to press Measure. The second is there
+           because it was asked within a minute of the dialog first being seen -- a reader who has
+           just been told to calibrate a card before trusting its levels will reasonably assume the
+           same of this. -->
+      <CollapsibleSection
+        title="How this works"
+        icon="info"
+        tone="blue"
+        :default-open="false"
+        class="shrink-0"
+      >
+        <div class="flex flex-col gap-2 text-[12px] leading-relaxed">
+          <p>
+            Two cards run on two crystals, and neither is obliged to produce exactly the rate it was
+            asked for. This plays a tone on the output card and reads its frequency on the input
+            card: the difference between what was played and what came back <em>is</em> the
+            difference between the two clocks. Neither card's own error against true time is
+            knowable from one cable, and neither needs to be — only the difference reaches a
+            measurement.
+          </p>
+          <p>
+            <strong>Calibration is not needed for this.</strong> The answer is a ratio of two
+            frequencies, so the volts scale never enters it — an uncalibrated card gives the same
+            drift figure as a calibrated one, and even a badly wrong level would not bias it, since
+            clipping adds harmonics without moving the fundamental. On an uncalibrated card the
+            Level box reads in <strong>dBFS</strong>, where 0 is the clipping point, and −20 is a
+            good place to measure from.
+          </p>
+        </div>
+      </CollapsibleSection>
 
       <div class="dialog-card shrink-0">
-        <div class="tb-group">
+        <div class="sc-body pt-1">
           <label class="sc-row">
             <span class="sc-label">Tone</span>
             <span class="flex items-center gap-2">
@@ -256,13 +275,13 @@ async function close() {
           <button
             v-if="!running"
             type="button"
-            class="btn-run-go"
+            class="btn-run-go w-52 flex-none"
             :disabled="busy"
             @click="onStart"
           >
             Measure
           </button>
-          <button v-else type="button" class="btn-run-stop" :disabled="busy" @click="cancel">
+          <button v-else type="button" class="btn-run-stop w-52 flex-none" :disabled="busy" @click="cancel">
             Stop
           </button>
           <button
@@ -287,12 +306,13 @@ async function close() {
         </div>
       </div>
 
-      <div class="dialog-card shrink-0">
-        <div ref="host" class="w-full"></div>
-        <p
-          v-if="!points.length"
-          class="px-1 py-6 text-center text-[12px] text-neutral-500 dark:text-neutral-400"
-        >
+      <!-- The chart and the empty state are alternatives rather than a stack: uPlot draws nothing
+           at all without a data range, so rendering both left a tall blank box with a caption
+           under it. v-show rather than v-if on the host, because buildPlot needs the element to
+           exist and to have a width when the dialog opens. -->
+      <div class="dialog-card shrink-0 flex min-h-[260px] items-center justify-center">
+        <div v-show="points.length" ref="host" class="w-full"></div>
+        <p v-if="!points.length" class="px-4 text-center text-[12px] text-neutral-500 dark:text-neutral-400">
           Press Measure. A reading lands about once a second.
         </p>
       </div>

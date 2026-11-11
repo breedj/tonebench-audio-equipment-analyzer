@@ -513,6 +513,23 @@ internal static class ResponseCaptureSupport
     /// being fitted is a shape <i>across</i> the band, so leverage should come from spanning it
     /// rather than from the loudest part of it. Weighting by 1/f, by 1/f² and by magnitude were each
     /// measured against the same phase curves, and every one of them was worse.</para>
+    ///
+    /// <para><b>UNVERIFIED, AND THE KNOWN HOLE IS THE REFERENCE CHANNEL ITSELF.</b> Reported from
+    /// the bench 2026-11-11: a two-card run corrected by a figure measured an hour earlier read
+    /// <b>+20.8 ppm</b> left over, which would say the stored figure was a fifth out — on a bench
+    /// whose last three independent drift measurements agreed to 0.3 ppm. The cause was that the
+    /// bench has <i>one</i> channel wired: <c>RightChannelIsReference</c> was ticked, as it is by
+    /// default, while nothing was connected to the right input at all. So the reading was fitted to
+    /// whatever leaks into a disconnected input, and it is worthless.</para>
+    ///
+    /// <para>Nothing here, and nothing anywhere else in this runner, checks that the reference
+    /// input is actually being fed — which is a gap in the <i>measurement</i> before it is a gap in
+    /// this reading, since a gain trace against a disconnected reference is equally meaningless and
+    /// equally silent about it. <b>Until that guard exists this reading must not be believed on a
+    /// bench whose right input may be unconnected</b>, and the first thing to settle is what a real
+    /// fed reference reads: the figure to beat is a residual near zero on a freshly measured
+    /// figure. The log line <c>Clock drift residual: …</c> carries the fitted band and the fit's
+    /// own miss in degrees, which is what to read when that is next on the bench.</para>
     /// </summary>
     public static DriftResidualReading? EstimateDriftResidual(
         FrequencyResponseRequest request,

@@ -167,6 +167,9 @@ describe('clockDriftStaleNotice', () => {
 
     expect(notice).toContain('34 days old')
     expect(notice).toContain('warmed up')
+    // And that the re-measure needs no re-wiring: the drift test measures through whatever is
+    // connected, because a DUT changes a tone's level and phase but not its frequency.
+    expect(notice).toContain('DUT still connected')
   })
 
   /**
@@ -231,6 +234,13 @@ describe('clockDriftResidualNotice', () => {
     expect(notice?.text).toContain('\u2212104.0 ppm')
     expect(notice?.text).toContain('26 ppm out')
     expect(notice?.text).toContain('Clock drift test')
+    // And says the re-measure needs no re-wiring, which is the whole reason it is reasonable to
+    // ask for: the drift test measures through whatever is connected, since a DUT changes a tone's
+    // level and phase but not its frequency. The first draft of this line told the reader to loop
+    // the output back to the input, contradicting the manual's own Clock drift page two sections
+    // above it.
+    expect(notice?.text).toContain('stay wired as it is')
+    expect(notice?.text).not.toContain('looped back')
     // Keep correcting meanwhile: a stale figure removes most of the error, and a reader told only
     // that it is stale would reasonably clear the box, which is strictly worse. Same reasoning as
     // clockDriftStaleNotice's own reassurance.

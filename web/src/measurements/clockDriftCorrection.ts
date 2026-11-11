@@ -157,9 +157,9 @@ export function clockDriftStaleNotice(
   const days = Math.round(age)
   return (
     `This figure is ${days} days old. Clocks move with temperature, so run the Clock drift test ` +
-    `again once the bench has warmed up — it needs the output looped back to the input, as the ` +
-    `calibration does. A stale figure still removes most of the error; it is never worse than ` +
-    `leaving the box clear.`
+    `again once the bench has warmed up. It can run with the DUT still connected — it needs the ` +
+    `tone to reach the input, not a loopback. A stale figure still removes most of the error; it ` +
+    `is never worse than leaving the box clear.`
   )
 }
 
@@ -226,10 +226,11 @@ const ppm = (value: number) => `${value >= 0 ? '+' : '\u2212'}${Math.abs(value).
  * What the measurement on screen says about the stored drift figure, or null when it says nothing.
  *
  * <p><b>This is the staleness detector.</b> A crystal's frequency moves with temperature and the
- * clock-drift test cannot be re-run without re-wiring the bench into a loopback, so the only thing
- * that can notice a figure going out of date is the measurement itself: a sweep corrected by an
- * exact figure has no delay ramp left on it, and whatever ramp *is* left is the error in that
- * figure. The server reads it off the reference channel — see
+ * clock-drift test is not something anyone re-runs on a hunch, so the only thing that notices a
+ * figure going out of date is the measurement itself: a sweep corrected by an exact figure has no
+ * delay ramp left on it, and whatever ramp *is* left is the error in that figure. The test can be
+ * re-run with the bench wired exactly as it is — it needs the tone to reach the input, not a
+ * loopback — which is what makes "go and re-measure" a reasonable thing for this line to say. The server reads it off the reference channel — see
  * `ResponseCaptureSupport.EstimateDriftResidual`, which is also where the reasons it sometimes
  * cannot are.</p>
  *
@@ -286,8 +287,9 @@ export function clockDriftResidualNotice(
     text:
       `This run still has ${ppm(residual.residualPpm)} on it after correcting ${ppm(applied)}, so ` +
       `the stored figure looks about ${left.toFixed(0)} ppm out — ${cost} left uncorrected. Run the ` +
-      `Clock drift test again once the bench has warmed up; it needs the output looped back to the ` +
-      `input. Leave the box ticked meanwhile: a stale figure still removes most of the error.`,
+      `Clock drift test again; it can stay wired as it is, and the new figure should land about ` +
+      `${left.toFixed(0)} ppm from the stored one. Leave the box ticked meanwhile: a stale figure ` +
+      `still removes most of the error.`,
   }
 }
 

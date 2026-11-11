@@ -265,9 +265,10 @@
     <p>
       So: the checkbox prints how old its figure is, and says so in amber past a month. Re-run the
       test when it suits you — after the bench has been on for a while, if the room has changed
-      temperature noticeably, or simply when you are next in a loopback for a calibration, which is
-      the wiring this test wants anyway. It cannot be done automatically for exactly that reason:
-      the output has to reach the input, and while a DUT is patched in it usually does not.
+      temperature noticeably, or when the line under the correction says the figure looks out. You
+      do not have to take the DUT out to do it: as above, the test only needs the tone to reach the
+      input. What it cannot be is <em>automatic</em>, because it plays a tone for as long as it
+      runs, and that is not something to start under a measurement without being asked.
     </p>
 
     <p>
@@ -282,9 +283,10 @@
       <strong>It reads the leftover drift off the measurement you have just taken.</strong> Correct
       a sweep by exactly the right figure and there is no delay ramp left on it; correct it by one
       that has drifted and what is left is the <em>error in that figure</em>. So every chirp
-      measurement is also a check on the number that corrected it — taken with the DUT wherever it
-      is, which is the one thing the Clock drift test itself cannot do, because it needs the output
-      looped back to the input.
+      measurement is also a check on the number that corrected it — taken for free, on the bench as
+      it stands, every time you sweep. Re-running the Clock drift test is cheap and needs no
+      re-wiring; what nobody does is re-run it <em>on a hunch</em>, and this is what says when it is
+      worth doing.
     </p>
 
     <p>
@@ -307,7 +309,8 @@
         <tr class="manual-wrap">
           <td>…so the stored figure looks about N ppm out</td>
           <td>
-            Re-run the Clock drift test when it suits you. Leave the box ticked meanwhile: a stale
+            Re-run the Clock drift test — the bench can stay wired as it is, and the new figure
+            should land about that far from the stored one. Leave the box ticked meanwhile: a stale
             figure still removes most of the error.
           </td>
         </tr>

@@ -316,15 +316,36 @@ watch(
  * a watcher — which fires on a programmatic change as readily as a typed one — would overwrite the
  * restored pair with whatever the single card happened to be.</p>
  */
+/**
+ * The output card that unticking Separate devices threw away, or null.
+ *
+ * <p>Collapsing two cards to one must discard a side, and this is the half that goes. That is
+ * defensible; doing it in silence is not. Reported 2026-11-11: with the G6 as the input and the
+ * MOTU as the output, unticking moved the <i>output</i> to the G6, and the output calibration run
+ * minutes later measured the G6 rather than the MOTU — a 3874 mV full scale belonging to the wrong
+ * interface, which the bench then used for every level. The calibration-drift notice did catch it
+ * afterwards, which is what that notice is for; what was missing was anything saying the output
+ * had moved at the moment it moved.</p>
+ */
+const collapsedOutputCard = ref<string | null>(null)
+
 function onSeparateDevicesChanged() {
   if (form.separateDevices) {
     form.inputCardKey = form.cardKey
     form.outputCardKey = form.cardKey
+    collapsedOutputCard.value = null
     return
   }
 
+  // The input wins: it is the measuring side, and the output follows it through the watcher above.
+  const dropped = form.outputCardKey
   form.cardKey = form.inputCardKey || form.outputCardKey
+  collapsedOutputCard.value =
+    dropped && form.inputCardKey && dropped !== form.inputCardKey ? splitKey(dropped).name : null
 }
+
+// Once the single card is chosen deliberately, the note has said what it had to say.
+watch(() => form.cardKey, () => (collapsedOutputCard.value = null))
 
 /** Channel pairs the chosen device can actually offer, as offsets. */
 const inputPairs = computed(() => pairsFor(selectedInput.value?.maxInputChannels ?? 0))
@@ -1039,6 +1060,20 @@ function mvRms(value: number | null | undefined) {
           is still using the card it had before, so the calibration steps are turned off: they
           would measure <em>that</em> card while this dialog describes a different one. Putting
           both cards on a host API the other also offers is usually what fixes it.
+        </p>
+
+        <!-- Said at the moment the output moves, not minutes later when a calibration has already
+             been taken through the wrong interface. See collapsedOutputCard. -->
+        <p
+          v-if="collapsedOutputCard"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          Both directions are now on <strong>{{ splitKey(form.cardKey).name }}</strong>. The output
+          was on <strong>{{ collapsedOutputCard }}</strong> — one card carries both directions, so
+          unticking Separate devices keeps the input's card and the output follows it. If the output
+          should still be the other card, tick Separate devices again. <strong>Re-run the output
+          calibration either way</strong>: a full scale measured on one interface does not describe
+          the other.
         </p>
 
         <p

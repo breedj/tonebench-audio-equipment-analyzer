@@ -315,6 +315,18 @@ export interface SoundCardConfig {
   inputFullScalePeakMvLeft: number | null
   inputFullScalePeakMvRight: number | null
   calibratedUtc: string | null
+  /**
+   * Which hardware each full scale was measured on — see `SoundCardConfig`'s own remarks. Empty is
+   * "not recorded", which is every document written before 2026-11-11 and is **not** the same as
+   * "differs": a bench calibrated last year must not be told its calibration is stale merely
+   * because this build cannot tell.
+   */
+  outputCalibratedHostApi: string
+  outputCalibratedDeviceName: string
+  outputCalibratedChannelOffset: number
+  inputCalibratedHostApi: string
+  inputCalibratedDeviceName: string
+  inputCalibratedChannelOffset: number
   frontEndGainLeftDb: number
   frontEndGainRightDb: number
   gainDisplayUnit: string

@@ -190,11 +190,11 @@ public sealed class SoundCardCalibrationRunner(
 
         await SilenceAsync(ct);
 
-        SoundCardConfig updated = soundCard.Config with
+        SoundCardConfig updated = (soundCard.Config with
         {
             OutputFullScalePeakMv = fullScaleV * 1000.0,
             CalibratedUtc = DateTimeOffset.UtcNow,
-        };
+        }).StampOutputCalibration();
 
         await SaveAndReopenAsync(updated, ct);
 
@@ -296,12 +296,12 @@ public sealed class SoundCardCalibrationRunner(
             double leftMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, leftDbFs) * 1000.0;
             double rightMv = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, rightDbFs) * 1000.0;
 
-            SoundCardConfig updated = soundCard.Config with
+            SoundCardConfig updated = (soundCard.Config with
             {
                 InputFullScalePeakMvLeft = leftMv,
                 InputFullScalePeakMvRight = rightMv,
                 CalibratedUtc = DateTimeOffset.UtcNow,
-            };
+            }).StampInputCalibration();
 
             await SaveAndReopenAsync(updated, ct);
 
@@ -399,9 +399,10 @@ public sealed class SoundCardCalibrationRunner(
             double fullScaleV = SoundCardCalibration.InputFullScaleFromMeasurement(knownPeakV, measuredDbFs);
             double fullScaleMv = fullScaleV * 1000.0;
 
-            SoundCardConfig updated = channel == StreamChannel.Right
+            SoundCardConfig updated = (channel == StreamChannel.Right
                 ? soundCard.Config with { InputFullScalePeakMvRight = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow }
-                : soundCard.Config with { InputFullScalePeakMvLeft = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow };
+                : soundCard.Config with { InputFullScalePeakMvLeft = fullScaleMv, CalibratedUtc = DateTimeOffset.UtcNow })
+                .StampInputCalibration();
 
             await SaveAndReopenAsync(updated, ct);
 

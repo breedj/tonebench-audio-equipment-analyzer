@@ -473,7 +473,22 @@ public sealed record SoundCardConfig(
     double FrontEndGainLeftDb = 0.0,
     double FrontEndGainRightDb = 0.0,
     string GainDisplayUnit = "Db",
-    double MinStimulusFrequencyHz = 20.0)
+    double MinStimulusFrequencyHz = 20.0,
+    // **Which hardware each full scale was measured on.** A full scale is a property of one device
+    // and one channel pair, so changing either leaves a stored figure describing something that is
+    // no longer in the path -- and the figure is what turns samples into volts, so every reading
+    // afterwards is wrong by whatever the two cards differ by, with nothing on screen saying so.
+    // Only CalibratedUtc was recorded before, which says *when* and not *what*.
+    //
+    // Empty means "not recorded", which is every document written before 2026-11-11 and is NOT the
+    // same as "differs" -- a bench that calibrated last year must not be told its calibration is
+    // stale merely because this build cannot tell. The client treats unknown as no complaint.
+    string OutputCalibratedHostApi = "",
+    string OutputCalibratedDeviceName = "",
+    int OutputCalibratedChannelOffset = 0,
+    string InputCalibratedHostApi = "",
+    string InputCalibratedDeviceName = "",
+    int InputCalibratedChannelOffset = 0)
 {
     /// <summary>The same bound the external gain uses, and for the same reason: past it, it is a typo rather than a fixture.</summary>
     public const double MaxAbsGainDb = ExternalGainConfig.MaxAbsDb;
@@ -504,6 +519,31 @@ public sealed record SoundCardConfig(
 
     private static bool IsFullScaleValid(double? mv) =>
         mv is null || (double.IsFinite(mv.Value) && mv.Value >= MinFullScaleMv && mv.Value <= MaxFullScaleMv);
+
+    /// <summary>
+    /// Records that the output full scale now in this configuration was measured on the output it
+    /// currently names. Called by the calibration runner at the moment it stores the figure, so the
+    /// two can never disagree — a stamp applied anywhere later would be a claim rather than a fact.
+    /// </summary>
+    public SoundCardConfig StampOutputCalibration() => this with
+    {
+        OutputCalibratedHostApi = OutputHostApi,
+        OutputCalibratedDeviceName = OutputDeviceName,
+        OutputCalibratedChannelOffset = OutputChannelOffset,
+    };
+
+    /// <summary>
+    /// The input's counterpart. Note the loopback source calibrates the input <i>through</i> this
+    /// card's output, so an input figure taken that way also depends on the output's — which the
+    /// dialog already says, and which is why the output's own drift is reported separately rather
+    /// than folded into this one.
+    /// </summary>
+    public SoundCardConfig StampInputCalibration() => this with
+    {
+        InputCalibratedHostApi = InputHostApi,
+        InputCalibratedDeviceName = InputDeviceName,
+        InputCalibratedChannelOffset = InputChannelOffset,
+    };
 }
 
 /// <summary>

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import type { SoundCardConfig, VoltageEntryUnitName } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
@@ -14,6 +14,7 @@ import {
   savedCardNeedsAdvanced,
   splitKey,
 } from '../soundcard/cardList'
+import { calibrationState } from '../soundcard/calibrationState'
 import Modal from './Modal.vue'
 import PanelIcon from './PanelIcon.vue'
 import HeaderIcon from './HeaderIcon.vue'
@@ -325,6 +326,49 @@ const trustWarning = computed(() => {
 const canSave = computed(
   () => (!!selectedInput.value || !!selectedOutput.value) && rates.value.length > 0 && !busy.value,
 )
+
+/**
+ * What to say about the stored full scales, beside the dropdowns that change them.
+ *
+ * <p>Two things, and the drift one is the reason this exists: a full scale is the figure that
+ * turns samples into volts, measured on one device and one channel pair, so changing either leaves
+ * every reading afterwards wrong by whatever the two differ by — and nothing downstream can tell a
+ * calibrated card from a mis-calibrated one, which is what makes it worth saying out loud. The
+ * rule, including why provenance that was never recorded is <i>not</i> drift, is in
+ * <c>calibrationState</c>.</p>
+ */
+const calibrationNotices = computed<string[]>(() => {
+  const state = calibrationState(config.value)
+  const notices: string[] = []
+
+  // Drift first: it is about a figure that exists and is wrong, which is worse than one that is
+  // honestly absent, and it is the one the user has just caused.
+  for (const drift of state.drifted) {
+    notices.push(
+      `The ${drift.direction} full scale was measured on ${drift.measuredOn}, and the ` +
+        `${drift.direction} is now ${drift.nowOn}. The stored figure describes different ` +
+        `hardware, so levels on that side are wrong by whatever the two differ by — run the ` +
+        `${drift.direction} step again.`,
+    )
+  }
+
+  if (state.uncalibrated.length === 2) {
+    notices.push(
+      'This card has not been calibrated: readings are in dBFS rather than volts, and the app ' +
+        'does not know what voltage it is playing. Both steps are below.',
+    )
+  } else if (state.uncalibrated.includes('output')) {
+    notices.push(
+      'The output has not been calibrated, so the app does not know what voltage it is playing.',
+    )
+  } else if (state.uncalibrated.includes('input')) {
+    notices.push(
+      'The input has not been calibrated, so readings are in dBFS rather than volts.',
+    )
+  }
+
+  return notices
+})
 
 /**
  * What the chosen pair costs, said once and beside the dropdowns that caused it.
@@ -722,6 +766,17 @@ function mvRms(value: number | null | undefined) {
           {{ modeNote }}
         </p>
 
+        <!-- The calibration's own state, here rather than beside the two steps: changing a
+             dropdown above is what makes a stored full scale stale, so the complaint belongs where
+             the cause is. See calibrationNotices. -->
+        <p
+          v-for="notice in calibrationNotices"
+          :key="notice"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ notice }}
+        </p>
+
         <!-- What a host API that offered nothing reported. Under the dropdown because it is about
              that list: an empty one otherwise says only "no cards", which is the same picture
              whether the machine has no interface, the driver declined to start, or the driver
@@ -743,6 +798,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Input</span>
           <select
             v-model="form.inputKey"
+            v-memo="[cardInputs, form.inputKey]"
             class="tb-input"
           >
             <option
@@ -759,6 +815,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Input channels</span>
           <select
             v-model.number="form.inputChannelOffset"
+            v-memo="[inputPairs, form.inputChannelOffset]"
             class="tb-input"
           >
             <option v-for="pair in inputPairs" :key="pair.offset" :value="pair.offset">{{ pair.label }}</option>
@@ -769,6 +826,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Output</span>
           <select
             v-model="form.outputKey"
+            v-memo="[cardOutputs, form.outputKey]"
             class="tb-input"
           >
             <option
@@ -785,6 +843,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Output channels</span>
           <select
             v-model.number="form.outputChannelOffset"
+            v-memo="[outputPairs, form.outputChannelOffset]"
             class="tb-input"
           >
             <option v-for="pair in outputPairs" :key="pair.offset" :value="pair.offset">{{ pair.label }}</option>
@@ -900,6 +959,7 @@ function mvRms(value: number | null | undefined) {
           <span class="flex min-w-0 items-center gap-2">
             <select
               v-model.number="outputStep.dbFs"
+              v-memo="[outputStep.dbFs, playingDbFs]"
               class="tb-input min-w-0 flex-1"
               :disabled="playingDbFs !== null"
             >
@@ -942,6 +1002,7 @@ function mvRms(value: number | null | undefined) {
             />
             <select
               v-model="outputStep.unit"
+              v-memo="[outputStep.unit]"
               class="tb-input"
             >
               <option value="Rms">mV rms</option>
@@ -996,6 +1057,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Known source</span>
           <select
             v-model="inputStep.source"
+            v-memo="[inputStep.source]"
             class="tb-input"
           >
             <option value="External">A generator of known voltage</option>
@@ -1038,6 +1100,7 @@ function mvRms(value: number | null | undefined) {
           <span class="sc-label">Input channel</span>
           <select
             v-model="inputStep.channel"
+            v-memo="[inputStep.channel]"
             class="tb-input"
           >
             <option value="Left">Left</option>
@@ -1057,6 +1120,7 @@ function mvRms(value: number | null | undefined) {
             />
             <select
               v-model="inputStep.unit"
+              v-memo="[inputStep.unit]"
               class="tb-input"
             >
               <option value="Rms">mV rms</option>
@@ -1073,7 +1137,7 @@ function mvRms(value: number | null | undefined) {
             Play at
           </span>
           <span class="flex min-w-0 items-center gap-2">
-            <select v-model.number="inputStep.dbFs" class="tb-input min-w-0 flex-1">
+            <select v-model.number="inputStep.dbFs" v-memo="[inputStep.dbFs]" class="tb-input min-w-0 flex-1">
               <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dBFS</option>
             </select>
             <button
@@ -1188,9 +1252,11 @@ function mvRms(value: number | null | undefined) {
         v-if="!isCalibrated"
         class="text-[11px] text-neutral-500 dark:text-neutral-400"
       >
-        Until both steps are done the analyzer reports <strong>dBFS rather than volts</strong>. Every
-        ratio — THD, IMD, crosstalk, the shape of a frequency response — is exact regardless, because
-        a consistent full-scale constant cancels out of it.
+        <!-- The headline moved up beside the device controls (calibrationNotices), so this is only
+             the half it does not say: what is still trustworthy without a calibration. -->
+        Every ratio — THD, IMD, crosstalk, the shape of a frequency response — is exact whether or
+        not this card is calibrated, because a consistent full-scale constant cancels out of it.
+        What a calibration adds is the <strong>absolute</strong> level: volts rather than dBFS.
       </p>
 
       <p v-if="error" class="text-red-600 dark:text-red-400">{{ error }}</p>

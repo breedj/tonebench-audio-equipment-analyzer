@@ -173,6 +173,19 @@ async function close() {
         stand clear of the input's own hum.
       </p>
 
+      <!-- Asked on 2026-11-11, and the answer is worth having on the screen that prompts it: a
+           reader who has just been told to calibrate a card before trusting its levels will
+           reasonably assume the same of this. SoundCardCalibration picks root-2 V peak for an
+           uncalibrated card precisely so that dBV and dBFS coincide, which is what makes the
+           Level box below mean something sensible either way. -->
+      <p class="dialog-card shrink-0 text-[12px] leading-relaxed">
+        <strong>Calibration is not needed for this.</strong> The answer is a ratio of two
+        frequencies, so the volts scale never enters it — an uncalibrated card gives the same
+        drift figure as a calibrated one. All calibration changes is what the numbers are
+        <em>called</em>: with none, full scale is 0 dBV by construction, so the Level box reads as
+        dBFS and −20 is 20 dB below clipping, which is a good place to measure from.
+      </p>
+
       <div class="dialog-card shrink-0">
         <div class="tb-group">
           <label class="sc-row">

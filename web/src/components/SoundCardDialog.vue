@@ -328,6 +328,29 @@ const canSave = computed(
 )
 
 /**
+ * Whether what this dialog shows is what the connected card is actually running.
+ *
+ * <p>It is not decoration, and it is the fault reported on 2026-11-11: the calibration steps below
+ * drive the <i>connected device</i> through the session, while every control above them is a form
+ * that <c>applyDevice</c> writes separately — so the two can disagree, and when they do nothing
+ * says so. A pairing that accepts no common sample rate (a G6 on WASAPI against a MOTU on ASIO,
+ * which is the natural selection and the one that cannot work) leaves <c>canSave</c> false, so
+ * <c>applyDevice</c> returns without a word and <i>none</i> of the fields is applied — including
+ * Output channels. Generate sine then played the tone on the previously connected card at offset
+ * 0, i.e. channels 1/2, while the dialog read 3/4 and the cable was on 3/4: a loopback that
+ * captured nothing but hum, with the one control that explains it showing the right answer.</p>
+ *
+ * <p>The comparison is <c>applyDevice</c>'s own, so the two cannot disagree about what "applied"
+ * means; it is briefly false during the 250 ms debounce, which is correct — a tone started then
+ * would play on the configuration being replaced.</p>
+ */
+const settingsInEffect = computed(() => {
+  const next = toConfig()
+  if (!next || !canSave.value) return false
+  return JSON.stringify(next) === JSON.stringify(config.value)
+})
+
+/**
  * What to say about the stored full scales, beside the dropdowns that change them.
  *
  * <p>Two things, and the drift one is the reason this exists: a full scale is the figure that
@@ -582,7 +605,10 @@ async function acceptInput() {
 const outputCalibrated = computed(() => config.value?.outputFullScalePeakMv != null)
 
 const canMeasureInput = computed(
-  () => !busy.value && (inputStep.source === 'External' || outputCalibrated.value),
+  () =>
+    !busy.value &&
+    settingsInEffect.value &&
+    (inputStep.source === 'External' || outputCalibrated.value),
 )
 
 // The tone must never outlive the dialog: it is the generator, and the user has walked away.
@@ -900,6 +926,19 @@ function mvRms(value: number | null | undefined) {
           {{ probe.problem ?? 'This pairing accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.' }}
         </p>
 
+        <!-- The consequence of whatever is above, stated separately because it is what the user
+             actually meets: a setting that reads one thing while the card does another. Its own
+             paragraph rather than a sentence appended to the red box, since the box has two
+             possible texts and this follows from either. -->
+        <p
+          v-if="config && !settingsInEffect && !busy"
+          class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
+        >
+          These settings are not in effect — none of them has reached a card, so the calibration
+          steps below are turned off. They drive whichever card is still connected, which is not
+          the one shown here.
+        </p>
+
         <p
           v-if="pairingWarning"
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
@@ -973,7 +1012,12 @@ function mvRms(value: number | null | undefined) {
                   ? { backgroundColor: 'var(--kind-red-chip-bg)', color: 'var(--kind-red-chip-fg)' }
                   : { backgroundColor: 'var(--kind-orange-chip-bg)', color: 'var(--kind-orange-chip-fg)' }
               "
-              :disabled="busy"
+              :disabled="busy || (!settingsInEffect && playingDbFs === null)"
+              :title="
+                !settingsInEffect && playingDbFs === null
+                  ? 'The settings above are not in effect, so this would play on whichever card is still connected.'
+                  : undefined
+              "
               @click="toggleTone"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">

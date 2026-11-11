@@ -4,6 +4,9 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useClockDrift } from '../composables/useClockDrift'
+import { useSoundCard } from '../composables/useSoundCard'
+import { useManual } from '../manual/useManual'
+import HeaderIcon from './HeaderIcon.vue'
 import { clampNumberField } from '../numberField'
 import Modal from './Modal.vue'
 
@@ -22,12 +25,26 @@ const props = defineProps<{ open: boolean; pairingNote?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { status, error, busy, running, points, refresh, start, cancel, clear } = useClockDrift()
+const soundCard = useSoundCard()
+const { openManual } = useManual()
 const { isDark } = useAppTheme()
 
 const form = reactive({ toneHz: 1000, levelDbv: -20, durationSeconds: 60 })
 
 const host = ref<HTMLDivElement | null>(null)
 const plot = shallowRef<uPlot | null>(null)
+
+/**
+ * What the Level box is in. dBV asserts volts, and an uncalibrated card has no volts scale -- it
+ * assumes full scale is root-2 V peak so that dBV and dBFS coincide numerically, which makes the
+ * figure right and the label a claim the app cannot back. Reported from 2026-11-11: "shouldn't we
+ * change that dBV to dBFS instead, that is why I was confused".
+ *
+ * <p>The OUTPUT full scale decides it, not the pair: this box drives the generator. It follows the
+ * convention the status bar already states -- "not calibrated, so levels are dBFS rather than
+ * volts" -- rather than inventing one.</p>
+ */
+const levelUnit = computed(() => (soundCard.config.value?.outputFullScalePeakMv != null ? 'dBV' : 'dBFS'))
 
 const verdict = computed(() => status.value?.verdict ?? null)
 
@@ -173,17 +190,17 @@ async function close() {
         stand clear of the input's own hum.
       </p>
 
-      <!-- Asked on 2026-11-11, and the answer is worth having on the screen that prompts it: a
-           reader who has just been told to calibrate a card before trusting its levels will
-           reasonably assume the same of this. SoundCardCalibration picks root-2 V peak for an
-           uncalibrated card precisely so that dBV and dBFS coincide, which is what makes the
-           Level box below mean something sensible either way. -->
+      <!-- Asked on 2026-11-11, and the answer belongs on the screen that prompts it: a reader who
+           has just been told to calibrate a card before trusting its levels will reasonably assume
+           the same of this. The Level box above now names its own unit, so this no longer has to
+           explain away a label that said volts on a card that has none. -->
       <p class="dialog-card shrink-0 text-[12px] leading-relaxed">
         <strong>Calibration is not needed for this.</strong> The answer is a ratio of two
-        frequencies, so the volts scale never enters it — an uncalibrated card gives the same
-        drift figure as a calibrated one. All calibration changes is what the numbers are
-        <em>called</em>: with none, full scale is 0 dBV by construction, so the Level box reads as
-        dBFS and −20 is 20 dB below clipping, which is a good place to measure from.
+        frequencies, so the volts scale never enters it — an uncalibrated card gives the same drift
+        figure as a calibrated one, and even a badly wrong level would not bias it, since clipping
+        adds harmonics without moving the fundamental. On an uncalibrated card the Level box reads
+        in <strong>dBFS</strong>, where 0 is the clipping point, and −20 is a good place to measure
+        from.
       </p>
 
       <div class="dialog-card shrink-0">
@@ -215,7 +232,7 @@ async function close() {
                 :disabled="running"
                 @change="form.levelDbv = clampNumberField(form.levelDbv, -80, 20)"
               />
-              <span class="text-neutral-500">dBV</span>
+              <span class="text-neutral-500">{{ levelUnit }}</span>
             </span>
           </label>
           <label class="sc-row">
@@ -315,6 +332,15 @@ async function close() {
     </div>
 
     <template #footer>
+      <button
+        type="button"
+        class="mr-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 text-[13px] font-semibold hover:bg-neutral-100 dark:border-neutral-800 dark:hover:bg-neutral-800"
+        title="Clock drift: what the figure means, and which measurements it reaches."
+        @click="openManual('clock-drift')"
+      >
+        <HeaderIcon name="manual" :size="16" />
+        Manual
+      </button>
       <button type="button" class="btn-primary" @click="close">Close</button>
     </template>
   </Modal>

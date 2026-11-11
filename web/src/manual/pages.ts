@@ -404,6 +404,14 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/SoundCardPage.vue')),
   },
   {
+    id: 'clock-drift',
+    title: 'Clock drift',
+    summary:
+      'Two cards run on two crystals: measuring how far apart, what the figure means, and which measurements it reaches.',
+    group: 'Basics',
+    component: manualPage(() => import('./pages/ClockDriftPage.vue')),
+  },
+  {
     id: 'simulator',
     title: 'Using the simulator',
     summary: 'Measuring without hardware: how the simulator is wired, and what each DUT model is for.',

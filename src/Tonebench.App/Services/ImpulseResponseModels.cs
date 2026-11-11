@@ -319,7 +319,12 @@ public sealed record ImpulseResponseStatus(
     /// <see cref="DriftResidualReading"/>; the frequency-response screen carries the same field for
     /// the same reason, and the two panels word it through one client-side module.
     /// </summary>
-    DriftResidualReading? DriftResidual = null);
+    DriftResidualReading? DriftResidual = null,
+    /// <summary>
+    /// What the reference input was carrying, on a run whose reference mode is the right channel.
+    /// See <see cref="DriftResidualReading"/>'s own neighbour on the frequency-response status.
+    /// </summary>
+    ReferenceChannelReading? Reference = null);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record ImpulseResponseStarted(

@@ -62,6 +62,16 @@ const { showPage } = useManual()
       phase — and only in this mode do the Nyquist and Nichols projections become available.
     </p>
 
+    <p class="manual-callout">
+      <strong>The box is ticked by default, so check that the right input really is fed.</strong>
+      A bench with one channel wired has nothing on it, and dividing by nothing produces a Gain
+      trace, a phase, a group delay and a delay reading that all look entirely plausible and mean
+      nothing. The app now measures that input and says so underneath the box — it reports how much
+      signal is arriving against that channel's own noise, and turns amber below about 20 dB. If you
+      only have one cable, clear the box: the measurement against the generated sweep is correct and
+      complete, it simply includes the analyzer's own output path.
+    </p>
+
     <h2>Running it</h2>
     <table>
       <tbody>
@@ -174,7 +184,8 @@ const { showPage } = useManual()
           <td>Right channel is reference</td>
           <td>
             Measure left relative to the right input rather than against the generated sweep — see
-            above.
+            above. The line underneath says how much signal is reaching that input, and warns when
+            almost none is.
           </td>
         </tr>
         <tr>

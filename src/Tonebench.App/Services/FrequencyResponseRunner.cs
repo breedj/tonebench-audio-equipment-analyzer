@@ -114,6 +114,13 @@ public sealed class FrequencyResponseRunner(
     private DriftResidualReading? _driftResidual;
 
     /// <summary>
+    /// What the reference input was carrying on the run on screen — see
+    /// <see cref="ResponseCaptureSupport.CheckReferenceChannel"/>. Null on a run that measured
+    /// against the synthetic stimulus, which has no reference to check.
+    /// </summary>
+    private ReferenceChannelReading? _reference;
+
+    /// <summary>
     /// The runs of the measurements switched away from, so clicking one away and back does not throw
     /// a chirp away — see <see cref="SwitchOwner"/>, and <see cref="ThdSweepRunner.SwitchOwner"/> for
     /// the whole reasoning. Four, the sweep runners' bound and the retained spectrum's: a parked run
@@ -149,7 +156,7 @@ public sealed class FrequencyResponseRunner(
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     [.. _traces], PointsMeasured: 0, PointCount: 0,
                     PhaseKind: ResponsePhaseKind.PerTrace, RightChannelIsReference: _rightChannelIsReference,
-                    Warning: _warning, DriftResidual: _driftResidual);
+                    Warning: _warning, DriftResidual: _driftResidual, Reference: _reference);
             }
         }
     }
@@ -208,6 +215,7 @@ public sealed class FrequencyResponseRunner(
                 _lastResults = null;
                 _bandwidthOverride = null;
                 _driftResidual = null;
+                _reference = null;
             }
 
             _lastRequest = request;
@@ -265,6 +273,7 @@ public sealed class FrequencyResponseRunner(
             _traces = [];
             _lastResults = null;
             _driftResidual = null;
+            _reference = null;
             _phase = FrequencyResponsePhase.Idle;
             _continuous = false;
             _passesCompleted = 0;
@@ -308,7 +317,7 @@ public sealed class FrequencyResponseRunner(
                     _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     _rightChannelIsReference, _traces, _lastRequest, _warning, _lastResults,
-                    _bandwidthOverride, _driftResidual);
+                    _bandwidthOverride, _driftResidual, _reference);
 
             var outcome = _parking.Switch(owner, current);
             if (!outcome.Changed)
@@ -334,6 +343,7 @@ public sealed class FrequencyResponseRunner(
                 _lastResults = parked.LastResults;
                 _bandwidthOverride = parked.BandwidthOverride;
                 _driftResidual = parked.DriftResidual;
+                _reference = parked.Reference;
             }
             else if (outcome.Cleared)
             {
@@ -390,6 +400,7 @@ public sealed class FrequencyResponseRunner(
         _lastResults = null;
         _bandwidthOverride = null;
         _driftResidual = null;
+        _reference = null;
         _phase = FrequencyResponsePhase.Idle;
         _continuous = false;
         _passesCompleted = 0;
@@ -414,7 +425,8 @@ public sealed class FrequencyResponseRunner(
         List<FrequencyResponseTrace> Traces, FrequencyResponseRequest? LastRequest, string? Warning,
         (double GeneratorAmpDbv, FrequencyResponseResult Left, FrequencyResponseResult Right, FrequencyResponseResult? Gain)? LastResults,
         BandwidthReferenceSpec? BandwidthOverride,
-        DriftResidualReading? DriftResidual);
+        DriftResidualReading? DriftResidual,
+        ReferenceChannelReading? Reference);
 
     /// <summary>
     /// Re-finds the bandwidth corners of the traces on screen against a new reference, without
@@ -844,17 +856,25 @@ public sealed class FrequencyResponseRunner(
         var traces = ResponseCaptureSupport.BuildTraces(
             effective, results.Item1, DisplayColumns, results.Item2, results.Item3, results.Item4);
 
+        // Was the reference input carrying anything at all? Before the residual, which is gated on
+        // it: a reading taken off an unconnected input is the way that measurement goes wrong.
+        // Named for what it is rather than "reference": the chirp's own reference spectrum is a
+        // local in this method already, and the two are nothing to do with each other.
+        var referenceCheck = ResponseCaptureSupport.CheckReferenceChannel(effective, results.Item3);
+        ResponseCaptureSupport.LogReferenceChannel(logger, referenceCheck);
+
         // Read off the finished estimates, once per pass. It is a reading *of* the measurement, not
         // a parameter of it, so it does not belong in BuildTraces -- which ApplyBandwidthReference
         // calls again on the same results, where re-fitting would spend the work for an answer that
         // cannot have changed.
-        var residual = ResponseCaptureSupport.EstimateDriftResidual(effective, results.Item2, results.Item3);
+        var residual = ResponseCaptureSupport.EstimateDriftResidual(effective, results.Item2, results.Item3, referenceCheck);
         ResponseCaptureSupport.LogDriftResidual(logger, residual);
 
         lock (_stateLock)
         {
             _lastResults = results;
             _driftResidual = residual;
+            _reference = referenceCheck;
         }
 
         return (traces, peakDbv);

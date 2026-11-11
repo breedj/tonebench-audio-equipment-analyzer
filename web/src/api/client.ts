@@ -1552,6 +1552,18 @@ export interface FrequencyResponseTraceJson {
 }
 
 /**
+ * Whether the reference input was actually carrying anything. Mirrors
+ * `Tonebench.App.Services.ReferenceChannelReading`; absent on a run that measured against the
+ * synthetic stimulus, which has no reference to check, and on a build older than this one.
+ */
+export interface ReferenceChannelJson {
+  /** Per-bin signal-to-noise ratio of that channel, from the roughness of its own phase. */
+  snrDb: number
+  /** Whether it is enough to divide by. False is a bench with one channel wired. */
+  usable: boolean
+}
+
+/**
  * How much clock drift the run on screen still carries. Mirrors
  * `Tonebench.App.Services.DriftResidualReading`; absent where the reading could not honestly be
  * made, which is every stimulus but the chirp, every run without a measured reference, and every
@@ -1573,6 +1585,8 @@ export interface DriftResidualJson {
   slipSamples: number
   /** That record's length in seconds, so the slip can be quoted against it. */
   recordSeconds: number
+  /** What the reference channel it was read off was carrying — the figure is only worth what that was. */
+  referenceSnrDb: number
 }
 
 export interface FrequencyResponseStatus {
@@ -1609,6 +1623,8 @@ export interface FrequencyResponseStatus {
   pointPreviews?: ResponsePointPreviewJson[]
   /** The clock drift this run still shows, where it could be read. See `DriftResidualJson`. */
   driftResidual?: DriftResidualJson | null
+  /** What the reference input was carrying, on a run that had one. See `ReferenceChannelJson`. */
+  reference?: ReferenceChannelJson | null
 }
 
 /** One point's decimated spectrum and waveform on one input. Mirrors Tonebench.App.Services.ResponsePointPreview. */
@@ -1727,6 +1743,8 @@ export interface ImpulseResponseStatus {
   stimulus: ResponseStimulusName | null
   /** The clock drift this run still shows, where it could be read. See `DriftResidualJson`. */
   driftResidual?: DriftResidualJson | null
+  /** What the reference input was carrying, on a run that had one. See `ReferenceChannelJson`. */
+  reference?: ReferenceChannelJson | null
 }
 
 /** A stored loopback calibration, as the picker lists it. */

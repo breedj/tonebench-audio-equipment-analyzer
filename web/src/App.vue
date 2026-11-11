@@ -727,6 +727,7 @@ const {
   phaseKind: responsePhaseKind,
   rightChannelIsReference: responseRightChannelIsReference,
   driftResidual: responseDriftResidual,
+  reference: responseReference,
   phaseAvailable: responsePhaseAvailable,
 } = useFrequencyResponse()
 
@@ -826,6 +827,7 @@ const {
   harmonics: impulseHarmonics,
   gateResolutionHz: impulseGateResolutionHz,
   driftResidual: impulseDriftResidual,
+  reference: impulseReference,
   refresh: refreshImpulse,
   start: startImpulse,
   cancel: cancelImpulse,
@@ -4670,6 +4672,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
                   :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
                   :drift-residual="impulseDriftResidual"
+                  :reference="impulseReference"
                   @capture-reference="loopbackDialogOpen = true"
                 />
               </template>
@@ -5057,6 +5060,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
                   :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
                   :drift-residual="responseDriftResidual"
+                  :reference="responseReference"
                 />
                 <SteppedResponseConfigPanel
                   v-else

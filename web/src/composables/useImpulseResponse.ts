@@ -324,6 +324,9 @@ export function useImpulseResponse() {
    */
   const driftResidual = computed(() => status.value?.driftResidual ?? null)
 
+  /** What the reference input was carrying, on a run whose reference mode is the right channel. */
+  const reference = computed(() => status.value?.reference ?? null)
+
   /**
    * The one line the measurement status bar shows — "Measuring · pass 2 · record 1 of 4" — in the
    * shape every other runner's `progressLabel` has, so `statusHeadline`/`statusDetail` split it the
@@ -375,6 +378,7 @@ export function useImpulseResponse() {
     hasResult,
     gateResolutionHz,
     driftResidual,
+    reference,
     references,
     capturingReference,
     error,

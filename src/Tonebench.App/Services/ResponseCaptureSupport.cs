@@ -477,6 +477,117 @@ internal static class ResponseCaptureSupport
     }
 
     /// <summary>
+    /// How far under a usable reference a channel has to read before the run is warned about it.
+    ///
+    /// <para>Measured rather than chosen. <see cref="TransferFunctionSnr"/> recovers a known
+    /// signal-to-noise ratio to within about three decibels and saturates near zero, so the figure
+    /// has to sit clear of both ends: 20 dB is ten above where the estimate stops meaning anything
+    /// and far below the 60 dB and better a real reference tap reads. What is on the other side of
+    /// it is not a <i>marginal</i> reference but no reference — a 20 dB channel contributes a tenth
+    /// of its own amplitude as noise to every ratio it is divided into, and the latency estimate
+    /// and the gain trace are built on exactly that division.</para>
+    /// </summary>
+    public const double MinReferenceSnrDb = 20.0;
+
+    /// <summary>
+    /// Whether the reference input was carrying anything, on a run that said it had one.
+    ///
+    /// <para><b>The gap this closes.</b> <c>Right channel is reference</c> is ticked by default and
+    /// nothing anywhere checked that the right input was fed. On a bench with one channel wired
+    /// that produced a complete, plausible measurement built on dividing by noise — the gain trace,
+    /// its phase, its group delay and the latency reading all of it — with nothing on screen saying
+    /// so. Reported from the bench 2026-11-11, where it first surfaced as the clock-drift residual
+    /// claiming a figure was stale that three independent measurements agreed on to 0.3 ppm.</para>
+    ///
+    /// <para><b>Why the test is phase roughness.</b> Coherence is identically 1 for a single record
+    /// and one record is the default; level cannot be thresholded on a bench whose reference may be
+    /// through a divider and whose DUT may have 60 dB of gain; and the deconvolution reproduces the
+    /// captured spectrum bin for bin, so there is no residual to measure. A transfer function is
+    /// smooth from bin to bin whatever shape it has and noise is not, which is the one difference
+    /// that survives all three. <see cref="TransferFunctionSnr"/> carries the measurements.</para>
+    ///
+    /// <para><b>What it cannot catch</b>, stated here because the warning must not be read as more
+    /// than it is: a reference input carrying a loud clean signal that is not the stimulus — an
+    /// unrelated source, or heavy crosstalk from the other channel — passes this. It bounds the
+    /// noise on that channel; it does not establish that the channel is fed from the generator.</para>
+    /// </summary>
+    public static ReferenceChannelReading? CheckReferenceChannel(
+        FrequencyResponseRequest request, FrequencyResponseResult rightResult)
+    {
+        if (!request.RightChannelIsReference) return null;
+
+        double binHz = request.BinHz;
+        int binCount = rightResult.Magnitude.Length;
+        if (binCount < 4 || binHz <= 0) return null;
+
+        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
+        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
+        if (lastBin - firstBin + 1 < TransferFunctionSnr.MinBins) return null;
+
+        if (TransferFunctionSnr.FromPhaseRoughness(
+                rightResult.PhaseDeg, MeasuredPhaseBins(rightResult.Magnitude, firstBin, lastBin),
+                firstBin, lastBin)
+            is not { } snrDb) return null;
+
+        if (!double.IsFinite(snrDb)) return null;
+
+        return new ReferenceChannelReading(snrDb, snrDb >= MinReferenceSnrDb);
+    }
+
+    /// <summary>
+    /// Puts the reference check in the log, at Warning when it failed.
+    ///
+    /// <para>The wording the user reads is the client's (<c>measurements/referenceChannel.ts</c>),
+    /// deliberately not duplicated here — but a log line is the half that survives the process, and
+    /// a run whose gain trace was a division by noise has to be identifiable in a log sent in
+    /// afterwards. That is exactly how this fault was reported, and it took a conversation to
+    /// establish rather than one line.</para>
+    /// </summary>
+    public static void LogReferenceChannel(ILogger logger, ReferenceChannelReading? reading)
+    {
+        if (reading is null) return;
+
+        if (reading.Usable)
+        {
+            logger.LogInformation(
+                "Reference channel: carrying about {Snr:0} dB over its own noise", reading.SnrDb);
+            return;
+        }
+
+        logger.LogWarning(
+            "Reference channel: almost nothing is arriving on the right input ({Snr:0} dB, against " +
+            "{Min:0} dB needed). The gain trace, its phase and group delay, and the latency reading " +
+            "are a division by noise for this run",
+            reading.SnrDb, MinReferenceSnrDb);
+    }
+
+    /// <summary>
+    /// 1 where a bin's phase is a measurement and 0 where it was <i>held</i>.
+    /// <see cref="FrequencyResponseEstimator.PhaseFloorRelative"/> holds the phase constant below
+    /// the trace's own magnitude floor, and a constant has a second difference of exactly zero — so
+    /// a stretch of held bins would read as a perfect channel, which is the one way this estimate
+    /// can be made to lie. The floor is read from the estimator rather than restated, so the two
+    /// cannot disagree about which bins were measured.
+    /// </summary>
+    private static double[] MeasuredPhaseBins(double[] magnitude, int firstBin, int lastBin)
+    {
+        double peak = 0.0;
+        for (int k = 0; k < magnitude.Length; k++)
+            peak = Math.Max(peak, magnitude[k]);
+
+        double floor = peak * FrequencyResponseEstimator.PhaseFloorRelative;
+        var weight = new double[magnitude.Length];
+
+        for (int k = firstBin; k <= lastBin; k++)
+        {
+            if (double.IsFinite(magnitude[k]) && magnitude[k] > floor)
+                weight[k] = 1.0;
+        }
+
+        return weight;
+    }
+
+    /// <summary>
     /// How much clock drift the finished estimates still carry, or null where the question cannot
     /// honestly be asked — see <see cref="DriftResidualReading"/> for why it is worth asking.
     ///
@@ -534,7 +645,8 @@ internal static class ResponseCaptureSupport
     public static DriftResidualReading? EstimateDriftResidual(
         FrequencyResponseRequest request,
         FrequencyResponseResult leftResult,
-        FrequencyResponseResult rightResult)
+        FrequencyResponseResult rightResult,
+        ReferenceChannelReading? reference)
     {
         // Chirp only: the ramp lives on the sweep's own frequency-to-time map, and a periodic-noise
         // stimulus has none -- the same restriction the correction itself carries.
@@ -543,6 +655,11 @@ internal static class ResponseCaptureSupport
         // The reference channel or nothing. See the remarks: a DUT in the path can manufacture more
         // fake drift than this bench has real drift.
         if (!request.RightChannelIsReference) return null;
+
+        // And a reference channel that is actually carrying something. Without this the reading is
+        // taken off whatever leaks into an unconnected input, which is how it first went wrong --
+        // see CheckReferenceChannel.
+        if (reference is not { Usable: true }) return null;
 
         if (ChirpTimeMap.For(request.SampleRateHz, request.FftSize, request.ChirpStartHz, request.ChirpEndHz)
             is not { } map) return null;
@@ -576,7 +693,8 @@ internal static class ResponseCaptureSupport
             fit.ResidualPpm, applied, fit.SigmaPpm, fit.FitRmsDeg, fit.Bins,
             fitFrom * binHz, fitTo * binHz,
             Math.Abs(fit.ResidualPpm) * 1e-6 * request.FftSize,
-            request.FftSize / request.SampleRateHz);
+            request.FftSize / request.SampleRateHz,
+            reference.SnrDb);
     }
 
     /// <summary>
@@ -645,10 +763,11 @@ internal static class ResponseCaptureSupport
         logger.LogInformation(
             "Clock drift residual: {Residual:+0.00;-0.00;0.00} ppm left after correcting " +
             "{Applied:+0.00;-0.00;0.00} ppm ({Slip:0.00} samples over a {Record:0.00} s record), " +
-            "from {Bins} reference-channel bins over {From:0}-{To:0} Hz, fit missed by " +
-            "{Rms:0.00} deg rms (+/-{Sigma:0.000} ppm)",
+            "from {Bins} reference-channel bins over {From:0}-{To:0} Hz at {RefSnr:0} dB, fit " +
+            "missed by {Rms:0.00} deg rms (+/-{Sigma:0.000} ppm)",
             reading.ResidualPpm, reading.AppliedPpm, reading.SlipSamples, reading.RecordSeconds,
-            reading.Bins, reading.FromHz, reading.ToHz, reading.FitRmsDeg, reading.SigmaPpm);
+            reading.Bins, reading.FromHz, reading.ToHz, reading.ReferenceSnrDb, reading.FitRmsDeg,
+            reading.SigmaPpm);
     }
 
     /// <summary>

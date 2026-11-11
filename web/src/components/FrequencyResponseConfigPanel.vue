@@ -5,6 +5,7 @@ import {
   RESPONSE_SMOOTHING,
   RESPONSE_SPANS_HZ,
   type DriftResidualJson,
+  type ReferenceChannelJson,
   type FrequencyResponseParameters,
   type FrequencyResponseStartRequest,
   type ResponseStimulusName,
@@ -41,6 +42,7 @@ import {
   readClockDriftCorrection,
   sendsClockDriftCorrection,
 } from '../measurements/clockDriftCorrection'
+import { referenceChannelNote, referenceChannelWarning } from '../measurements/referenceChannel'
 import { stimulusFloorNotice } from '../stimulusFloor'
 import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -68,6 +70,12 @@ const props = defineProps<{
    * `ResponseCaptureSupport.EstimateDriftResidual` for the conditions it needs.
    */
   driftResidual?: DriftResidualJson | null
+  /**
+   * What the reference input was carrying on the run on screen. The panel offers the reference
+   * ticked by default, and nothing used to check that anything was connected to it — see
+   * measurements/referenceChannel.ts.
+   */
+  reference?: ReferenceChannelJson | null
 }>()
 
 
@@ -302,6 +310,16 @@ const driftCorrectionNotice = computed(() =>
 const driftFreshness = computed(() =>
   clockDriftFreshnessNotice(props.driftResidual, props.clockDriftMeasuredUtc),
 )
+
+/**
+ * Whether the reference input is carrying one. Amber when it is not, which is the case this
+ * exists for: the box above is ticked by default, and a bench with one channel wired has nothing
+ * on that input at all.
+ */
+const referenceWarning = computed(() => referenceChannelWarning(props.reference))
+
+/** And the quiet confirmation, so a reader learns what good looks like before it goes bad. */
+const referenceNote = computed(() => referenceChannelNote(props.reference))
 
 
 /**
@@ -593,6 +611,18 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       <input v-model="form.rightChannelIsReference" type="checkbox" :disabled="running" class="tb-check" />
       Right channel is reference
     </label>
+    <p
+      v-if="referenceWarning"
+      class="text-[10px] leading-snug text-amber-700 dark:text-amber-400"
+    >
+      {{ referenceWarning }}
+    </p>
+    <p
+      v-else-if="referenceNote"
+      class="text-[10px] leading-snug text-neutral-500 dark:text-neutral-400"
+    >
+      {{ referenceNote }}
+    </p>
 
     <label
       v-if="offersDriftCorrection"

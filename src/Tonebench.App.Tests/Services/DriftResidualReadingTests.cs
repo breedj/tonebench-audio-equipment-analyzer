@@ -54,11 +54,20 @@ public class DriftResidualReadingTests
     /// <summary>A trace carrying no drift at all, for the "which trace" cases.</summary>
     private static FrequencyResponseResult Clean() => Result(0.0);
 
+    /// <summary>A reference channel that is carrying one, which is the ordinary case.</summary>
+    private static readonly ReferenceChannelReading Fed = new(85.0, Usable: true);
+
+    private static DriftResidualReading? Estimate(
+        FrequencyResponseRequest request,
+        FrequencyResponseResult left,
+        FrequencyResponseResult right,
+        ReferenceChannelReading? reference = null) =>
+        ResponseCaptureSupport.EstimateDriftResidual(request, left, right, reference ?? Fed);
+
     [Fact]
     public void TheReferenceChannelsOwnRamp_IsWhatIsReported()
     {
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(
-            Request(clockDriftPpm: -104.038), Clean(), Result(-8.5));
+        var reading = Estimate(Request(clockDriftPpm: -104.038), Clean(), Result(-8.5));
 
         Assert.NotNull(reading);
         Assert.Equal(-8.5, reading!.ResidualPpm, 0.2);
@@ -75,8 +84,7 @@ public class DriftResidualReadingTests
     [Fact]
     public void TheMeasuredChannelIsNeverRead_EvenWhenItIsTheLouderStory()
     {
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(
-            Request(), Result(-900.0), Result(-8.5));
+        var reading = Estimate(Request(), Result(-900.0), Result(-8.5));
 
         Assert.Equal(-8.5, reading!.ResidualPpm, 0.2);
     }
@@ -88,8 +96,7 @@ public class DriftResidualReadingTests
     [Fact]
     public void WithoutAMeasuredReference_NoReadingIsMade()
     {
-        Assert.Null(ResponseCaptureSupport.EstimateDriftResidual(
-            Request(rightIsReference: false), Result(-104.038), Result(-104.038)));
+        Assert.Null(Estimate(Request(rightIsReference: false), Result(-104.038), Result(-104.038)));
     }
 
     /// <summary>
@@ -102,8 +109,7 @@ public class DriftResidualReadingTests
     [InlineData(ResponseStimulus.SpeechMale2011)]
     public void ANoiseStimulus_HasNoRampToRead(ResponseStimulus stimulus)
     {
-        Assert.Null(ResponseCaptureSupport.EstimateDriftResidual(
-            Request(stimulus: stimulus), Clean(), Result(-104.038)));
+        Assert.Null(Estimate(Request(stimulus: stimulus), Clean(), Result(-104.038)));
     }
 
     /// <summary>
@@ -114,8 +120,7 @@ public class DriftResidualReadingTests
     [Fact]
     public void AnUncorrectedRun_ReportsTheWholeDrift()
     {
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(
-            Request(clockDriftPpm: 0.0), Clean(), Result(-104.038));
+        var reading = Estimate(Request(clockDriftPpm: 0.0), Clean(), Result(-104.038));
 
         Assert.Equal(-104.038, reading!.ResidualPpm, 0.2);
         Assert.Equal(0.0, reading.AppliedPpm);
@@ -129,8 +134,7 @@ public class DriftResidualReadingTests
     [Fact]
     public void ADriftFigureTooSmallToHaveBeenApplied_IsNotReportedAsApplied()
     {
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(
-            Request(clockDriftPpm: 0.02), Clean(), Result(-104.038));
+        var reading = Estimate(Request(clockDriftPpm: 0.02), Clean(), Result(-104.038));
 
         Assert.Equal(0.0, reading!.AppliedPpm);
     }
@@ -145,8 +149,7 @@ public class DriftResidualReadingTests
     public void ARollOffAtTheTopOfTheBand_IsNotFitted()
     {
         // One pole at a tenth of Nyquist: 3 dB down by 2.4 kHz, so most of the band is excluded.
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(
-            Request(), Clean(), Result(-8.5, f => 1.0 / Math.Sqrt(1.0 + Math.Pow(f / 2400.0, 2))));
+        var reading = Estimate(Request(), Clean(), Result(-8.5, f => 1.0 / Math.Sqrt(1.0 + Math.Pow(f / 2400.0, 2))));
 
         Assert.NotNull(reading);
         Assert.Equal(-8.5, reading!.ResidualPpm, 0.2);
@@ -158,10 +161,39 @@ public class DriftResidualReadingTests
     public void AFlatPath_KeepsTheWholeAnalysedBand()
     {
         var request = Request();
-        var reading = ResponseCaptureSupport.EstimateDriftResidual(request, Clean(), Result(-8.5));
+        var reading = Estimate(request, Clean(), Result(-8.5));
 
         Assert.True(reading!.ToHz > request.AnalysisHighHz - 2.0 * request.BinHz,
             $"a flat path should reach {request.AnalysisHighHz:0} Hz and reached {reading.ToHz:0}");
+    }
+
+    /// <summary>
+    /// <b>The guard the bench asked for.</b> A reference channel the server has judged not to be
+    /// carrying one makes no reading at all — rather than a reading of whatever leaks into an
+    /// unconnected input, which is how this measurement first went wrong: it claimed a drift figure
+    /// was stale that three independent measurements agreed on to 0.3 ppm.
+    /// </summary>
+    [Fact]
+    public void AReferenceChannelCarryingNothing_MakesNoReading()
+    {
+        var unusable = new ReferenceChannelReading(SnrDb: 2.0, Usable: false);
+
+        Assert.Null(Estimate(Request(clockDriftPpm: -104.038), Clean(), Result(-8.5), unusable));
+
+        // And a run the check could not make an answer about at all -- too few measured bins to
+        // judge -- is the same refusal, not the benefit of the doubt.
+        Assert.Null(ResponseCaptureSupport.EstimateDriftResidual(
+            Request(clockDriftPpm: -104.038), Clean(), Result(-8.5), reference: null));
+    }
+
+    /// <summary>
+    /// And what that channel was carrying rides on the reading, because the figure is only ever
+    /// worth what the channel it was read off was.
+    /// </summary>
+    [Fact]
+    public void TheReadingSaysWhatTheReferenceWasCarrying()
+    {
+        Assert.Equal(85.0, Estimate(Request(), Clean(), Result(-8.5))!.ReferenceSnrDb);
     }
 
     /// <summary>
@@ -171,7 +203,6 @@ public class DriftResidualReadingTests
     [Fact]
     public void AReferenceChannelWithNothingOnIt_IsNoReading()
     {
-        Assert.Null(ResponseCaptureSupport.EstimateDriftResidual(
-            Request(), Clean(), Result(-8.5, _ => 0.0)));
+        Assert.Null(Estimate(Request(), Clean(), Result(-8.5, _ => 0.0)));
     }
 }

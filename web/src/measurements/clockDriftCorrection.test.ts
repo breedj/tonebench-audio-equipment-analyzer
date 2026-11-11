@@ -219,6 +219,7 @@ function reading(residualPpm: number, appliedPpm: number, over: Partial<DriftRes
     toHz: 22_800,
     slipSamples: Math.abs(residualPpm) * 1e-6 * 32768,
     recordSeconds: 32768 / 48_000,
+    referenceSnrDb: 85,
     ...over,
   }
 }

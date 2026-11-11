@@ -542,6 +542,21 @@ public sealed record FrequencyResponseRequest(
 }
 
 /// <summary>
+/// Whether the reference input was actually carrying anything, and how much — see
+/// <see cref="ResponseCaptureSupport.CheckReferenceChannel"/>.
+/// </summary>
+/// <param name="SnrDb">
+/// The reference channel's per-bin signal-to-noise ratio, estimated from the roughness of its own
+/// phase. See <see cref="TransferFunctionSnr"/> for why that and not coherence or level.
+/// </param>
+/// <param name="Usable">
+/// Whether it is enough to divide by. False is the case this exists for: the panel offers
+/// <b>Right channel is reference</b> ticked by default, and a bench with one channel wired has
+/// nothing on that input at all.
+/// </param>
+public sealed record ReferenceChannelReading(double SnrDb, bool Usable);
+
+/// <summary>
 /// How much clock drift the run on screen still carries, and therefore whether the stored drift
 /// figure has gone stale — see <see cref="ChirpDriftResidual"/> for the measurement and
 /// <see cref="ResponseCaptureSupport.EstimateDriftResidual"/> for the conditions it needs.
@@ -574,6 +589,11 @@ public sealed record FrequencyResponseRequest(
 /// resolution the measurement on screen was not taken at.
 /// </param>
 /// <param name="RecordSeconds">That record's length, so the slip can be quoted against it.</param>
+/// <param name="ReferenceSnrDb">
+/// What the reference channel this was read off was carrying. Reported with the figure because the
+/// figure is only worth what that channel was: a reading taken off an input with nothing on it is
+/// the way this measurement goes wrong, and it has gone wrong that way once already.
+/// </param>
 public sealed record DriftResidualReading(
     double ResidualPpm,
     double AppliedPpm,
@@ -583,7 +603,8 @@ public sealed record DriftResidualReading(
     double FromHz,
     double ToHz,
     double SlipSamples,
-    double RecordSeconds);
+    double RecordSeconds,
+    double ReferenceSnrDb);
 
 /// <summary>What a client polling <c>GET /api/frequency-response/status</c> sees.</summary>
 /// <param name="LatencySamples">
@@ -649,7 +670,12 @@ public sealed record FrequencyResponseStatus(
     /// every other stimulus and for a stepped sweep, neither of which has a sweep time map for the
     /// ramp to live on. See <see cref="DriftResidualReading"/>.
     /// </summary>
-    DriftResidualReading? DriftResidual = null);
+    DriftResidualReading? DriftResidual = null,
+    /// <summary>
+    /// What the reference input was carrying, on a run that had one. Null where the run measured
+    /// against the synthetic stimulus instead, which has nothing to check.
+    /// </summary>
+    ReferenceChannelReading? Reference = null);
 
 /// <summary>
 /// One measured point's decimated spectrum and waveform, on one input — what the two small preview

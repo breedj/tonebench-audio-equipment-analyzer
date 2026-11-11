@@ -332,6 +332,15 @@
     </p>
 
     <p>
+      <strong>It needs a reference input that is actually fed</strong>, and the app checks: a run
+      whose right input is carrying almost nothing makes no reading at all, and says so under the
+      checkbox instead. That guard exists because the first reading taken on a real bench was a
+      false alarm of exactly that kind — one channel wired, the reference box ticked by default, and
+      a confident claim that a drift figure three independent measurements agreed on was a fifth
+      out.
+    </p>
+
+    <p>
       <strong>It needs <em>Right channel is reference</em> ticked, and that is not a detail.</strong>
       The reading is taken off the reference channel, which carries the generator rather than the
       DUT's output — so the ramp is in it and the DUT is not. Read off the measured channel instead,

@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, type Ref } from 'vue'
 import {
   api,
   type DriftResidualJson,
+  type ReferenceChannelJson,
   type FrequencyResponseStartRequest,
   type FrequencyResponseStatus,
   type FrequencyResponseTraceJson,
@@ -138,6 +139,8 @@ interface ResponseState {
    * else here: a chirp reading must not reappear under the stepped screen, which cannot produce one.
    */
   driftResidual: Ref<DriftResidualJson | null>
+  /** What the reference input was carrying, on a run that had one. Per target, like everything else here. */
+  reference: Ref<ReferenceChannelJson | null>
   /** Crosstalk only: how many passes the run makes (1 or 2), for the progress line. */
   passCount: Ref<number>
 }
@@ -175,6 +178,7 @@ function createResponseState(): ResponseState {
     phaseKind: ref<ResponsePhaseKindName>('PerTrace'),
     rightChannelIsReference: ref(false),
     driftResidual: ref<DriftResidualJson | null>(null),
+    reference: ref<ReferenceChannelJson | null>(null),
     passCount: ref(1),
   }
 }
@@ -213,6 +217,7 @@ const previews = computed(() => active.value.previews.value)
 const phaseKind = computed(() => active.value.phaseKind.value)
 const rightChannelIsReference = computed(() => active.value.rightChannelIsReference.value)
 const driftResidual = computed(() => active.value.driftResidual.value)
+const reference = computed(() => active.value.reference.value)
 
 /**
  * Whether the measurement on screen has a phase to offer at all — the one rule behind the toggle,
@@ -420,6 +425,7 @@ function applyStatus(state: ResponseState, status: FrequencyResponseStatus) {
   // Written whatever it is, including null: the reading belongs to the run whose traces have just
   // replaced the previous ones, so one kept from before would describe a different measurement.
   state.driftResidual.value = status.driftResidual ?? null
+  state.reference.value = status.reference ?? null
 }
 
 /**
@@ -519,6 +525,7 @@ export function useFrequencyResponse() {
     phaseKind,
     rightChannelIsReference,
     driftResidual,
+    reference,
     phaseAvailable,
 
     trace: (kind: ResponseTraceKindName) => traces.value.find((t) => t.kind === kind) ?? null,

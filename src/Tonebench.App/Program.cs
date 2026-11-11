@@ -172,6 +172,7 @@ try
     builder.Services.AddSingleton<FrequencyResponseRunner>();
     builder.Services.AddSingleton<SteppedResponseRunner>();
     builder.Services.AddSingleton<CrosstalkRunner>();
+    builder.Services.AddSingleton<ClockDriftRunner>();
     builder.Services.AddSingleton<OutputImpedanceRunner>();
     builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
     builder.Services.AddSingleton<ImpulseResponseRunner>();
@@ -220,6 +221,7 @@ try
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<FrequencyResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SteppedResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<CrosstalkRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ClockDriftRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<OutputImpedanceRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpulseResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpedanceRunner>());
@@ -333,6 +335,7 @@ try
     app.MapImpulseResponseEndpoints();
     app.MapSteppedResponseEndpoints();
     app.MapCrosstalkEndpoints();
+    app.MapClockDriftEndpoints();
     app.MapOutputImpedanceEndpoints();
     app.MapImpedanceEndpoints();
     app.MapRunOwnerEndpoints();

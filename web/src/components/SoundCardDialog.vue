@@ -16,6 +16,7 @@ import {
   splitKey,
 } from '../soundcard/cardList'
 import { calibrationState } from '../soundcard/calibrationState'
+import ClockDriftDialog from './ClockDriftDialog.vue'
 import Modal from './Modal.vue'
 import PanelIcon from './PanelIcon.vue'
 import HeaderIcon from './HeaderIcon.vue'
@@ -170,6 +171,12 @@ function cardKeyFor(hostApi: string, deviceName: string) {
  * except where the saved card is only reachable in the full one (see the open watcher).</p>
  */
 const advanced = ref(false)
+
+/**
+ * The clock-drift test, opened from the two-clocks note. Its own dialog rather than another
+ * section: it is a measurement with a chart, and this dialog is already the longest in the app.
+ */
+const clockDriftOpen = ref(false)
 
 /**
  * The cards the machine has, each a host API and an interface within it.
@@ -861,6 +868,25 @@ function mvRms(value: number | null | undefined) {
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
         >
           {{ modeNote }}
+          <!-- The note states the problem without a number; this measures it. Inside the note
+               rather than beside it, because the button means nothing without the sentence. Only
+               where two cards are really chosen: on one card there are no two clocks to compare
+               and the test would read zero by construction. -->
+          <button
+            v-if="pairing === 'separate'"
+            type="button"
+            class="btn-chip mt-2"
+            :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
+            :disabled="!settingsInEffect"
+            :title="
+              settingsInEffect
+                ? 'Plays a tone on the output card and reads it back on the input card.'
+                : 'These settings are not in effect yet, so there is nothing to measure.'
+            "
+            @click="clockDriftOpen = true"
+          >
+            Measure the drift
+          </button>
         </p>
 
         <!-- The calibration's own state, here rather than beside the two steps: changing a
@@ -1420,4 +1446,5 @@ function mvRms(value: number | null | undefined) {
       </button>
     </template>
   </Modal>
+  <ClockDriftDialog :open="clockDriftOpen" :pairing-note="modeNote" @close="clockDriftOpen = false" />
 </template>

@@ -3519,6 +3519,58 @@ export interface ThdSweepStatus {
   stopReason?: string | null
 }
 
+/**
+ * How far the input card's clock runs from the output card's, and what that costs.
+ *
+ * Measured rather than looked up: two cards are told one rate and neither is obliged to produce it
+ * exactly. See `ClockDriftRunner` server-side for the method and its one failure mode.
+ */
+export interface ClockDriftPoint {
+  atSeconds: number
+  ppm: number
+  toneDbv: number
+  /** The tone against everything else in that record. Under ~6 dB the reading means nothing. */
+  dominanceDb: number
+}
+
+export interface ClockDriftVerdict {
+  headline: string
+  detail: string
+  quality: 'Good' | 'Fair' | 'Poor' | 'Unknown'
+  slipSamplesPerRecord: number
+  slipMicroseconds: number
+  phaseErrorDegAt20k: number
+}
+
+export interface ClockDriftStatus {
+  running: boolean
+  phase: 'Idle' | 'Settling' | 'Measuring' | 'Finished' | 'Cancelled' | 'Failed'
+  elapsedSeconds: number
+  durationSeconds: number
+  toneHz: number
+  /** What the generator really played: a tone is snapped to a bin, and the snap is not the answer. */
+  playedToneHz: number
+  sampleRateHz: number
+  binHz: number
+  fftSize: number
+  measuredChannel: string
+  points: ClockDriftPoint[]
+  meanPpm: number | null
+  spreadPpm: number | null
+  sigmaPpm: number | null
+  verdict: ClockDriftVerdict | null
+  chirpCost: string | null
+  warning: string | null
+  error: string | null
+}
+
+export interface ClockDriftRequest {
+  toneHz: number
+  levelDbv: number
+  /** Zero runs until stopped. */
+  durationSeconds: number
+}
+
 export const api = {
   getDevice: () => request<DeviceStatus>('/device'),
 
@@ -4185,6 +4237,17 @@ export const api = {
 
   setSteppedResponseBandwidthReference: (req: BandwidthReferenceRequest) =>
     request<FrequencyResponseStatus>('/stepped-response/bandwidth-reference', { method: 'PUT', body: JSON.stringify(req) }),
+
+  // Clock drift: a bench property rather than a measurement, so it saves nothing and lives beside
+  // the sound card settings. Polled -- a reading lands about once a second.
+  startClockDrift: (req: ClockDriftRequest) =>
+    request<ClockDriftStatus>('/clock-drift/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelClockDrift: () => request<ClockDriftStatus>('/clock-drift/cancel', { method: 'POST' }),
+
+  clearClockDrift: () => request<ClockDriftStatus>('/clock-drift/clear', { method: 'POST' }),
+
+  getClockDriftStatus: () => request<ClockDriftStatus>('/clock-drift/status'),
 
   // Crosstalk: the stepped sweep's mechanics with one output muted, so the same status payload and
   // the same store — its own endpoints because it is its own runner (two passes, two traces).

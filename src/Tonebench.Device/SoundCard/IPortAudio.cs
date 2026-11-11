@@ -74,6 +74,34 @@ public sealed record SoundCardDeviceDescriptor(
     public bool IsFullDuplex => HasInput && HasOutput;
 }
 
+/// <summary>
+/// Which directions a stream carries. <see cref="Duplex"/> is the one shape this app opened until
+/// 2026-11-11, and it is still the right one whenever both directions are the same physical
+/// interface — one device, therefore one clock, and the lockstep read/write loop that
+/// <c>SoundCardDevice.Pump</c> is built around.
+///
+/// <para>The one-direction shapes exist for two devices that are <i>not</i> one interface: a
+/// capture-only ADC (an E1DA Cosmos has only a USB-C out), a playback-only USB DAC, or a QA403
+/// capturing while a sound card plays. Note what that costs and why it is still the right shape —
+/// a single duplex stream spanning two devices would be read and written in lockstep against two
+/// different clocks, so the output ring accumulates the difference at the ppm rate (~19 samples/s
+/// at 100 ppm and 192 kHz, which eats a 180 ms ring in about half an hour) and the stream glitches
+/// on a schedule no ring sizing can push out. Two independent one-direction streams each
+/// free-run on their own device's clock and do not have that failure. The drift is still there in
+/// the *measurement*, and that is a separate matter — see <c>SoundCardEnumerator.Pairing</c>.</para>
+/// </summary>
+public enum SoundCardStreamDirection
+{
+    /// <summary>Both directions on one device.</summary>
+    Duplex = 0,
+
+    /// <summary>Capture only. Nothing is written, so the blocking read is the only clock.</summary>
+    InputOnly = 1,
+
+    /// <summary>Playback only. Nothing is read, so the blocking write is the only clock, and the stream yields no blocks.</summary>
+    OutputOnly = 2,
+}
+
 /// <summary>What to open: one input device, one output device, a rate, and whether to demand exclusive access.</summary>
 public sealed record SoundCardStreamRequest(
     int InputDevice,
@@ -85,6 +113,18 @@ public sealed record SoundCardStreamRequest(
 {
     /// <summary>Suggested latency, in seconds; null lets the device's own default-low figure stand.</summary>
     public double? SuggestedLatencyS { get; init; }
+
+    /// <summary>
+    /// Which directions to open. Defaults to <see cref="SoundCardStreamDirection.Duplex"/>, so
+    /// every caller that predates one-direction streams keeps the shape it asked for.
+    /// </summary>
+    public SoundCardStreamDirection Direction { get; init; } = SoundCardStreamDirection.Duplex;
+
+    /// <summary>True when this stream carries capture. The device and channel count are ignored when it does not.</summary>
+    public bool HasInput => Direction != SoundCardStreamDirection.OutputOnly;
+
+    /// <summary>True when this stream carries playback. The device and channel count are ignored when it does not.</summary>
+    public bool HasOutput => Direction != SoundCardStreamDirection.InputOnly;
 }
 
 /// <summary>

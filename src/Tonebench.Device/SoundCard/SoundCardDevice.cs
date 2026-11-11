@@ -191,18 +191,30 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
     public Task<DeviceInfo> ConnectAsync(CancellationToken ct)
     {
-        if (!_settings.IsConfigured)
+        // IsUsable, not IsConfigured: one direction is enough to open a stream, which is what a
+        // capture-only ADC and a playback-only DAC each need. A bench with only one of the two is
+        // half an analyzer and the caller above decides what to do about that; refusing it here
+        // made the device unopenable at all.
+        if (!_settings.IsUsable)
             throw new SoundCardNotFoundException("No sound card has been chosen yet. Pick one in the sound-card settings.");
 
         var enumerator = new SoundCardEnumerator(_portAudio);
 
-        var input = enumerator.Find(_settings.InputHostApi, _settings.InputDeviceName)
-            ?? throw new SoundCardNotFoundException(
-                $"The input '{_settings.InputDeviceName}' ({_settings.InputHostApi}) is not there. Plug the card in, or pick another in the sound-card settings.");
+        SoundCardDeviceDescriptor? input = null;
+        if (_settings.HasInput)
+        {
+            input = enumerator.Find(_settings.InputHostApi, _settings.InputDeviceName)
+                ?? throw new SoundCardNotFoundException(
+                    $"The input '{_settings.InputDeviceName}' ({_settings.InputHostApi}) is not there. Plug the card in, or pick another in the sound-card settings.");
+        }
 
-        var output = enumerator.Find(_settings.OutputHostApi, _settings.OutputDeviceName)
-            ?? throw new SoundCardNotFoundException(
-                $"The output '{_settings.OutputDeviceName}' ({_settings.OutputHostApi}) is not there. Plug the card in, or pick another in the sound-card settings.");
+        SoundCardDeviceDescriptor? output = null;
+        if (_settings.HasOutput)
+        {
+            output = enumerator.Find(_settings.OutputHostApi, _settings.OutputDeviceName)
+                ?? throw new SoundCardNotFoundException(
+                    $"The output '{_settings.OutputDeviceName}' ({_settings.OutputHostApi}) is not there. Plug the card in, or pick another in the sound-card settings.");
+        }
 
         RequireChannels(input, output);
 
@@ -211,8 +223,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         if (rates.Count == 0)
         {
+            // Whichever side exists -- on a one-direction stream the other is not a device at all,
+            // so naming it would print an empty string.
+            string named = (input ?? output)!.Name;
             throw new SoundCardNotFoundException(
-                $"'{input.Name}' accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.");
+                $"'{named}' accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.");
         }
 
         lock (_stateGate)
@@ -226,17 +241,27 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         _connected = true;
 
-        var pairing = SoundCardEnumerator.Pairing(input, output);
-        if (pairing == SoundCardPairing.Unknown)
+        // Only a bench holding both directions has a pairing to doubt. A one-direction stream is
+        // one device and therefore one clock; the clock question does not disappear, it moves up a
+        // level, to whatever supplies the other half of the bench — and that is where the warning
+        // belongs, because this device cannot see it.
+        if (input is not null && output is not null
+            && SoundCardEnumerator.Pairing(input, output) == SoundCardPairing.Unknown)
         {
             _logger.LogWarning(
                 "Sound card input '{Input}' and output '{Output}' may not be the same interface. Two clocks drift, and the drift is reported as DUT response.",
                 input.Name, output.Name);
         }
 
+        // Which directions this stream will carry, said once and plainly. A log that named an
+        // input and an output unconditionally would invent a device on a one-direction bench, and
+        // which half is missing is the first thing a report of "it measures nothing" needs.
         _logger.LogInformation(
-            "Sound card connected: {HostApi} / {Input} + {Output}, rates {Rates}, input full scale {InputDbv:0.00} dBV{Calibrated}",
-            input.HostApiName, input.Name, output.Name, string.Join("/", rates.Select(r => r / 1000)),
+            "Sound card connected: {HostApi} / {Devices} ({Direction}), rates {Rates}, input full scale {InputDbv:0.00} dBV{Calibrated}",
+            (input ?? output)!.HostApiName,
+            DescribeDevices(input, output),
+            _settings.Direction,
+            string.Join("/", rates.Select(r => r / 1000)),
             _calibration.InputRangeDbv,
             _calibration.IsInputCalibrated && _calibration.IsOutputCalibrated ? string.Empty : " (UNCALIBRATED — levels are dBFS)");
 
@@ -268,12 +293,8 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         static string Dbv(double? peakV) =>
             peakV is > 0.0 ? SoundCardCalibration.PeakVoltsToDbv(peakV.Value).ToString("0.00") : "n/a";
 
-        string label = pairing == SoundCardPairing.FullDuplexDevice
-            ? input.Name
-            : $"{input.Name} + {output.Name}";
-
         return Task.FromResult(new DeviceInfo(
-            ProductName: $"{label} ({input.HostApiName})",
+            ProductName: $"{DescribeDevices(input, output)} ({(input ?? output)!.HostApiName})",
             SerialNumber: "—",
             FirmwareVersion: _portAudio.VersionText,
             IsSimulated: false));
@@ -335,15 +356,26 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         _stopRequested = false;
 
         var enumerator = new SoundCardEnumerator(_portAudio);
-        var input = enumerator.Find(_settings.InputHostApi, _settings.InputDeviceName)
-            ?? throw new SoundCardNotFoundException("The input device is no longer there.");
-        var output = enumerator.Find(_settings.OutputHostApi, _settings.OutputDeviceName)
-            ?? throw new SoundCardNotFoundException("The output device is no longer there.");
+
+        SoundCardDeviceDescriptor? input = null;
+        if (_settings.HasInput)
+        {
+            input = enumerator.Find(_settings.InputHostApi, _settings.InputDeviceName)
+                ?? throw new SoundCardNotFoundException("The input device is no longer there.");
+        }
+
+        SoundCardDeviceDescriptor? output = null;
+        if (_settings.HasOutput)
+        {
+            output = enumerator.Find(_settings.OutputHostApi, _settings.OutputDeviceName)
+                ?? throw new SoundCardNotFoundException("The output device is no longer there.");
+        }
 
         var request = new SoundCardStreamRequest(
-            input.Index, InputChannelCount, output.Index, OutputChannelCount,
+            input?.Index ?? 0, InputChannelCount, output?.Index ?? 0, OutputChannelCount,
             config.SampleRateHz, Exclusive: true)
         {
+            Direction = _settings.Direction,
             // **The rings are asked for in time, and this field is what makes TargetBufferedSeconds
             // real rather than documentation.** Left null, PortAudio sizes both from the driver's
             // own defaultLow*Latency, which an ASIO driver reports as a frame count: on a MOTU M4
@@ -413,7 +445,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         {
             try
             {
-                Pump(stream, blocks.Writer, config, settleFrames, ct);
+                Pump(stream, blocks.Writer, config, settleFrames, request.Direction, ct);
             }
             catch (Exception ex)
             {
@@ -467,8 +499,18 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// </summary>
     private void Pump(
         IPortAudioStream stream, ChannelWriter<PcmBlock> writer, AcquisitionConfig config,
-        int settleFrames, CancellationToken ct)
+        int settleFrames, SoundCardStreamDirection direction, CancellationToken ct)
     {
+        // **Which half of the loop runs, and what paces it.** On a duplex stream the blocking read
+        // is the clock and the write rides on it, which is the shape every comment below was
+        // written for. A one-direction stream has only one blocking call, so that call is the
+        // clock instead: output-only is paced by Write filling the ring, input-only by Read as
+        // before. Output-only also yields no blocks at all -- there is nothing to measure -- so it
+        // is a generator that happens to be an IAnalyzerDevice, which is exactly what the split
+        // device needs of it.
+        bool carriesInput = direction != SoundCardStreamDirection.OutputOnly;
+        bool carriesOutput = direction != SoundCardStreamDirection.InputOnly;
+
         int frames = TransferFrames;
         var waveform = new Qa40xGeneratorWaveform(new Random(), config.SampleRateHz);
 
@@ -633,7 +675,8 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 primingFinished = true;
             }
 
-            Prime(running: false);
+            if (carriesOutput)
+                Prime(running: false);
 
             // How deep the queue ended up, after the top-up below has had its turn. Logged once,
             // reporting what went in rather than what was asked for, so it can never overstate the
@@ -644,51 +687,58 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
             while (!_stopRequested && !ct.IsCancellationRequested)
             {
-                bool overflowed;
-                try
-                {
-                    overflowed = stream.Read(inBuffer, frames);
-                    // Measured here, as the read returns, and not at the top of the loop: that is
-                    // the far end of the window a stall lives in. Both glitches this has to
-                    // explain are then describing the same window -- an input overflow is noticed
-                    // by the read that has just returned late, and an output underflow by the
-                    // write a few hundred microseconds after it.
-                    NoteIteration();
-                    consecutiveTimeouts = 0;
-                }
-                catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
-                {
-                    NoteIteration();
-                    // The device is still there and the next transfer usually succeeds. Tearing the
-                    // session down over one would be worse than the hiccup -- the same judgement the
-                    // QA403's liveness ping makes about a timeout or a short read. Only a run of
-                    // them means the card has actually stopped.
-                    if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
-                        throw;
+                bool overflowed = false;
 
-                    // **A timeout before the first block has arrived is not a drop**, and counting
-                    // it as one was reported as "a lot of dropped when using the soundcard,
-                    // especially after I change the sample rate". An ASIO stream takes a few
-                    // hundred milliseconds to deliver its first buffer, and every read until then
-                    // times out: measured on a MOTU M4, 3 timeouts at 96 kHz and 7 at 192 kHz, all
-                    // before block 0, with not a single one afterwards. The count scaled with the
-                    // sample rate only because the stream's own read timeout is shorter there --
-                    // ~90 ms against ~47 ms -- so more of them fit into the same wait.
-                    //
-                    // Nothing was lost: there were no samples yet to lose. DroppedRxChunks means a
-                    // *hole* in the stream, which per its own rule invalidates a noise measurement,
-                    // so reporting a startup wait as one is worse than useless -- it is the number
-                    // a user checks to decide whether to believe the screen.
-                    if (sequence == 0)
+                // The read is the duplex clock and the input-only clock alike; an output-only
+                // stream has no read at all, and asking for one would block for ever on a
+                // device that has no capture side to deliver from.
+                if (carriesInput)
+                {
+                    try
                     {
-                        _logger.LogDebug("Waiting for the sound card's first buffer.");
+                        overflowed = stream.Read(inBuffer, frames);
+                        // Measured here, as the read returns, and not at the top of the loop: that is
+                        // the far end of the window a stall lives in. Both glitches this has to
+                        // explain are then describing the same window -- an input overflow is noticed
+                        // by the read that has just returned late, and an output underflow by the
+                        // write a few hundred microseconds after it.
+                        NoteIteration();
+                        consecutiveTimeouts = 0;
+                    }
+                    catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                    {
+                        NoteIteration();
+                        // The device is still there and the next transfer usually succeeds. Tearing the
+                        // session down over one would be worse than the hiccup -- the same judgement the
+                        // QA403's liveness ping makes about a timeout or a short read. Only a run of
+                        // them means the card has actually stopped.
+                        if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
+                            throw;
+
+                        // **A timeout before the first block has arrived is not a drop**, and counting
+                        // it as one was reported as "a lot of dropped when using the soundcard,
+                        // especially after I change the sample rate". An ASIO stream takes a few
+                        // hundred milliseconds to deliver its first buffer, and every read until then
+                        // times out: measured on a MOTU M4, 3 timeouts at 96 kHz and 7 at 192 kHz, all
+                        // before block 0, with not a single one afterwards. The count scaled with the
+                        // sample rate only because the stream's own read timeout is shorter there --
+                        // ~90 ms against ~47 ms -- so more of them fit into the same wait.
+                        //
+                        // Nothing was lost: there were no samples yet to lose. DroppedRxChunks means a
+                        // *hole* in the stream, which per its own rule invalidates a noise measurement,
+                        // so reporting a startup wait as one is worse than useless -- it is the number
+                        // a user checks to decide whether to believe the screen.
+                        if (sequence == 0)
+                        {
+                            _logger.LogDebug("Waiting for the sound card's first buffer.");
+                            continue;
+                        }
+
+                        Interlocked.Increment(ref _droppedRxChunks);
+                        Glitch("read timed out", ++readTimeouts);
+                        discontinuity = true;
                         continue;
                     }
-
-                    Interlocked.Increment(ref _droppedRxChunks);
-                    Glitch("read timed out", ++readTimeouts);
-                    discontinuity = true;
-                    continue;
                 }
 
                 if (overflowed)
@@ -710,10 +760,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 // stream that follows a rate change -- which an adaptive sweep makes on its own.
                 // Writing the shortfall here costs one iteration and nothing afterwards: Prime()
                 // stops for good at the first refusal, so a ring that is simply full is asked once.
-                if (!primingFinished)
+                if (carriesOutput && !primingFinished)
                     Prime(running: true);
 
-                if (!marginReported)
+                if (carriesOutput && !marginReported)
                 {
                     marginReported = true;
                     _logger.LogInformation(
@@ -739,22 +789,25 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     settleRemaining -= frames;
                     discontinuity = true;
 
-                    Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
-                    frameIndex += frames;
+                    if (carriesOutput)
+                    {
+                        Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
+                        frameIndex += frames;
 
-                    timing.WorkDone();
-                    try
-                    {
-                        stream.Write(outBuffer, frames);
-                    }
-                    catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
-                    {
-                        if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
-                            throw;
-                    }
-                    finally
-                    {
-                        timing.WriteDone();
+                        timing.WorkDone();
+                        try
+                        {
+                            stream.Write(outBuffer, frames);
+                        }
+                        catch (PortAudioException ex) when (ex.ErrorCode == PaError.TimedOut)
+                        {
+                            if (++consecutiveTimeouts > MaxConsecutiveTimeouts)
+                                throw;
+                        }
+                        finally
+                        {
+                            timing.WriteDone();
+                        }
                     }
 
                     if (settleRemaining <= 0)
@@ -767,24 +820,38 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                     continue;
                 }
 
-                float[] blockBuffer = ArrayPool<float>.Shared.Rent(frames * 2);
-                for (int f = 0; f < frames; f++)
+                // **An output-only stream produces no blocks, and that is the whole of what it
+                // is for.** Nothing was captured, so there is nothing to hand to the consumer, and
+                // the enumeration simply yields nothing until it is cancelled -- a generator
+                // wearing an IAnalyzerDevice's interface. Note the consequence for the loop
+                // timing: `sequence` never advances, so NoteIteration stays silent. That is
+                // deliberate rather than an oversight -- its three segments (read wait, our work,
+                // write wait) describe a *duplex* iteration, and on a write-paced loop there is no
+                // read wait to attribute, so arming it would report a window it cannot explain.
+                if (carriesInput)
                 {
-                    int src = (f * InputChannelCount) + _settings.InputChannelOffset;
-                    blockBuffer[f * 2] = (float)_calibration.SampleToVolts(inBuffer[src], 0);
-                    blockBuffer[(f * 2) + 1] = (float)_calibration.SampleToVolts(inBuffer[src + 1], 1);
+                    float[] blockBuffer = ArrayPool<float>.Shared.Rent(frames * 2);
+                    for (int f = 0; f < frames; f++)
+                    {
+                        int src = (f * InputChannelCount) + _settings.InputChannelOffset;
+                        blockBuffer[f * 2] = (float)_calibration.SampleToVolts(inBuffer[src], 0);
+                        blockBuffer[(f * 2) + 1] = (float)_calibration.SampleToVolts(inBuffer[src + 1], 1);
+                    }
+
+                    var block = new PcmBlock(
+                        blockBuffer, frames * 2, config.SampleRateHz, 2, sequence++,
+                        Stopwatch.GetTimestamp(), discontinuity);
+                    discontinuity = false;
+
+                    if (!writer.TryWrite(block))
+                    {
+                        block.Dispose();
+                        Interlocked.Increment(ref _droppedBlocks);
+                    }
                 }
 
-                var block = new PcmBlock(
-                    blockBuffer, frames * 2, config.SampleRateHz, 2, sequence++,
-                    Stopwatch.GetTimestamp(), discontinuity);
-                discontinuity = false;
-
-                if (!writer.TryWrite(block))
-                {
-                    block.Dispose();
-                    Interlocked.Increment(ref _droppedBlocks);
-                }
+                if (!carriesOutput)
+                    continue;
 
                 Synthesize(outBuffer, frames, waveform, frameIndex, config.SampleRateHz);
                 frameIndex += frames;
@@ -937,19 +1004,43 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// </summary>
     private const int MaxConsecutiveTimeouts = 20;
 
-    private void RequireChannels(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
+    /// <summary>
+    /// Checks each direction that is present. A null side is a direction this stream does not
+    /// carry, not a device with no channels — which is why this takes nullables rather than being
+    /// handed a zeroed descriptor.
+    /// </summary>
+    private void RequireChannels(SoundCardDeviceDescriptor? input, SoundCardDeviceDescriptor? output)
     {
-        if (input.MaxInputChannels < InputChannelCount)
+        if (input is not null && input.MaxInputChannels < InputChannelCount)
         {
             throw new SoundCardNotFoundException(
                 $"'{input.Name}' has {input.MaxInputChannels} input channels, and the analyzer was asked for channels {_settings.InputChannelOffset + 1}–{_settings.InputChannelOffset + 2}.");
         }
 
-        if (output.MaxOutputChannels < OutputChannelCount)
+        if (output is not null && output.MaxOutputChannels < OutputChannelCount)
         {
             throw new SoundCardNotFoundException(
                 $"'{output.Name}' has {output.MaxOutputChannels} output channels, and the analyzer was asked for channels {_settings.OutputChannelOffset + 1}–{_settings.OutputChannelOffset + 2}.");
         }
+    }
+
+    /// <summary>
+    /// How a bench is named in a log line and on the status pill: one name for a full-duplex
+    /// device or a one-direction stream, both names for two devices. The direction is reported
+    /// beside it rather than inferred from the shape of this string.
+    /// </summary>
+    private static string DescribeDevices(
+        SoundCardDeviceDescriptor? input, SoundCardDeviceDescriptor? output)
+    {
+        if (input is null)
+            return output!.Name;
+
+        if (output is null)
+            return input.Name;
+
+        return SoundCardEnumerator.Pairing(input, output) == SoundCardPairing.FullDuplexDevice
+            ? input.Name
+            : $"{input.Name} + {output.Name}";
     }
 
     /// <summary>

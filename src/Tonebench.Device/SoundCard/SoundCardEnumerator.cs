@@ -119,17 +119,36 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// Which of <see cref="CandidateRatesHz"/> this pair actually accepts, probed one at a time.
     /// </summary>
     public IReadOnlyList<double> SupportedRatesHz(
-        SoundCardDeviceDescriptor input,
-        SoundCardDeviceDescriptor output,
+        SoundCardDeviceDescriptor? input,
+        SoundCardDeviceDescriptor? output,
         bool exclusive,
         int inputChannelCount = 2,
         int outputChannelCount = 2)
     {
+        // A null side means "this stream does not carry that direction", so the rates probed are
+        // that one device's. Both null is a caller that has not chosen anything, and answering
+        // with the full candidate list would report a bench that cannot stream as able to stream
+        // at every rate.
+        if (input is null && output is null)
+            throw new ArgumentException("A rate probe needs at least one device.", nameof(input));
+
+        var direction = input is not null && output is not null ? SoundCardStreamDirection.Duplex
+            : input is not null ? SoundCardStreamDirection.InputOnly
+            : SoundCardStreamDirection.OutputOnly;
+
         var supported = new List<double>(CandidateRatesHz.Length);
         foreach (double rate in CandidateRatesHz)
         {
+            // The absent side's index and channel count are never read -- AllocParameters returns
+            // a null parameter block for it -- so the placeholders below reach no native call.
             var request = new SoundCardStreamRequest(
-                input.Index, inputChannelCount, output.Index, outputChannelCount, rate, exclusive);
+                input?.Index ?? 0, inputChannelCount,
+                output?.Index ?? 0, outputChannelCount,
+                rate, exclusive)
+            {
+                Direction = direction,
+            };
+
             if (portAudio.IsFormatSupported(request))
                 supported.Add(rate);
         }

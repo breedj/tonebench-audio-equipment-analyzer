@@ -163,16 +163,28 @@ internal static class PortAudioInterop
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr Pa_GetHostApiInfo(int hostApi);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr Pa_GetDeviceInfo(int device);
 
+    /// <summary>
+    /// Both parameter blocks are passed as raw pointers rather than <c>ref</c>, and that is the
+    /// whole of what makes a one-direction stream possible: PortAudio's own contract is that
+    /// <c>inputParameters</c> is NULL for an output-only stream and <c>outputParameters</c> is NULL
+    /// for an input-only one, and a <c>ref</c> parameter has no way to say NULL. There is
+    /// deliberately no <c>ref</c> overload left — with one, an absent direction would be passed a
+    /// zeroed struct instead, which names device 0 with 0 channels and is a different request
+    /// altogether.
+    /// </summary>
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int Pa_IsFormatSupported(
-        ref PaStreamParameters inputParameters, ref PaStreamParameters outputParameters, double sampleRate);
+        IntPtr inputParameters, IntPtr outputParameters, double sampleRate);
 
-    /// <summary>Opened with a null callback, i.e. PortAudio's blocking read/write interface.</summary>
+    /// <summary>
+    /// Opened with a null callback, i.e. PortAudio's blocking read/write interface. See
+    /// <see cref="Pa_IsFormatSupported"/> for why the parameter blocks are pointers.
+    /// </summary>
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int Pa_OpenStream(
         out IntPtr stream,
-        ref PaStreamParameters inputParameters,
-        ref PaStreamParameters outputParameters,
+        IntPtr inputParameters,
+        IntPtr outputParameters,
         double sampleRate,
         CULong framesPerBuffer,
         CULong streamFlags,

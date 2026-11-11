@@ -127,8 +127,22 @@ internal sealed class FakePortAudioStream : IPortAudioStream
         return OverflowOnRead.Contains(index);
     }
 
+    /// <summary>
+    /// Whether a write takes as long as the audio it accepts. <b>Off by default</b>, because on a
+    /// duplex stream the read is the clock and a paced write would double every iteration.
+    ///
+    /// <para>An output-only stream has no read at all, so its write is the only thing that can
+    /// pace the pump — the role a real driver's full ring plays — and a test of one has to turn
+    /// this on or the loop spins as fast as the CPU allows, which fills <see cref="Written"/>
+    /// without bound.</para>
+    /// </summary>
+    public bool PaceWrites { get; set; }
+
     public bool Write(float[] buffer, int frames)
     {
+        if (PaceWrites)
+            Thread.Sleep(TimeSpan.FromSeconds(frames / Math.Max(1.0, SampleRateHz)));
+
         int index = WriteCount++;
         lock (_gate)
         {

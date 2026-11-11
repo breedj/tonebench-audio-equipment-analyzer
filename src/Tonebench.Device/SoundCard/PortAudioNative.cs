@@ -92,15 +92,21 @@ internal sealed class PortAudioNative : IPortAudio
 
     public bool IsFormatSupported(SoundCardStreamRequest request) => _dispatcher.Invoke(() =>
     {
-        var input = BuildParameters(request, output: false, out IntPtr inputExtra);
-        var outputParams = BuildParameters(request, output: true, out IntPtr outputExtra);
+        IntPtr inputExtra = IntPtr.Zero, outputExtra = IntPtr.Zero;
+        IntPtr inputBlock = IntPtr.Zero, outputBlock = IntPtr.Zero;
+
         try
         {
-            return PortAudioInterop.Pa_IsFormatSupported(ref input, ref outputParams, request.SampleRateHz)
+            inputBlock = AllocParameters(request, output: false, out inputExtra);
+            outputBlock = AllocParameters(request, output: true, out outputExtra);
+
+            return PortAudioInterop.Pa_IsFormatSupported(inputBlock, outputBlock, request.SampleRateHz)
                 == PaError.NoError;
         }
         finally
         {
+            Free(inputBlock);
+            Free(outputBlock);
             Free(inputExtra);
             Free(outputExtra);
         }
@@ -155,29 +161,54 @@ internal sealed class PortAudioNative : IPortAudio
 
     private IPortAudioStream OpenStreamCore(SoundCardStreamRequest request, int framesPerBuffer)
     {
-        var input = BuildParameters(request, output: false, out IntPtr inputExtra);
-        var outputParams = BuildParameters(request, output: true, out IntPtr outputExtra);
+        IntPtr inputExtra = IntPtr.Zero, outputExtra = IntPtr.Zero;
+        IntPtr inputBlock = IntPtr.Zero, outputBlock = IntPtr.Zero;
 
-        int error = PortAudioInterop.Pa_OpenStream(
-            out IntPtr handle,
-            ref input,
-            ref outputParams,
-            request.SampleRateHz,
-            new CULong((nuint)framesPerBuffer),
-            PortAudioInterop.StreamFlagsDitherOff,
-            IntPtr.Zero,
-            IntPtr.Zero);
+        // The two allocations have different lifetimes and the distinction is load-bearing. The
+        // parameter blocks are read during Pa_OpenStream and are the caller's to free the moment it
+        // returns; the WASAPI descriptors are not, and ownership of those passes to the stream.
+        // Until the stream exists to own them, a throw on either path has to free them here, which
+        // the pre-2026-11-11 shape did only for the error return and not for a throw out of the
+        // second AllocParameters.
+        bool handedOver = false;
 
-        if (error != PaError.NoError)
+        try
         {
-            Free(inputExtra);
-            Free(outputExtra);
-            throw new PortAudioException(
-                $"Could not open the audio stream at {request.SampleRateHz:0} Hz: {PortAudioInterop.ErrorText(error)}",
-                error);
-        }
+            inputBlock = AllocParameters(request, output: false, out inputExtra);
+            outputBlock = AllocParameters(request, output: true, out outputExtra);
 
-        return new NativeStream(handle, inputExtra, outputExtra, _dispatcher);
+            int error = PortAudioInterop.Pa_OpenStream(
+                out IntPtr handle,
+                inputBlock,
+                outputBlock,
+                request.SampleRateHz,
+                new CULong((nuint)framesPerBuffer),
+                PortAudioInterop.StreamFlagsDitherOff,
+                IntPtr.Zero,
+                IntPtr.Zero);
+
+            if (error != PaError.NoError)
+            {
+                throw new PortAudioException(
+                    $"Could not open the audio stream at {request.SampleRateHz:0} Hz: {PortAudioInterop.ErrorText(error)}",
+                    error);
+            }
+
+            var stream = new NativeStream(handle, inputExtra, outputExtra, _dispatcher);
+            handedOver = true;
+            return stream;
+        }
+        finally
+        {
+            Free(inputBlock);
+            Free(outputBlock);
+
+            if (!handedOver)
+            {
+                Free(inputExtra);
+                Free(outputExtra);
+            }
+        }
     }
 
     /// <summary>
@@ -264,13 +295,25 @@ internal sealed class PortAudioNative : IPortAudio
     };
 
     /// <summary>
-    /// Builds one side's parameters, allocating a WASAPI descriptor when exclusive mode is asked
-    /// for. The allocation has to outlive the call — PortAudio reads it during
-    /// <c>Pa_OpenStream</c> — so ownership passes to the caller, and the stream frees it on close.
+    /// Builds one side's parameters on the unmanaged heap, or returns <see cref="IntPtr.Zero"/>
+    /// where the request does not carry that direction — which is PortAudio's own way of saying
+    /// "no input" or "no output", and the reason the two P/Invokes take pointers rather than
+    /// <c>ref</c>.
+    ///
+    /// <para>Two allocations, two lifetimes. The returned block is read during
+    /// <c>Pa_OpenStream</c> / <c>Pa_IsFormatSupported</c> and the caller frees it as soon as the
+    /// call returns. <paramref name="hostApiSpecific"/> is the WASAPI exclusive-mode descriptor and
+    /// is <b>not</b> the caller's to free on the success path — ownership passes to the stream,
+    /// which frees it on close.</para>
     /// </summary>
-    private PortAudioInterop.PaStreamParameters BuildParameters(
+    private IntPtr AllocParameters(
         SoundCardStreamRequest request, bool output, out IntPtr hostApiSpecific)
     {
+        hostApiSpecific = IntPtr.Zero;
+
+        if (output ? !request.HasOutput : !request.HasInput)
+            return IntPtr.Zero;
+
         int device = output ? request.OutputDevice : request.InputDevice;
         int channels = output ? request.OutputChannelCount : request.InputChannelCount;
         var descriptor = _devices.FirstOrDefault(d => d.Index == device);
@@ -279,7 +322,6 @@ internal sealed class PortAudioNative : IPortAudio
             ?? (output ? descriptor?.DefaultLowOutputLatencyS : descriptor?.DefaultLowInputLatencyS)
             ?? 0.0;
 
-        hostApiSpecific = IntPtr.Zero;
         if (request.Exclusive && descriptor?.HostApiKind == SoundCardHostApiKind.Wasapi)
         {
             var wasapi = PaWasapiStreamInfo.Exclusive();
@@ -287,7 +329,7 @@ internal sealed class PortAudioNative : IPortAudio
             Marshal.StructureToPtr(wasapi, hostApiSpecific, fDeleteOld: false);
         }
 
-        return new PortAudioInterop.PaStreamParameters
+        var parameters = new PortAudioInterop.PaStreamParameters
         {
             Device = device,
             ChannelCount = channels,
@@ -295,6 +337,10 @@ internal sealed class PortAudioNative : IPortAudio
             SuggestedLatency = latency,
             HostApiSpecificStreamInfo = hostApiSpecific,
         };
+
+        IntPtr block = Marshal.AllocHGlobal(Marshal.SizeOf<PortAudioInterop.PaStreamParameters>());
+        Marshal.StructureToPtr(parameters, block, fDeleteOld: false);
+        return block;
     }
 
     private static void Free(IntPtr p)

@@ -91,7 +91,34 @@ public sealed record SoundCardSettings
     /// </summary>
     public double MinStimulusFrequencyHz { get; init; } = 20.0;
 
-    /// <summary>True once a card has been chosen on both sides.</summary>
-    public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(InputDeviceName) && !string.IsNullOrWhiteSpace(OutputDeviceName);
+    /// <summary>True once a capture device has been chosen.</summary>
+    public bool HasInput => !string.IsNullOrWhiteSpace(InputDeviceName);
+
+    /// <summary>True once a playback device has been chosen.</summary>
+    public bool HasOutput => !string.IsNullOrWhiteSpace(OutputDeviceName);
+
+    /// <summary>
+    /// True once a card has been chosen on both sides — i.e. this bench can both generate and
+    /// measure. Still the test every full measurement wants; it is no longer the test for whether
+    /// a stream can be opened at all, which is <see cref="IsUsable"/>.
+    /// </summary>
+    public bool IsConfigured => HasInput && HasOutput;
+
+    /// <summary>
+    /// True once <i>either</i> direction has been chosen. A capture-only ADC (an E1DA Cosmos has
+    /// only a USB-C out) and a playback-only USB DAC each satisfy this and not
+    /// <see cref="IsConfigured"/>, and before 2026-11-11 both were refused at connect — the Cosmos
+    /// case being the one <c>collapseToBestApi</c>'s own comment predicted, "would collapse the
+    /// card into an unusable entry".
+    /// </summary>
+    public bool IsUsable => HasInput || HasOutput;
+
+    /// <summary>
+    /// Which directions the chosen devices can carry. Derived rather than stored: the two device
+    /// names are what the user picked, and a stored direction could contradict them.
+    /// </summary>
+    public SoundCardStreamDirection Direction =>
+        HasInput && HasOutput ? SoundCardStreamDirection.Duplex
+        : HasInput ? SoundCardStreamDirection.InputOnly
+        : SoundCardStreamDirection.OutputOnly;
 }

@@ -938,7 +938,19 @@ function mvRms(value: number | null | undefined) {
           <span v-if="note.hint" class="opacity-80">{{ note.hint }}</span>
         </p>
 
-        <label v-if="cardInputs.length > 1" class="sc-row">
+        <!-- One device is not a choice, so it is not a dropdown -- but it is still the answer to
+             "which hardware is being driven", and hiding the row entirely left that answer
+             nowhere on screen. Asked on 2026-11-11, with a G6 selected whose single WASAPI output
+             endpoint made the row vanish while the Input row stayed: the only thing naming the
+             output was the calibration-drift warning above it. That matters more than usual here,
+             because the output can move between cards without being touched -- see
+             collapsedOutputCard. Shown read-only instead. -->
+        <div v-if="cardInputs.length === 1" class="sc-row">
+          <span class="sc-label">Input</span>
+          <span class="text-neutral-600 dark:text-neutral-300">{{ cardInputs[0]!.name }}</span>
+        </div>
+
+        <label v-else-if="cardInputs.length > 1" class="sc-row">
           <span class="sc-label">Input</span>
           <select
             v-model="form.inputKey"
@@ -966,7 +978,12 @@ function mvRms(value: number | null | undefined) {
           </select>
         </label>
 
-        <label v-if="cardOutputs.length > 1" class="sc-row">
+        <div v-if="cardOutputs.length === 1" class="sc-row">
+          <span class="sc-label">Output</span>
+          <span class="text-neutral-600 dark:text-neutral-300">{{ cardOutputs[0]!.name }}</span>
+        </div>
+
+        <label v-else-if="cardOutputs.length > 1" class="sc-row">
           <span class="sc-label">Output</span>
           <select
             v-model="form.outputKey"

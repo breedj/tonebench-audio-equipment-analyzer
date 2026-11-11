@@ -2452,7 +2452,15 @@ public sealed record ImpulseResponseParameters(
     /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
     /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
     /// </remarks>
-    IReadOnlyList<JsonElement>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null,
+    /// <summary>
+    /// The clock offset this run was corrected by, in ppm, or null for a run taken before the
+    /// correction existed or on a bench with one clock. Recorded because a corrected measurement
+    /// that cannot say which figure corrected it cannot be checked afterwards -- the same reason
+    /// <c>ChartStartHz</c> is stored, and the reason the mapping test refused this field until it
+    /// was.
+    /// </summary>
+    double? ClockDriftPpm = null);
 
 /// <summary>
 /// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --

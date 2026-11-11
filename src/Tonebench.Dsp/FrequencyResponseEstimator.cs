@@ -267,16 +267,29 @@ public sealed class FrequencyResponseEstimator
     /// add, trivial against the FFT that produced the record, and N slots of memory -- three arrays
     /// of bins each, about 8 MB per slot at the longest record -- which is why it is opt-in.</para>
     /// </param>
+    /// <summary>
+    /// The clock-ratio correction, or null where the two ends share a clock.
+    ///
+    /// <para>Applied to the transfer function in <b>both</b> completions rather than to the trace
+    /// afterwards, and that is the point of putting it here: the impulse is the inverse transform of
+    /// this same function, so a correction applied to the finished phase curve would leave the
+    /// impulse, the gate and both decay surfaces still smeared.</para>
+    /// </summary>
+    private readonly ChirpClockDrift? _clockDrift;
+
     public FrequencyResponseEstimator(
         int fftSize,
         IFftBackend fft,
         ImpulseGate? gate = null,
         bool removeLatency = true,
         double regularisationFraction = RegularisationFraction,
-        int windowRecords = 0)
+        int windowRecords = 0,
+        ChirpClockDrift? clockDrift = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(regularisationFraction);
         ArgumentOutOfRangeException.ThrowIfNegative(windowRecords);
+
+        _clockDrift = clockDrift;
 
         if (fftSize < 4 || (fftSize & (fftSize - 1)) != 0)
             throw new ArgumentException("FFT size must be a power of two of at least 4.", nameof(fftSize));
@@ -443,6 +456,8 @@ public sealed class FrequencyResponseEstimator
         for (int k = 0; k < _binCount; k++)
             _h[k] = _sxy[k] / (_sxx[k] + lambda);
 
+        _clockDrift?.Correct(_h.AsSpan(0, _binCount));
+
         ApplyGate();
 
         // Unwrap as we go: keep each step within half a turn of the last, so a response that
@@ -502,6 +517,8 @@ public sealed class FrequencyResponseEstimator
         var h = new Complex[_binCount];
         for (int k = 0; k < _binCount; k++)
             h[k] = _sxy[k] / (_sxx[k] + lambda);
+
+        _clockDrift?.Correct(h);
 
         double[] ungated = new double[_fftSize];
         _fft.Inverse(h, ungated);

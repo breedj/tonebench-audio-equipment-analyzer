@@ -1169,7 +1169,10 @@ public sealed class MeasurementSaveService(
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
-                ChartAnnotations: annotations),
+                ChartAnnotations: annotations,
+                // Null rather than 0 where the two ends share a clock, so a stored result reads
+                // "never corrected" rather than "corrected by nothing".
+                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm),
             SerializerOptions);
 
         var info = session.Info;

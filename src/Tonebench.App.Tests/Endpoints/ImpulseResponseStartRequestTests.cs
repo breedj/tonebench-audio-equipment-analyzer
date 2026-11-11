@@ -82,8 +82,8 @@ public class ImpulseResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(19, ConstructorParameterCount(typeof(ImpulseResponseStartRequest)));
-        Assert.Equal(19, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
+        Assert.Equal(20, ConstructorParameterCount(typeof(ImpulseResponseStartRequest)));
+        Assert.Equal(20, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
     }
 
     /// <summary>

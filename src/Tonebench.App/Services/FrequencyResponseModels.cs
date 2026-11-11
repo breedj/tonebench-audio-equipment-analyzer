@@ -295,7 +295,17 @@ public sealed record FrequencyResponseRequest(
     /// <see cref="Tonebench.Device.PeriodicNoise.DefaultCutoffHz"/> for the reason
     /// <see cref="ChirpStartHz"/> gives; kept equal to it by a test.
     /// </summary>
-    double NoiseCutoffHz = 5.0)
+    double NoiseCutoffHz = 5.0,
+    /// <summary>
+    /// How far the capturing clock runs from the playing one, in parts per million, or zero where
+    /// they share one. Measured by the clock-drift test; see <see cref="ChirpClockDrift"/> for what
+    /// it is worth and what it cannot do.
+    ///
+    /// <para>Zero by default, so a one-card bench is untouched and nothing is corrected on a
+    /// measurement nobody has measured the drift of — a wrong epsilon would put a ramp on where
+    /// there was none.</para>
+    /// </summary>
+    double ClockDriftPpm = 0.0)
 {
     /// <summary>Whether the stimulus is one of the periodic-noise kinds rather than the sweep.</summary>
     public bool UsesNoise => Stimulus != ResponseStimulus.Chirp;
@@ -385,6 +395,19 @@ public sealed record FrequencyResponseRequest(
     public double BinHz => SampleRateHz / FftSize;
 
     public double ChirpEndHz => ChirpEndNyquistFraction * SampleRateHz / 2.0;
+
+    /// <summary>
+    /// The clock correction this run should apply, or null — no drift worth correcting, or a
+    /// stimulus the correction does not describe.
+    ///
+    /// <para><b>Chirp only, and that is not a limitation to be fixed later.</b> The correction is
+    /// built on the sweep's time-frequency map; periodic noise has none, so there is no ramp to
+    /// remove — its error is incoherent leakage, which shows up as the coherence falling rather
+    /// than as a delay.</para>
+    /// </summary>
+    public ChirpClockDrift? ClockDrift => Stimulus == ResponseStimulus.Chirp
+        ? ChirpClockDrift.For(ClockDriftPpm, SampleRateHz, FftSize, ChirpStartHz, ChirpEndHz)
+        : null;
 
     public double AnalysisHighHz => AnalysisHighNyquistFraction * SampleRateHz / 2.0;
 

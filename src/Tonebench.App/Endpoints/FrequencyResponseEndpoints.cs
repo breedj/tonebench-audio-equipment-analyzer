@@ -199,7 +199,9 @@ public sealed record FrequencyResponseStartRequest(
     /// Where a pink or speech sequence stops rising towards DC, in Hz. Read by neither the chirp nor
     /// the white sequence, which has no slope for a corner to start.
     /// </summary>
-    double NoiseCutoffHz = 5.0)
+    double NoiseCutoffHz = 5.0,
+    /// <summary>Clock offset in ppm from the drift test; 0 leaves the measurement uncorrected.</summary>
+    double ClockDriftPpm = 0.0)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -229,7 +231,8 @@ public sealed record FrequencyResponseStartRequest(
             BandwidthReferenceLowHz,
             BandwidthReferenceHighHz,
             stimulus,
-            NoiseCutoffHz);
+            NoiseCutoffHz,
+            ClockDriftPpm);
 }
 
 /// <param name="ChartAnnotations">

@@ -111,7 +111,10 @@ public sealed record ImpulseResponseRequest(
     double ChirpStartHz = 2.0,
     double LoadOhms = 8.0,
     ResponseStimulus Stimulus = ResponseStimulus.Chirp,
-    double NoiseCutoffHz = 5.0)
+    double NoiseCutoffHz = 5.0,
+    /// <summary>The capture clock's offset from the playback clock in ppm — see
+    /// <see cref="FrequencyResponseRequest.ClockDriftPpm"/>, which this is carried to.</summary>
+    double ClockDriftPpm = 0.0)
 {
     public const double DefaultGatePreMs = 1.0;
 
@@ -156,7 +159,8 @@ public sealed record ImpulseResponseRequest(
             ChirpStartHz,
             LoadOhms,
             Stimulus: Stimulus,
-            NoiseCutoffHz: NoiseCutoffHz);
+            NoiseCutoffHz: NoiseCutoffHz,
+            ClockDriftPpm: ClockDriftPpm);
 
     public double SampleRateHz => AsAcquisition().SampleRateHz;
 
@@ -165,6 +169,8 @@ public sealed record ImpulseResponseRequest(
     public double BinHz => AsAcquisition().BinHz;
 
     public double ChirpEndHz => AsAcquisition().ChirpEndHz;
+
+    public ChirpClockDrift? ClockDrift => AsAcquisition().ClockDrift;
 
     public double AnalysisLowHz => AsAcquisition().AnalysisLowHz;
 

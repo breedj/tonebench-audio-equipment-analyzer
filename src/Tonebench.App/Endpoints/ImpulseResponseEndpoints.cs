@@ -348,7 +348,9 @@ public sealed record ImpulseResponseStartRequest(
     /// </summary>
     double NoiseCutoffHz = 5.0,
     /// <summary>The load a watts target is defined against, in ohms. Only read by the OutputPower mode.</summary>
-    double LoadOhms = 8.0)
+    double LoadOhms = 8.0,
+    /// <summary>Clock offset in ppm from the drift test; 0 leaves the measurement uncorrected.</summary>
+    double ClockDriftPpm = 0.0)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -387,7 +389,8 @@ public sealed record ImpulseResponseStartRequest(
             ChirpStartHz,
             LoadOhms,
             stimulus,
-            NoiseCutoffHz);
+            NoiseCutoffHz,
+            ClockDriftPpm);
 }
 
 /// <summary>

@@ -67,8 +67,8 @@ public class FrequencyResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        Assert.Equal(16, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
-        Assert.Equal(16, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
+        Assert.Equal(17, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
+        Assert.Equal(17, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
     }
 
     private static int ConstructorParameterCount(Type type) =>

@@ -901,14 +901,14 @@ public sealed class ImpulseResponseRunner(
         var acquisition = request.AsAcquisition();
         var gate = request.SweepGate;
 
-        var left = new FrequencyResponseEstimator(request.FftSize, _fft, gate);
-        var right = new FrequencyResponseEstimator(request.FftSize, _fft, gate);
+        var left = new FrequencyResponseEstimator(request.FftSize, _fft, gate, clockDrift: request.ClockDrift);
+        var right = new FrequencyResponseEstimator(request.FftSize, _fft, gate, clockDrift: request.ClockDrift);
 
         // Only when the right input is the reference. Estimating L against R directly, rather than
         // dividing the two synthetic-reference results, is what gives the gain trace its own honest
         // coherence — a ratio of two estimates has no coherence of its own.
         var gain = request.ReferenceMode == ImpulseReferenceMode.RightChannel
-            ? new FrequencyResponseEstimator(request.FftSize, _fft, gate)
+            ? new FrequencyResponseEstimator(request.FftSize, _fft, gate, clockDrift: request.ClockDrift)
             : null;
 
         lock (_stateLock)

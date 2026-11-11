@@ -351,6 +351,27 @@ const settingsInEffect = computed(() => {
 })
 
 /**
+ * Whether the settings are refused outright, rather than merely not applied yet.
+ *
+ * <p>This is what the notice is gated on, and the difference from <c>!settingsInEffect</c> is the
+ * debounce: for 250 ms after every change of a dropdown the settings really are not in effect, and
+ * a red box that appears for a quarter second each time one is touched is alarming about something
+ * that is about to be fine. Disabling two buttons for that long costs nothing, so the buttons use
+ * the stricter test and the notice uses this one.</p>
+ *
+ * <p>With a side selected and nothing in flight, <c>canSave</c> can only be false because no
+ * sample rate survived the probe — so the red refusal above is always on screen when this is, and
+ * the notice may refer to it.</p>
+ */
+const settingsRefused = computed(
+  () =>
+    !!config.value &&
+    !busy.value &&
+    !canSave.value &&
+    (!!selectedInput.value || !!selectedOutput.value),
+)
+
+/**
  * What to say about the stored full scales, beside the dropdowns that change them.
  *
  * <p>Two things, and the drift one is the reason this exists: a full scale is the figure that
@@ -926,17 +947,22 @@ function mvRms(value: number | null | undefined) {
           {{ probe.problem ?? 'This pairing accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.' }}
         </p>
 
-        <!-- The consequence of whatever is above, stated separately because it is what the user
-             actually meets: a setting that reads one thing while the card does another. Its own
-             paragraph rather than a sentence appended to the red box, since the box has two
-             possible texts and this follows from either. -->
+        <!-- The consequence of the refusal above, stated separately because it is what the user
+             actually meets: a dialog that reads one thing while the card does another.
+             <p>Gated on `settingsRefused` and NOT on `!settingsInEffect`, although the buttons
+             below are gated on the latter. The two differ for the 250 ms of the debounce and the
+             save that follows it, when the settings are genuinely not yet in effect but are about
+             to be -- turning two buttons off for a quarter second is nothing, and flashing a red
+             box on every ordinary change of a dropdown is alarming and wrong.</p> -->
         <p
-          v-if="config && !settingsInEffect && !busy"
+          v-if="settingsRefused"
           class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
         >
-          These settings are not in effect — none of them has reached a card, so the calibration
-          steps below are turned off. They drive whichever card is still connected, which is not
-          the one shown here.
+          Nothing here is in effect. These settings apply themselves as you change them, but only
+          once the pairing can be opened — and it cannot, for the reason just above. The analyzer
+          is still using the card it had before, so the calibration steps are turned off: they
+          would measure <em>that</em> card while this dialog describes a different one. Putting
+          both cards on a host API the other also offers is usually what fixes it.
         </p>
 
         <p

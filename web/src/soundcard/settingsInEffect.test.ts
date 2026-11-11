@@ -53,7 +53,16 @@ describe('the calibration steps are gated on the settings being in effect', () =
   })
 
   it('says why, rather than leaving dead controls unexplained', () => {
-    expect(source).toContain('These settings are not in effect')
+    expect(source).toContain('Nothing here is in effect')
+  })
+
+  it('does not flash that notice through every ordinary change', () => {
+    // Gated on the durable refusal and not on the buttons' own test, which is false for the
+    // 250 ms of the debounce after any dropdown moves -- a red box appearing for a quarter second
+    // each time one is touched is alarming about something that is about to be fine.
+    const notice = source.lastIndexOf('<p', source.indexOf('Nothing here is in effect'))
+    const start = source.indexOf('v-if="', notice) + 'v-if="'.length
+    expect(source.slice(start, source.indexOf('"', start))).toBe('settingsRefused')
   })
 })
 

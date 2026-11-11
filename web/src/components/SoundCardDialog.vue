@@ -258,17 +258,6 @@ watch(
  * a watcher — which fires on a programmatic change as readily as a typed one — would overwrite the
  * restored pair with whatever the single card happened to be.</p>
  */
-/** Writes whichever card field the current mode means — see the select's own comment. */
-function onCardChanged(side: 'input' | 'output', key: string) {
-  if (!form.separateDevices) {
-    form.cardKey = key
-    return
-  }
-
-  if (side === 'input') form.inputCardKey = key
-  else form.outputCardKey = key
-}
-
 function onSeparateDevicesChanged() {
   if (form.separateDevices) {
     form.inputCardKey = form.cardKey
@@ -645,15 +634,44 @@ function mvRms(value: number | null | undefined) {
         <div class="sc-row">
           <span class="sc-label">{{ form.separateDevices ? 'Input card' : 'Sound card' }}</span>
           <span class="flex items-center gap-2">
-            <!-- :value + @change rather than v-model, because which field this writes depends on
-                 the mode: one card key in the ordinary mode, the input's in separate mode. -->
+            <!-- **v-memo, and it is not an optimisation.** This dialog polls the input levels
+                 every 120 ms for the calibration bars, so it re-renders about eight times a second
+                 the whole time it is open — and Vue's patchDOMProp rewrites `value` on every
+                 <option> *unconditionally* (`|| el.tagName === 'OPTION'`, because an option's value
+                 can be shadowed by its text). Writing that to an **open** native dropdown resets
+                 the popup, which is the flicker reported while hovering the list, 2026-11-11.
+                 Measured on this bench: 100 OPTION.value and 25 SELECT.value writes in 3 seconds,
+                 with zero option nodes added or removed — so it was never a list being rebuilt.
+                 Memoised on its own option list and its own selection, the subtree is not patched
+                 between card changes at all.
+
+                 Pre-existing rather than new: the single dropdown measured identically before the
+                 separate-devices pair existed. The other selects in this dialog share the
+                 mechanism and are left alone for now — their lists are short and static, where
+                 these three are the long ones a user hovers through.
+
+                 One select per mode rather than one with a ternary list, so each gets a v-model
+                 and a memo key that names exactly what it draws. -->
             <select
-              :value="inputCardKey"
+              v-if="!form.separateDevices"
+              v-model="form.cardKey"
+              v-memo="[cards, form.cardKey]"
               class="tb-input min-w-0 flex-1"
-              @change="onCardChanged('input', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">—</option>
-              <option v-for="c in (form.separateDevices ? inputCards : cards)" :key="c.key" :value="c.key">
+              <option v-for="c in cards" :key="c.key" :value="c.key">
+                {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
+              </option>
+            </select>
+
+            <select
+              v-else
+              v-model="form.inputCardKey"
+              v-memo="[inputCards, form.inputCardKey]"
+              class="tb-input min-w-0 flex-1"
+            >
+              <option value="">—</option>
+              <option v-for="c in inputCards" :key="c.key" :value="c.key">
                 {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
               </option>
             </select>
@@ -682,10 +700,11 @@ function mvRms(value: number | null | undefined) {
              second dropdown that can only ever agree with the first is a control with no state. -->
         <label v-if="form.separateDevices" class="sc-row">
           <span class="sc-label">Output card</span>
+          <!-- Memoised for the reason the input's is — see the comment there. -->
           <select
-            :value="outputCardKey"
+            v-model="form.outputCardKey"
+            v-memo="[outputCards, form.outputCardKey]"
             class="tb-input"
-            @change="onCardChanged('output', ($event.target as HTMLSelectElement).value)"
           >
             <option value="">—</option>
             <option v-for="c in outputCards" :key="c.key" :value="c.key">

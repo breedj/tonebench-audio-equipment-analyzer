@@ -3592,8 +3592,15 @@ export interface ClockDriftStatus {
   fftSize: number
   measuredChannel: string
   points: ClockDriftPoint[]
-  meanPpm: number | null
+  /**
+   * The figure this run reports: the **median** of its readings, not their mean. Measured on this
+   * bench, 0.5 % of records come back wild — one of them at +157 ppm against a true −104 — and a
+   * mean carries them where a median does not. See `ClockDriftStatus.DriftPpm` on the server.
+   */
+  driftPpm: number | null
+  /** Max minus min, raw — the one number that reveals an outlier. Nothing keys a decision on it. */
   spreadPpm: number | null
+  /** The scatter of one reading, estimated robustly (MAD × 1.4826). The stability verdict reads this. */
   sigmaPpm: number | null
   verdict: ClockDriftVerdict | null
   chirpCost: string | null

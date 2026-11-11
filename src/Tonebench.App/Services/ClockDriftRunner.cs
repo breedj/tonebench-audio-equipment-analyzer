@@ -90,27 +90,50 @@ public sealed class ClockDriftRunner(
                 var points = _points.ToArray();
                 double[] ppm = [.. points.Select(p => p.Ppm)];
 
-                double? mean = ppm.Length > 0 ? ppm.Average() : null;
+                double? drift = ppm.Length > 0 ? Median(ppm) : null;
                 double? spread = ppm.Length > 1 ? ppm.Max() - ppm.Min() : null;
-                double? sigma = null;
-                if (ppm.Length > 1 && mean is { } m)
-                    sigma = Math.Sqrt(ppm.Sum(v => (v - m) * (v - m)) / (ppm.Length - 1));
+                double? sigma = ppm.Length > 1 && drift is { } m ? RobustSigma(ppm, m) : null;
 
                 ClockDriftVerdict? verdict = null;
                 string? chirpCost = null;
-                if (mean is { } value && points.Length >= 3)
+                if (drift is { } value && points.Length >= 3)
                 {
-                    verdict = ClockDriftReading.Describe(value, spread, _sampleRateHz, FftSize);
+                    verdict = ClockDriftReading.Describe(value, sigma, _sampleRateHz, FftSize);
                     chirpCost = ClockDriftReading.DescribeChirpCost(
                         verdict, _sampleRateHz > 0 ? FftSize / _sampleRateHz : 0);
                 }
 
                 return new ClockDriftStatus(
                     Running, _phase, _elapsed, _duration, _toneHz, _playedToneHz, _sampleRateHz,
-                    _binHz, FftSize, _measured.ToString(), points, mean, spread, sigma,
+                    _binHz, FftSize, _measured.ToString(), points, drift, spread, sigma,
                     verdict, chirpCost, _warning, _error, _remembered);
             }
         }
+    }
+
+    /// <summary>
+    /// The middle reading. See <see cref="ClockDriftStatus.DriftPpm"/> for why this and not a mean
+    /// — in short, 0.5 % of records on a real bench come back wild, and one of them is enough to
+    /// move a mean by more than the whole of what a longer run buys.
+    /// </summary>
+    internal static double Median(double[] values)
+    {
+        double[] sorted = [.. values];
+        Array.Sort(sorted);
+        int mid = sorted.Length / 2;
+        return sorted.Length % 2 == 1 ? sorted[mid] : 0.5 * (sorted[mid - 1] + sorted[mid]);
+    }
+
+    /// <summary>
+    /// The scatter of one reading, from the median absolute deviation scaled by 1.4826 so it reads
+    /// as a normal distribution's sigma. Robust for the same reason the middle is: the sample
+    /// standard deviation of the run this was measured on was seven times larger, and all of that
+    /// was two records out of 418.
+    /// </summary>
+    internal static double RobustSigma(double[] values, double median)
+    {
+        double[] deviations = [.. values.Select(v => Math.Abs(v - median))];
+        return 1.4826 * Median(deviations);
     }
 
     public async Task<ClockDriftStatus> StartAsync(ClockDriftRequest request, CancellationToken ct)
@@ -305,7 +328,7 @@ public sealed class ClockDriftRunner(
         {
             var status = Status;
             if (status.Phase is not ("Finished" or "Cancelled")) return;
-            if (status.MeanPpm is not { } ppm || status.Verdict is null) return;
+            if (status.DriftPpm is not { } ppm || status.Verdict is null) return;
             if (session.Kind != DeviceKind.SoundCard) return;
 
             var current = soundCard.Config;
@@ -323,9 +346,17 @@ public sealed class ClockDriftRunner(
                 System.Text.Json.JsonSerializer.Serialize(updated, Json.AppJsonContext.Default.SoundCardConfig),
                 CancellationToken.None).ConfigureAwait(false);
             soundCard.Config = updated;
+
+            // "Remembered" means kept *and usable*, which is what the dialog goes on to claim --
+            // it tells the reader the two chirp screens now offer this correction. On a bench whose
+            // two sides are one card there is no correction to offer, so the figure is still kept
+            // (it is a real reading, and "0 ppm, one clock" is worth having) and the claim is not
+            // made. Asking ForBench rather than re-deriving the conditions is what keeps the two
+            // from drifting apart.
+            bool usable = ClockDriftCorrection.ForBench(session.Kind, updated) is not null;
             lock (_stateLock)
             {
-                _remembered = true;
+                _remembered = usable;
             }
 
             // Not a reopen, unlike the calibration runner's save: a full scale changes what the
@@ -334,8 +365,9 @@ public sealed class ClockDriftRunner(
             // also re-clock the card and spend the settle, which is the very state this figure
             // describes.
             logger.LogInformation(
-                "Clock drift: remembered {Ppm:0.000} ppm (spread {Spread:0.000} ppm) between {Output} and {Input}",
-                ppm, status.SpreadPpm ?? 0.0, updated.OutputDeviceName, updated.InputDeviceName);
+                "Clock drift: stored {Ppm:0.000} ppm (spread {Spread:0.000} ppm) between {Output} and {Input}; {Usable}",
+                ppm, status.SpreadPpm ?? 0.0, updated.OutputDeviceName, updated.InputDeviceName,
+                usable ? "the chirp screens will offer it" : "nothing can use it on this pairing");
         }
         catch (Exception ex)
         {

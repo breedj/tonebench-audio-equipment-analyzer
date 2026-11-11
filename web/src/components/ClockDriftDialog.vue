@@ -219,6 +219,14 @@ async function close() {
             Level box reads in <strong>dBFS</strong>, where 0 is the clipping point, and −20 is a
             good place to measure from.
           </p>
+          <p>
+            <strong>Run it when the bench is warm, and run it again now and then.</strong> A
+            crystal's frequency moves with temperature, so a figure measured on a cold bench is not
+            the one a warm bench is running at. Thirty seconds is enough for the figure itself —
+            the default minute leaves room to see whether it is still settling. The wiring this
+            test wants is the same loopback a calibration wants, so the easiest habit is to run it
+            as the last step of one.
+          </p>
         </div>
       </CollapsibleSection>
 
@@ -321,7 +329,7 @@ async function close() {
 
       <div v-if="status && points.length" class="dialog-card shrink-0 text-[12px]">
         <div class="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
-          <div><span class="text-neutral-500">Drift</span><br /><span class="font-mono tabular-nums">{{ fmt(status.meanPpm, 2, ' ppm') }}</span></div>
+          <div><span class="text-neutral-500">Drift</span><br /><span class="font-mono tabular-nums">{{ fmt(status.driftPpm, 2, ' ppm') }}</span></div>
           <div><span class="text-neutral-500">Spread</span><br /><span class="font-mono tabular-nums">{{ fmt(status.spreadPpm, 2, ' ppm') }}</span></div>
           <div><span class="text-neutral-500">σ</span><br /><span class="font-mono tabular-nums">{{ fmt(status.sigmaPpm, 3, ' ppm') }}</span></div>
           <div><span class="text-neutral-500">Tone margin</span><br /><span class="font-mono tabular-nums">{{ fmt(weakestDominanceDb, 1, ' dB') }}</span></div>

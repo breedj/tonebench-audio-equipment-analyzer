@@ -14,7 +14,7 @@ public class ClockDriftReadingTests
     [Fact]
     public void OneCard_ReadsAsOneClock_AndSaysTheWarningDoesNotApply()
     {
-        var verdict = ClockDriftReading.Describe(0.02, spreadPpm: 0.05, Rate, Fft);
+        var verdict = ClockDriftReading.Describe(0.02, sigmaPpm: 0.05, Rate, Fft);
 
         Assert.Equal("Good", verdict.Quality);
         Assert.Contains("one clock", verdict.Headline, StringComparison.OrdinalIgnoreCase);
@@ -25,7 +25,7 @@ public class ClockDriftReadingTests
     public void ThisBenchsOwnFigure_ReadsAsTwoOrdinaryCrystals()
     {
         // -104.37 ppm, a MOTU M4 against a Sound BlasterX G6, measured 2026-11-11.
-        var verdict = ClockDriftReading.Describe(-104.37, spreadPpm: 0.62, Rate, Fft);
+        var verdict = ClockDriftReading.Describe(-104.37, sigmaPpm: 0.62, Rate, Fft);
 
         Assert.Equal("Good", verdict.Quality);
         Assert.Contains("ordinary crystals", verdict.Headline);
@@ -52,9 +52,14 @@ public class ClockDriftReadingTests
     [Fact]
     public void AReadingThatIsStillMoving_IsCalledProvisionalRatherThanQuoted()
     {
-        // Mean of 40 with a spread of 30 is not a clock, it is a clock settling -- the QA403's own
-        // documented 15-30 s re-lock after a rate change looks exactly like this.
-        var verdict = ClockDriftReading.Describe(40, spreadPpm: 30, Rate, Fft);
+        // A middle of 40 whose readings scatter by 30 is not a clock, it is a clock settling --
+        // the QA403's own documented 15-30 s re-lock after a rate change looks exactly like this.
+        //
+        // Keyed on the robust sigma rather than on the raw spread since 2026-11-11: a 418-point
+        // run on this bench spread 273 ppm and had a robust sigma of 1.9, the difference being two
+        // records out of 418, so on the spread this verdict was decided by whether one bad record
+        // happened to land in the run.
+        var verdict = ClockDriftReading.Describe(40, sigmaPpm: 30, Rate, Fft);
 
         Assert.Equal("Fair", verdict.Quality);
         Assert.Contains("still moving", verdict.Headline);
@@ -67,7 +72,7 @@ public class ClockDriftReadingTests
     {
         // The spread test is relative, so a 2 ppm reading with 0.5 ppm of spread is settled even
         // though the ratio is large -- without the LockedPpm floor this reads as "still moving".
-        var verdict = ClockDriftReading.Describe(2.0, spreadPpm: 0.5, Rate, Fft);
+        var verdict = ClockDriftReading.Describe(2.0, sigmaPpm: 0.5, Rate, Fft);
 
         Assert.Equal("Good", verdict.Quality);
         Assert.DoesNotContain("still moving", verdict.Headline);
@@ -76,7 +81,7 @@ public class ClockDriftReadingTests
     [Fact]
     public void FarAboveTwoCrystals_PointsAtTheRateRatherThanAtTheCrystal()
     {
-        var verdict = ClockDriftReading.Describe(4200, spreadPpm: 1, Rate, Fft);
+        var verdict = ClockDriftReading.Describe(4200, sigmaPpm: 1, Rate, Fft);
 
         Assert.Equal("Poor", verdict.Quality);
         Assert.Contains("larger than two crystals explain", verdict.Headline);
@@ -91,7 +96,7 @@ public class ClockDriftReadingTests
     [InlineData(201.0, "Poor")]
     public void TheCrystalBoundIsWhereItSaysItIs(double ppm, string quality)
     {
-        Assert.Equal(quality, ClockDriftReading.Describe(ppm, spreadPpm: 0.1, Rate, Fft).Quality);
+        Assert.Equal(quality, ClockDriftReading.Describe(ppm, sigmaPpm: 0.1, Rate, Fft).Quality);
     }
 
     [Fact]
@@ -128,5 +133,60 @@ public class ClockDriftReadingTests
 
         Assert.True(double.IsFinite(verdict.SlipSamplesPerRecord));
         Assert.True(double.IsFinite(verdict.PhaseErrorDegAt20k));
+    }
+
+    /// <summary>
+    /// <b>Why the reported figure is a median.</b> Measured on this bench 2026-11-11 over a
+    /// 418-reading run: two readings — 0.5 % — came back wild, one at +157 ppm against a true
+    /// −104, both from the records with the lowest tone margin of the run. Both survive the
+    /// dominance gate, which is set to catch a buried tone rather than a one-off bad record.
+    ///
+    /// <para>The consequence is how long the test must run. Taking every window of N consecutive
+    /// readings from that run and asking how far its estimate lands from the run's own middle: at
+    /// N = 30 a mean is out by up to <b>8.6 ppm</b> and a median by <b>1.5 ppm</b>, and the mean
+    /// needs more than 120 readings to reach what the median gives with 10.</para>
+    /// </summary>
+    [Fact]
+    public void TheReportedFigureIsAMedian_SoOneWildRecordCannotMoveIt()
+    {
+        // Twenty good readings around -104, plus the two this bench really produced.
+        double[] good = [.. Enumerable.Range(0, 20).Select(i => -104.0 + (i % 5 - 2) * 0.4)];
+        double[] withOutliers = [.. good, 156.70, -116.37];
+
+        double clean = ClockDriftRunner.Median(good);
+        double dirty = ClockDriftRunner.Median(withOutliers);
+        double mean = withOutliers.Average();
+
+        Assert.Equal(clean, dirty, 1);
+        Assert.True(Math.Abs(mean - clean) > 8,
+            $"the mean should be dragged by the outliers; it moved {Math.Abs(mean - clean):0.0} ppm");
+    }
+
+    /// <summary>
+    /// And why the sigma beside it is robust: the sample standard deviation of that same run was
+    /// <b>12.9 ppm</b> where the robust estimate was <b>1.9</b>, all of the difference being those
+    /// two records. The verdict's stability test reads this one, so on the raw figure a settled
+    /// bench would have been called "still moving" by one bad record.
+    /// </summary>
+    [Fact]
+    public void TheSigmaBesideItIsRobust_SoOneWildRecordCannotInflateIt()
+    {
+        double[] good = [.. Enumerable.Range(0, 20).Select(i => -104.0 + (i % 5 - 2) * 0.4)];
+        double[] withOutliers = [.. good, 156.70, -116.37];
+
+        double median = ClockDriftRunner.Median(withOutliers);
+        double robust = ClockDriftRunner.RobustSigma(withOutliers, median);
+        double sampleSd = Math.Sqrt(
+            withOutliers.Sum(v => Math.Pow(v - withOutliers.Average(), 2)) / (withOutliers.Length - 1));
+
+        Assert.True(robust < 2.0, $"the robust sigma should describe an ordinary reading; it read {robust:0.00} ppm");
+        Assert.True(sampleSd > 10.0, $"the sample sd should not; it read {sampleSd:0.0} ppm");
+    }
+
+    [Fact]
+    public void TheMedianOfAnEvenNumberOfReadingsIsTheMiddleOfTheTwoMiddleOnes()
+    {
+        Assert.Equal(-2.5, ClockDriftRunner.Median([-4.0, -3.0, -2.0, -1.0]), 9);
+        Assert.Equal(-3.0, ClockDriftRunner.Median([-4.0, -3.0, -2.0]), 9);
     }
 }

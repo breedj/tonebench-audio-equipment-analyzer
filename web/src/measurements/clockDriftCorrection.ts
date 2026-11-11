@@ -94,6 +94,7 @@ export function clockDriftCorrectionNotice(
   sampleRateHz: number,
   fftSize: number,
   measuredUtc: string | null | undefined,
+  now = new Date(),
 ): string | null {
   if (typeof clockDriftPpm !== 'number' || !Number.isFinite(clockDriftPpm)) return null
   if (!(sampleRateHz > 0) || !(fftSize > 0)) return null
@@ -103,12 +104,62 @@ export function clockDriftCorrectionNotice(
   const slipSamples = slipSeconds * sampleRateHz
   const when = readMeasuredDate(measuredUtc)
 
-  const measured = when ? ` Measured ${when}.` : ''
+  const age = clockDriftAgeDays(measuredUtc, now)
+  const ago =
+    age === null || age < 1 ? '' : ` (${Math.round(age)} day${Math.round(age) === 1 ? '' : 's'} ago)`
+  const measured = when ? ` Measured ${when}${ago}.` : ''
   return (
     `The two clocks separate by ${slipSamples.toFixed(1)} samples ` +
     `(${(slipSeconds * 1e6).toFixed(0)} µs) over one ${recordSeconds.toFixed(2)} s record, which a ` +
     `sweep reads as the DUT's own delay. This takes that ramp off the phase and the impulse.` +
     measured
+  )
+}
+
+/**
+ * How old a stored figure may be before the panel says so, in days.
+ *
+ * <p><b>Why a nudge and not a gate.</b> A crystal's frequency moves with temperature — a few ppm
+ * per degree on ordinary parts, so the *difference* between two of them can move by tens of ppm
+ * across a room's day. But a correction made with a figure that is wrong by Δ leaves Δ/|ε| of the
+ * original error, so a figure 40 % stale still removes 60 % of the ramp: staleness degrades
+ * gracefully, and the correction is only worse than nothing if the stored figure has the wrong
+ * *sign*, which needs it to be more than twice out. So the right handling is to say how old the
+ * figure is and let the reader judge, never to withhold the correction or refuse the run.</p>
+ *
+ * <p>Thirty days is chosen to be rare enough not to nag. It is not the real variable — what moves
+ * the figure is the bench warming up, which happens within an hour — so the wording points at
+ * warm-up rather than at the calendar, and the dialog says the same.</p>
+ */
+export const CLOCK_DRIFT_STALE_DAYS = 30
+
+/** How many days ago the figure was measured, or null when that cannot be read. */
+export function clockDriftAgeDays(measuredUtc: string | null | undefined, now = new Date()): number | null {
+  if (!measuredUtc) return null
+  const when = new Date(measuredUtc)
+  if (Number.isNaN(when.getTime())) return null
+  return Math.max(0, (now.getTime() - when.getTime()) / 86_400_000)
+}
+
+/**
+ * The amber line under the checkbox when the figure is old, or null while it is fresh.
+ *
+ * <p>It names warm-up rather than the date, because that is the lever: the same bench measured cold
+ * and used warm has already moved, where one measured a month ago and left running has not.</p>
+ */
+export function clockDriftStaleNotice(
+  measuredUtc: string | null | undefined,
+  now = new Date(),
+): string | null {
+  const age = clockDriftAgeDays(measuredUtc, now)
+  if (age === null || age < CLOCK_DRIFT_STALE_DAYS) return null
+
+  const days = Math.round(age)
+  return (
+    `This figure is ${days} days old. Clocks move with temperature, so run the Clock drift test ` +
+    `again once the bench has warmed up — it needs the output looped back to the input, as the ` +
+    `calibration does. A stale figure still removes most of the error; it is never worse than ` +
+    `leaving the box clear.`
   )
 }
 

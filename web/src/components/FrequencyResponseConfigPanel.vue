@@ -35,6 +35,7 @@ import {
 import {
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
+  clockDriftStaleNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
   sendsClockDriftCorrection,
@@ -283,6 +284,8 @@ const driftCorrectionNotice = computed(() =>
     props.clockDriftMeasuredUtc,
   ),
 )
+
+const driftStaleNotice = computed(() => clockDriftStaleNotice(props.clockDriftMeasuredUtc))
 
 
 /**
@@ -588,6 +591,12 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       class="text-[10px] leading-snug text-neutral-500 dark:text-neutral-400"
     >
       {{ driftCorrectionNotice }}
+    </p>
+    <p
+      v-if="offersDriftCorrection && driftStaleNotice"
+      class="text-[10px] leading-snug text-amber-700 dark:text-amber-400"
+    >
+      {{ driftStaleNotice }}
     </p>
 
     <p v-if="invalid" class="text-[12px] text-red-600 dark:text-red-400">{{ invalid }}</p>

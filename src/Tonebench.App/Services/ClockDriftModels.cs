@@ -77,22 +77,29 @@ public static class ClockDriftReading
     public const double TwoCrystalsPpm = 200.0;
 
     /// <summary>
-    /// A reading whose spread is this much of its own size has not settled, whatever its mean says.
+    /// <summary>
+    /// A reading scattered by this much of its own size has not settled, whatever its middle says.
+    ///
+    /// <para>Measured against the <b>robust</b> sigma rather than the raw spread, which is what it
+    /// used to read. On a 418-point run on this bench (2026-11-11) the spread was <b>273 ppm</b>
+    /// and the robust sigma <b>1.9 ppm</b>: the difference is two readings out of 418, so keyed on
+    /// the spread this verdict was decided by whether a single bad record happened to land in the
+    /// run.</para>
     /// </summary>
     public const double UnstableFraction = 0.25;
 
     public static ClockDriftVerdict Describe(
-        double meanPpm, double? spreadPpm, double sampleRateHz, int fftSize)
+        double driftPpm, double? sigmaPpm, double sampleRateHz, int fftSize)
     {
-        double magnitude = Math.Abs(meanPpm);
+        double magnitude = Math.Abs(driftPpm);
         double recordSeconds = sampleRateHz > 0 ? fftSize / sampleRateHz : 0;
         double slipSeconds = magnitude * 1e-6 * recordSeconds;
         double slipSamples = slipSeconds * sampleRateHz;
         double degAt20k = slipSeconds * 20000.0 * 360.0;
 
-        bool unstable = spreadPpm is { } spread
+        bool unstable = sigmaPpm is { } sigma
             && magnitude > LockedPpm
-            && spread > Math.Max(UnstableFraction * magnitude, LockedPpm);
+            && sigma > Math.Max(UnstableFraction * magnitude, LockedPpm);
 
         string headline;
         string quality;
@@ -100,7 +107,7 @@ public static class ClockDriftReading
 
         if (magnitude < LockedPpm)
         {
-            headline = $"{meanPpm:+0.00;-0.00;0.00} ppm — one clock.";
+            headline = $"{driftPpm:+0.00;-0.00;0.00} ppm — one clock.";
             quality = "Good";
             detail =
                 "The two sides are not running independently: this is one card used both ways, or " +
@@ -109,7 +116,7 @@ public static class ClockDriftReading
         }
         else if (unstable)
         {
-            headline = $"{meanPpm:+0.0;-0.0;0.0} ppm, and still moving.";
+            headline = $"{driftPpm:+0.0;-0.0;0.0} ppm, and still moving.";
             quality = "Fair";
             detail =
                 "The mean is plausible but the reading has not settled, so take it as provisional. " +
@@ -120,7 +127,7 @@ public static class ClockDriftReading
         }
         else if (magnitude <= TwoCrystalsPpm)
         {
-            headline = $"{meanPpm:+0.0;-0.0;0.0} ppm — two ordinary crystals.";
+            headline = $"{driftPpm:+0.0;-0.0;0.0} ppm — two ordinary crystals.";
             quality = "Good";
             detail =
                 $"That is normal and says nothing bad about either card: a consumer audio crystal is " +
@@ -131,7 +138,7 @@ public static class ClockDriftReading
         }
         else
         {
-            headline = $"{meanPpm:+0.0;-0.0;0.0} ppm — larger than two crystals explain.";
+            headline = $"{driftPpm:+0.0;-0.0;0.0} ppm — larger than two crystals explain.";
             quality = "Poor";
             detail =
                 "Two independent crystals differ by at most about 200 ppm, so this is something " +
@@ -179,8 +186,38 @@ public sealed record ClockDriftStatus(
     int FftSize,
     string MeasuredChannel,
     IReadOnlyList<ClockDriftPoint> Points,
-    double? MeanPpm,
+    /// <summary>
+    /// The figure this run reports: the <b>median</b> of its readings, not their mean.
+    ///
+    /// <para><b>Measured, not a preference.</b> Over a 418-reading run on this bench
+    /// (2026-11-11) two readings — 0.5 % — came back wild, one of them at +157 ppm against a true
+    /// −104, both from records whose tone margin was the lowest of the run. A mean carries them;
+    /// a median does not. Taking every window of N consecutive readings and asking how far its
+    /// estimate lands from the run's own middle: at N = 30 the mean is out by up to
+    /// <b>8.6 ppm</b> and the median by <b>1.5 ppm</b>, and the mean needs more than 120 readings
+    /// to reach what the median gives with 10. That ratio is what sets how long this test has to
+    /// run — see the manual's "How long to run it".</para>
+    ///
+    /// <para>It is not a trimmed mean, which would need a rejection rule and therefore a threshold
+    /// to argue about; the median needs neither and is exact here, since what it has to survive is
+    /// a handful of arbitrary values rather than a heavier-tailed distribution.</para>
+    /// </summary>
+    double? DriftPpm,
+    /// <summary>
+    /// Max minus min, raw. Deliberately <i>not</i> robust and deliberately still shown: it is the
+    /// one number that reveals an outlier at all, and reading it against <see cref="SigmaPpm"/>
+    /// beside it is how a run with one bad record is told from one that is genuinely scattered.
+    /// Nothing keys a decision on it.
+    /// </summary>
     double? SpreadPpm,
+    /// <summary>
+    /// The scatter of a single reading, estimated robustly (the median absolute deviation scaled
+    /// to a normal sigma) rather than as a sample standard deviation.
+    ///
+    /// <para>Same measurement as above: the sample sd of that 418-point run was <b>12.9 ppm</b>
+    /// and this is <b>1.9 ppm</b>, and the second is the one that describes what an ordinary
+    /// reading does. The verdict's stability test reads this.</para>
+    /// </summary>
     double? SigmaPpm,
     ClockDriftVerdict? Verdict,
     string? ChirpCost,

@@ -195,13 +195,16 @@ const { showPage } = useManual()
         <tr>
           <td>Correct for clock drift</td>
           <td>
-            Only on a bench whose two sound cards have had their
-            <a href="#" @click.prevent="showPage('clock-drift')">clock drift</a> measured, and only
-            on the sweep. Two cards are two crystals, so the capture is a very slightly time-scaled
-            copy of what was played — which a sweep reads as a delay that grows with frequency,
-            i.e. as the DUT's own phase and group delay. This takes that ramp off, by the figure
-            printed on the checkbox. Magnitudes are untouched. On by default; the result records
-            which figure corrected it.
+            Only on a bench built from <em>two</em> sound cards whose
+            <a href="#" @click.prevent="showPage('clock-drift')">clock drift</a> has been measured,
+            and only on the sweep. Two cards are two crystals, so the capture is a very slightly
+            time-scaled copy of what was played — which a sweep reads as a delay that grows with
+            frequency, i.e. as the DUT's own phase and group delay. This takes that ramp off, by
+            the figure printed on the checkbox, and leaves every magnitude untouched. It reaches
+            the Left and Right traces; the <strong>Gain</strong> trace is one captured channel
+            against the other and has already had the drift divide out of it. On by default, and
+            the result records which figure corrected it. The line underneath says how far the two
+            clocks separate over one record, and how old the figure is.
           </td>
         </tr>
       </tbody>

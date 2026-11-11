@@ -39,6 +39,7 @@ import {
 import {
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
+  clockDriftStaleNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
   sendsClockDriftCorrection,
@@ -229,6 +230,8 @@ const driftCorrectionNotice = computed(() =>
     props.clockDriftMeasuredUtc,
   ),
 )
+
+const driftStaleNotice = computed(() => clockDriftStaleNotice(props.clockDriftMeasuredUtc))
 
 const chirpEndHz = computed(() => 0.98 * sampleRateHz.value * 0.5)
 
@@ -595,6 +598,12 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
       class="text-[10px] leading-snug text-neutral-500 dark:text-neutral-400"
     >
       {{ driftCorrectionNotice }}
+    </p>
+    <p
+      v-if="offersDriftCorrection && driftStaleNotice"
+      class="text-[10px] leading-snug text-amber-700 dark:text-amber-400"
+    >
+      {{ driftStaleNotice }}
     </p>
 
     <template #footer>

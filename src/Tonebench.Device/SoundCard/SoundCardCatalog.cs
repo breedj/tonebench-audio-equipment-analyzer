@@ -282,12 +282,20 @@ public static class SoundCardCatalog
     /// The card a device belongs to: the interface buried in its name where there is one, and the
     /// device's own name where there is not — which is ASIO, whose device is the card, and WDM-KS,
     /// whose names name nothing.
+    ///
+    /// <para>Public, and taking a name rather than a descriptor, because it is also how the app
+    /// decides whether a configured bench is one card or two without enumerating PortAudio — see
+    /// <c>ClockDriftCorrection.UsesTwoCards</c>, where getting it from the stored device names
+    /// alone is the whole point. One rule rather than two, or the picker's card list and the
+    /// clock-drift correction could disagree about what a card is.</para>
     /// </summary>
-    private static string InterfaceOf(SoundCardDeviceDescriptor d)
+    public static string CardOf(string deviceName)
     {
-        string stem = SoundCardEnumerator.InterfaceStem(d.Name);
-        return stem.Length > 0 ? stem : d.Name;
+        string stem = SoundCardEnumerator.InterfaceStem(deviceName);
+        return stem.Length > 0 ? stem : deviceName;
     }
+
+    private static string InterfaceOf(SoundCardDeviceDescriptor d) => CardOf(d.Name);
 
     private static SoundCardOption Describe(SoundCardDeviceDescriptor d) => new(
         HostApi: d.HostApiName,

@@ -64,9 +64,9 @@
         <tr>
           <td>For</td>
           <td>
-            How long to measure. A reading lands about once a second. Zero runs until stopped. Two
-            clocks separate at a constant rate, so the figure itself settles within a few readings —
-            the length is really about seeing whether it <em>stays</em> settled.
+            How long to measure. A reading lands about every 0.7 seconds. Zero runs until
+            stopped. See <strong>How long to run it</strong> below — the short answer is that
+            30 seconds is enough and the default minute is comfortable.
           </td>
         </tr>
       </tbody>
@@ -79,9 +79,28 @@
         <tr><th>Reading</th><th>What it means</th></tr>
       </thead>
       <tbody>
-        <tr><td>Drift</td><td>The mean of every reading, in parts per million. Negative means the input card's clock runs slow against the output card's.</td></tr>
-        <tr><td>Spread</td><td>Largest reading minus smallest. A clock that has settled has a spread far smaller than its own value.</td></tr>
-        <tr><td>σ</td><td>The standard deviation, which is the same question asked less harshly than Spread.</td></tr>
+        <tr>
+          <td>Drift</td>
+          <td>
+            The figure, in parts per million — the <em>median</em> of every reading, not their mean.
+            Negative means the input card's clock runs slow against the output card's.
+          </td>
+        </tr>
+        <tr>
+          <td>Spread</td>
+          <td>
+            Largest reading minus smallest. Not robust, and shown for exactly that reason: it is the
+            one number here that reveals a single bad record. Read it against σ.
+          </td>
+        </tr>
+        <tr>
+          <td>σ</td>
+          <td>
+            What an <em>ordinary</em> reading scatters by, estimated so that a stray record does not
+            inflate it. A large Spread beside a small σ means one bad record, which is harmless; a
+            large σ means the clock has not settled, and the verdict says so.
+          </td>
+        </tr>
         <tr>
           <td>Tone margin</td>
           <td>
@@ -172,8 +191,28 @@
       frequency at a known moment — so a clock ratio is a delay of
       <em>ε&nbsp;×&nbsp;(time into the sweep)</em>: nothing at the bottom of the band, the whole
       slip at the top. The correction multiplies that delay back out of the measured response.
-      Phase and both delay curves lose the ramp; <strong>magnitudes are untouched</strong>, because
-      the correction is a unit-modulus factor and cannot change a level.
+      Phase and both delay curves lose the ramp, and the impulse response — which is that same
+      response transformed back into time — stops being smeared by it. <strong>Magnitudes are
+      untouched</strong>, because the correction is a unit-modulus factor and cannot change a
+      level: a measurement whose levels you already trusted is not put at risk by ticking this.
+    </p>
+
+    <p>
+      <strong>Which traces it reaches, and which it cannot help.</strong> It corrects whatever was
+      measured against the <em>generated</em> sweep — the Left and Right traces, and the impulse
+      response under reference <em>None</em> or a stored loopback. It deliberately does not touch
+      the <strong>Gain</strong> trace, which is one captured channel measured against the other:
+      both come from the same record on the same clock, so the drift has already divided out and
+      "correcting" it would put an error in. If you work with <strong>Right channel is
+      reference</strong> on, your gain curve was never affected by clock drift in the first place —
+      that is the same fact as the advice above, and the reason it is given.
+    </p>
+
+    <p>
+      <strong>It applies only to a bench built from two cards.</strong> One interface has one clock,
+      so there is no difference to measure and nothing to correct; the checkbox does not appear
+      there. The app works out which case you are in from the two devices selected, not from their
+      endpoint names — <em>In 3-4</em> and <em>Out 3-4</em> of one interface are one card.
     </p>
 
     <p>
@@ -195,9 +234,91 @@
     </p>
 
     <p>
-      Every corrected result records the figure it was corrected by, so a measurement can always say
-      which ε produced it. A run taken with the box clear records nothing, which is how a corrected
-      and an uncorrected measurement of the same DUT are told apart afterwards.
+      <strong>It is applied once, when the measurement is taken</strong>, not each time a curve is
+      drawn. What is stored is the corrected response, so a result in History opens exactly as it
+      was measured and costs nothing to redraw — and changing the stored drift figure afterwards
+      does not retrospectively alter it. Every corrected result records the figure it was corrected
+      by, so a measurement can always say which ε produced it; a run taken with the box clear
+      records nothing, which is how a corrected and an uncorrected measurement of the same DUT are
+      told apart afterwards.
+    </p>
+
+    <h3>Keeping the figure current</h3>
+
+    <p>
+      <strong>A crystal's frequency moves with temperature</strong>, a few parts per million per
+      degree on ordinary parts — so the difference between two of them moves too, and a bench
+      measured cold and used warm is not working from the same number. The one that matters is
+      warm-up rather than the calendar: an hour of the bench being on moves the figure further than
+      a month of it sitting switched off.
+    </p>
+
+    <p>
+      <strong>This degrades gently, which is why the app nudges rather than refuses.</strong> A
+      correction made with a figure that is wrong by Δ removes all but Δ/ε of the error, so a figure
+      40 % stale still takes 60 % of the ramp off. It can only be worse than leaving the box clear
+      if the stored figure has the <em>wrong sign</em>, which needs it to be more than twice out —
+      and a pair of crystals that far apart would have been reported as something other than two
+      ordinary crystals when it was measured. <strong>An old figure is better than none.</strong>
+    </p>
+
+    <p>
+      So: the checkbox prints how old its figure is, and says so in amber past a month. Re-run the
+      test when it suits you — after the bench has been on for a while, if the room has changed
+      temperature noticeably, or simply when you are next in a loopback for a calibration, which is
+      the wiring this test wants anyway. It cannot be done automatically for exactly that reason:
+      the output has to reach the input, and while a DUT is patched in it usually does not.
+    </p>
+
+    <p>
+      A good habit is to run it as the last step of a calibration session — the cable is already in
+      the right place, it takes under a minute, and the figure is then as fresh as the full scales
+      beside it.
+    </p>
+
+    <h3>How long to run it</h3>
+
+    <p>
+      <strong>About 30 readings — some 20 to 30 seconds — is enough, and the default minute leaves
+      a comfortable margin.</strong> That is measured rather than estimated: a 418-reading run on
+      this project's own bench was cut into every possible window of <em>N</em> consecutive readings
+      and each window's figure compared with the whole run's.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Readings</th><th>About</th><th>Worst error</th><th>Ramp left uncorrected</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>10</td><td>7 s</td><td>2.1 ppm</td><td>2 %</td></tr>
+        <tr><td>20</td><td>14 s</td><td>1.7 ppm</td><td>1.6 %</td></tr>
+        <tr><td>30</td><td>21 s</td><td>1.5 ppm</td><td>1.5 %</td></tr>
+        <tr><td>60</td><td>43 s</td><td>0.6 ppm</td><td>0.6 %</td></tr>
+        <tr><td>120</td><td>86 s</td><td>0.4 ppm</td><td>0.4 %</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      So precision stops being the limit almost immediately: thirty readings already leave about one
+      microsecond of the seventy-one this bench's drift puts on a record, and running four times as
+      long improves that by a factor of three on a quantity that no longer matters.
+    </p>
+
+    <p>
+      <strong>Why the figure is a median.</strong> Over those 418 readings, two — half a per cent —
+      came back wild, one of them at +157 ppm against a true −104, both from the records with the
+      weakest tone of the run. They are not enough to be caught by the tone-margin gate, which
+      exists to catch a tone buried in hum rather than a one-off bad record. A mean carries them: on
+      the same windows, a <em>mean</em> of 30 readings is out by up to 8.6 ppm where the median is
+      out by 1.5, and a mean needs more than 120 readings to reach what a median gives with 10.
+    </p>
+
+    <p>
+      <strong>What the extra time really buys is stability, not precision.</strong> A clock that is
+      still settling — the QA403 re-locks over 15 to 30 seconds after a sample-rate change, and a
+      sound card can do the same after its stream reopens — looks perfectly steady over five
+      readings. The same 418-reading run drifted 1.8 ppm from its first third to its last as the
+      bench warmed, which is the kind of thing only a longer run shows.
     </p>
 
     <h3>When not to believe it</h3>

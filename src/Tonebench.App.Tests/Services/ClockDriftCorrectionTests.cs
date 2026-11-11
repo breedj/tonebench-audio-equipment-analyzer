@@ -49,6 +49,58 @@ public class ClockDriftCorrectionTests
         Assert.Null(ClockDriftCorrection.ForBench(kind, Pair()));
     }
 
+
+    /// <summary>
+    /// The premise of the whole measurement: drift is the <em>difference</em> between two crystals,
+    /// and one card has one. A card used both ways reads ~0 ppm however it is driven — a resampler
+    /// on it converts between the app's rate and the device's on the same clock in both directions,
+    /// so nothing is time-scaled.
+    /// </summary>
+    [Fact]
+    public void OneCardUsedBothWays_IsNeverOfferedACorrection()
+    {
+        // The endpoint names differ, which is exactly the trap: one interface is several endpoints.
+        var oneCard = Pair(input: "In 3-4 (MOTU M Series)", output: "Out 3-4 (MOTU M Series)");
+
+        Assert.False(ClockDriftCorrection.UsesTwoCards(oneCard));
+        Assert.Null(ClockDriftCorrection.ForBench(DeviceKind.SoundCard, oneCard));
+        Assert.Equal(0.0, ClockDriftCorrection.Resolve(true, DeviceKind.SoundCard, oneCard));
+    }
+
+    /// <summary>
+    /// An ASIO driver <em>is</em> the card, so both sides carry the same bare name and there is no
+    /// stem to find. The fallback has to read that as one card, or every ASIO bench would be
+    /// offered a correction for a clock difference it cannot have.
+    /// </summary>
+    [Fact]
+    public void AnAsioDriverUsedBothWays_IsOneCard()
+    {
+        Assert.False(ClockDriftCorrection.UsesTwoCards(Pair(input: "MOTU M Series", output: "MOTU M Series")));
+    }
+
+    [Fact]
+    public void TwoCardsAreTwoCards_WhateverTheirEndpointsAreCalled()
+    {
+        Assert.True(ClockDriftCorrection.UsesTwoCards(Pair()));
+        Assert.True(ClockDriftCorrection.UsesTwoCards(
+            Pair(input: "Line In (2- Sound BlasterX G6)", output: "Out 3-4 (MOTU M Series)")));
+    }
+
+    /// <summary>
+    /// The same card under two host APIs is two clocks' worth of <i>path</i> but one crystal, and
+    /// the host API is part of what was stamped — so this reads as two cards and the figure applies
+    /// only to the pairing it was measured on. Erring this way is deliberate: see
+    /// <see cref="ClockDriftCorrection.UsesTwoCards"/>, where the expensive mistake is withholding
+    /// a correction rather than offering one the threshold then refuses.
+    /// </summary>
+    [Fact]
+    public void TheSameCardUnderTwoHostApis_ReadsAsTwo()
+    {
+        var mixed = Pair() with { InputHostApi = "WASAPI", OutputHostApi = "ASIO" };
+
+        Assert.True(ClockDriftCorrection.UsesTwoCards(mixed));
+    }
+
     [Fact]
     public void ABenchThatHasNeverRunTheTest_HasNothingToApply()
     {

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CLOCK_DRIFT_STALE_DAYS,
+  clockDriftAgeDays,
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
+  clockDriftStaleNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
   readMeasuredDate,
@@ -101,16 +104,81 @@ describe('clockDriftCorrectionNotice', () => {
     expect(clockDriftCorrectionNotice(PPM, 48000, 131072, null)).toContain('13.6 samples')
   })
 
-  it('says when the figure was measured, when that is known', () => {
-    const notice = clockDriftCorrectionNotice(PPM, 48000, 32768, '2026-11-11T12:00:00Z')
+  it('says when the figure was measured, and how long ago', () => {
+    const notice = clockDriftCorrectionNotice(
+      PPM, 48000, 32768, '2026-11-11T12:00:00Z', new Date('2026-11-25T12:00:00Z'))
 
     expect(notice).toContain('Measured')
+    // The date alone makes the reader do the arithmetic, and the age is the part they act on.
+    expect(notice).toContain('14 days ago')
+  })
+
+  it('leaves the age off a figure measured today', () => {
+    const notice = clockDriftCorrectionNotice(
+      PPM, 48000, 32768, '2026-11-11T12:00:00Z', new Date('2026-11-11T18:00:00Z'))
+
+    expect(notice).toContain('Measured')
+    expect(notice).not.toContain('ago')
   })
 
   it('says nothing at all without a figure or a record to measure it over', () => {
     expect(clockDriftCorrectionNotice(null, 48000, 32768, null)).toBeNull()
     expect(clockDriftCorrectionNotice(PPM, 0, 32768, null)).toBeNull()
     expect(clockDriftCorrectionNotice(PPM, 48000, 0, null)).toBeNull()
+  })
+})
+
+
+describe('clockDriftAgeDays', () => {
+  const measured = '2026-11-11T12:00:00Z'
+
+  it('counts the days since the figure was measured', () => {
+    expect(clockDriftAgeDays(measured, new Date('2026-11-25T12:00:00Z'))).toBeCloseTo(14, 3)
+  })
+
+  // A clock that is ahead of the stored stamp -- a machine whose time was corrected backwards --
+  // must read as fresh rather than as negative days, which would print as "-3 days ago".
+  it('never reads as negative', () => {
+    expect(clockDriftAgeDays(measured, new Date('2026-11-01T12:00:00Z'))).toBe(0)
+  })
+
+  it('answers nothing for anything it cannot read', () => {
+    expect(clockDriftAgeDays(null)).toBeNull()
+    expect(clockDriftAgeDays('the other day')).toBeNull()
+  })
+})
+
+describe('clockDriftStaleNotice', () => {
+  const measured = '2026-11-11T12:00:00Z'
+  const after = (days: number) =>
+    new Date(Date.parse(measured) + days * 86_400_000).toISOString()
+
+  it('says nothing while the figure is fresh', () => {
+    expect(clockDriftStaleNotice(measured, new Date(after(CLOCK_DRIFT_STALE_DAYS - 1)))).toBeNull()
+  })
+
+  it('names the age and points at warm-up rather than at the calendar', () => {
+    const notice = clockDriftStaleNotice(measured, new Date(after(CLOCK_DRIFT_STALE_DAYS + 4)))
+
+    expect(notice).toContain('34 days old')
+    expect(notice).toContain('warmed up')
+  })
+
+  /**
+   * The reassurance is load-bearing, not padding. A correction made with a figure wrong by delta
+   * leaves delta/|eps| of the error, so a stale figure still removes most of the ramp -- and a
+   * reader told only that the figure is old would reasonably clear the box, which is strictly
+   * worse. The line has to say so.
+   */
+  it('says a stale figure is still better than none', () => {
+    const notice = clockDriftStaleNotice(measured, new Date(after(400)))
+
+    expect(notice).toContain('never worse')
+  })
+
+  it('says nothing when there is no date to judge', () => {
+    expect(clockDriftStaleNotice(null)).toBeNull()
+    expect(clockDriftStaleNotice('not a date')).toBeNull()
   })
 })
 

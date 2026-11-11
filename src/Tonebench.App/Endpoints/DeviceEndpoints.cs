@@ -55,12 +55,18 @@ public static class DeviceEndpoints
             }
         });
 
-        group.MapGet("/ranges", (DeviceSessionService session) =>
+        group.MapGet("/ranges", (DeviceSessionService session, SoundCardSetting soundCard) =>
         {
             var caps = session.Capabilities;
+
+            // Read here rather than in the session, which knows nothing about the configuration
+            // database -- the same division DatabaseProblem on the status response follows.
+            var drift = ClockDriftCorrection.ForBench(session.Kind, soundCard.Config);
+
             return Results.Ok(new DeviceRangesResponse(
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,
-                session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz));
+                session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz,
+                drift?.Ppm, drift?.MeasuredUtc));
         });
 
         group.MapPost("/input-range", async (
@@ -480,7 +486,23 @@ public sealed record DeviceRangesResponse(
     /// <see cref="Tonebench.App.Services.DeviceSessionService.MaxGeneratorSampleRateHz"/>). The FFT
     /// screen's Generator panel stands itself down above it; see <c>generatorRateCeiling.ts</c>.
     /// </summary>
-    double? MaxGeneratorSampleRateHz = null);
+    double? MaxGeneratorSampleRateHz = null,
+    /// <summary>
+    /// How far the input's clock runs from the output's, in ppm, or <b>null</b> when no chirp
+    /// measurement on this bench can be corrected for it — see
+    /// <see cref="Tonebench.App.Services.ClockDriftCorrection.ForBench"/>, which carries the four
+    /// separate reasons that answer can be null.
+    ///
+    /// <para>On this response rather than on the status poll because it is a capability of the
+    /// bench and not a reading from it: it changes only when the drift test is run or the card
+    /// pairing is changed, both of which already re-read the ranges (the sound-card dialog's close
+    /// does it, and the drift dialog is nested inside it). The two chirp panels offer their
+    /// correction checkbox on it exactly as they take their chirp floor from
+    /// <see cref="MinStimulusFrequencyHz"/>.</para>
+    /// </summary>
+    double? ClockDriftPpm = null,
+    /// <summary>When the figure above was measured, for the caption beside the checkbox. Null when there is no figure.</summary>
+    DateTimeOffset? ClockDriftMeasuredUtc = null);
 
 public sealed record InputRangeRequest(double Dbv);
 

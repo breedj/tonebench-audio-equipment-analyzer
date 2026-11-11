@@ -488,7 +488,33 @@ public sealed record SoundCardConfig(
     int OutputCalibratedChannelOffset = 0,
     string InputCalibratedHostApi = "",
     string InputCalibratedDeviceName = "",
-    int InputCalibratedChannelOffset = 0)
+    int InputCalibratedChannelOffset = 0,
+    // **How far the input's clock runs from the output's, in ppm** -- what the Clock drift test
+    // measured, remembered so the chirp correction can use it without re-measuring. Null means
+    // never measured, which is every bench that has not run the test.
+    //
+    // It is kept with the sound card's settings because that is what it is a property of: two
+    // crystals, one per device. It is *not* a property of a DUT, so it is deliberately not stored
+    // in a project -- a result records the figure it was corrected with (see
+    // ImpulseResponseParameters.ClockDriftPpm), which is provenance rather than a setting to
+    // restore.
+    double? ClockDriftPpm = null,
+    /// <summary>The spread of the readings it was averaged from, in ppm; null from a single reading.</summary>
+    double? ClockDriftSpreadPpm = null,
+    DateTimeOffset? ClockDriftMeasuredUtc = null,
+    // **Which two devices it was measured between**, for the same reason the full scales carry
+    // theirs: a figure measured between one pair says nothing about another, and this one is used
+    // to *change* a measurement, so a stale one corrects a response by the wrong ramp and leaves no
+    // trace of having done so.
+    //
+    // Unlike the calibration stamps there is no channel offset here, and that is a real
+    // distinction rather than an omission: a full scale is a property of one channel pair, where a
+    // crystal is a property of the whole device -- so moving to another channel pair of the same
+    // card leaves this figure true.
+    string ClockDriftInputHostApi = "",
+    string ClockDriftInputDeviceName = "",
+    string ClockDriftOutputHostApi = "",
+    string ClockDriftOutputDeviceName = "")
 {
     /// <summary>The same bound the external gain uses, and for the same reason: past it, it is a typo rather than a fixture.</summary>
     public const double MaxAbsGainDb = ExternalGainConfig.MaxAbsDb;
@@ -497,6 +523,14 @@ public sealed record SoundCardConfig(
     public const double MinFullScaleMv = 0.1;
 
     public const double MaxFullScaleMv = 1_000_000.0;
+
+    /// <summary>
+    /// Past this a figure is not a clock difference at all. Two independent crystals differ by at
+    /// most a few hundred ppm; the large readings are a card running at a rate it was not asked for
+    /// -- 44.1 kHz against 48 kHz is 81 250 ppm, which is a real and diagnosable fault and so has
+    /// to be storable. Ten per cent is past every such pair and short of anything a clock can do.
+    /// </summary>
+    public const double MaxAbsClockDriftPpm = 100_000.0;
 
     public static SoundCardConfig Default { get; } = new();
 
@@ -515,7 +549,9 @@ public sealed record SoundCardConfig(
         && (GainDisplayUnit == "Db" || GainDisplayUnit == "Times")
         && IsFullScaleValid(OutputFullScalePeakMv)
         && IsFullScaleValid(InputFullScalePeakMvLeft)
-        && IsFullScaleValid(InputFullScalePeakMvRight);
+        && IsFullScaleValid(InputFullScalePeakMvRight)
+        && (ClockDriftPpm is null
+            || (double.IsFinite(ClockDriftPpm.Value) && Math.Abs(ClockDriftPpm.Value) <= MaxAbsClockDriftPpm));
 
     private static bool IsFullScaleValid(double? mv) =>
         mv is null || (double.IsFinite(mv.Value) && mv.Value >= MinFullScaleMv && mv.Value <= MaxFullScaleMv);
@@ -544,6 +580,41 @@ public sealed record SoundCardConfig(
         InputCalibratedDeviceName = InputDeviceName,
         InputCalibratedChannelOffset = InputChannelOffset,
     };
+
+    /// <summary>
+    /// Records a measured clock difference against the pair it was measured between. Called by
+    /// <c>ClockDriftRunner</c> at the moment the run ends, for the reason the two stamps above are
+    /// applied where their figures are produced: a stamp written anywhere later is a claim rather
+    /// than a fact.
+    /// </summary>
+    public SoundCardConfig StampClockDrift(double ppm, double? spreadPpm, DateTimeOffset measuredUtc) => this with
+    {
+        ClockDriftPpm = ppm,
+        ClockDriftSpreadPpm = spreadPpm,
+        ClockDriftMeasuredUtc = measuredUtc,
+        ClockDriftInputHostApi = InputHostApi,
+        ClockDriftInputDeviceName = InputDeviceName,
+        ClockDriftOutputHostApi = OutputHostApi,
+        ClockDriftOutputDeviceName = OutputDeviceName,
+    };
+
+    /// <summary>
+    /// Whether the stored drift figure was measured between the two devices now selected.
+    ///
+    /// <para><b>An unstamped figure is treated as applying</b>, which is the opposite of what the
+    /// calibration notices do with an unstamped full scale -- and for the opposite reason. There,
+    /// unknown provenance means "cannot tell", and a bench is not told its year-old calibration is
+    /// stale merely because this build cannot say. Here there is no such history: the stamp was
+    /// written the same day as the field, so a figure with no stamp cannot exist except by hand
+    /// editing, and reading one as applicable is both harmless and the simpler rule.</para>
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ClockDriftMatchesPairing =>
+        string.IsNullOrEmpty(ClockDriftInputDeviceName)
+        || (ClockDriftInputHostApi == InputHostApi
+            && ClockDriftInputDeviceName == InputDeviceName
+            && ClockDriftOutputHostApi == OutputHostApi
+            && ClockDriftOutputDeviceName == OutputDeviceName);
 }
 
 /// <summary>

@@ -40,14 +40,20 @@ public class ImpulseResponseStartRequestTests
             ChirpStartHz: 8.0,
             LoadOhms: 4.0,
             Stimulus: "SpeechFemale2011",
-            NoiseCutoffHz: 37.0);
+            NoiseCutoffHz: 37.0,
+            CorrectClockDrift: true);
 
         var measurement = wire.ToMeasurement(
             ThdSweepLevelMode.GeneratorVoltage,
             ThdSweepLevelUnit.Dbv,
             ImpulseReferenceMode.StoredLoopback,
             WindowType.BlackmanHarris,
-            ResponseStimulus.SpeechFemale2011);
+            ResponseStimulus.SpeechFemale2011,
+            // Resolved by the endpoint from the bench's stored figure rather than taken off the
+            // wire -- see ClockDriftCorrection.Resolve -- so this is the one setting that arrives
+            // as an argument. It still has to be carried across, and the acquisition half is where
+            // the estimator reads it.
+            clockDriftPpm: -104.038);
 
         Assert.Equal(48_000.0, measurement.FrequencySpanHz);
         Assert.Equal(4, measurement.ResolutionMultiplier);
@@ -68,16 +74,23 @@ public class ImpulseResponseStartRequestTests
         Assert.Equal(4.0, measurement.LoadOhms);
         Assert.Equal(ResponseStimulus.SpeechFemale2011, measurement.Stimulus);
         Assert.Equal(37.0, measurement.NoiseCutoffHz);
+        Assert.Equal(-104.038, measurement.ClockDriftPpm);
 
         // And through to the acquisition half, which is where the runner reads them.
         Assert.Equal(ResponseStimulus.SpeechFemale2011, measurement.AsAcquisition().Stimulus);
         Assert.Equal(37.0, measurement.AsAcquisition().NoiseCutoffHz);
+        Assert.Equal(-104.038, measurement.AsAcquisition().ClockDriftPpm);
     }
 
     /// <summary>
     /// Fails the moment a parameter is added to either record, because the assertions above cannot
     /// know about a field nobody told them about. Deliberately blunt: the alternative is an evening
     /// spent measuring a setting that never left the browser.
+    ///
+    /// <para>Note the two counts agreeing does <b>not</b> mean the two records hold the same field
+    /// names. The wire's <c>CorrectClockDrift</c> is a bool decision and the measurement's
+    /// <c>ClockDriftPpm</c> is the figure the server resolved for it, so they pair one-to-one
+    /// without matching -- which is why the mapping above passes the ppm in by hand.</para>
     /// </summary>
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()

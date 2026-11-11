@@ -24,6 +24,17 @@ namespace Tonebench.Dsp;
 /// correction is worth as much as ε is known: measured twice five hours apart by two different
 /// estimators, this bench's figure agreed to 0.33 ppm, so a ~100× reduction is available.</para>
 ///
+/// <para><b>Where it belongs, which is not everywhere.</b> It corrects a response measured against
+/// the <i>synthetic</i> chirp, because that reference is on the playback clock while the capture is
+/// not. A response of one captured channel against <i>another</i> — the gain trace when the right
+/// input is the reference, and every impedance measurement — has both sides on the capture clock,
+/// so the ramp has already cancelled and applying this would put one in. That cancellation is the
+/// same fact as the standing advice to use the right input as a reference where phase matters.
+/// Measured on the bench 2026-11-11, which is how it was found: a loopback's gain trace read 0 µs
+/// of group delay uncorrected and −41 to −72 µs corrected, following the sweep's own time map
+/// exactly. Pinned by
+/// <c>TheClockDriftCorrectionReachesTheSyntheticReferenceTraces_AndNotTheGainTrace</c>.</para>
+///
 /// <para><b>What it cannot do.</b> It inverts a <i>constant</i> ratio and nothing else — not jitter,
 /// not a clock still settling (a QA403 re-locks over 15–30 s after a rate change), and not a signal
 /// below the capture device's own floor. It is also specific to a chirp: the correction is built on

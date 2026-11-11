@@ -32,6 +32,13 @@ import {
   usesChirpStart,
   usesNoiseCutoff,
 } from '../measurements/responseStimulus'
+import {
+  clockDriftCorrectionLabel,
+  clockDriftCorrectionNotice,
+  offersClockDriftCorrection,
+  readClockDriftCorrection,
+  sendsClockDriftCorrection,
+} from '../measurements/clockDriftCorrection'
 import { stimulusFloorNotice } from '../stimulusFloor'
 import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
@@ -44,6 +51,14 @@ const props = defineProps<{
   minStimulusFrequencyHz?: number
   /** The rates the connected analyzer accepts. A span implies a rate, so this decides which spans are offered. */
   sampleRatesHz?: number[]
+  /**
+   * The bench's measured clock drift in ppm, or null when no measurement here can be corrected for
+   * it. The server decides that — see measurements/clockDriftCorrection.ts — and it arrives on
+   * `GET /api/device/ranges` beside the chirp floor above, which is the same shape of fact.
+   */
+  clockDriftPpm?: number | null
+  /** When that figure was measured, ISO-8601. Only for the caption. */
+  clockDriftMeasuredUtc?: string | null
 }>()
 
 
@@ -98,6 +113,8 @@ const form = reactive({
   /** What to play. The sweep by default, which is the only one that separates the DUT's distortion. */
   stimulus: 'Chirp' as ResponseStimulusName,
   noiseCutoffHz: 5,
+  /** On where a figure exists — see measurements/clockDriftCorrection.ts for why that way round. */
+  correctClockDrift: true,
 })
 
 // Edited in the Measurements panel next to the corners they define, saved and sent from here —
@@ -155,6 +172,8 @@ function applyStoredParams(paramsJson: string) {
   // Absent on a type saved before the stimulus was a choice, where the sweep is what it played.
   form.stimulus = readStimulus(stored.stimulus)
   if (typeof stored.noiseCutoffHz === 'number') form.noiseCutoffHz = stored.noiseCutoffHz
+  // Absent reads as *on*, unlike most of these — clockDriftCorrection.ts carries why.
+  form.correctClockDrift = readClockDriftCorrection(stored.correctClockDrift)
   // Absent on a type saved before the reference was configurable. Those runs were peak-referenced,
   // but the default here is the passband median on purpose: the stored value describes how the type
   // was last configured, not a promise to keep reproducing a reference that was wrong for it.
@@ -245,6 +264,28 @@ const binHz = computed(() => sampleRateHz.value / fftSize.value)
 const recordSeconds = computed(() => fftSize.value / sampleRateHz.value)
 
 /**
+ * The clock-drift correction, offered only where it can act: a bench with a figure, playing the
+ * sweep. All three read measurements/clockDriftCorrection.ts, which the impulse-response panel
+ * reads too — the two screens are the same measurement at two ends and must not differ about
+ * whether a run is corrected.
+ */
+const offersDriftCorrection = computed(() =>
+  offersClockDriftCorrection(props.clockDriftPpm, form.stimulus),
+)
+
+const driftCorrectionLabel = computed(() => clockDriftCorrectionLabel(props.clockDriftPpm))
+
+const driftCorrectionNotice = computed(() =>
+  clockDriftCorrectionNotice(
+    props.clockDriftPpm,
+    sampleRateHz.value,
+    fftSize.value,
+    props.clockDriftMeasuredUtc,
+  ),
+)
+
+
+/**
  * Roughly how long a run takes: one record per average, plus one thrown away after the stimulus
  * change (see FrequencyResponseRunner.MeasureOnceAsync), plus the flush and the audio still queued
  * for the DAC between them, plus a couple of probe captures when the level has to be solved for.
@@ -323,6 +364,7 @@ function buildParamsJson(): string {
     bandwidthReference: bandwidthReference.value,
     bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
     bandwidthReferenceHighHz: bandwidthReferenceHighHz.value,
+    correctClockDrift: form.correctClockDrift,
     generatorAmpDbv: null,
   }
   return JSON.stringify(parameters)
@@ -353,6 +395,9 @@ function buildRequest(continuous: boolean): FrequencyResponseStartRequest | null
     bandwidthReference: bandwidthReference.value,
     bandwidthReferenceLowHz: bandwidthReferenceLowHz.value,
     bandwidthReferenceHighHz: bandwidthReferenceHighHz.value,
+    // Only ever asked for where it can be acted on, the rule extractHarmonics follows on the
+    // impulse panel: a request the stimulus cannot carry is one the server has to reason about.
+    correctClockDrift: sendsClockDriftCorrection(form.correctClockDrift, form.stimulus),
     continuous,
   }
 }
@@ -529,6 +574,21 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       <input v-model="form.rightChannelIsReference" type="checkbox" :disabled="running" class="tb-check" />
       Right channel is reference
     </label>
+
+    <label
+      v-if="offersDriftCorrection"
+      class="tb-check-row"
+      title="Two cards are two crystals, so the capture is a very slightly time-scaled copy of what was played — which a sweep reads as a delay that grows with frequency, i.e. as the DUT's own phase and group delay. This removes that ramp using the figure the Clock drift test measured on this bench. Magnitudes are untouched."
+    >
+      <input v-model="form.correctClockDrift" type="checkbox" :disabled="running" class="tb-check" />
+      {{ driftCorrectionLabel }}
+    </label>
+    <p
+      v-if="offersDriftCorrection && driftCorrectionNotice"
+      class="text-[10px] leading-snug text-neutral-500 dark:text-neutral-400"
+    >
+      {{ driftCorrectionNotice }}
+    </p>
 
     <p v-if="invalid" class="text-[12px] text-red-600 dark:text-red-400">{{ invalid }}</p>
 

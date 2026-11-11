@@ -336,6 +336,14 @@ async function close() {
         <strong>{{ verdict.headline }}</strong>
         <p class="mt-1">{{ verdict.detail }}</p>
         <p v-if="status?.chirpCost" class="mt-2">{{ status.chirpCost }}</p>
+        <!-- The figure is kept the moment the run ends, so this says what happened rather than
+             offering to do it. Without the line the correction checkbox on the two chirp screens
+             appears from nowhere, which is the whole reason it is here. -->
+        <p v-if="status?.remembered" class="mt-2">
+          Kept with this card's settings. <strong>Frequency response</strong> and
+          <strong>Impulse response</strong> now offer to take this drift off a sweep, which is the
+          only thing that removes it — see their <em>Correct for clock drift</em> checkbox.
+        </p>
       </div>
 
       <p

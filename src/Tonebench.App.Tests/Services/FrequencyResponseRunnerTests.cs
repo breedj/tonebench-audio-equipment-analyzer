@@ -31,10 +31,11 @@ public class FrequencyResponseRunnerTests
         double bandwidthReferenceLowHz = BandwidthReferenceSpec.DefaultLowHz,
         double bandwidthReferenceHighHz = BandwidthReferenceSpec.DefaultHighHz,
         ResponseStimulus stimulus = ResponseStimulus.Chirp,
-        double noiseCutoffHz = 5.0) =>
+        double noiseCutoffHz = 5.0,
+        double clockDriftPpm = 0.0) =>
         new(spanHz, resolutionMultiplier, levelMode, levelValue, levelUnit, rightIsReference, smoothing, averages,
             continuous, chirpStartHz, loadOhms, bandwidthReference, bandwidthReferenceLowHz, bandwidthReferenceHighHz,
-            stimulus, noiseCutoffHz);
+            stimulus, noiseCutoffHz, clockDriftPpm);
 
     private sealed record Harness(FrequencyResponseRunner Runner, DeviceSessionService Session, SpectrumPipeline Pipeline);
 
@@ -103,6 +104,69 @@ public class FrequencyResponseRunnerTests
     {
         for (int i = trace.FreqHz.Length / 4; i < trace.FreqHz.Length * 3 / 4; i += 20)
             yield return i;
+    }
+
+
+    /// <summary>
+    /// The clock-drift correction belongs to a trace measured against the <em>synthetic</em> chirp,
+    /// and to no other.
+    ///
+    /// <para><b>Why this is the test that matters.</b> Left and Right are each a captured channel
+    /// over the generated sweep: the sweep is on the playback clock, the capture on the capture
+    /// clock, so the time scaling is in them and has to come out. The Gain trace is one captured
+    /// channel over <em>another</em>, both from the same record on the same clock — the ramp has
+    /// already cancelled, and correcting it puts one in. That cancellation is the same fact as this
+    /// app's long-standing advice to use the right input as a reference where phase matters.</para>
+    ///
+    /// <para>Found on the bench rather than here, 2026-11-11, with the correction wired to all
+    /// three: the gain trace of a loopback read 0 µs of group delay uncorrected and −41 to −72 µs
+    /// corrected, following the sweep's own time map exactly. Right-channel-as-reference is the
+    /// frequency-response panel's <em>default</em>, so that was the first thing a user would have
+    /// seen.</para>
+    ///
+    /// <para>Asserted as a difference between two runs rather than against a formula: the simulator
+    /// has one clock, so whatever the correction does to a trace here is entirely the correction's
+    /// doing, and the group delay a trace is reported with has been through smoothing and a
+    /// least-squares slope that no closed form here would reproduce.</para>
+    /// </summary>
+    [Fact]
+    public async Task TheClockDriftCorrectionReachesTheSyntheticReferenceTraces_AndNotTheGainTrace()
+    {
+        // Far larger than any real pair of crystals, so the ramp is unmistakable against the
+        // simulator's own numerical floor.
+        const double ppm = -1000.0;
+
+        var plain = await CreateAsync();
+        await plain.Runner.StartAsync(Request(), CancellationToken.None);
+        var uncorrected = await AwaitCompletionAsync(plain.Runner);
+        AssertFinished(uncorrected);
+
+        var corrected = await CreateAsync();
+        await corrected.Runner.StartAsync(Request(clockDriftPpm: ppm), CancellationToken.None);
+        var withDrift = await AwaitCompletionAsync(corrected.Runner);
+        AssertFinished(withDrift);
+
+        double worstGain = 0;
+        double mostLeft = 0;
+        var gainBefore = Trace(uncorrected, FrequencyResponseTraceKind.Gain);
+        var gainAfter = Trace(withDrift, FrequencyResponseTraceKind.Gain);
+        var leftBefore = Trace(uncorrected, FrequencyResponseTraceKind.Left);
+        var leftAfter = Trace(withDrift, FrequencyResponseTraceKind.Left);
+
+        foreach (int i in MidBandColumns(gainBefore))
+        {
+            worstGain = Math.Max(worstGain, Math.Abs(gainAfter.GroupDelayS![i] - gainBefore.GroupDelayS![i]));
+            mostLeft = Math.Max(mostLeft, Math.Abs(leftAfter.GroupDelayS![i] - leftBefore.GroupDelayS![i]));
+        }
+
+        // The left trace must move by something like the slip the figure describes -- 1000 ppm of a
+        // 0.68 s record is 683 us -- and the gain trace must not move at all. A tenth of a
+        // microsecond is far below anything a measurement could read and far above the arithmetic's
+        // own noise, so the two bounds cannot both be met by accident.
+        Assert.True(mostLeft > 100e-6,
+            $"the correction should have moved the left trace's group delay; it moved {mostLeft * 1e6:0.00} us");
+        Assert.True(worstGain < 0.1e-6,
+            $"the gain trace is already on one clock and must not be corrected; it moved {worstGain * 1e6:0.00} us");
     }
 
     [Fact]

@@ -185,7 +185,17 @@ public sealed record ClockDriftStatus(
     ClockDriftVerdict? Verdict,
     string? ChirpCost,
     string? Warning,
-    string? Error)
+    string? Error,
+    /// <summary>
+    /// Whether this run's figure was kept with the sound card's settings, so the chirp correction
+    /// can use it — see <c>ClockDriftRunner.RememberAsync</c>.
+    ///
+    /// <para>Reported rather than predicted. The dialog cannot work out for itself whether storing
+    /// happened: it depends on which analyzer the test ran on, on whether a card is configured, and
+    /// on the figure being storable at all. A line promising the figure had been kept on a bench
+    /// where it had not would be worse than no line.</para>
+    /// </summary>
+    bool Remembered = false)
 {
     public static ClockDriftStatus Idle { get; } = new(
         false, "Idle", 0, 0, 0, 0, 0, 0, 0, "None", [], null, null, null, null, null, null, null);

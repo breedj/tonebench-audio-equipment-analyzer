@@ -268,7 +268,12 @@ public sealed class MeasurementSaveService(
             BandwidthReferenceLowHz: BandwidthReferenceSpec.DefaultLowHz,
             BandwidthReferenceHighHz: BandwidthReferenceSpec.DefaultHighHz,
             Stimulus: nameof(ResponseStimulus.Chirp),
-            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz), SerializerOptions);
+            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz,
+            // Stated rather than left null, on the "a configured type should say what it does"
+            // reading the sweeps' ChartAutofitOnDone already follows -- the client reads an absent
+            // field the same way, so this is belt and braces, and it is also what a reader of the
+            // stored JSON sees.
+            CorrectClockDrift: true), SerializerOptions);
 
     /// <summary>
     /// A brand-new impulse-response type's <c>params_json</c>, on the same terms as
@@ -300,7 +305,12 @@ public sealed class MeasurementSaveService(
             ChirpStartHz: FrequencyResponseRequest.DefaultChirpStartHz,
             LoadOhms: 8.0,
             Stimulus: nameof(ResponseStimulus.PinkNoise),
-            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz), SerializerOptions);
+            NoiseCutoffHz: PeriodicNoise.DefaultCutoffHz,
+            // Stated rather than left null, on the "a configured type should say what it does"
+            // reading the sweeps' ChartAutofitOnDone already follows -- the client reads an absent
+            // field the same way, so this is belt and braces, and it is also what a reader of the
+            // stored JSON sees.
+            CorrectClockDrift: true), SerializerOptions);
 
     /// <summary>
     /// A brand-new stepped-sine response type's <c>params_json</c>, on the same terms as
@@ -921,7 +931,10 @@ public sealed class MeasurementSaveService(
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb, ExternalGainRightDb: session.ExternalGainRightDb,
                 ProgrammableLoadKind: LoadKindStamp, ProgrammableLoadOhms: LoadOhmsStamp,
-                ChartAnnotations: annotations),
+                ChartAnnotations: annotations,
+                // 0 means the run was not corrected, which is a null here rather than a zero:
+                // a stored 0 ppm would read as "measured, and found to be nothing".
+                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm),
             SerializerOptions);
 
         var info = session.Info;

@@ -36,13 +36,30 @@ import {
   usesChirpStart,
   usesNoiseCutoff,
 } from '../measurements/responseStimulus'
+import {
+  clockDriftCorrectionLabel,
+  clockDriftCorrectionNotice,
+  offersClockDriftCorrection,
+  readClockDriftCorrection,
+  sendsClockDriftCorrection,
+} from '../measurements/clockDriftCorrection'
 import { useLoadOhms } from '../composables/useLoadOhms'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { MAX_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
 import EstimateBadge from './EstimateBadge.vue'
 
-defineProps<{ running: boolean }>()
+const props = defineProps<{
+  running: boolean
+  /**
+   * The bench's measured clock drift in ppm, or null when no measurement here can be corrected for
+   * it — the frequency-response panel takes the same pair, from the same place, and the two read
+   * one shared module so they cannot differ about whether a run is corrected.
+   */
+  clockDriftPpm?: number | null
+  /** When that figure was measured, ISO-8601. Only for the caption. */
+  clockDriftMeasuredUtc?: string | null
+}>()
 const emit = defineEmits<{ (e: 'capture-reference'): void }>()
 
 const { types, currentTypeId, markDirty } = useProjects()
@@ -95,6 +112,11 @@ const form = reactive({
   /** What to play. Pink PN, which is what ARTA recommends for acoustic work and opens on. */
   stimulus: 'PinkNoise' as ResponseStimulusName,
   noiseCutoffHz: 5,
+  /**
+   * On where a figure exists — see measurements/clockDriftCorrection.ts. Note this screen opens on
+   * pink noise, which carries no ramp, so the box is hidden until the sweep is picked.
+   */
+  correctClockDrift: true,
 })
 
 /** The one line under the stimulus dropdown, naming what the choice costs. See responseStimulus.ts. */
@@ -135,6 +157,8 @@ function applyStoredParams(paramsJson: string) {
   // Absent on a type saved before the stimulus was a choice, where the sweep is what it played.
   form.stimulus = readStimulus(stored.stimulus)
   if (typeof stored.noiseCutoffHz === 'number') form.noiseCutoffHz = stored.noiseCutoffHz
+  // Absent reads as *on*, unlike most of these — clockDriftCorrection.ts carries why.
+  form.correctClockDrift = readClockDriftCorrection(stored.correctClockDrift)
   if (typeof stored.loadOhms === 'number' && stored.loadOhms > 0) loadOhms.value = stored.loadOhms
 
   void nextTick(() => {
@@ -185,6 +209,26 @@ const fftSize = computed(() => Math.round(sampleRateHz.value / (48000 / 32768)) 
 const binHz = computed(() => sampleRateHz.value / fftSize.value)
 
 const recordSeconds = computed(() => fftSize.value / sampleRateHz.value)
+
+/**
+ * The clock-drift correction, offered only where it can act: a bench with a figure, playing the
+ * sweep. Shared with the frequency-response panel through
+ * measurements/clockDriftCorrection.ts — the two screens are the same measurement at two ends.
+ */
+const offersDriftCorrection = computed(() =>
+  offersClockDriftCorrection(props.clockDriftPpm, form.stimulus),
+)
+
+const driftCorrectionLabel = computed(() => clockDriftCorrectionLabel(props.clockDriftPpm))
+
+const driftCorrectionNotice = computed(() =>
+  clockDriftCorrectionNotice(
+    props.clockDriftPpm,
+    sampleRateHz.value,
+    fftSize.value,
+    props.clockDriftMeasuredUtc,
+  ),
+)
 
 const chirpEndHz = computed(() => 0.98 * sampleRateHz.value * 0.5)
 
@@ -338,6 +382,7 @@ function buildParamsJson(): string {
     stimulus: form.stimulus,
     noiseCutoffHz: form.noiseCutoffHz,
     loadOhms: loadOhms.value,
+    correctClockDrift: form.correctClockDrift,
     generatorAmpDbv: null,
   }
   return JSON.stringify(parameters)
@@ -367,6 +412,8 @@ function buildRequest(continuous: boolean): ImpulseResponseStartRequest | null {
     stimulus: form.stimulus,
     noiseCutoffHz: form.noiseCutoffHz,
     loadOhms: loadOhms.value,
+    // Only ever asked for where it can be acted on, exactly as extractHarmonics is above.
+    correctClockDrift: sendsClockDriftCorrection(form.correctClockDrift, form.stimulus),
     continuous,
   }
 }
@@ -534,6 +581,21 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         class="tb-input"
       />
     </label>
+
+    <label
+      v-if="offersDriftCorrection"
+      class="tb-check-row"
+      title="Two cards are two crystals, so the capture is a very slightly time-scaled copy of what was played — which a sweep reads as a delay that grows with frequency, i.e. as the DUT's own phase and group delay, and which smears the impulse. This removes that ramp using the figure the Clock drift test measured on this bench. Magnitudes are untouched."
+    >
+      <input v-model="form.correctClockDrift" type="checkbox" :disabled="running" class="tb-check" />
+      {{ driftCorrectionLabel }}
+    </label>
+    <p
+      v-if="offersDriftCorrection && driftCorrectionNotice"
+      class="text-[10px] leading-snug text-neutral-500 dark:text-neutral-400"
+    >
+      {{ driftCorrectionNotice }}
+    </p>
 
     <template #footer>
       <span class="leading-snug">

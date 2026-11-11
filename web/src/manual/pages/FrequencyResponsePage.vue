@@ -192,6 +192,18 @@ const { showPage } = useManual()
             record always reads 1.
           </td>
         </tr>
+        <tr>
+          <td>Correct for clock drift</td>
+          <td>
+            Only on a bench whose two sound cards have had their
+            <a href="#" @click.prevent="showPage('clock-drift')">clock drift</a> measured, and only
+            on the sweep. Two cards are two crystals, so the capture is a very slightly time-scaled
+            copy of what was played — which a sweep reads as a delay that grows with frequency,
+            i.e. as the DUT's own phase and group delay. This takes that ramp off, by the figure
+            printed on the checkbox. Magnitudes are untouched. On by default; the result records
+            which figure corrected it.
+          </td>
+        </tr>
       </tbody>
     </table>
     <p>

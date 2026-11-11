@@ -1800,7 +1800,26 @@ public sealed record FrequencyResponseParameters(
     /// <para>Null on a measurement <i>type</i>'s own params, where the working set is written
     /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
     /// </remarks>
-    IReadOnlyList<JsonElement>? ChartAnnotations = null)
+    IReadOnlyList<JsonElement>? ChartAnnotations = null,
+    /// <summary>
+    /// Whether this measurement asks for the clock's delay ramp to be taken off it — the
+    /// <b>decision</b>, where <see cref="ClockDriftPpm"/> beside it is what a
+    /// run was corrected by. Null on a type saved before it existed, which the client reads as
+    /// <b>on</b>: the correction can only change a run on a bench that has deliberately measured
+    /// its drift, and there the uncorrected measurement is wrong in a way nothing on screen shows.
+    ///
+    /// <para>Declared here rather than left to the stored document because a round trip through a
+    /// record that does not declare a field drops it silently -- the same reason
+    /// <c>ChartAnnotations</c> is on every kind's record.</para>
+    /// </summary>
+    bool? CorrectClockDrift = null,
+    /// <summary>
+    /// The clock offset this run was corrected by, in ppm — see
+    /// <see cref="ImpulseResponseParameters.ClockDriftPpm"/>, which carries the whole of why it is
+    /// stored. Null on a type's own params and on a result taken before the correction existed or
+    /// on a bench with one clock.
+    /// </summary>
+    double? ClockDriftPpm = null)
 {
     /// <summary>
     /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
@@ -2453,6 +2472,18 @@ public sealed record ImpulseResponseParameters(
     /// under the same key by the client (<c>buildTypeParamsJson</c>) and never through here.</para>
     /// </remarks>
     IReadOnlyList<JsonElement>? ChartAnnotations = null,
+    /// <summary>
+    /// Whether this measurement asks for the clock's delay ramp to be taken off it — the
+    /// <b>decision</b>, where <see cref="ClockDriftPpm"/> beside it is what a
+    /// run was corrected by. Null on a type saved before it existed, which the client reads as
+    /// <b>on</b>: the correction can only change a run on a bench that has deliberately measured
+    /// its drift, and there the uncorrected measurement is wrong in a way nothing on screen shows.
+    ///
+    /// <para>Declared here rather than left to the stored document because a round trip through a
+    /// record that does not declare a field drops it silently -- the same reason
+    /// <c>ChartAnnotations</c> is on every kind's record.</para>
+    /// </summary>
+    bool? CorrectClockDrift = null,
     /// <summary>
     /// The clock offset this run was corrected by, in ppm, or null for a run taken before the
     /// correction existed or on a bench with one clock. Recorded because a corrected measurement

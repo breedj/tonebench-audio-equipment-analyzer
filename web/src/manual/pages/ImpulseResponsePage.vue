@@ -35,6 +35,15 @@ const { showPage } = useManual()
       </button>
     </p>
 
+    <p>
+      One setting here is not about the sweep or the gate at all. On a bench built from
+      <em>two</em> sound cards, <strong>Correct for clock drift</strong> removes the delay ramp the
+      two crystals put on a deconvolved chirp — which smears the impulse and tilts its phase. It
+      appears once the
+      <a href="#" @click.prevent="showPage('clock-drift')">clock drift</a> test has run, and that
+      page says what it does and what it is worth.
+    </p>
+
     <h2>Why gate an impulse response</h2>
     <p>
       Everything a DUT does arrives at a different time. Direct sound comes first; a reflection off a

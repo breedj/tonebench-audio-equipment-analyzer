@@ -752,8 +752,18 @@ public sealed class FrequencyResponseRunner(
         // Only when the right input is the reference. Estimating L against R directly, rather than
         // dividing the two synthetic-reference results, is what gives the gain trace its own honest
         // coherence — a ratio of two estimates has no coherence of its own.
+        //
+        // **No clock-drift correction here, and that is not an omission.** The two estimators above
+        // measure a captured channel against the *synthetic* chirp, which is on the playback
+        // clock — so the capture's time scaling is in them and has to come out. This one measures
+        // one captured channel against another, both from the same record on the same capture
+        // clock, so the ramp has already cancelled: correcting it would put one *in*. Measured on
+        // the bench 2026-11-11, which is how this was found — the gain trace read 0 µs of group
+        // delay uncorrected and −41 to −72 µs corrected, following the sweep's own time map
+        // exactly. That cancellation is the same fact as the long-standing advice to use the right
+        // input as a reference where phase matters.
         var gain = request.RightChannelIsReference
-            ? new FrequencyResponseEstimator(request.FftSize, _fft, gate, clockDrift: request.ClockDrift)
+            ? new FrequencyResponseEstimator(request.FftSize, _fft, gate)
             : null;
 
         lock (_stateLock)

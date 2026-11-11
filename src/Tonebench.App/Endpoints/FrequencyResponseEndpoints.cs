@@ -12,7 +12,8 @@ public static class FrequencyResponseEndpoints
         var group = app.MapGroup("/api/frequency-response");
 
         group.MapPost("/start", async (
-            FrequencyResponseStartRequest request, FrequencyResponseRunner runner, CancellationToken ct) =>
+            FrequencyResponseStartRequest request, FrequencyResponseRunner runner,
+            DeviceSessionService session, SoundCardSetting soundCard, CancellationToken ct) =>
         {
             if (!EnumParsing.TryParse(request.LevelMode, ThdSweepLevelMode.GeneratorVoltage, out ThdSweepLevelMode levelMode, out var modeError))
                 return Results.BadRequest(modeError);
@@ -33,7 +34,9 @@ public static class FrequencyResponseEndpoints
                 return Results.BadRequest(stimulusError);
             }
 
-            var measurement = request.ToMeasurement(levelMode, levelUnit, bandwidthReference, stimulus);
+            var measurement = request.ToMeasurement(
+                levelMode, levelUnit, bandwidthReference, stimulus,
+                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config));
 
             try
             {
@@ -200,8 +203,21 @@ public sealed record FrequencyResponseStartRequest(
     /// the white sequence, which has no slope for a corner to start.
     /// </summary>
     double NoiseCutoffHz = 5.0,
-    /// <summary>Clock offset in ppm from the drift test; 0 leaves the measurement uncorrected.</summary>
-    double ClockDriftPpm = 0.0)
+    /// <summary>
+    /// Take the clock's delay ramp off the measurement — see <see cref="Tonebench.Dsp.ChirpClockDrift"/>.
+    ///
+    /// <para><b>A decision, not a figure.</b> The ppm comes from the bench's own stored drift test
+    /// (<see cref="Tonebench.App.Services.ClockDriftCorrection.Resolve"/>) rather than from the
+    /// request, so a browser open since before that test cannot correct a run by a stale number,
+    /// and a run started on a bench with no figure is simply uncorrected. What the run used is
+    /// recorded with the result.</para>
+    ///
+    /// <para>True by default, because the correction exists only where a figure applies — which is
+    /// a bench that deliberately measured its drift — and there the uncorrected measurement is
+    /// wrong in a way nothing on screen reveals. Read by the chirp alone: noise has no
+    /// time-frequency map for a ramp to live on.</para>
+    /// </summary>
+    bool CorrectClockDrift = true)
 {
     /// <summary>
     /// The measurement this request asks for. A method rather than inline in the endpoint so it can
@@ -215,7 +231,8 @@ public sealed record FrequencyResponseStartRequest(
         ThdSweepLevelMode levelMode,
         ThdSweepLevelUnit levelUnit,
         BandwidthReferenceMode bandwidthReference,
-        ResponseStimulus stimulus) =>
+        ResponseStimulus stimulus,
+        double clockDriftPpm = 0.0) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -232,7 +249,7 @@ public sealed record FrequencyResponseStartRequest(
             BandwidthReferenceHighHz,
             stimulus,
             NoiseCutoffHz,
-            ClockDriftPpm);
+            clockDriftPpm);
 }
 
 /// <param name="ChartAnnotations">

@@ -1003,6 +1003,13 @@ export interface FrequencyResponseStartRequest {
   stimulus: ResponseStimulusName
   /** Where a pink or speech sequence stops rising towards DC. Read by neither the chirp nor the white sequence. */
   noiseCutoffHz: number
+  /**
+   * Take the clock's delay ramp off the measurement. A *decision*, not a figure: the server reads
+   * the ppm from the bench's own stored drift test, so a tab open since before that test cannot
+   * correct a run by a stale number. Ignored on a bench with no figure and on a noise stimulus,
+   * which has no time–frequency map for a ramp to sit on.
+   */
+  correctClockDrift: boolean
 }
 
 /**
@@ -1115,6 +1122,18 @@ export interface FrequencyResponseParameters {
   bandwidthReference?: ResponseReferenceModeName | null
   bandwidthReferenceLowHz?: number | null
   bandwidthReferenceHighHz?: number | null
+  /**
+   * Whether this measurement asks for the clock-drift correction. Absent on a type saved before it
+   * existed, which reads as **on** — see measurements/clockDriftCorrection.ts for why that way
+   * round, and note it can only change what a run does on a bench that has measured its drift.
+   */
+  correctClockDrift?: boolean | null
+  /**
+   * On a stored *result*: the ppm it was actually corrected by, written by the server. Null on a
+   * type's own params and on an uncorrected run. Provenance, never restored into the form — a
+   * corrected measurement that cannot say which figure corrected it cannot be checked afterwards.
+   */
+  clockDriftPpm?: number | null
 }
 
 /** Which y quantity the chart is showing — the old app's "FR (dBV)" / "Gain (dB)" buttons. */
@@ -1618,6 +1637,8 @@ export interface ImpulseResponseStartRequest {
   loadOhms: number
   stimulus: ResponseStimulusName
   noiseCutoffHz: number
+  /** See `FrequencyResponseStartRequest.correctClockDrift` — the same decision, on the same sweep. */
+  correctClockDrift: boolean
 }
 
 export interface ImpulseResponseStarted {
@@ -1812,6 +1833,10 @@ export interface ImpulseResponseParameters {
   chartBurstMaxPeriods?: number | null
   chartBurstPointsPerPeriod?: number | null
   chartBurstResolution?: BurstDecayResolutionName | null
+  /** See `FrequencyResponseParameters.correctClockDrift`. Absent reads as on. */
+  correctClockDrift?: boolean | null
+  /** On a stored result: the ppm it was corrected by. Provenance, never restored into the form. */
+  clockDriftPpm?: number | null
 }
 
 /** Stacked curves in oblique projection, or the same surface as a flat colour map. */
@@ -1996,6 +2021,18 @@ export interface DeviceRanges {
    * 384 kHz is an input-only rate. See generatorRateCeiling.ts.
    */
   maxGeneratorSampleRateHz: number | null
+  /**
+   * How far the input card's clock runs from the output card's, in ppm, or null when no chirp
+   * measurement on this bench can be corrected for it — see measurements/clockDriftCorrection.ts.
+   *
+   * The server decides this, from four separate conditions (is the analyzer a sound card at all,
+   * has the drift test been run, was it run between the two devices now selected, and is the
+   * figure big enough to be worth correcting). Null is the ordinary answer and means the two chirp
+   * panels show no correction checkbox.
+   */
+  clockDriftPpm: number | null
+  /** ISO-8601, for the caption beside that checkbox. Null when there is no figure. */
+  clockDriftMeasuredUtc: string | null
 }
 
 export interface GeneratorTone {
@@ -3562,6 +3599,12 @@ export interface ClockDriftStatus {
   chirpCost: string | null
   warning: string | null
   error: string | null
+  /**
+   * Whether this run's figure was kept with the sound card's settings, so the two chirp screens can
+   * correct with it. Reported by the server rather than worked out here — it depends on which
+   * analyzer the test ran on and on a card being configured.
+   */
+  remembered: boolean
 }
 
 export interface ClockDriftRequest {

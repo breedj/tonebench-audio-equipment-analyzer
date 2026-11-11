@@ -4665,6 +4665,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <ImpulseResponseConfigPanel
                   ref="impulseConfigPanel"
                   :running="impulseRunning"
+                  :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
+                  :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
                   @capture-reference="loopbackDialogOpen = true"
                 />
               </template>
@@ -5049,6 +5051,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="responseRunning"
                   :min-stimulus-frequency-hz="ranges?.minStimulusFrequencyHz ?? 0"
                   :sample-rates-hz="ranges?.sampleRatesHz"
+                  :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
+                  :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
                 />
                 <SteppedResponseConfigPanel
                   v-else

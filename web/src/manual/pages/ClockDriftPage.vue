@@ -150,10 +150,54 @@
     </p>
 
     <p>
-      There are two ways round it, both of which the two-clocks note already names. Use the
+      There are three ways round it. Two avoid the drift: use the
       <strong>right input as a reference</strong>, so both channels come from one capture on one
       clock and the drift divides out; or use the <strong>stepped sine</strong>, which measures one
-      settled tone at a time and never compares across a record.
+      settled tone at a time and never compares across a record. The third removes it, and is what
+      this test is for.
+    </p>
+
+    <h3>Correcting for it</h3>
+
+    <p>
+      Once the test has run, <strong>Frequency response</strong> and
+      <strong>Impulse response</strong> each offer <em>Correct for clock drift</em> in their
+      Measurement section, with the figure printed on the checkbox. It is on by default, and it only
+      appears where it can do something: a sweep, on the pair of cards the figure was measured
+      between.
+    </p>
+
+    <p>
+      <strong>What it does.</strong> A chirp maps frequency to time — the sweep reaches each
+      frequency at a known moment — so a clock ratio is a delay of
+      <em>ε&nbsp;×&nbsp;(time into the sweep)</em>: nothing at the bottom of the band, the whole
+      slip at the top. The correction multiplies that delay back out of the measured response.
+      Phase and both delay curves lose the ramp; <strong>magnitudes are untouched</strong>, because
+      the correction is a unit-modulus factor and cannot change a level.
+    </p>
+
+    <p>
+      <strong>What it is worth.</strong> Measured on this project's own bench — a MOTU M4 playing
+      into a Sound BlasterX G6 at −104 ppm, interleaved off/on/on/off so the conditions cannot
+      explain it — the gated impulse sharpened from 3 samples half-width to 2 and its peak rose
+      14.5 % (1.18 dB), which is energy coming back out of the smear. Group delay at 20 kHz fell
+      from about 90 µs to 35 µs. It does not quite reach a one-clock measurement, which reads
+      1 sample.
+    </p>
+
+    <p>
+      <strong>It is only as good as ε.</strong> This bench's figure, measured twice five hours apart
+      by two different estimators, agreed to 0.33 ppm — so about a hundredfold reduction is
+      available. A reading the dialog calls <em>still moving</em> is a clock that has not settled,
+      and correcting with it corrects by the wrong amount; leave the test running, or run it again
+      once the bench has been playing for a minute. And nothing here touches jitter, which is not a
+      constant ratio and has no ramp to remove.
+    </p>
+
+    <p>
+      Every corrected result records the figure it was corrected by, so a measurement can always say
+      which ε produced it. A run taken with the box clear records nothing, which is how a corrected
+      and an uncorrected measurement of the same DUT are told apart afterwards.
     </p>
 
     <h3>When not to believe it</h3>
@@ -183,12 +227,23 @@
       <strong>Using a sound card</strong> for what the two steps are worth.
     </p>
 
-    <h3>What is not saved</h3>
+    <h3>Where the figure is kept</h3>
 
     <p>
-      Nothing. The figure is a property of the <em>bench</em> — which two cards are plugged in —
-      rather than of a DUT, so it belongs with the sound card settings and not in a project's
-      results. Run it again whenever the pair of cards changes.
+      <strong>With the sound card's settings, and stamped with the two devices it was measured
+      between.</strong> The figure is a property of the <em>bench</em> — which two cards are plugged
+      in — rather than of a DUT, so it does not belong in a project's results; and it is kept the
+      moment the run ends, without being asked for, because this test has no other purpose. The
+      dialog says so when it has happened.
+    </p>
+
+    <p>
+      Changing either card, or either host API, retires it: a figure measured between one pair says
+      nothing about another, and this one is used to <em>change</em> a measurement. The correction
+      checkbox then disappears until the test is run again. Moving to another
+      <em>channel pair</em> of the same cards does not retire it — a crystal belongs to the whole
+      device, where a full scale belongs to one channel pair, which is why the two are stamped
+      differently.
     </p>
   </section>
 </template>

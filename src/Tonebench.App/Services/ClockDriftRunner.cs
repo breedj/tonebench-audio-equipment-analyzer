@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Tonebench.App.Streaming;
+using Tonebench.Data;
 using Tonebench.Device;
 using Tonebench.Dsp;
 
@@ -38,6 +39,8 @@ namespace Tonebench.App.Services;
 public sealed class ClockDriftRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
+    ConfigRepository config,
+    SoundCardSetting soundCard,
     ILogger<ClockDriftRunner> logger) : IMeasurementRun
 {
     /// <summary>
@@ -74,6 +77,7 @@ public sealed class ClockDriftRunner(
     private StreamChannel _measured = StreamChannel.Left;
     private string? _warning;
     private string? _error;
+    private bool _remembered;
 
     public bool Running => _phase is "Settling" or "Measuring";
 
@@ -104,7 +108,7 @@ public sealed class ClockDriftRunner(
                 return new ClockDriftStatus(
                     Running, _phase, _elapsed, _duration, _toneHz, _playedToneHz, _sampleRateHz,
                     _binHz, FftSize, _measured.ToString(), points, mean, spread, sigma,
-                    verdict, chirpCost, _warning, _error);
+                    verdict, chirpCost, _warning, _error, _remembered);
             }
         }
     }
@@ -124,6 +128,7 @@ public sealed class ClockDriftRunner(
             {
                 _points.Clear();
                 _phase = "Settling";
+                _remembered = false;
                 _elapsed = 0;
                 _duration = request.DurationSeconds;
                 _toneHz = request.ToneHz;
@@ -181,6 +186,7 @@ public sealed class ClockDriftRunner(
         {
             _points.Clear();
             _phase = "Idle";
+            _remembered = false;
             _elapsed = 0;
             _warning = null;
             _error = null;
@@ -266,7 +272,74 @@ public sealed class ClockDriftRunner(
                 _elapsed = stopwatch.Elapsed.TotalSeconds;
             }
 
+            await RememberAsync().ConfigureAwait(false);
             await TearDownAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Stores the figure this run measured with the sound card's settings, so the chirp correction
+    /// can use it without the test being run again.
+    ///
+    /// <para><b>Stored without being asked for, and that is the decision.</b> This test has no
+    /// other purpose — nobody runs it out of curiosity — so measuring the drift <i>is</i> asking
+    /// for it, and a separate button to keep the answer is one more thing to forget, after which
+    /// the correction checkbox on the response screens is mysteriously absent. What stays opt-in is
+    /// the <i>correction</i>, per measurement, which is where the decision belongs: a figure that
+    /// is remembered changes nothing on its own.</para>
+    ///
+    /// <para><b>Cancelled counts.</b> Two clocks separate at a constant rate, so a run stopped at
+    /// forty seconds has the same answer as one that ran the full minute, and what the dialog is
+    /// showing at the moment the user stops it is what gets remembered. A <i>failed</i> run does
+    /// not, and neither does one with too few points to draw a verdict from.</para>
+    ///
+    /// <para><b>Only on a sound card</b>, because the figure is stamped with the two devices it was
+    /// measured between and a QA403 session is not measuring between them — it has one clock, which
+    /// is what makes its reading ~0, and stamping that onto a card pairing would silently retire a
+    /// real figure. Note the whole method never throws: a configuration write that fails must not
+    /// turn a completed measurement into a failed one, and the reading is still on screen.</para>
+    /// </summary>
+    private async Task RememberAsync()
+    {
+        try
+        {
+            var status = Status;
+            if (status.Phase is not ("Finished" or "Cancelled")) return;
+            if (status.MeanPpm is not { } ppm || status.Verdict is null) return;
+            if (session.Kind != DeviceKind.SoundCard) return;
+
+            var current = soundCard.Config;
+            if (!current.IsConfigured) return;
+
+            var updated = current.StampClockDrift(ppm, status.SpreadPpm, DateTimeOffset.UtcNow);
+            if (!updated.IsValid)
+            {
+                logger.LogWarning("Clock drift: {Ppm:0.0} ppm is outside what can be stored; the figure was not kept.", ppm);
+                return;
+            }
+
+            await config.SetAsync(
+                ConfigRepository.SoundCardKey,
+                System.Text.Json.JsonSerializer.Serialize(updated, Json.AppJsonContext.Default.SoundCardConfig),
+                CancellationToken.None).ConfigureAwait(false);
+            soundCard.Config = updated;
+            lock (_stateLock)
+            {
+                _remembered = true;
+            }
+
+            // Not a reopen, unlike the calibration runner's save: a full scale changes what the
+            // device reports as its capabilities, where this changes nothing about the device at
+            // all -- it is read by the chirp estimator, through the start request. Reopening would
+            // also re-clock the card and spend the settle, which is the very state this figure
+            // describes.
+            logger.LogInformation(
+                "Clock drift: remembered {Ppm:0.000} ppm (spread {Spread:0.000} ppm) between {Output} and {Input}",
+                ppm, status.SpreadPpm ?? 0.0, updated.OutputDeviceName, updated.InputDeviceName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not store the clock drift figure.");
         }
     }
 

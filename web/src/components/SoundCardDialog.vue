@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
-import type { SoundCardConfig, VoltageEntryUnitName } from '../api/client'
+import type { SoundCardConfig, SoundCardOption, VoltageEntryUnitName } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
 import {
@@ -10,6 +10,7 @@ import {
   devicePairing,
   hostApiNotes,
   keyOf,
+  matchHostApis,
   reselectCardKey,
   savedCardNeedsAdvanced,
   splitKey,
@@ -210,9 +211,58 @@ const pairing = computed(() => devicePairing(inputCardKey.value, outputCardKey.v
 /**
  * The cards each dropdown offers in separate mode. A card with no inputs cannot be the input card,
  * and offering it would collapse that side into a blank device list with nothing saying why.
+ *
+ * <p>Each list is collapsed towards the <i>other</i> side's host API, which is what stops the
+ * picker offering a pair PortAudio cannot open. A G6 chosen as the input makes the MOTU offer its
+ * WASAPI entry rather than its ASIO one; with nothing chosen on the other side both fall back to
+ * the ordinary best-API collapse. The reasoning, and why the API is ours to choose rather than the
+ * user's in this mode, is in <c>collapseToBestApi</c> and <c>matchHostApis</c>.</p>
  */
-const inputCards = computed(() => cardsOffering(cards.value, inventory.value?.inputs ?? []))
-const outputCards = computed(() => cardsOffering(cards.value, inventory.value?.outputs ?? []))
+function cardsFor(
+  devices: readonly SoundCardOption[],
+  otherCardKey: string,
+): ReturnType<typeof cardsOffering> {
+  const prefer = otherCardKey ? splitKey(otherCardKey).hostApi : undefined
+  const list = prefer
+    ? buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], advanced.value, prefer)
+    : cards.value
+  return cardsOffering(list, devices)
+}
+
+const inputCards = computed(() =>
+  cardsFor(inventory.value?.inputs ?? [], form.separateDevices ? form.outputCardKey : ''),
+)
+const outputCards = computed(() =>
+  cardsFor(inventory.value?.outputs ?? [], form.separateDevices ? form.inputCardKey : ''),
+)
+
+/**
+ * Brings a mismatched pair onto one host API — the safety net the two lists above cannot be.
+ *
+ * <p>They stop the dropdowns producing a cross-API pair; they cannot repair one that arrives from
+ * somewhere else. Three ways it does: a configuration saved before this rule existed, Advanced
+ * being turned off over a deliberate cross-API selection, and Separate devices being ticked over a
+ * one-card choice whose API the other side does not have.</p>
+ *
+ * <p>Writing to what it watches is safe because <c>matchHostApis</c> is idempotent — once the two
+ * agree it returns them untouched — so the second pass stops. It cannot fight the user either:
+ * with the lists collapsed as they are, a mismatched pair is unreachable from the dropdowns.</p>
+ */
+watch(
+  () => [form.separateDevices, form.inputCardKey, form.outputCardKey, advanced.value].join('|'),
+  () => {
+    if (!form.separateDevices) return
+    const matched = matchHostApis(
+      form.inputCardKey,
+      form.outputCardKey,
+      inventory.value?.inputs ?? [],
+      inventory.value?.outputs ?? [],
+      advanced.value,
+    )
+    if (matched.inputKey !== form.inputCardKey) form.inputCardKey = matched.inputKey
+    if (matched.outputKey !== form.outputCardKey) form.outputCardKey = matched.outputKey
+  },
+)
 
 /** The card the Control panel button belongs to: the input's, as its own comment explains. */
 const selectedCard = computed(() => cards.value.find((c) => c.key === inputCardKey.value) ?? null)
@@ -1089,10 +1139,23 @@ function mvRms(value: number | null | undefined) {
             class="btn-chip"
             :style="{ backgroundColor: 'var(--kind-orange-chip-bg)', color: 'var(--kind-orange-chip-fg)' }"
             :disabled="busy || playingDbFs === null"
+            :title="
+              playingDbFs === null
+                ? 'Start the tone first. The full scale is worked out from the level actually being played, not from the one in the dropdown — which is why that dropdown locks while the tone runs.'
+                : undefined
+            "
             @click="acceptOutput"
           >
             Estimate peak output
           </button>
+          <!-- Said out loud rather than left to the greyed button, which is the fault this dialog
+               has now had twice: a control that is off for a good reason and does not give it.
+               The reason is not that the level is unknown -- the dropdown holds it -- but that
+               the server will only attribute a reading to a level it actually played, and the
+               dropdown is locked while it is playing. Stop the tone and the two can diverge. -->
+          <span v-if="playingDbFs === null && settingsInEffect" class="text-neutral-500 dark:text-neutral-400">
+            Start the tone to enable this.
+          </span>
           <span class="font-mono text-neutral-600 dark:text-neutral-300">
             current {{ mv(config?.outputFullScalePeakMv) }} mV peak
             <span class="text-neutral-500 dark:text-neutral-400">

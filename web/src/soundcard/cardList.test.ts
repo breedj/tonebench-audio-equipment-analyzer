@@ -8,7 +8,9 @@ import {
   hostApiNotes,
   keyOf,
   reselectCardKey,
+  matchHostApis,
   savedCardNeedsAdvanced,
+  splitKey,
 } from './cardList'
 
 /**
@@ -400,5 +402,93 @@ describe('cardsOffering', () => {
 
   it('offers nothing when the direction has no devices at all', () => {
     expect(cardsOffering(buildCards(inputs, outputs, false), [])).toEqual([])
+  })
+})
+
+/**
+ * The picker must not offer a pair PortAudio cannot open.
+ *
+ * Measured on this bench 2026-11-11: a MOTU under ASIO against a Sound BlasterX G6 under WASAPI is
+ * refused at every rate, while the same two under WASAPI probe 48/96/192 kHz and stream with no
+ * drops. The fixture above is that bench's shape — the MOTU exists under both APIs and the Realtek
+ * only under WASAPI, exactly as the G6 does — so these cases are the report itself.
+ */
+describe('two cards are offered under one host API', () => {
+  const wasapi = 'Windows WASAPI'
+  const motuWasapi = keyOf(wasapi, 'MOTU M Series')
+  const motuAsioKey = keyOf('ASIO', 'MOTU M Series')
+  const realtek = keyOf(wasapi, 'Realtek(R) Audio')
+
+  it('still collapses each card to its own best API when nothing is paired with it', () => {
+    const cards = buildCards(inputs, outputs, false)
+    expect(cards.find((c) => c.interfaceName === 'MOTU M Series')?.hostApi).toBe('ASIO')
+  })
+
+  it('offers the MOTU under WASAPI once the other side is a WASAPI-only card', () => {
+    const cards = buildCards(inputs, outputs, false, wasapi)
+
+    // The same physical interface, still one entry -- the preference order is overridden, not the
+    // one-entry-per-interface rule, so this does not reintroduce the duplication Advanced is for.
+    expect(cards.filter((c) => c.interfaceName === 'MOTU M Series')).toHaveLength(1)
+    expect(cards.find((c) => c.interfaceName === 'MOTU M Series')?.hostApi).toBe(wasapi)
+  })
+
+  it('leaves a card alone where the preferred API cannot carry it', () => {
+    const cards = buildCards(inputs, outputs, false, 'ASIO')
+    expect(cards.find((c) => c.interfaceName === 'Realtek(R) Audio')?.hostApi).toBe(wasapi)
+  })
+
+  describe('matchHostApis', () => {
+    it('brings a cross-API pair onto the API they share', () => {
+      expect(matchHostApis(realtek, motuAsioKey, inputs, outputs)).toEqual({
+        inputKey: realtek,
+        outputKey: motuWasapi,
+      })
+    })
+
+    it('moves both sides rather than making one win', () => {
+      // The MOTU in, the Realtek out: it is the MOTU that has to move again, because the Realtek
+      // is the side with only one API. Neither side is privileged; the shared API decides.
+      expect(matchHostApis(motuAsioKey, realtek, inputs, outputs)).toEqual({
+        inputKey: motuWasapi,
+        outputKey: realtek,
+      })
+    })
+
+    it('is idempotent, so the watcher that writes what it watches settles', () => {
+      const once = matchHostApis(realtek, motuAsioKey, inputs, outputs)
+      expect(matchHostApis(once.inputKey, once.outputKey, inputs, outputs)).toEqual(once)
+    })
+
+    it('leaves a matching pair untouched', () => {
+      expect(matchHostApis(realtek, motuWasapi, inputs, outputs)).toEqual({
+        inputKey: realtek,
+        outputKey: motuWasapi,
+      })
+    })
+
+    it('changes nothing while only one side is chosen', () => {
+      expect(matchHostApis('', motuAsioKey, inputs, outputs)).toEqual({
+        inputKey: '',
+        outputKey: motuAsioKey,
+      })
+    })
+
+    it('will not move a side onto a host API the picker does not offer', () => {
+      // The MOTU and the Realtek share DirectSound in the fixture for inputs only, and
+      // DirectSound resamples -- SoundCardEnumerator.Trust calls it so. Repairing a pairing by
+      // moving it somewhere whose readings cannot be believed is not a repair.
+      const result = matchHostApis(realtek, motuAsioKey, inputs, outputs)
+      expect(splitKey(result.outputKey).hostApi).not.toBe('Windows DirectSound')
+    })
+
+    it('leaves both alone where they share nothing, so the probe can refuse it in words', () => {
+      const lonely = keyOf('ASIO', 'Some other ASIO card')
+      const extra = [...outputs, option({ hostApi: 'ASIO', name: 'Some other ASIO card', maxInputChannels: 0, maxOutputChannels: 2 })]
+      expect(matchHostApis(realtek, lonely, inputs, extra)).toEqual({
+        inputKey: realtek,
+        outputKey: lonely,
+      })
+    })
   })
 })

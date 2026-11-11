@@ -173,6 +173,7 @@ export function buildCards(
   inputs: readonly SoundCardOption[],
   outputs: readonly SoundCardOption[],
   advanced: boolean,
+  preferHostApi?: string,
 ): SoundCard[] {
   const devices = [...inputs, ...outputs]
   const offered = advanced
@@ -201,7 +202,9 @@ export function buildCards(
     })
   }
 
-  const cards = advanced ? [...seen.values()] : collapseToBestApi([...seen.values()], inputs, outputs)
+  const cards = advanced
+    ? [...seen.values()]
+    : collapseToBestApi([...seen.values()], inputs, outputs, preferHostApi)
 
   return cards.sort(
     (a, b) => a.preference - b.preference || a.interfaceName.localeCompare(b.interfaceName),
@@ -221,15 +224,27 @@ export function buildCards(
  * unusable entry while hiding the API that could have run it. Where no API has both, the lowest
  * preference still wins and the dialog's existing pairing and rate probes report what is wrong —
  * silently dropping the card would be worse than offering a broken one.</p>
+ *
+ * <p><b>preferHostApi</b> overrides the preference order for any interface that offers that API,
+ * and exists because this function's per-interface independence is wrong the moment two cards have
+ * to work together. PortAudio cannot open one stream across two host APIs — measured 2026-11-11, a
+ * MOTU under ASIO against a G6 under WASAPI is refused at every rate — and collapsing each
+ * interface to its own best API produces exactly that pair, since ASIO is the MOTU's best and the
+ * G6 has none. So the natural selection in the picker was the one combination that cannot work,
+ * and the only way to reach the MOTU's WASAPI entry was the Advanced checkbox, which is 32 further
+ * entries. Passing the other side's host API here collapses this side to match it where it can,
+ * which is what {@link matchHostApis} is for.</p>
  */
 function collapseToBestApi(
   cards: readonly SoundCard[],
   inputs: readonly SoundCardOption[],
   outputs: readonly SoundCardOption[],
+  preferHostApi?: string,
 ): SoundCard[] {
   const hasInput = new Set(inputs.map((o) => keyOf(o.hostApi, o.interfaceName)))
   const hasOutput = new Set(outputs.map((o) => keyOf(o.hostApi, o.interfaceName)))
   const complete = (c: SoundCard) => hasInput.has(c.key) && hasOutput.has(c.key)
+  const preferred = (c: SoundCard) => !!preferHostApi && c.hostApi === preferHostApi
 
   const best = new Map<string, SoundCard>()
   for (const card of [...cards].sort((a, b) => a.preference - b.preference)) {
@@ -239,11 +254,75 @@ function collapseToBestApi(
       continue
     }
 
+    // The preferred API wins outright: being openable alongside the other card beats being the
+    // better driver, since the better driver cannot be opened at all in that pairing.
+    if (preferred(card) && !preferred(incumbent)) {
+      best.set(card.interfaceName, card)
+      continue
+    }
+    if (preferred(incumbent)) continue
+
     // Lower preference already won unless it cannot carry both directions and this one can.
     if (!complete(incumbent) && complete(card)) best.set(card.interfaceName, card)
   }
 
   return [...best.values()]
+}
+
+/**
+ * The same two interfaces under one host API, where there is one they share.
+ *
+ * <p>The picker's lists are each collapsed towards the other side's host API, so two dropdowns
+ * cannot normally produce a mismatched pair. This is the safety net for the states that do not come
+ * from the dropdowns: a configuration saved before this rule existed, Advanced being turned off
+ * over a deliberate cross-API selection, and ticking Separate devices over a one-card choice.</p>
+ *
+ * <p>It moves <b>both</b> sides rather than making one win, because neither is more right than the
+ * other and the host API is not the user's choice in this mode — the non-Advanced picker offers one
+ * entry per physical interface precisely to keep the API out of it. The hardware the user named is
+ * what is kept.</p>
+ *
+ * <p>Where the two share no host API at all, both keys come back unchanged: there is nothing
+ * honest to move them to, and the probe's own refusal plus the dialog's "nothing here is in effect"
+ * notice already say so in words. Silently repointing one side at hardware the user did not choose
+ * would be worse than a pairing that is visibly refused.</p>
+ */
+export function matchHostApis(
+  inputKey: string,
+  outputKey: string,
+  inputs: readonly SoundCardOption[],
+  outputs: readonly SoundCardOption[],
+  advanced = false,
+): { inputKey: string; outputKey: string } {
+  const unchanged = { inputKey, outputKey }
+  if (!inputKey || !outputKey) return unchanged
+
+  const from = splitKey(inputKey)
+  const to = splitKey(outputKey)
+  if (from.hostApi === to.hostApi) return unchanged
+
+  const offered = (o: SoundCardOption) =>
+    advanced || (DEFAULT_HOST_API_KINDS as readonly string[]).includes(o.hostApiKind)
+
+  // An API is a candidate only if it carries this input interface's inputs AND this output
+  // interface's outputs. Either half missing leaves a side with an empty device list.
+  const candidates = new Map<string, number>()
+  for (const i of inputs) {
+    if (!offered(i) || i.interfaceName !== from.name) continue
+    for (const o of outputs) {
+      if (!offered(o) || o.interfaceName !== to.name || o.hostApi !== i.hostApi) continue
+      const best = candidates.get(i.hostApi)
+      if (best === undefined || i.preference < best) candidates.set(i.hostApi, i.preference)
+    }
+  }
+
+  if (candidates.size === 0) return unchanged
+
+  const [hostApi] = [...candidates.entries()].sort(
+    (a, b) => a[1] - b[1] || a[0].localeCompare(b[0]),
+  )[0]!
+
+  return { inputKey: keyOf(hostApi, from.name), outputKey: keyOf(hostApi, to.name) }
 }
 
 /**

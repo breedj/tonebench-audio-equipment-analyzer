@@ -318,6 +318,13 @@ export function useImpulseResponse() {
   const gateResolutionHz = computed(() => status.value?.gateResolutionHz ?? 0)
 
   /**
+   * How much clock drift the run on screen still shows — the staleness detector, read off its own
+   * reference channel. Null where the reading could not be made, which is every stimulus but the
+   * chirp and every run without a measured reference.
+   */
+  const driftResidual = computed(() => status.value?.driftResidual ?? null)
+
+  /**
    * The one line the measurement status bar shows — "Measuring · pass 2 · record 1 of 4" — in the
    * shape every other runner's `progressLabel` has, so `statusHeadline`/`statusDetail` split it the
    * same way. This runner had none until the bar arrived, because its screen printed nothing about
@@ -367,6 +374,7 @@ export function useImpulseResponse() {
     harmonics,
     hasResult,
     gateResolutionHz,
+    driftResidual,
     references,
     capturingReference,
     error,

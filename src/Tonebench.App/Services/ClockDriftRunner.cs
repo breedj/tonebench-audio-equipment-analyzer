@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Tonebench.App.Streaming;
 using Tonebench.Data;
 using Tonebench.Device;
@@ -56,6 +56,28 @@ public sealed class ClockDriftRunner(
     /// <summary>A tone this far under the rest of its own record is not worth a reading.</summary>
     public const double MinDominanceDb = 6.0;
 
+    /// <summary>
+    /// How many readings a run must take before it reports a figure at all, and therefore before
+    /// one is stored.
+    ///
+    /// <para><b>Measured on a 418-reading run on this bench, 2026-11-11.</b> Two of those readings
+    /// — half a per cent, both from the records whose tone margin was the lowest of the run — came
+    /// back wild, one at +157 ppm against a true −104. Taking every window of N consecutive readings
+    /// and asking how far its median lands from the run's own middle: 10 readings is out by up to
+    /// 2.1 ppm, <b>30 by 1.5 ppm</b>, 120 by 0.4. (A <i>mean</i> over the same windows is out by
+    /// 26.0, 8.6 and 2.1, which is the measurement that made the figure a median — see
+    /// <see cref="ClockDriftStatus.DriftPpm"/>.)</para>
+    ///
+    /// <para>So thirty is where the estimate stops being dominated by whether a bad record happened
+    /// to land in the run, and it leaves about 1 µs of this bench's 71 µs slip — a hundredth of what
+    /// the correction removes. It is a <i>floor</i> and not a target: the default duration takes
+    /// several times as many, and the extra readings buy stability rather than precision, since a
+    /// clock still settling is the thing a long run is really there to show.</para>
+    ///
+    /// <para>It costs about 21 s at 48 kHz and 5 s at 192 kHz, a reading being one whole record.</para>
+    /// </summary>
+    public const int MinReadings = 30;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly object _stateLock = new();
@@ -96,7 +118,11 @@ public sealed class ClockDriftRunner(
 
                 ClockDriftVerdict? verdict = null;
                 string? chirpCost = null;
-                if (drift is { } value && points.Length >= 3)
+
+                // No figure at all below the minimum, rather than a provisional one: a verdict is
+                // what RememberAsync stores on, and a reading this test has said is not good enough
+                // to show is not one to correct every later measurement with.
+                if (drift is { } value && points.Length >= MinReadings)
                 {
                     verdict = ClockDriftReading.Describe(value, sigma, _sampleRateHz, FftSize);
                     chirpCost = ClockDriftReading.DescribeChirpCost(
@@ -262,8 +288,27 @@ public sealed class ClockDriftRunner(
             }
 
             logger.LogInformation(
-                "Clock drift: playing {Played:0.000} Hz at {Level:0.0} dBV, {Fft} points at {Rate:0} Hz, for {Duration:0} s",
-                played, request.LevelDbv, FftSize, rate, request.DurationSeconds);
+                "Clock drift: playing {Played:0.000} Hz at {Level:0.0} dBV, {Fft} points at {Rate:0} Hz, " +
+                "for {Duration:0} s, needing at least {MinReadings} readings",
+                played, request.LevelDbv, FftSize, rate, request.DurationSeconds, MinReadings);
+
+            // Said before the run rather than discovered after it. A reading is one whole record, so
+            // whether a duration can reach MinReadings depends on the sample rate -- which Validate
+            // cannot see, being static and holding only the request. Half again on the arithmetic,
+            // because the first reading waits for the stream to fill and the odd record is refused
+            // for a weak tone.
+            double needSeconds = 1.5 * MinReadings * FftSize / rate;
+            if (request.DurationSeconds > 0 && request.DurationSeconds < needSeconds)
+            {
+                lock (_stateLock)
+                {
+                    _warning =
+                        $"This run is {request.DurationSeconds:0} s long, and at this sample rate " +
+                        $"{MinReadings} readings take about {needSeconds:0} s. It will probably stop " +
+                        "before there is a figure to report. Give it longer, or leave the duration at " +
+                        "0 and stop it by hand.";
+                }
+            }
 
             await MeasureAsync(request, played, rate, stopwatch, ct).ConfigureAwait(false);
 

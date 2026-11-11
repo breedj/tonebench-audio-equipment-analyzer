@@ -204,7 +204,9 @@ const { showPage } = useManual()
             the Left and Right traces; the <strong>Gain</strong> trace is one captured channel
             against the other and has already had the drift divide out of it. On by default, and
             the result records which figure corrected it. The line underneath says how far the two
-            clocks separate over one record, and how old the figure is.
+            clocks separate over one record, how old the figure is, and — once a run with
+            <strong>Right channel is reference</strong> has finished — whether that run still shows
+            any drift, which is how a figure that has gone stale announces itself.
           </td>
         </tr>
       </tbody>

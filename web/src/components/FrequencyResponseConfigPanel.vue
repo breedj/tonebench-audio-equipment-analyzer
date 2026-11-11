@@ -4,6 +4,7 @@ import {
   RESPONSE_RESOLUTIONS,
   RESPONSE_SMOOTHING,
   RESPONSE_SPANS_HZ,
+  type DriftResidualJson,
   type FrequencyResponseParameters,
   type FrequencyResponseStartRequest,
   type ResponseStimulusName,
@@ -35,7 +36,7 @@ import {
 import {
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
-  clockDriftStaleNotice,
+  clockDriftFreshnessNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
   sendsClockDriftCorrection,
@@ -60,6 +61,13 @@ const props = defineProps<{
   clockDriftPpm?: number | null
   /** When that figure was measured, ISO-8601. Only for the caption. */
   clockDriftMeasuredUtc?: string | null
+  /**
+   * How much clock drift the run on screen still shows, off its own reference channel — the
+   * staleness detector. Null where the reading could not be made; see
+   * measurements/clockDriftCorrection.ts for what is done with it, and
+   * `ResponseCaptureSupport.EstimateDriftResidual` for the conditions it needs.
+   */
+  driftResidual?: DriftResidualJson | null
 }>()
 
 
@@ -285,7 +293,15 @@ const driftCorrectionNotice = computed(() =>
   ),
 )
 
-const driftStaleNotice = computed(() => clockDriftStaleNotice(props.clockDriftMeasuredUtc))
+/**
+ * The one line under the correction: what this run measured about the stored figure if it could
+ * measure anything, and the calendar otherwise. Rendered whether or not the checkbox is — a bench
+ * that has never run the drift test has no checkbox and is exactly the bench most worth telling
+ * that its measurement is carrying a ramp.
+ */
+const driftFreshness = computed(() =>
+  clockDriftFreshnessNotice(props.driftResidual, props.clockDriftMeasuredUtc),
+)
 
 
 /**
@@ -593,10 +609,13 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
       {{ driftCorrectionNotice }}
     </p>
     <p
-      v-if="offersDriftCorrection && driftStaleNotice"
-      class="text-[10px] leading-snug text-amber-700 dark:text-amber-400"
+      v-if="driftFreshness"
+      class="text-[10px] leading-snug"
+      :class="driftFreshness.tone === 'warn'
+        ? 'text-amber-700 dark:text-amber-400'
+        : 'text-neutral-500 dark:text-neutral-400'"
     >
-      {{ driftStaleNotice }}
+      {{ driftFreshness.text }}
     </p>
 
     <p v-if="invalid" class="text-[12px] text-red-600 dark:text-red-400">{{ invalid }}</p>

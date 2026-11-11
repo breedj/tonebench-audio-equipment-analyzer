@@ -452,6 +452,20 @@ internal static class ResponseCaptureSupport
         return gains;
     }
 
+    /// <summary>
+    /// The value at <paramref name="fraction"/> of the way up the sorted values, nearest-rank, or
+    /// NaN for an empty set — <see cref="Median"/> with the rank chosen by the caller.
+    /// </summary>
+    private static double Percentile(IEnumerable<double> values, double fraction)
+    {
+        var sorted = values.ToList();
+        if (sorted.Count == 0)
+            return double.NaN;
+
+        sorted.Sort();
+        return sorted[Math.Clamp((int)(fraction * (sorted.Count - 1)), 0, sorted.Count - 1)];
+    }
+
     private static double Median(IEnumerable<double> values)
     {
         var sorted = values.ToList();
@@ -460,6 +474,192 @@ internal static class ResponseCaptureSupport
 
         sorted.Sort();
         return sorted[sorted.Count / 2];
+    }
+
+    /// <summary>
+    /// How much clock drift the finished estimates still carry, or null where the question cannot
+    /// honestly be asked — see <see cref="DriftResidualReading"/> for why it is worth asking.
+    ///
+    /// <para><b>It reads the reference channel and nothing else, and that restriction is the whole
+    /// design.</b> A run with the right input as the reference — the frequency-response panel's own
+    /// default — feeds that input the stimulus rather than the DUT's output, so its response against
+    /// the <i>synthetic</i> chirp holds the clock ramp and no DUT at all. Without a measured
+    /// reference there is only the DUT's own channel, and <b>that is not good enough</b>: measured
+    /// against synthetic phase curves, a bare one-pole low-pass at 2 kHz reads as <b>133 ppm</b> of
+    /// drift and a 200 Hz pole as 51 ppm, against the 104 ppm this project's bench actually has. The
+    /// reason is not numerical: over three decades <c>f</c> and <c>f·ln f</c> are similar enough that
+    /// a saturating phase curve really is well described by a large ramp plus a large offsetting
+    /// delay. So a reading off a DUT-bearing trace could not be told from a stale figure, and the
+    /// honest answer is to make none. A realistic analyzer path — linear-phase converter filters, a
+    /// gentle analog reconstruction pole, DC coupling — biases this by about <b>2.5 ppm</b>, which is
+    /// what makes the reference case worth having.</para>
+    ///
+    /// <para><b>Never the gain trace</b>, which is the same rule the correction itself follows and
+    /// for the same reason: L/R is two captured channels on one clock, so the ramp has already
+    /// cancelled out of it and it carries no information about ε in either direction.</para>
+    ///
+    /// <para><b>The band is gated on flatness, not on a noise floor</b>, and
+    /// <see cref="ResidualFlatnessDb"/>'s effect is measured rather than assumed. A path's phase
+    /// curvature travels with its magnitude roll-off, so dropping the bins where the magnitude has
+    /// left the band's own middle drops exactly the region that would contaminate the fit — on a
+    /// 2 kHz pole that takes the reading from 133 ppm to 47, and on a 200 Hz pole from 51 to 5. It
+    /// cannot rescue a <i>brickwall</i>, whose phase curves far below a magnitude that is still flat,
+    /// which is the residual risk this method carries and the reason the 2.5 ppm above is a
+    /// measurement rather than a bound. The gate also subsumes a noise floor: a bin the stimulus
+    /// never reached is nowhere near the middle of the band.</para>
+    ///
+    /// <para><b>The weighting is uniform over what survives</b>, deliberately unlike
+    /// <see cref="FractionalOctaveSmoother.SmoothUnwrappedPhaseDeg"/>'s magnitude weighting. What is
+    /// being fitted is a shape <i>across</i> the band, so leverage should come from spanning it
+    /// rather than from the loudest part of it. Weighting by 1/f, by 1/f² and by magnitude were each
+    /// measured against the same phase curves, and every one of them was worse.</para>
+    /// </summary>
+    public static DriftResidualReading? EstimateDriftResidual(
+        FrequencyResponseRequest request,
+        FrequencyResponseResult leftResult,
+        FrequencyResponseResult rightResult)
+    {
+        // Chirp only: the ramp lives on the sweep's own frequency-to-time map, and a periodic-noise
+        // stimulus has none -- the same restriction the correction itself carries.
+        if (request.Stimulus != ResponseStimulus.Chirp) return null;
+
+        // The reference channel or nothing. See the remarks: a DUT in the path can manufacture more
+        // fake drift than this bench has real drift.
+        if (!request.RightChannelIsReference) return null;
+
+        if (ChirpTimeMap.For(request.SampleRateHz, request.FftSize, request.ChirpStartHz, request.ChirpEndHz)
+            is not { } map) return null;
+
+        double binHz = request.BinHz;
+        int binCount = rightResult.Magnitude.Length;
+        if (binCount < 4 || binHz <= 0) return null;
+
+        int firstBin = Math.Max(1, (int)Math.Ceiling(request.AnalysisLowHz / binHz));
+        int lastBin = Math.Min(binCount - 1, (int)Math.Floor(request.AnalysisHighHz / binHz));
+        if (lastBin - firstBin + 1 < ChirpDriftResidual.MinBins) return null;
+
+        var (weight, fitFrom, fitTo) = FlatBand(rightResult.Magnitude, firstBin, lastBin);
+        if (weight is null) return null;
+
+        if (ChirpDriftResidual.Fit(rightResult.PhaseDeg, weight, binHz, map, fitFrom, fitTo)
+            is not { } fit) return null;
+
+        // The NaN-truncates-the-whole-response trap: System.Text.Json refuses to write one part way
+        // through serializing, and the client discards the entire status rather than one field. A
+        // reading that cannot be reported is reported as absent.
+        if (!double.IsFinite(fit.ResidualPpm) || !double.IsFinite(fit.SigmaPpm) || !double.IsFinite(fit.FitRmsDeg))
+            return null;
+
+        double applied = request.ClockDrift is not null ? request.ClockDriftPpm : 0.0;
+        if (!double.IsFinite(applied)) applied = 0.0;
+
+        // The slip in samples is exactly |ppm| * 1e-6 * FftSize -- the sample rate cancels -- which
+        // is why the record length is the only other figure the wording needs.
+        return new DriftResidualReading(
+            fit.ResidualPpm, applied, fit.SigmaPpm, fit.FitRmsDeg, fit.Bins,
+            fitFrom * binHz, fitTo * binHz,
+            Math.Abs(fit.ResidualPpm) * 1e-6 * request.FftSize,
+            request.FftSize / request.SampleRateHz);
+    }
+
+    /// <summary>
+    /// How far from the band's strong part a bin's magnitude may sit and still be fitted. Loose
+    /// enough that a healthy reference path keeps its whole band — the figure is not about accuracy
+    /// of level, it is about staying out of a roll-off's phase.
+    /// </summary>
+    private const double ResidualFlatnessDb = 3.0;
+
+    /// <summary>
+    /// Which magnitude the gate is measured from. <b>Not the median</b>, which was the first attempt
+    /// and is wrong in exactly the case the gate exists for: bins are uniform in frequency, so on a
+    /// path that rolls off the median bin is part way <i>down the slope</i> and a window around it
+    /// selects the slope rather than the passband — measured, a one-pole at 2.4 kHz kept 8 to
+    /// 16 kHz, which is all roll-off and no flat band at all. The ninetieth percentile sits in the
+    /// strong part of any response whose passband is most of a decade wide, and on a flat path it is
+    /// indistinguishable from the median. Not the <i>maximum</i> either: one noisy bin would then
+    /// decide the whole band.
+    /// </summary>
+    private const double ResidualFlatnessPercentile = 0.90;
+
+    /// <summary>
+    /// The flat part of the band: 1 where a bin is worth fitting and 0 where it is not, plus the
+    /// first and last surviving bin. The weights are null when too few survive.
+    /// </summary>
+    private static (double[]? Weight, int First, int Last) FlatBand(
+        double[] magnitude, int firstBin, int lastBin)
+    {
+        double strong = Percentile(
+            Enumerable.Range(firstBin, lastBin - firstBin + 1).Select(k => magnitude[k]),
+            ResidualFlatnessPercentile);
+        if (!double.IsFinite(strong) || strong <= 0) return (null, 0, 0);
+
+        double lo = strong * Math.Pow(10.0, -ResidualFlatnessDb / 20.0);
+        double hi = strong * Math.Pow(10.0, ResidualFlatnessDb / 20.0);
+
+        var weight = new double[magnitude.Length];
+        int usable = 0, first = int.MaxValue, last = -1;
+
+        for (int k = firstBin; k <= lastBin; k++)
+        {
+            double m = magnitude[k];
+            if (!double.IsFinite(m) || m < lo || m > hi) continue;
+
+            weight[k] = 1.0;
+            usable++;
+            first = Math.Min(first, k);
+            last = k;
+        }
+
+        return usable >= ChirpDriftResidual.MinBins ? (weight, first, last) : (null, 0, 0);
+    }
+
+    /// <summary>
+    /// Puts the reading in the log, which is the half of it that survives the process.
+    ///
+    /// <para>A figure that only ever reaches a panel cannot answer for a measurement sent in
+    /// afterwards, and "the phase looks wrong" is exactly how a stale drift figure is reported. One
+    /// line per pass, at Information: it names what the run corrected by, what is left, and the two
+    /// figures that say how much the second one is worth.</para>
+    /// </summary>
+    public static void LogDriftResidual(ILogger logger, DriftResidualReading? reading)
+    {
+        if (reading is null) return;
+
+        logger.LogInformation(
+            "Clock drift residual: {Residual:+0.00;-0.00;0.00} ppm left after correcting " +
+            "{Applied:+0.00;-0.00;0.00} ppm ({Slip:0.00} samples over a {Record:0.00} s record), " +
+            "from {Bins} reference-channel bins over {From:0}-{To:0} Hz, fit missed by " +
+            "{Rms:0.00} deg rms (+/-{Sigma:0.000} ppm)",
+            reading.ResidualPpm, reading.AppliedPpm, reading.SlipSamples, reading.RecordSeconds,
+            reading.Bins, reading.FromHz, reading.ToHz, reading.FitRmsDeg, reading.SigmaPpm);
+    }
+
+    /// <summary>
+    /// How far under the band's own middle a bin may sit and still be fitted. Generous of the
+    /// signal and strict about the noise: the estimator holds the phase below 120 dB under the
+    /// trace's peak, so this cannot admit a held bin, while 40 dB of signal-to-noise is well under
+    /// a degree of phase error and so costs the fit nothing.
+    /// </summary>
+    private const double ResidualWeightFloorDb = 40.0;
+
+    /// <summary>1 where the bin is worth fitting and 0 where it is not, or null when too few are.</summary>
+    private static double[]? BuildResidualWeights(double[] magnitude, int firstBin, int lastBin)
+    {
+        double median = Median(Enumerable.Range(firstBin, lastBin - firstBin + 1).Select(k => magnitude[k]));
+        if (!double.IsFinite(median) || median <= 0) return null;
+
+        double floor = median * Math.Pow(10.0, -ResidualWeightFloorDb / 20.0);
+        var weight = new double[magnitude.Length];
+        int usable = 0;
+
+        for (int k = firstBin; k <= lastBin; k++)
+        {
+            if (!double.IsFinite(magnitude[k]) || magnitude[k] < floor) continue;
+            weight[k] = 1.0;
+            usable++;
+        }
+
+        return usable >= ChirpDriftResidual.MinBins ? weight : null;
     }
 
     /// <summary>

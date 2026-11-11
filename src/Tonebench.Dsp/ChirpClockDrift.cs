@@ -45,16 +45,12 @@ namespace Tonebench.Dsp;
 public sealed class ChirpClockDrift
 {
     private readonly double _epsilon;
-    private readonly double _periodSeconds;
-    private readonly double _startFreqHz;
-    private readonly double _logSpan;
+    private readonly ChirpTimeMap _map;
 
-    private ChirpClockDrift(double epsilon, double periodSeconds, double startFreqHz, double logSpan)
+    private ChirpClockDrift(double epsilon, ChirpTimeMap map)
     {
         _epsilon = epsilon;
-        _periodSeconds = periodSeconds;
-        _startFreqHz = startFreqHz;
-        _logSpan = logSpan;
+        _map = map;
     }
 
     /// <summary>Below this a correction is not worth making and is not made.</summary>
@@ -71,24 +67,17 @@ public sealed class ChirpClockDrift
         double driftPpm, double sampleRateHz, int fftSize, double startFreqHz, double endFreqHz)
     {
         if (!double.IsFinite(driftPpm) || Math.Abs(driftPpm) < NegligiblePpm) return null;
-        if (sampleRateHz <= 0 || fftSize <= 0) return null;
-        if (startFreqHz <= 0 || endFreqHz <= startFreqHz) return null;
 
-        return new ChirpClockDrift(
-            driftPpm * 1e-6, fftSize / sampleRateHz, startFreqHz, Math.Log(endFreqHz / startFreqHz));
+        return ChirpTimeMap.For(sampleRateHz, fftSize, startFreqHz, endFreqHz) is { } map
+            ? new ChirpClockDrift(driftPpm * 1e-6, map)
+            : null;
     }
+
+    /// <summary>The sweep's frequency-to-time map, which is also what the residual estimator fits.</summary>
+    public ChirpTimeMap Map => _map;
 
     /// <summary>How far into the sweep frequency <paramref name="freqHz"/> is played, in seconds.</summary>
-    public double SweepTimeSeconds(double freqHz)
-    {
-        if (freqHz <= 0) return 0;
-
-        // Clamped rather than extrapolated: below the sweep's start and above its end there is no
-        // stimulus, so there is no arrival time either, and a linear extrapolation of a logarithm
-        // would put an enormous correction on exactly the bins that carry only noise.
-        double t = _periodSeconds * Math.Log(freqHz / _startFreqHz) / _logSpan;
-        return Math.Clamp(t, 0.0, _periodSeconds);
-    }
+    public double SweepTimeSeconds(double freqHz) => _map.SweepTimeSeconds(freqHz);
 
     /// <summary>The delay this clock ratio puts on the response at that frequency, in seconds.</summary>
     public double DelaySeconds(double freqHz) => -_epsilon * SweepTimeSeconds(freqHz);
@@ -107,16 +96,18 @@ public sealed class ChirpClockDrift
         // The bin spacing is the reciprocal of the record, and the record is the chirp's own period
         // -- that equality is the premise the whole measurement rests on, so deriving it here rather
         // than taking it as an argument removes a way for the two to disagree.
-        double binHz = 1.0 / _periodSeconds;
+        double binHz = 1.0 / _map.PeriodSeconds;
 
         for (int k = 0; k < h.Length; k++)
         {
-            double f = k * binHz;
-            double phase = 2 * Math.PI * f * DelaySeconds(f);
+            // Through the map's own ramp shape rather than through 2*pi*f*DelaySeconds(f): that is
+            // the one expression ChirpDriftResidual fits, so a measurement corrected by exactly the
+            // right figure leaves a residual of zero by construction. See ChirpTimeMap.
+            double phase = -_epsilon * _map.RampRadiansPerEpsilon(k * binHz);
             h[k] *= new Complex(Math.Cos(phase), Math.Sin(phase));
         }
     }
 
     /// <summary>The slip across the whole record — the figure the plan predicts and the bench measures.</summary>
-    public double SlipSeconds => Math.Abs(_epsilon) * _periodSeconds;
+    public double SlipSeconds => Math.Abs(_epsilon) * _map.PeriodSeconds;
 }

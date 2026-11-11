@@ -105,6 +105,15 @@ public sealed class FrequencyResponseRunner(
     private BandwidthReferenceSpec? _bandwidthOverride;
 
     /// <summary>
+    /// How much clock drift the run on screen still shows, measured off its own phase — see
+    /// <see cref="ResponseCaptureSupport.EstimateDriftResidual"/>. Stored rather than derived from
+    /// <see cref="_lastResults"/> on every status read: the status is polled once a second and this
+    /// is a least-squares fit over every bin in the band, which has no business running inside
+    /// <c>_stateLock</c> that often. Null where the reading could not be made.
+    /// </summary>
+    private DriftResidualReading? _driftResidual;
+
+    /// <summary>
     /// The runs of the measurements switched away from, so clicking one away and back does not throw
     /// a chirp away — see <see cref="SwitchOwner"/>, and <see cref="ThdSweepRunner.SwitchOwner"/> for
     /// the whole reasoning. Four, the sweep runners' bound and the retained spectrum's: a parked run
@@ -140,7 +149,7 @@ public sealed class FrequencyResponseRunner(
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     [.. _traces], PointsMeasured: 0, PointCount: 0,
                     PhaseKind: ResponsePhaseKind.PerTrace, RightChannelIsReference: _rightChannelIsReference,
-                    Warning: _warning);
+                    Warning: _warning, DriftResidual: _driftResidual);
             }
         }
     }
@@ -198,6 +207,7 @@ public sealed class FrequencyResponseRunner(
                 _traces = [];
                 _lastResults = null;
                 _bandwidthOverride = null;
+                _driftResidual = null;
             }
 
             _lastRequest = request;
@@ -254,6 +264,7 @@ public sealed class FrequencyResponseRunner(
 
             _traces = [];
             _lastResults = null;
+            _driftResidual = null;
             _phase = FrequencyResponsePhase.Idle;
             _continuous = false;
             _passesCompleted = 0;
@@ -297,7 +308,7 @@ public sealed class FrequencyResponseRunner(
                     _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     _rightChannelIsReference, _traces, _lastRequest, _warning, _lastResults,
-                    _bandwidthOverride);
+                    _bandwidthOverride, _driftResidual);
 
             var outcome = _parking.Switch(owner, current);
             if (!outcome.Changed)
@@ -322,6 +333,7 @@ public sealed class FrequencyResponseRunner(
                 _warning = parked.Warning;
                 _lastResults = parked.LastResults;
                 _bandwidthOverride = parked.BandwidthOverride;
+                _driftResidual = parked.DriftResidual;
             }
             else if (outcome.Cleared)
             {
@@ -377,6 +389,7 @@ public sealed class FrequencyResponseRunner(
         _traces = [];
         _lastResults = null;
         _bandwidthOverride = null;
+        _driftResidual = null;
         _phase = FrequencyResponsePhase.Idle;
         _continuous = false;
         _passesCompleted = 0;
@@ -400,7 +413,8 @@ public sealed class FrequencyResponseRunner(
         double? LatencySamples, string? Error, bool RightChannelIsReference,
         List<FrequencyResponseTrace> Traces, FrequencyResponseRequest? LastRequest, string? Warning,
         (double GeneratorAmpDbv, FrequencyResponseResult Left, FrequencyResponseResult Right, FrequencyResponseResult? Gain)? LastResults,
-        BandwidthReferenceSpec? BandwidthOverride);
+        BandwidthReferenceSpec? BandwidthOverride,
+        DriftResidualReading? DriftResidual);
 
     /// <summary>
     /// Re-finds the bandwidth corners of the traces on screen against a new reference, without
@@ -826,11 +840,22 @@ public sealed class FrequencyResponseRunner(
         }
 
         var results = (generatorAmpDbv, left.Complete(), right.Complete(), gain?.Complete());
+        var effective = EffectiveRequest(request);
         var traces = ResponseCaptureSupport.BuildTraces(
-            EffectiveRequest(request), results.Item1, DisplayColumns, results.Item2, results.Item3, results.Item4);
+            effective, results.Item1, DisplayColumns, results.Item2, results.Item3, results.Item4);
+
+        // Read off the finished estimates, once per pass. It is a reading *of* the measurement, not
+        // a parameter of it, so it does not belong in BuildTraces -- which ApplyBandwidthReference
+        // calls again on the same results, where re-fitting would spend the work for an answer that
+        // cannot have changed.
+        var residual = ResponseCaptureSupport.EstimateDriftResidual(effective, results.Item2, results.Item3);
+        ResponseCaptureSupport.LogDriftResidual(logger, residual);
 
         lock (_stateLock)
+        {
             _lastResults = results;
+            _driftResidual = residual;
+        }
 
         return (traces, peakDbv);
     }

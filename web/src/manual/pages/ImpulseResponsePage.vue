@@ -41,7 +41,9 @@ const { showPage } = useManual()
       two crystals put on a deconvolved chirp — which smears the impulse and tilts its phase. It
       appears once the
       <a href="#" @click.prevent="showPage('clock-drift')">clock drift</a> test has run, and that
-      page says what it does and what it is worth.
+      page says what it does and what it is worth. The line under it also reports whether the run
+      on screen still shows any drift, which is how a stored figure that has gone out of date with
+      the bench's temperature announces itself.
     </p>
 
     <h2>Why gate an impulse response</h2>

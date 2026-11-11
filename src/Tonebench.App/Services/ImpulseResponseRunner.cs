@@ -120,6 +120,14 @@ public sealed class ImpulseResponseRunner(
     private ImpulseResponseResult? _lastLeftImpulse;
 
     /// <summary>
+    /// How much clock drift the run on screen still shows — see
+    /// <see cref="ResponseCaptureSupport.EstimateDriftResidual"/>, and
+    /// <see cref="FrequencyResponseRunner"/>'s own field for why it is stored rather than derived
+    /// on every status read.
+    /// </summary>
+    private DriftResidualReading? _driftResidual;
+
+    /// <summary>
     /// The runs of the measurements switched away from — see <see cref="SwitchOwner"/>, and
     /// <see cref="ThdSweepRunner.SwitchOwner"/> for the whole reasoning. Four, and the bound matters
     /// most here: a parked run holds a whole impulse response, which is an <c>FftSize</c> array of
@@ -283,7 +291,7 @@ public sealed class ImpulseResponseRunner(
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     [.. _traces], [.. _impulses], [.. _harmonics],
                     _referenceMode, _referenceName, _gateResolutionHz, _gatePreMs, _gatePostMs,
-                    _lastRequest?.Stimulus);
+                    _lastRequest?.Stimulus, _driftResidual);
             }
         }
     }
@@ -360,6 +368,7 @@ public sealed class ImpulseResponseRunner(
                 _harmonics = [];
                 _lastLeftResult = null;
                 _lastLeftImpulse = null;
+                _driftResidual = null;
             }
 
             _lastRequest = request;
@@ -414,6 +423,7 @@ public sealed class ImpulseResponseRunner(
             _harmonics = [];
             _lastLeftResult = null;
             _lastLeftImpulse = null;
+            _driftResidual = null;
             _phase = FrequencyResponsePhase.Idle;
             _continuous = false;
             _passesCompleted = 0;
@@ -451,7 +461,8 @@ public sealed class ImpulseResponseRunner(
                     _phase, _continuous, _passesCompleted, _averagesTaken, _averageCount,
                     _generatorAmpDbv, _binHz, _sampleRateHz, _fftSize, _latencySamples, _error,
                     _referenceMode, _referenceName, _gatePreMs, _gatePostMs, _gateResolutionHz,
-                    _traces, _impulses, _harmonics, _lastLeftResult, _lastLeftImpulse, _lastRequest);
+                    _traces, _impulses, _harmonics, _lastLeftResult, _lastLeftImpulse, _lastRequest,
+                    _driftResidual);
 
             var outcome = _parking.Switch(owner, current);
             if (!outcome.Changed)
@@ -481,6 +492,7 @@ public sealed class ImpulseResponseRunner(
                 _lastLeftResult = parked.LastLeftResult;
                 _lastLeftImpulse = parked.LastLeftImpulse;
                 _lastRequest = parked.LastRequest;
+                _driftResidual = parked.DriftResidual;
             }
             else if (outcome.Cleared)
             {
@@ -535,6 +547,7 @@ public sealed class ImpulseResponseRunner(
         _harmonics = [];
         _lastLeftResult = null;
         _lastLeftImpulse = null;
+        _driftResidual = null;
         _phase = FrequencyResponsePhase.Idle;
         _continuous = false;
         _passesCompleted = 0;
@@ -562,7 +575,8 @@ public sealed class ImpulseResponseRunner(
         string? ReferenceName, double GatePreMs, double GatePostMs, double GateResolutionHz,
         List<FrequencyResponseTrace> Traces, List<ImpulseTrace> Impulses,
         List<HarmonicCurve> Harmonics, FrequencyResponseResult? LastLeftResult,
-        ImpulseResponseResult? LastLeftImpulse, ImpulseResponseRequest? LastRequest);
+        ImpulseResponseResult? LastLeftImpulse, ImpulseResponseRequest? LastRequest,
+        DriftResidualReading? DriftResidual);
 
     /// <summary>
     /// Captures the analyzer's own impulse response, for later division out of a measurement.
@@ -790,6 +804,7 @@ public sealed class ImpulseResponseRunner(
                     _harmonics = pass.Harmonics;
                     _lastLeftResult = pass.LeftResult;
                     _lastLeftImpulse = pass.LeftImpulse;
+                    _driftResidual = pass.DriftResidual;
                     _passesCompleted = passes;
                 }
 
@@ -888,7 +903,8 @@ public sealed class ImpulseResponseRunner(
         List<HarmonicCurve> Harmonics,
         double PeakDbv,
         FrequencyResponseResult LeftResult,
-        ImpulseResponseResult LeftImpulse);
+        ImpulseResponseResult LeftImpulse,
+        DriftResidualReading? DriftResidual);
 
     private async Task<PassResult> MeasureOnceAsync(
         ImpulseResponseRequest request,
@@ -995,8 +1011,16 @@ public sealed class ImpulseResponseRunner(
         // and the left channel's magnitudes, as the denominator of every dBc figure — has to hold the
         // results rather than hand the estimators to two different consumers.
         var leftResult = left.Complete();
+
+        // Held rather than completed inline into BuildTraces: the drift-residual reading is taken
+        // off the reference channel's own estimate where there is one, which is the trace the clock
+        // ramp is on with no DUT in it. See ResponseCaptureSupport.EstimateDriftResidual.
+        var rightResult = right.Complete();
         var traces = ResponseCaptureSupport.BuildTraces(
-            acquisition, generatorAmpDbv, DisplayColumns, leftResult, right.Complete(), gain?.Complete());
+            acquisition, generatorAmpDbv, DisplayColumns, leftResult, rightResult, gain?.Complete());
+
+        var residual = ResponseCaptureSupport.EstimateDriftResidual(acquisition, leftResult, rightResult);
+        ResponseCaptureSupport.LogDriftResidual(logger, residual);
 
         var impulses = new List<ImpulseTrace>
         {
@@ -1019,7 +1043,7 @@ public sealed class ImpulseResponseRunner(
             }
         }
 
-        return new PassResult(traces, impulses, harmonics, peakDbv, leftResult, leftImpulse);
+        return new PassResult(traces, impulses, harmonics, peakDbv, leftResult, leftImpulse, residual);
     }
 
     private static ImpulseTrace BuildImpulseTrace(

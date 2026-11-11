@@ -1551,6 +1551,30 @@ export interface FrequencyResponseTraceJson {
   referenceFellBackToPeak: boolean
 }
 
+/**
+ * How much clock drift the run on screen still carries. Mirrors
+ * `Tonebench.App.Services.DriftResidualReading`; absent where the reading could not honestly be
+ * made, which is every stimulus but the chirp, every run without a measured reference, and every
+ * build older than this one.
+ */
+export interface DriftResidualJson {
+  /** On a corrected run, the error in the figure that corrected it; otherwise the drift itself. */
+  residualPpm: number
+  /** What the run was corrected by, 0 when it was not. */
+  appliedPpm: number
+  /** The fit's own standard error. Optimistic, and nothing decides on it. */
+  sigmaPpm: number
+  /** How far the fitted model missed the phase, in degrees rms — the honest confidence figure. */
+  fitRmsDeg: number
+  bins: number
+  fromHz: number
+  toHz: number
+  /** What the residual costs this run: clock separation across one analysis record, in samples. */
+  slipSamples: number
+  /** That record's length in seconds, so the slip can be quoted against it. */
+  recordSeconds: number
+}
+
 export interface FrequencyResponseStatus {
   running: boolean
   phase: ResponsePhaseName
@@ -1583,6 +1607,8 @@ export interface FrequencyResponseStatus {
    * has no points) and on a status from a build that predates them.
    */
   pointPreviews?: ResponsePointPreviewJson[]
+  /** The clock drift this run still shows, where it could be read. See `DriftResidualJson`. */
+  driftResidual?: DriftResidualJson | null
 }
 
 /** One point's decimated spectrum and waveform on one input. Mirrors Tonebench.App.Services.ResponsePointPreview. */
@@ -1699,6 +1725,8 @@ export interface ImpulseResponseStatus {
   gatePostMs: number
   /** What the run on screen played, or null before anything has run. Null on a build older than this. */
   stimulus: ResponseStimulusName | null
+  /** The clock drift this run still shows, where it could be read. See `DriftResidualJson`. */
+  driftResidual?: DriftResidualJson | null
 }
 
 /** A stored loopback calibration, as the picker lists it. */

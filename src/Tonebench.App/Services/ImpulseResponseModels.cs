@@ -313,7 +313,13 @@ public sealed record ImpulseResponseStatus(
     /// <para>The run's own stimulus and not the panel's staged one, which is the whole point:
     /// turning the dropdown after a run must not relabel what that run did.</para>
     /// </remarks>
-    ResponseStimulus? Stimulus);
+    ResponseStimulus? Stimulus,
+    /// <summary>
+    /// The clock drift this run still shows, where it could be read — chirp only. See
+    /// <see cref="DriftResidualReading"/>; the frequency-response screen carries the same field for
+    /// the same reason, and the two panels word it through one client-side module.
+    /// </summary>
+    DriftResidualReading? DriftResidual = null);
 
 /// <summary>The immediate answer to a start request — what the run will do, before it does it.</summary>
 public sealed record ImpulseResponseStarted(

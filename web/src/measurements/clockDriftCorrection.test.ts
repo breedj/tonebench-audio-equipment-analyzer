@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import type { DriftResidualJson } from '../api/client'
 import {
+  CLOCK_DRIFT_ACTIONABLE_PPM,
+  CLOCK_DRIFT_MAX_FIT_MISS_DEG,
   CLOCK_DRIFT_STALE_DAYS,
   clockDriftAgeDays,
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
+  clockDriftFreshnessNotice,
+  clockDriftResidualNotice,
   clockDriftStaleNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
@@ -193,5 +198,141 @@ describe('readMeasuredDate', () => {
     expect(readMeasuredDate(null)).toBeNull()
     expect(readMeasuredDate('')).toBeNull()
     expect(readMeasuredDate('the other day')).toBeNull()
+  })
+})
+
+/**
+ * A reading off a 0.68 s record at 48 kHz, this bench's own default resolution — so the slip in
+ * samples is `|ppm| * 1e-6 * 32768`, which is what the server computes and sends.
+ */
+function reading(residualPpm: number, appliedPpm: number, over: Partial<DriftResidualJson> = {}): DriftResidualJson {
+  return {
+    residualPpm,
+    appliedPpm,
+    sigmaPpm: 0.02,
+    fitRmsDeg: 0.3,
+    bins: 15_551,
+    fromHz: 20,
+    toHz: 22_800,
+    slipSamples: Math.abs(residualPpm) * 1e-6 * 32768,
+    recordSeconds: 32768 / 48_000,
+    ...over,
+  }
+}
+
+describe('clockDriftResidualNotice', () => {
+  // The case the whole detector exists for: the bench's own figure has moved, and the only thing
+  // that could notice is the measurement itself.
+  it('says the stored figure looks stale, by how much, and what to do', () => {
+    const notice = clockDriftResidualNotice(reading(-26.0, -104.0))
+
+    expect(notice?.tone).toBe('warn')
+    expect(notice?.text).toContain('\u221226.0 ppm')
+    expect(notice?.text).toContain('\u2212104.0 ppm')
+    expect(notice?.text).toContain('26 ppm out')
+    expect(notice?.text).toContain('Clock drift test')
+    // Keep correcting meanwhile: a stale figure removes most of the error, and a reader told only
+    // that it is stale would reasonably clear the box, which is strictly worse. Same reasoning as
+    // clockDriftStaleNotice's own reassurance.
+    expect(notice?.text).toContain('still removes most of the error')
+  })
+
+  // The confirmation, which is the half that earns the line its credibility -- and the only thing
+  // that can retire the calendar nag.
+  it('confirms a figure that is doing its job', () => {
+    const notice = clockDriftResidualNotice(reading(-0.4, -104.0))
+
+    expect(notice?.tone).toBe('ok')
+    expect(notice?.text).toContain('still current')
+  })
+
+  /**
+   * Both gates, because either alone is a nag. A residual under
+   * {@link CLOCK_DRIFT_ACTIONABLE_PPM} is the bench's own measured signature rather than staleness;
+   * one under a tenth of what was applied is a correction doing 90 % of its job.
+   */
+  it('is quiet about a residual too small to act on, in absolute or in proportion', () => {
+    expect(clockDriftResidualNotice(reading(-4.0, -104.0))?.tone).toBe('ok')
+    expect(clockDriftResidualNotice(reading(-9.0, -104.0))?.tone).toBe('ok')
+    expect(clockDriftResidualNotice(reading(-11.0, -104.0))?.tone).toBe('warn')
+    // Small in proportion is not enough on its own: a tenth of 400 ppm is 40 ppm of real error.
+    expect(clockDriftResidualNotice(reading(-39.0, -400.0))?.tone).toBe('ok')
+    expect(clockDriftResidualNotice(reading(-41.0, -400.0))?.tone).toBe('warn')
+  })
+
+  /**
+   * The third gate is what the residual costs *this* run. The same ppm matters more at a long
+   * record than a short one, so a bench measuring at coarse resolution is not told to re-measure
+   * for an error nothing on its screen can show.
+   */
+  it('is quiet where the residual costs this record almost nothing', () => {
+    const tiny = reading(-20.0, -104.0, { slipSamples: 0.05, recordSeconds: 0.0853 })
+
+    expect(clockDriftResidualNotice(tiny)?.tone).toBe('ok')
+  })
+
+  // A bench that has never measured its drift. Until this reading existed, nothing anywhere could
+  // tell it that the curve on screen was carrying a ramp.
+  it('tells an uncorrected run that it is carrying drift', () => {
+    const notice = clockDriftResidualNotice(reading(-104.0, 0))
+
+    expect(notice?.tone).toBe('warn')
+    expect(notice?.text).toContain('carrying \u2212104.0 ppm')
+    expect(notice?.text).toContain('3.4 samples')
+    expect(notice?.text).toContain('0.68 s record')
+    expect(notice?.text).toContain('Clock drift test')
+  })
+
+  /**
+   * And says nothing at all about an uncorrected run with no drift worth the name, which is every
+   * ordinary single-clock analyzer. A line on every measurement confirming the absence of a fault
+   * nobody suspected is the definition of noise.
+   */
+  it('says nothing about a single-clock bench', () => {
+    expect(clockDriftResidualNotice(reading(0.3, 0))).toBeNull()
+  })
+
+  it('says nothing where the fit did not describe the phase', () => {
+    const wild = reading(-26.0, -104.0, { fitRmsDeg: CLOCK_DRIFT_MAX_FIT_MISS_DEG + 1 })
+
+    expect(clockDriftResidualNotice(wild)).toBeNull()
+  })
+
+  it('says nothing without a reading, or with one it cannot read', () => {
+    expect(clockDriftResidualNotice(null)).toBeNull()
+    expect(clockDriftResidualNotice(undefined)).toBeNull()
+    expect(clockDriftResidualNotice(reading(Number.NaN, -104.0))).toBeNull()
+    expect(clockDriftResidualNotice(reading(-26.0, -104.0, { recordSeconds: 0 }))).toBeNull()
+  })
+})
+
+describe('clockDriftFreshnessNotice', () => {
+  const measured = '2026-11-11T12:00:00Z'
+  const long_after = new Date('2027-06-01T12:00:00Z')
+
+  /**
+   * A measurement beats a date, and that ordering is the point. A figure half a year old that this
+   * run has just confirmed to a fraction of a ppm does not need re-measuring, and telling its owner
+   * to go and do it anyway would teach them to ignore the line.
+   */
+  it('lets a confirming measurement retire the calendar nag', () => {
+    expect(clockDriftStaleNotice(measured, long_after)).not.toBeNull()
+
+    const notice = clockDriftFreshnessNotice(reading(-0.4, -104.0), measured, long_after)
+
+    expect(notice?.tone).toBe('ok')
+    expect(notice?.text).toContain('still current')
+  })
+
+  it('falls back to the calendar when nothing measured anything', () => {
+    const notice = clockDriftFreshnessNotice(null, measured, long_after)
+
+    expect(notice?.tone).toBe('warn')
+    expect(notice?.text).toContain('days old')
+  })
+
+  it('says nothing when neither has anything to say', () => {
+    expect(clockDriftFreshnessNotice(null, measured, new Date('2026-11-12T12:00:00Z'))).toBeNull()
+    expect(clockDriftFreshnessNotice(reading(0.1, 0), null)).toBeNull()
   })
 })

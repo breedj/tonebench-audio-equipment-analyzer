@@ -26,6 +26,14 @@ const props = defineProps<{ open: boolean; pairingNote?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { status, error, busy, running, points, refresh, start, cancel, clear } = useClockDrift()
+
+/**
+ * The server's own floor, mirrored so the dialog can count toward it —
+ * `ClockDriftRunner.MinReadings`, which carries the measurement behind the figure. Mirrored rather
+ * than sent on the status: it is a constant of this build, not a property of a run, and
+ * `clockDriftReadings.test.ts` pins the two together.
+ */
+const MIN_CLOCK_DRIFT_READINGS = 30
 const soundCard = useSoundCard()
 const { openManual } = useManual()
 const { isDark } = useAppTheme()
@@ -48,6 +56,18 @@ const plot = shallowRef<uPlot | null>(null)
 const levelUnit = computed(() => (soundCard.config.value?.outputFullScalePeakMv != null ? 'dBV' : 'dBFS'))
 
 const verdict = computed(() => status.value?.verdict ?? null)
+
+/**
+ * How many readings there are, and — until there are enough — how many it takes. The server draws
+ * no verdict and stores nothing below that floor, so a run counting up with no figure beside it
+ * looks broken; this is what says it is working and not yet finished.
+ */
+const readingsLabel = computed(() => {
+  const taken = points.value.length
+  return taken >= MIN_CLOCK_DRIFT_READINGS
+    ? `${taken} readings`
+    : `reading ${taken} of at least ${MIN_CLOCK_DRIFT_READINGS}`
+})
 
 const verdictTone = computed(() => {
   switch (verdict.value?.quality) {
@@ -303,7 +323,7 @@ async function close() {
             </button>
 
             <span v-if="status" class="text-[12px] text-neutral-600 dark:text-neutral-300">
-              {{ status.phase }}<span v-if="points.length"> · {{ points.length }} readings</span>
+              {{ status.phase }}<span v-if="points.length"> · {{ readingsLabel }}</span>
               <span v-if="status.playedToneHz">
                 · playing {{ status.playedToneHz.toFixed(3) }} Hz on {{ status.measuredChannel }}
               </span>
@@ -323,7 +343,8 @@ async function close() {
       <div class="dialog-card shrink-0 flex min-h-[260px] items-center justify-center">
         <div v-show="points.length" ref="host" class="w-full"></div>
         <p v-if="!points.length" class="px-4 text-center text-[12px] text-neutral-500 dark:text-neutral-400">
-          Press Measure. A reading lands about once a second.
+          Press Measure. A reading lands about once a second, and it takes
+          {{ MIN_CLOCK_DRIFT_READINGS }} of them before there is a figure worth keeping.
         </p>
       </div>
 

@@ -169,6 +169,78 @@ public class FrequencyResponseRunnerTests
             $"the gain trace is already on one clock and must not be corrected; it moved {worstGain * 1e6:0.00} us");
     }
 
+    /// <summary>
+    /// The staleness detector, end to end through the real runner — and the simulator is the ideal
+    /// bench for it, because it has <em>one</em> clock. So a run corrected by a figure is a run
+    /// corrected by a figure that is entirely wrong, and the residual the detector reads must be
+    /// exactly that figure back again with the opposite sign: <c>ε_true − ε_stored</c> with
+    /// <c>ε_true = 0</c>.
+    ///
+    /// <para>That is the case a user meets as "the stored figure has gone stale", which is what this
+    /// whole reading exists to catch — and it is checked here rather than only in
+    /// <c>DriftResidualReadingTests</c> because what could break it is the wiring: the reading taken
+    /// off the wrong trace, taken before the correction, or not reaching the status at all.</para>
+    /// </summary>
+    [Fact]
+    public async Task ACorrectionAppliedToABenchThatNeedsNone_IsReadBackAsTheWholeFigure()
+    {
+        const double ppm = -300.0;
+
+        var harness = await CreateAsync();
+        await harness.Runner.StartAsync(Request(clockDriftPpm: ppm), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        var reading = status.DriftResidual;
+        Assert.NotNull(reading);
+        Assert.Equal(ppm, reading!.AppliedPpm);
+
+        // The sign is the whole of what a reader acts on, and it is the one thing a mirrored shape
+        // would get wrong: correcting a bench by -300 ppm it does not need leaves +300 on it.
+        Assert.Equal(-ppm, reading.ResidualPpm, 3.0);
+        Assert.True(reading.SlipSamples > 9.0,
+            $"300 ppm of a 32768-sample record is 9.8 samples; this read {reading.SlipSamples:0.00}");
+        Assert.True(reading.Bins > 1000, $"a 24 kHz span should give thousands of bins, not {reading.Bins}");
+    }
+
+    /// <summary>
+    /// And an uncorrected run on a one-clock bench reads nothing worth reporting, which is what
+    /// every QA403 session is: the residual exists, because this run had a reference to read it off,
+    /// and it is small enough that the panel says nothing. A detector that cried stale on the
+    /// commonest bench in the app would be worse than none.
+    /// </summary>
+    [Fact]
+    public async Task AnUncorrectedRunOnAOneClockBench_ReadsNoDriftWorthReporting()
+    {
+        var harness = await CreateAsync();
+        await harness.Runner.StartAsync(Request(), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        var reading = status.DriftResidual;
+        Assert.NotNull(reading);
+        Assert.Equal(0.0, reading!.AppliedPpm);
+        Assert.True(Math.Abs(reading.ResidualPpm) < 1.0,
+            $"a single-clock bench should read no drift, and read {reading.ResidualPpm:0.000} ppm");
+    }
+
+    /// <summary>
+    /// Without a measured reference there is no DUT-free trace to read, so no reading is made —
+    /// <c>ResponseCaptureSupport.EstimateDriftResidual</c> carries the measurement that makes that
+    /// restriction necessary. Checked through the runner because the request's flag is what decides
+    /// it, and the runner is what passes the request on.
+    /// </summary>
+    [Fact]
+    public async Task WithoutAReference_TheRunnerReportsNoResidual()
+    {
+        var harness = await CreateAsync();
+        await harness.Runner.StartAsync(Request(rightIsReference: false), CancellationToken.None);
+        var status = await AwaitCompletionAsync(harness.Runner);
+        AssertFinished(status);
+
+        Assert.Null(status.DriftResidual);
+    }
+
     [Fact]
     public void AnalysisLowHz_KeepsItsFourHzFloorAtTheDefaultStartAndRisesWithIt()
     {

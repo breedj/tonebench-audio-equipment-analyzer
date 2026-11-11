@@ -541,6 +541,50 @@ public sealed record FrequencyResponseRequest(
     }
 }
 
+/// <summary>
+/// How much clock drift the run on screen still carries, and therefore whether the stored drift
+/// figure has gone stale — see <see cref="ChirpDriftResidual"/> for the measurement and
+/// <see cref="ResponseCaptureSupport.EstimateDriftResidual"/> for the conditions it needs.
+///
+/// <para><b>Why this is worth carrying at all.</b> A crystal's frequency moves with temperature, so
+/// a stored ε goes out of date — and nothing else in the app can notice, because the clock-drift
+/// test needs the output looped back to the input and a bench with a DUT patched in is not in that
+/// state. This is read off the measurement the user has just taken, which makes it the only thing
+/// that can tell a fresh figure from a stale one <i>while measuring</i>. It is a prompt to
+/// re-measure, never a substitute for the measurement.</para>
+/// </summary>
+/// <param name="ResidualPpm">
+/// The drift left on the trace. On a corrected run this is the error in the figure that corrected
+/// it; on an uncorrected one it is the drift itself.
+/// </param>
+/// <param name="AppliedPpm">
+/// What this run was corrected by, 0 when it was not. Carried with the residual because the two are
+/// only meaningful together: 8 ppm left over after correcting 104 is a figure doing its job, and
+/// 8 ppm on an uncorrected run is a bench that has never measured its drift.
+/// </param>
+/// <param name="SigmaPpm">The fit's own standard error. Optimistic — see <see cref="ChirpDriftResidualFit.SigmaPpm"/>.</param>
+/// <param name="FitRmsDeg">How far the fitted model missed the phase. See <see cref="ChirpDriftResidualFit.FitRmsDeg"/>.</param>
+/// <param name="Bins">How many bins the fit used, after the flatness gate dropped the rest.</param>
+/// <param name="FromHz">The bottom of the band actually fitted.</param>
+/// <param name="ToHz">The top of it. Below the analysed band's own top where the path rolls off.</param>
+/// <param name="SlipSamples">
+/// What the residual costs <i>this</i> run: how far the two clocks still separate across one
+/// analysis record. Carried rather than derived on the client, because it belongs to the run's own
+/// record length — a panel computing it from the staged settings would quote a figure for a
+/// resolution the measurement on screen was not taken at.
+/// </param>
+/// <param name="RecordSeconds">That record's length, so the slip can be quoted against it.</param>
+public sealed record DriftResidualReading(
+    double ResidualPpm,
+    double AppliedPpm,
+    double SigmaPpm,
+    double FitRmsDeg,
+    int Bins,
+    double FromHz,
+    double ToHz,
+    double SlipSamples,
+    double RecordSeconds);
+
 /// <summary>What a client polling <c>GET /api/frequency-response/status</c> sees.</summary>
 /// <param name="LatencySamples">
 /// The DUT's propagation delay in samples, or null when nothing measured it. Only a run whose
@@ -599,7 +643,13 @@ public sealed record FrequencyResponseStatus(
     /// through this and would otherwise have an empty rail until the next point was measured — or
     /// for ever, on a finished run.</para>
     /// </summary>
-    IReadOnlyList<ResponsePointPreview>? PointPreviews = null);
+    IReadOnlyList<ResponsePointPreview>? PointPreviews = null,
+    /// <summary>
+    /// The clock drift this run still shows, where it could be read — chirp only, and null for
+    /// every other stimulus and for a stepped sweep, neither of which has a sweep time map for the
+    /// ramp to live on. See <see cref="DriftResidualReading"/>.
+    /// </summary>
+    DriftResidualReading? DriftResidual = null);
 
 /// <summary>
 /// One measured point's decimated spectrum and waveform, on one input — what the two small preview

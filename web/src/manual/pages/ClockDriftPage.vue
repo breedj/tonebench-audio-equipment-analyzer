@@ -276,13 +276,88 @@
       beside it.
     </p>
 
+    <h3>How the app checks the figure is still current</h3>
+
+    <p>
+      <strong>It reads the leftover drift off the measurement you have just taken.</strong> Correct
+      a sweep by exactly the right figure and there is no delay ramp left on it; correct it by one
+      that has drifted and what is left is the <em>error in that figure</em>. So every chirp
+      measurement is also a check on the number that corrected it — taken with the DUT wherever it
+      is, which is the one thing the Clock drift test itself cannot do, because it needs the output
+      looped back to the input.
+    </p>
+
+    <p>
+      The result is one line under the correction on <strong>Frequency response</strong> and
+      <strong>Impulse response</strong>. It says one of three things, and otherwise nothing at all:
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Line</th><th>What it means</th></tr>
+      </thead>
+      <tbody>
+        <tr class="manual-wrap">
+          <td>The stored figure is still current…</td>
+          <td>
+            The correction is doing its job. This also retires the "this figure is N days old"
+            warning — a measurement beats a date.
+          </td>
+        </tr>
+        <tr class="manual-wrap">
+          <td>…so the stored figure looks about N ppm out</td>
+          <td>
+            Re-run the Clock drift test when it suits you. Leave the box ticked meanwhile: a stale
+            figure still removes most of the error.
+          </td>
+        </tr>
+        <tr class="manual-wrap">
+          <td>This run is carrying N ppm of clock drift</td>
+          <td>
+            Nothing corrected it — either the box is clear, or this bench has never measured its
+            drift. The ramp is on the phase and the impulse of the run on screen.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      It says nothing on an ordinary single-clock analyzer, which has no drift to report, and
+      nothing about a residual too small to matter — under 5 ppm, under a tenth of what was
+      corrected, or under a tenth of a sample across the record being analysed. All three have to be
+      exceeded before the line turns amber.
+    </p>
+
+    <p>
+      <strong>It needs <em>Right channel is reference</em> ticked, and that is not a detail.</strong>
+      The reading is taken off the reference channel, which carries the generator rather than the
+      DUT's output — so the ramp is in it and the DUT is not. Read off the measured channel instead,
+      a DUT's own phase curve can be mistaken for drift that is not there: a bare one-pole low-pass
+      at 2 kHz, with no clock error at all, reads as 133 ppm. That is more fake drift than this
+      project's bench has real drift, so the app simply makes no reading without a reference.
+    </p>
+
+    <p>
+      <strong>What is left is the bench's own signature.</strong> Even with a clean reference the
+      analyzer's own path — its converter filters, its DC coupling — contributes a little, about
+      2.5 ppm on a realistic one. That is why the threshold is 5 ppm rather than a tenth of one, and
+      why this is a prompt to re-measure rather than a measurement. The Clock drift test, with a
+      known tone and no DUT in the answer, is a hundred times finer.
+    </p>
+
     <h3>How long to run it</h3>
 
     <p>
-      <strong>About 30 readings — some 20 to 30 seconds — is enough, and the default minute leaves
-      a comfortable margin.</strong> That is measured rather than estimated: a 418-reading run on
-      this project's own bench was cut into every possible window of <em>N</em> consecutive readings
-      and each window's figure compared with the whole run's.
+      <strong>Thirty readings — some 20 to 30 seconds — is the minimum, and the app will not report
+      a figure below it.</strong> The default minute leaves a comfortable margin; the count beside
+      the phase reads <em>reading 14 of at least 30</em> until there are enough, and no verdict is
+      drawn and nothing is stored until then.
+    </p>
+
+    <p>
+      The figure is measured rather than estimated. A 418-reading run on this project's own bench
+      was cut into every possible window of <em>N</em> consecutive readings and each window's figure
+      compared with the whole run's.
     </p>
 
     <table>
@@ -299,9 +374,12 @@
     </table>
 
     <p>
-      So precision stops being the limit almost immediately: thirty readings already leave about one
-      microsecond of the seventy-one this bench's drift puts on a record, and running four times as
-      long improves that by a factor of three on a quantity that no longer matters.
+      So precision stops being the limit almost immediately — which is exactly why thirty is where
+      the floor sits. Thirty readings already leave about one microsecond of the seventy-one this
+      bench's drift puts on a record, a hundredth of what the correction removes, and running four
+      times as long improves that by a factor of three on a quantity that no longer matters. Below
+      thirty the estimate starts to be decided by whether a bad record happened to land in the run,
+      which is the next paragraph.
     </p>
 
     <p>

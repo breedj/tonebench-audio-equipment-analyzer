@@ -1,4 +1,4 @@
-namespace Tonebench.App.Services;
+﻿namespace Tonebench.App.Services;
 
 /// <summary>What to play, for how long, and how often to take a reading.</summary>
 /// <param name="ToneHz">
@@ -187,7 +187,10 @@ public sealed record ClockDriftStatus(
     string MeasuredChannel,
     IReadOnlyList<ClockDriftPoint> Points,
     /// <summary>
-    /// The figure this run reports: the <b>median</b> of its readings, not their mean.
+    /// The figure this run reports: the <b>median</b> of its readings, not their mean. Non-null from
+    /// the first reading, so the dialog can show the figure converging — but no
+    /// <see cref="Verdict"/> is drawn, and nothing is stored, until there are
+    /// <see cref="ClockDriftRunner.MinReadings"/> of them.
     ///
     /// <para><b>Measured, not a preference.</b> Over a 418-reading run on this bench
     /// (2026-11-11) two readings — 0.5 % — came back wild, one of them at +157 ppm against a true

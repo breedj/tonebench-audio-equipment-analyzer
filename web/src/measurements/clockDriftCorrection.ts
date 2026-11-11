@@ -1,4 +1,4 @@
-import type { ResponseStimulusName } from '../api/client'
+import type { DriftResidualJson, ResponseStimulusName } from '../api/client'
 import { usesChirpStart } from './responseStimulus'
 
 /**
@@ -168,4 +168,145 @@ export function readMeasuredDate(measuredUtc: string | null | undefined): string
   if (!measuredUtc) return null
   const when = new Date(measuredUtc)
   return Number.isNaN(when.getTime()) ? null : when.toLocaleDateString()
+}
+
+/**
+ * A line the panel prints under the correction, and how loudly.
+ *
+ * <p>`ok` is a grey confirmation and `warn` is amber. Two tones rather than a boolean because the
+ * useful cases are not all faults: "the stored figure is current" is worth saying, and it is the
+ * only thing that can retire the calendar nag below.</p>
+ */
+export interface ClockDriftNotice {
+  tone: 'ok' | 'warn'
+  text: string
+}
+
+/**
+ * How far out a drift figure has to be before saying so is worth a reader's attention, in ppm.
+ *
+ * <p>Measured, not chosen: a realistic analyzer path — linear-phase converter filters, a gentle
+ * analog reconstruction pole, DC coupling — makes the residual read about 2.5 ppm when the stored
+ * figure is exact, so anything below that is the bench's own signature rather than staleness. Five
+ * leaves a margin of two on it.</p>
+ */
+export const CLOCK_DRIFT_ACTIONABLE_PPM = 5
+
+/**
+ * And how far out *relative to the correction being made*, because the absolute figure alone is the
+ * wrong question: 8 ppm left over after correcting 104 is a figure doing 92 % of its job, and
+ * telling someone to re-measure for that is a nag. A tenth is where re-measuring buys a visible
+ * improvement.
+ */
+export const CLOCK_DRIFT_ACTIONABLE_FRACTION = 0.1
+
+/**
+ * And how much it has to cost *this* measurement, in samples of slip across one record. The same
+ * residual matters more at a long record than a short one — the slip is proportional to it — so
+ * this is the gate that keeps the panel quiet about a figure whose error nothing on screen can
+ * show. A tenth of a sample is well under the estimator's own peak interpolation.
+ */
+export const CLOCK_DRIFT_ACTIONABLE_SLIP_SAMPLES = 0.1
+
+/**
+ * Above this the fitted model did not describe the measured phase at all, so its drift coefficient
+ * is not a reading of anything — say nothing rather than something confident.
+ *
+ * <p>Generous, because the miss is a weak discriminator and not a strong one: a clean path reads
+ * well under a degree, but a DUT's own phase curve can read a few degrees while being wrong about
+ * the drift by more than the whole quantity. What this catches is the gross case — a reference input
+ * with something unexpected on it. The real protection is that the reading is only ever taken off
+ * the reference channel; see `ResponseCaptureSupport.EstimateDriftResidual`.</p>
+ */
+export const CLOCK_DRIFT_MAX_FIT_MISS_DEG = 30
+
+const ppm = (value: number) => `${value >= 0 ? '+' : '\u2212'}${Math.abs(value).toFixed(1)} ppm`
+
+/**
+ * What the measurement on screen says about the stored drift figure, or null when it says nothing.
+ *
+ * <p><b>This is the staleness detector.</b> A crystal's frequency moves with temperature and the
+ * clock-drift test cannot be re-run without re-wiring the bench into a loopback, so the only thing
+ * that can notice a figure going out of date is the measurement itself: a sweep corrected by an
+ * exact figure has no delay ramp left on it, and whatever ramp *is* left is the error in that
+ * figure. The server reads it off the reference channel — see
+ * `ResponseCaptureSupport.EstimateDriftResidual`, which is also where the reasons it sometimes
+ * cannot are.</p>
+ *
+ * <p>Four states and only three of them speak. A correction that is doing its job earns a quiet
+ * confirmation, because it is the one thing that can retire {@link clockDriftStaleNotice}'s
+ * calendar nag. One that is not earns amber. An <i>uncorrected</i> run that is carrying drift earns
+ * amber too — that bench has an error on screen it could simply remove, and until now nothing could
+ * tell it so. And a run with no drift worth the name says nothing at all: that is every ordinary
+ * single-clock analyzer, and a line on every measurement confirming the absence of a fault nobody
+ * suspected is the definition of noise.</p>
+ */
+export function clockDriftResidualNotice(
+  residual: DriftResidualJson | null | undefined,
+): ClockDriftNotice | null {
+  if (!residual) return null
+  if (!Number.isFinite(residual.residualPpm) || !Number.isFinite(residual.appliedPpm)) return null
+  if (!(residual.recordSeconds > 0) || !(residual.slipSamples >= 0)) return null
+  if (Number.isFinite(residual.fitRmsDeg) && residual.fitRmsDeg > CLOCK_DRIFT_MAX_FIT_MISS_DEG) return null
+
+  const { recordSeconds, slipSamples } = residual
+  const applied = residual.appliedPpm
+  const left = Math.abs(residual.residualPpm)
+
+  const actionable =
+    slipSamples >= CLOCK_DRIFT_ACTIONABLE_SLIP_SAMPLES &&
+    left >= Math.max(CLOCK_DRIFT_ACTIONABLE_PPM, CLOCK_DRIFT_ACTIONABLE_FRACTION * Math.abs(applied))
+
+  const cost =
+    `${slipSamples.toFixed(1)} samples over one ${recordSeconds.toFixed(2)} s record`
+
+  if (applied === 0) {
+    if (!actionable) return null
+
+    return {
+      tone: 'warn',
+      text:
+        `This run is carrying ${ppm(residual.residualPpm)} of clock drift — ${cost} — read off the ` +
+        `reference channel. Run the Clock drift test to measure it, and correcting for it takes ` +
+        `that ramp off the phase and the impulse.`,
+    }
+  }
+
+  if (!actionable) {
+    return {
+      tone: 'ok',
+      text:
+        `The stored figure is still current: this run has ${ppm(residual.residualPpm)} left on it ` +
+        `after correcting ${ppm(applied)}, measured from its own reference channel.`,
+    }
+  }
+
+  return {
+    tone: 'warn',
+    text:
+      `This run still has ${ppm(residual.residualPpm)} on it after correcting ${ppm(applied)}, so ` +
+      `the stored figure looks about ${left.toFixed(0)} ppm out — ${cost} left uncorrected. Run the ` +
+      `Clock drift test again once the bench has warmed up; it needs the output looped back to the ` +
+      `input. Leave the box ticked meanwhile: a stale figure still removes most of the error.`,
+  }
+}
+
+/**
+ * The one line the panel prints: what the measurement says if it said anything, and the calendar
+ * otherwise.
+ *
+ * <p>In that order, because a measurement beats a date. A figure a month old that a run has just
+ * confirmed to within a ppm does not need re-measuring, and telling its owner to go and do it would
+ * teach them to ignore the line.</p>
+ */
+export function clockDriftFreshnessNotice(
+  residual: DriftResidualJson | null | undefined,
+  measuredUtc: string | null | undefined,
+  now = new Date(),
+): ClockDriftNotice | null {
+  const measured = clockDriftResidualNotice(residual)
+  if (measured) return measured
+
+  const stale = clockDriftStaleNotice(measuredUtc, now)
+  return stale ? { tone: 'warn', text: stale } : null
 }

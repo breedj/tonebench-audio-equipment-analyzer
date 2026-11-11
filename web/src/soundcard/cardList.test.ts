@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { SoundCardHostApiOption, SoundCardOption } from '../api/client'
 import {
   buildCards,
+  cardsOffering,
   clampChannelOffset,
+  devicePairing,
   hostApiNotes,
   keyOf,
   reselectCardKey,
@@ -340,5 +342,63 @@ describe('hostApiNotes', () => {
       'Windows WASAPI listed 2 devices, and none of them reports any input or output channels.',
     )
     expect(notes[0]!.hint).toBeNull()
+  })
+})
+
+/**
+ * Two devices that are not one interface — the case the separate-devices picker exists for, and
+ * the one the single-card picker deliberately cannot express.
+ */
+describe('devicePairing', () => {
+  it('calls one card both ways duplex, which is the guarantee the single picker makes', () => {
+    expect(devicePairing('asio\u0000MOTU', 'asio\u0000MOTU')).toBe('duplex')
+  })
+
+  it('calls two different cards separate, because that is two clocks', () => {
+    expect(devicePairing('wasapi\u0000Cosmos', 'wasapi\u0000D50 III')).toBe('separate')
+  })
+
+  it('names which half is missing rather than calling a one-direction bench unusable', () => {
+    expect(devicePairing('wasapi\u0000Cosmos', '')).toBe('inputOnly')
+    expect(devicePairing('', 'wasapi\u0000D50 III')).toBe('outputOnly')
+  })
+
+  /** The one state that cannot be opened at all — SoundCardSettings.IsUsable being false. */
+  it('calls nothing chosen none', () => {
+    expect(devicePairing('', '')).toBe('none')
+  })
+})
+
+describe('cardsOffering', () => {
+  /**
+   * A capture-only ADC: the shape of an E1DA Cosmos, whose only digital port is a USB-C out. It
+   * has to reach the Input card dropdown and stay out of the Output one — offered in both, it
+   * would collapse the output side into a blank device list with nothing saying why.
+   */
+  const cosmos = option({
+    hostApi: 'Windows WASAPI',
+    name: 'Cosmos ADC',
+    maxInputChannels: 2,
+    maxOutputChannels: 0,
+  })
+
+  const withCosmos = [...inputs, cosmos]
+
+  it('offers a capture-only card to the input side only', () => {
+    const cards = buildCards(withCosmos, outputs, false)
+
+    expect(cardsOffering(cards, withCosmos).map((c) => c.interfaceName)).toContain('Cosmos ADC')
+    expect(cardsOffering(cards, outputs).map((c) => c.interfaceName)).not.toContain('Cosmos ADC')
+  })
+
+  it('offers a full-duplex card to both sides', () => {
+    const cards = buildCards(withCosmos, outputs, false)
+
+    expect(cardsOffering(cards, withCosmos).map((c) => c.interfaceName)).toContain('MOTU M Series')
+    expect(cardsOffering(cards, outputs).map((c) => c.interfaceName)).toContain('MOTU M Series')
+  })
+
+  it('offers nothing when the direction has no devices at all', () => {
+    expect(cardsOffering(buildCards(inputs, outputs, false), [])).toEqual([])
   })
 })

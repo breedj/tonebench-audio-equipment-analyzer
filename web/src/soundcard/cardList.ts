@@ -247,6 +247,49 @@ function collapseToBestApi(
 }
 
 /**
+ * The cards that offer at least one device in the given direction.
+ *
+ * <p>Only reached in separate-devices mode, where the two card dropdowns are independent: a card
+ * with no inputs cannot be the input card, and offering it would collapse that side into a blank
+ * device list with nothing saying why. In the ordinary one-card mode every card is offered,
+ * including one that carries a single direction — see {@link collapseToBestApi}, whose own remark
+ * says why silently dropping it would be worse.</p>
+ */
+export function cardsOffering(
+  cards: readonly SoundCard[],
+  devices: readonly SoundCardOption[],
+): SoundCard[] {
+  const keys = new Set(devices.map((o) => keyOf(o.hostApi, o.interfaceName)))
+  return cards.filter((c) => keys.has(c.key))
+}
+
+/**
+ * What a chosen pair of cards amounts to. The dialog words each case; this is the rule.
+ *
+ * <ul>
+ *   <li><b>duplex</b> — one card both ways. The case the one-card picker exists to guarantee: one
+ *   piece of hardware, therefore one clock.</li>
+ *   <li><b>separate</b> — two different cards, i.e. <b>two clocks</b>. Tone-based measurements
+ *   survive it; the chirp's phase, group delay and impulse response do not, because the clock
+ *   ratio reads as a frequency-dependent delay. Warned about, never refused — the precedent is
+ *   <c>SoundCardEnumerator.Pairing</c>, which warns rather than blocking for the same reason.</li>
+ *   <li><b>inputOnly</b> / <b>outputOnly</b> — a capture-only ADC or a playback-only DAC. Openable
+ *   since the one-direction streams of 2026-11-11; half an analyzer, and the dialog says which
+ *   half is missing.</li>
+ *   <li><b>none</b> — nothing chosen, which is the one case that cannot be opened at all. Mirrors
+ *   <c>SoundCardSettings.IsUsable</c> being false.</li>
+ * </ul>
+ */
+export type DevicePairing = 'duplex' | 'separate' | 'inputOnly' | 'outputOnly' | 'none'
+
+export function devicePairing(inputCardKey: string, outputCardKey: string): DevicePairing {
+  if (!inputCardKey && !outputCardKey) return 'none'
+  if (!outputCardKey) return 'inputOnly'
+  if (!inputCardKey) return 'outputOnly'
+  return inputCardKey === outputCardKey ? 'duplex' : 'separate'
+}
+
+/**
  * The card to select after the list changes under the current selection — which is what toggling
  * Advanced does.
  *

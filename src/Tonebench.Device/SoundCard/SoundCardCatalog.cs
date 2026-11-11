@@ -202,10 +202,26 @@ public static class SoundCardCatalog
             PortAudioNative pa = PortAudioNative.Shared;
             var enumerator = new SoundCardEnumerator(pa);
 
-            SoundCardDeviceDescriptor? input = enumerator.Find(inputHostApi, inputDevice);
-            SoundCardDeviceDescriptor? output = enumerator.Find(outputHostApi, outputDevice);
+            // **An empty name is a direction this bench does not carry, not a device that is
+            // missing.** A capture-only ADC and a playback-only DAC are each half of this, and
+            // before the one-direction streams of 2026-11-11 the probe answered both with
+            // "'' is not there." -- which left the picker unable to save a bench the device layer
+            // could open perfectly well. A name that was given and cannot be found is still a
+            // fault, and still says so.
+            bool wantsInput = !string.IsNullOrWhiteSpace(inputDevice);
+            bool wantsOutput = !string.IsNullOrWhiteSpace(outputDevice);
 
-            if (input is null || output is null)
+            if (!wantsInput && !wantsOutput)
+            {
+                return new SoundCardProbe(
+                    [], SoundCardPairing.Unknown.ToString(), string.Empty, string.Empty,
+                    "Choose an input, an output, or both.");
+            }
+
+            SoundCardDeviceDescriptor? input = wantsInput ? enumerator.Find(inputHostApi, inputDevice) : null;
+            SoundCardDeviceDescriptor? output = wantsOutput ? enumerator.Find(outputHostApi, outputDevice) : null;
+
+            if ((wantsInput && input is null) || (wantsOutput && output is null))
             {
                 return new SoundCardProbe(
                     [], SoundCardPairing.Unknown.ToString(), string.Empty, string.Empty,
@@ -215,24 +231,25 @@ public static class SoundCardCatalog
             int inputChannels = inputChannelOffset + 2;
             int outputChannels = outputChannelOffset + 2;
 
+            // Only a bench holding both directions has a pairing to doubt; one device is one clock,
+            // and the clock question then belongs to whatever supplies the other half. Trust is
+            // per side, so an absent one reports nothing rather than borrowing its partner's.
+            string pairing = input is not null && output is not null
+                ? SoundCardEnumerator.Pairing(input, output).ToString()
+                : SoundCardPairing.FullDuplexDevice.ToString();
+            string inputTrust = input is null ? string.Empty : SoundCardEnumerator.Trust(input.HostApiKind).ToString();
+            string outputTrust = output is null ? string.Empty : SoundCardEnumerator.Trust(output.HostApiKind).ToString();
+
             if (SoundCardEnumerator.ChannelPairProblem(
                     input, inputChannelOffset, output, outputChannelOffset) is { } channelProblem)
             {
-                return new SoundCardProbe(
-                    [], SoundCardEnumerator.Pairing(input, output).ToString(),
-                    SoundCardEnumerator.Trust(input.HostApiKind).ToString(),
-                    SoundCardEnumerator.Trust(output.HostApiKind).ToString(),
-                    channelProblem);
+                return new SoundCardProbe([], pairing, inputTrust, outputTrust, channelProblem);
             }
 
             var rates = enumerator.SupportedRatesHz(
                 input, output, exclusive: true, inputChannels, outputChannels);
 
-            return new SoundCardProbe(
-                rates,
-                SoundCardEnumerator.Pairing(input, output).ToString(),
-                SoundCardEnumerator.Trust(input.HostApiKind).ToString(),
-                SoundCardEnumerator.Trust(output.HostApiKind).ToString());
+            return new SoundCardProbe(rates, pairing, inputTrust, outputTrust);
         }
         catch (Exception ex)
         {

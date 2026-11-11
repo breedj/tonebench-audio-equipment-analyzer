@@ -184,14 +184,17 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// through the same dead end.</para>
     /// </summary>
     public static string? ChannelPairProblem(
-        SoundCardDeviceDescriptor input, int inputChannelOffset,
-        SoundCardDeviceDescriptor output, int outputChannelOffset)
+        SoundCardDeviceDescriptor? input, int inputChannelOffset,
+        SoundCardDeviceDescriptor? output, int outputChannelOffset)
     {
-        string? inputProblem = input.MaxInputChannels < inputChannelOffset + 2
+        // A null side is a direction this bench does not carry, so it has no channels to fall
+        // short -- which is not the same as a device that has none, and that would be a real
+        // complaint.
+        string? inputProblem = input is not null && input.MaxInputChannels < inputChannelOffset + 2
             ? $"channels {PairLabel(inputChannelOffset)} need {inputChannelOffset + 2} input channels and '{input.Name}' has {input.MaxInputChannels}"
             : null;
 
-        string? outputProblem = output.MaxOutputChannels < outputChannelOffset + 2
+        string? outputProblem = output is not null && output.MaxOutputChannels < outputChannelOffset + 2
             ? $"channels {PairLabel(outputChannelOffset)} need {outputChannelOffset + 2} output channels and '{output.Name}' has {output.MaxOutputChannels}"
             : null;
 

@@ -257,6 +257,33 @@ public class SoundCardEnumeratorTests
     }
 
     /// <summary>
+    /// A direction this bench does not carry has no channels to fall short — which is not the same
+    /// as a device that has none. A capture-only ADC and a playback-only DAC are each half of this,
+    /// and complaining about the absent side would refuse a bench the device layer opens perfectly
+    /// well.
+    /// </summary>
+    [Fact]
+    public void AnAbsentDirection_HasNoChannelProblem()
+    {
+        Assert.Null(SoundCardEnumerator.ChannelPairProblem(
+            Input("Cosmos ADC", 2), 0, output: null, 0));
+
+        Assert.Null(SoundCardEnumerator.ChannelPairProblem(
+            input: null, 0, Output("D50 III", 2), 0));
+    }
+
+    /// <summary>The side that *is* there is still checked, or the absent one would excuse it.</summary>
+    [Fact]
+    public void AnAbsentDirection_DoesNotExcuseThePairTheOtherSideCannotHonour()
+    {
+        string? problem = SoundCardEnumerator.ChannelPairProblem(
+            Input("Cosmos ADC", 2), inputChannelOffset: 2, output: null, 0);
+
+        Assert.NotNull(problem);
+        Assert.Contains("Cosmos ADC", problem);
+    }
+
+    /// <summary>
     /// The message has to name the pair, the count it needs and the count the device has. The one
     /// it replaced -- "That channel pair is past what the card has." -- named none of the three,
     /// and the control that would answer it is usually not on screen: the dialog shows a

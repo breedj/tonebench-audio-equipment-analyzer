@@ -5,7 +5,9 @@ import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
 import {
   buildCards,
+  cardsOffering,
   clampChannelOffset,
+  devicePairing,
   hostApiNotes,
   keyOf,
   reselectCardKey,
@@ -63,6 +65,26 @@ const OUTPUT_LEVELS = [-3, -6, -9, -12, -20]
 const form = reactive({
   /** Which physical card, as "host API\u0000interface". Both device lists are filtered to it. */
   cardKey: '',
+
+  /**
+   * Whether the two directions may sit on different cards — off by default, and that default is
+   * the protection rather than a preference.
+   *
+   * <p>One card is one clock. Two are two, and the drift between them is reported as DUT response
+   * rather than as a fault, so the one-card picker is what guarantees the common case is right.
+   * The escape exists because some benches have no choice: a capture-only ADC (an E1DA Cosmos has
+   * only a USB-C out) or a playback-only USB DAC cannot be half of one card, and before the
+   * one-direction streams of 2026-11-11 they could not be chosen at all.</p>
+   *
+   * <p>Not persisted: it is derived on open from whether the two saved devices are in fact on one
+   * card, so a saved configuration cannot contradict its own checkbox.</p>
+   */
+  separateDevices: false,
+
+  /** Only read while {@link separateDevices}; otherwise both sides use <c>cardKey</c>. */
+  inputCardKey: '',
+  outputCardKey: '',
+
   inputKey: '',
   outputKey: '',
   inputChannelOffset: 0,
@@ -174,14 +196,32 @@ const hiddenCardCount = computed(() =>
  */
 const apiNotes = computed(() => hostApiNotes(inventory.value?.hostApis ?? [], cards.value.length))
 
-const selectedCard = computed(() => cards.value.find((c) => c.key === form.cardKey) ?? null)
+/**
+ * Which card each direction is filtered to. The same key both ways in the ordinary mode, which is
+ * what makes that path behave exactly as it did before separate devices existed.
+ */
+const inputCardKey = computed(() => (form.separateDevices ? form.inputCardKey : form.cardKey))
+const outputCardKey = computed(() => (form.separateDevices ? form.outputCardKey : form.cardKey))
 
-/** Only this card's devices, so the two sides cannot be put on different hardware. */
+/** What the two chosen cards amount to — one clock, two clocks, or half a bench. */
+const pairing = computed(() => devicePairing(inputCardKey.value, outputCardKey.value))
+
+/**
+ * The cards each dropdown offers in separate mode. A card with no inputs cannot be the input card,
+ * and offering it would collapse that side into a blank device list with nothing saying why.
+ */
+const inputCards = computed(() => cardsOffering(cards.value, inventory.value?.inputs ?? []))
+const outputCards = computed(() => cardsOffering(cards.value, inventory.value?.outputs ?? []))
+
+/** The card the Control panel button belongs to: the input's, as its own comment explains. */
+const selectedCard = computed(() => cards.value.find((c) => c.key === inputCardKey.value) ?? null)
+
+/** Only the chosen card's devices, so a side cannot name hardware its own card does not carry. */
 const cardInputs = computed(() =>
-  (inventory.value?.inputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === form.cardKey),
+  (inventory.value?.inputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === inputCardKey.value),
 )
 const cardOutputs = computed(() =>
-  (inventory.value?.outputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === form.cardKey),
+  (inventory.value?.outputs ?? []).filter((o) => keyOf(o.hostApi, o.interfaceName) === outputCardKey.value),
 )
 
 const selectedInput = computed(() =>
@@ -194,7 +234,7 @@ const selectedOutput = computed(() =>
 // Choosing a card picks its only input and output for you, which on an ASIO card is the whole job:
 // there is one device and it carries both directions.
 watch(
-  () => form.cardKey,
+  () => [inputCardKey.value, outputCardKey.value].join('|'),
   () => {
     if (!cardInputs.value.some((o) => keyOf(o.hostApi, o.name) === form.inputKey))
       form.inputKey = cardInputs.value.length > 0 ? keyOf(cardInputs.value[0]!.hostApi, cardInputs.value[0]!.name) : ''
@@ -203,6 +243,41 @@ watch(
       form.outputKey = cardOutputs.value.length > 0 ? keyOf(cardOutputs.value[0]!.hostApi, cardOutputs.value[0]!.name) : ''
   },
 )
+
+/**
+ * Carries the selection across the checkbox, in both directions, so toggling it never empties a
+ * dialog that was correctly filled in.
+ *
+ * <p>On: both sides start from the single card, so the first thing the user sees is the bench they
+ * already had, with two dropdowns instead of one. Off: the input's card becomes the single card —
+ * the input is the measuring side, so it is the one worth keeping — and the output follows it
+ * through the watcher above.</p>
+ *
+ * <p>A <c>@change</c> handler rather than a watcher on the flag, and that is load-bearing: the
+ * open path below derives this flag from the saved devices and sets the two card keys itself, so
+ * a watcher — which fires on a programmatic change as readily as a typed one — would overwrite the
+ * restored pair with whatever the single card happened to be.</p>
+ */
+/** Writes whichever card field the current mode means — see the select's own comment. */
+function onCardChanged(side: 'input' | 'output', key: string) {
+  if (!form.separateDevices) {
+    form.cardKey = key
+    return
+  }
+
+  if (side === 'input') form.inputCardKey = key
+  else form.outputCardKey = key
+}
+
+function onSeparateDevicesChanged() {
+  if (form.separateDevices) {
+    form.inputCardKey = form.cardKey
+    form.outputCardKey = form.cardKey
+    return
+  }
+
+  form.cardKey = form.inputCardKey || form.outputCardKey
+}
 
 /** Channel pairs the chosen device can actually offer, as offsets. */
 const inputPairs = computed(() => pairsFor(selectedInput.value?.maxInputChannels ?? 0))
@@ -226,6 +301,14 @@ const rates = computed(() => probe.value?.sampleRatesHz ?? [])
 const pairingWarning = computed(() => {
   if (!probe.value || !selectedInput.value || !selectedOutput.value) return null
   if (probe.value.pairing !== 'Unknown') return null
+
+  // Two cards chosen deliberately are already explained by modeNote, in more useful words — it
+  // names which measurements survive and what to do instead. This one is for the case the user
+  // did *not* ask for: one card whose two endpoints the host API cannot be shown to share, which
+  // is every WDM-KS pairing. Both firing at once put two amber paragraphs about clocks on screen
+  // saying the same thing, which was reported from a MOTU-in / Realtek-out bench.
+  if (pairing.value === 'separate') return null
+
   return 'These may not be the same interface. Two cards run on two clocks, and the drift between them is reported as DUT response — nothing downstream can tell the difference.'
 })
 
@@ -248,9 +331,31 @@ const trustWarning = computed(() => {
     : 'This host API resamples in software: it will accept any rate, but what the converter ran at is the Windows mixer’s, not what is asked for. Prefer ASIO where the card has a driver.'
 })
 
+// Either side is enough, which mirrors SoundCardSettings.IsUsable: one direction opens a stream,
+// and a capture-only ADC or a playback-only DAC is the whole reason that is true.
 const canSave = computed(
-  () => !!selectedInput.value && !!selectedOutput.value && rates.value.length > 0 && !busy.value,
+  () => (!!selectedInput.value || !!selectedOutput.value) && rates.value.length > 0 && !busy.value,
 )
+
+/**
+ * What the chosen pair costs, said once and beside the dropdowns that caused it.
+ *
+ * <p>Advisory, never a refusal — the precedent is <c>SoundCardEnumerator.Pairing</c>, which warns
+ * about two clocks rather than blocking, because the alternative is making a bench that has no
+ * other option unusable. The three cases each say the one thing a reader can act on.</p>
+ */
+const modeNote = computed(() => {
+  switch (pairing.value) {
+    case 'separate':
+      return 'Two cards run on two clocks. Tone measurements — THD, IMD, stepped sweeps — are unaffected, but the chirp’s phase, group delay and impulse response are not: the clock ratio reads as a frequency-dependent delay. Use the right input as a reference, or the stepped sine, where phase matters.'
+    case 'inputOnly':
+      return 'Capture only: there is no generator, so this bench measures whatever arrives and cannot drive a sweep. Choose an output as well to run one.'
+    case 'outputOnly':
+      return 'Playback only: this bench generates but measures nothing. Choose an input as well to take a reading.'
+    default:
+      return null
+  }
+})
 
 watch(
   () => props.open,
@@ -272,7 +377,16 @@ watch(
         config.value.inputHostApi,
         config.value.inputDeviceName,
       )
-      form.cardKey = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
+      const savedInputCard = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
+      const savedOutputCard = cardKeyFor(config.value.outputHostApi, config.value.outputDeviceName)
+
+      // Derived, never stored, so a saved configuration cannot contradict its own checkbox. Two
+      // different cards is separate mode; so is a bench with only one direction saved, which is
+      // exactly how a capture-only ADC or a playback-only DAC comes back.
+      form.separateDevices = savedInputCard !== savedOutputCard
+      form.cardKey = savedInputCard || savedOutputCard
+      form.inputCardKey = savedInputCard
+      form.outputCardKey = savedOutputCard
       form.inputKey = keyOf(config.value.inputHostApi, config.value.inputDeviceName)
       form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
       form.inputChannelOffset = config.value.inputChannelOffset
@@ -290,12 +404,15 @@ watch(
 watch(
   () => advanced.value,
   () => {
-    form.cardKey = reselectCardKey(
-      form.cardKey,
-      inventory.value?.inputs ?? [],
-      inventory.value?.outputs ?? [],
-      advanced.value,
-    )
+    const reselect = (key: string) =>
+      reselectCardKey(key, inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], advanced.value)
+
+    // All three, not just the one in use: toggling Advanced twice would otherwise leave whichever
+    // pair was idle pointing outside its own dropdown, and the checkbox beside them makes that
+    // reachable without reopening the dialog.
+    form.cardKey = reselect(form.cardKey)
+    form.inputCardKey = reselect(form.inputCardKey)
+    form.outputCardKey = reselect(form.outputCardKey)
   },
 )
 
@@ -482,6 +599,22 @@ function mvRms(value: number | null | undefined) {
           <PanelIcon icon="soundcard" tone="blue" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Device</h3>
           <span class="flex items-center gap-3">
+            <!-- A mode switch for this whole section, so it sits with Advanced rather than among
+                 the controls it rearranges. Off by default: one card is one clock, and that is
+                 the guarantee the single picker exists to make. -->
+            <label
+              class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
+              title="Lets the input and the output sit on different cards, or on only one of them — which is what a capture-only ADC or a playback-only DAC needs. Two cards run on two clocks, so the chirp's phase and impulse response stop being trustworthy; tone measurements are unaffected."
+            >
+              <input
+                v-model="form.separateDevices"
+                type="checkbox"
+                class="h-3.5 w-3.5"
+                @change="onSeparateDevicesChanged"
+              />
+              Separate devices
+            </label>
+
             <!-- TEMPORARY, removed once the filtered list has been checked against real cards. -->
             <label
               class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
@@ -510,14 +643,17 @@ function mvRms(value: number | null | undefined) {
              directions are one piece of hardware, and therefore one clock: two cards run on two,
              and the drift between them is reported as DUT response rather than as a fault. -->
         <div class="sc-row">
-          <span class="sc-label">Sound card</span>
+          <span class="sc-label">{{ form.separateDevices ? 'Input card' : 'Sound card' }}</span>
           <span class="flex items-center gap-2">
+            <!-- :value + @change rather than v-model, because which field this writes depends on
+                 the mode: one card key in the ordinary mode, the input's in separate mode. -->
             <select
-              v-model="form.cardKey"
+              :value="inputCardKey"
               class="tb-input min-w-0 flex-1"
+              @change="onCardChanged('input', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">—</option>
-              <option v-for="c in cards" :key="c.key" :value="c.key">
+              <option v-for="c in (form.separateDevices ? inputCards : cards)" :key="c.key" :value="c.key">
                 {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
               </option>
             </select>
@@ -541,6 +677,31 @@ function mvRms(value: number | null | undefined) {
             </button>
           </span>
         </div>
+
+        <!-- Only in separate mode: in the ordinary one the output's card is the input's, and a
+             second dropdown that can only ever agree with the first is a control with no state. -->
+        <label v-if="form.separateDevices" class="sc-row">
+          <span class="sc-label">Output card</span>
+          <select
+            :value="outputCardKey"
+            class="tb-input"
+            @change="onCardChanged('output', ($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">—</option>
+            <option v-for="c in outputCards" :key="c.key" :value="c.key">
+              {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
+            </option>
+          </select>
+        </label>
+
+        <!-- What the chosen pair costs: two clocks, or half a bench. Advisory, never a refusal —
+             a bench with no other option must stay usable. See modeNote for the wording and why. -->
+        <p
+          v-if="modeNote"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ modeNote }}
+        </p>
 
         <!-- What a host API that offered nothing reported. Under the dropdown because it is about
              that list: an empty one otherwise says only "no cards", which is the same picture

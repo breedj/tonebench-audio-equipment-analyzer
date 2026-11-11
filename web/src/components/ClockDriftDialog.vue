@@ -271,38 +271,40 @@ async function close() {
           </label>
         </div>
 
-        <div class="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            v-if="!running"
-            type="button"
-            class="btn-run-go w-52 flex-none"
-            :disabled="busy"
-            @click="onStart"
-          >
-            Measure
-          </button>
-          <button v-else type="button" class="btn-run-stop w-52 flex-none" :disabled="busy" @click="cancel">
-            Stop
-          </button>
-          <button
-            type="button"
-            class="btn-secondary"
-            :disabled="running || !points.length"
-            @click="clear"
-          >
-            Clear
-          </button>
+        <div class="px-3.5 pb-3">
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              v-if="!running"
+              type="button"
+              class="btn-run-go w-52 flex-none"
+              :disabled="busy"
+              @click="onStart"
+            >
+              Measure
+            </button>
+            <button v-else type="button" class="btn-run-stop w-52 flex-none" :disabled="busy" @click="cancel">
+              Stop
+            </button>
+            <button
+              type="button"
+              class="btn-secondary"
+              :disabled="running || !points.length"
+              @click="clear"
+            >
+              Clear
+            </button>
 
-          <span v-if="status" class="text-[12px] text-neutral-600 dark:text-neutral-300">
-            {{ status.phase }}<span v-if="points.length"> · {{ points.length }} readings</span>
-            <span v-if="status.playedToneHz">
-              · playing {{ status.playedToneHz.toFixed(3) }} Hz on {{ status.measuredChannel }}
-            </span>
-          </span>
-        </div>
+            <span v-if="status" class="text-[12px] text-neutral-600 dark:text-neutral-300">
+              {{ status.phase }}<span v-if="points.length"> · {{ points.length }} readings</span>
+              <span v-if="status.playedToneHz">
+                · playing {{ status.playedToneHz.toFixed(3) }} Hz on {{ status.measuredChannel }}
+              </span>
+              </span>
+          </div>
 
-        <div v-if="progressPercent !== null && running" class="tb-progress mt-2">
-          <div :style="{ width: `${progressPercent}%` }"></div>
+          <div v-if="progressPercent !== null && running" class="tb-progress mt-2">
+            <div :style="{ width: `${progressPercent}%` }"></div>
+          </div>
         </div>
       </div>
 

@@ -459,34 +459,49 @@ const settingsRefused = computed(
  * rule, including why provenance that was never recorded is <i>not</i> drift, is in
  * <c>calibrationState</c>.</p>
  */
-const calibrationNotices = computed<string[]>(() => {
+interface CalibrationNotice {
+  /** What to do, as its own line at the top. */
+  action: string
+  /** Why, underneath it. */
+  detail: string
+}
+
+const calibrationNotices = computed<CalibrationNotice[]>(() => {
   const state = calibrationState(config.value)
-  const notices: string[] = []
+  const notices: CalibrationNotice[] = []
 
   // Drift first: it is about a figure that exists and is wrong, which is worse than one that is
   // honestly absent, and it is the one the user has just caused.
   for (const drift of state.drifted) {
-    notices.push(
-      `The ${drift.direction} full scale was measured on ${drift.measuredOn}, and the ` +
+    notices.push({
+      action: `Run the ${drift.direction} step again.`,
+      detail:
+        `The ${drift.direction} full scale was measured on ${drift.measuredOn}, and the ` +
         `${drift.direction} is now ${drift.nowOn}. The stored figure describes different ` +
-        `hardware, so levels on that side are wrong by whatever the two differ by — run the ` +
-        `${drift.direction} step again.`,
-    )
+        `hardware, so levels on that side are wrong by whatever the two differ by.`,
+    })
   }
 
+  // "again" is the drift wording and is deliberately absent here: there is no stored figure to
+  // re-take, so a reader told to run it "again" would go looking for one they never made.
   if (state.uncalibrated.length === 2) {
-    notices.push(
-      'This card has not been calibrated: readings are in dBFS rather than volts, and the app ' +
-        'does not know what voltage it is playing. Both steps are below.',
-    )
+    notices.push({
+      action: 'Run both calibration steps.',
+      detail:
+        'This card has not been calibrated: readings are in dBFS rather than volts, and the app ' +
+        'does not know what voltage it is playing.',
+    })
   } else if (state.uncalibrated.includes('output')) {
-    notices.push(
-      'The output has not been calibrated, so the app does not know what voltage it is playing.',
-    )
+    notices.push({
+      action: 'Run the output step.',
+      detail:
+        'The output has not been calibrated, so the app does not know what voltage it is playing.',
+    })
   } else if (state.uncalibrated.includes('input')) {
-    notices.push(
-      'The input has not been calibrated, so readings are in dBFS rather than volts.',
-    )
+    notices.push({
+      action: 'Run the input step.',
+      detail: 'The input has not been calibrated, so readings are in dBFS rather than volts.',
+    })
   }
 
   return notices
@@ -786,7 +801,7 @@ function mvRms(value: number | null | undefined) {
             </label>
             <button
               type="button"
-              class="inline-flex h-[30px] items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class="inline-flex h-[30px] items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-100 px-2.5 text-xs font-medium hover:bg-neutral-200 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:bg-neutral-700"
               :disabled="devicesLoading"
               title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
               @click="loadDevices(true)"
@@ -886,7 +901,7 @@ function mvRms(value: number | null | undefined) {
              a bench with no other option must stay usable. See modeNote for the wording and why. -->
         <p
           v-if="modeNote"
-          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+          class="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200"
         >
           {{ modeNote }}
           <!-- The note states the problem without a number; this measures it. Inside the note
@@ -915,10 +930,14 @@ function mvRms(value: number | null | undefined) {
              the cause is. See calibrationNotices. -->
         <p
           v-for="notice in calibrationNotices"
-          :key="notice"
+          :key="notice.action + notice.detail"
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
         >
-          {{ notice }}
+          <!-- What to do first, on its own line: asked for 2026-11-11, and it is the right way
+               round. The reason is two clauses of hardware names, and a reader who has already
+               decided to act should not have to read to the end of them to find out what. -->
+          <strong class="block">{{ notice.action }}</strong>
+          {{ notice.detail }}
         </p>
 
         <!-- What a host API that offered nothing reported. Under the dropdown because it is about

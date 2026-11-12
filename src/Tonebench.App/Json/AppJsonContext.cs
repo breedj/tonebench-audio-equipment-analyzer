@@ -109,6 +109,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(ExternalGainConfig))]
 [JsonSerializable(typeof(SoundCardConfig))]
 [JsonSerializable(typeof(AnalyzerKindConfig))]
+[JsonSerializable(typeof(SplitDeviceConfig))]
 [JsonSerializable(typeof(Tonebench.Device.SoundCard.SoundCardInventory))]
 [JsonSerializable(typeof(Tonebench.Device.SoundCard.SoundCardProbe))]
 [JsonSerializable(typeof(SoundCardCalibrationResult))]

@@ -2,6 +2,7 @@ using Tonebench.Device;
 using Tonebench.Device.Hardware;
 using Tonebench.Device.Simulation;
 using Tonebench.Device.SoundCard;
+using Tonebench.Device.Split;
 
 namespace Tonebench.App.Services;
 
@@ -19,6 +20,18 @@ public enum DeviceKind
     /// Which card, and where its full scale sits, is <c>SoundCardConfig</c>.
     /// </summary>
     SoundCard = 2,
+
+    /// <summary>
+    /// Two devices as one analyzer: one supplies the DAC, the other the ADC — see
+    /// <see cref="SplitAnalyzerDevice"/>. Which two, and the rate the generator runs at, is
+    /// <c>SplitDeviceConfig</c>.
+    ///
+    /// <para>The benches it exists for are a USB DAC playing while a QA403 captures, and a QA403
+    /// playing into a capture-only ADC such as an E1DA Cosmos. Two devices are two clocks, which the
+    /// clock-drift correction and the two-clocks wording answer; it is not a quality step over
+    /// either device alone and must not be presented as one.</para>
+    /// </summary>
+    Split = 3,
 }
 
 /// <summary>
@@ -50,18 +63,21 @@ public class AnalyzerDeviceFactory
     private readonly SoundCardSetting _soundCard;
     private readonly Experimental384kSetting _experimental384k;
     private readonly AutoRangeStepDownDelaySetting _stepDownDelay;
+    private readonly SplitDeviceSetting _split;
 
     public AnalyzerDeviceFactory(
         ILoggerFactory loggerFactory,
         DeviceKind initialKind,
         SoundCardSetting? soundCard = null,
         Experimental384kSetting? experimental384k = null,
-        AutoRangeStepDownDelaySetting? stepDownDelay = null)
+        AutoRangeStepDownDelaySetting? stepDownDelay = null,
+        SplitDeviceSetting? split = null)
     {
         _loggerFactory = loggerFactory;
         _soundCard = soundCard ?? new SoundCardSetting();
         _experimental384k = experimental384k ?? new Experimental384kSetting();
         _stepDownDelay = stepDownDelay ?? new AutoRangeStepDownDelaySetting();
+        _split = split ?? new SplitDeviceSetting();
         InitialKind = initialKind;
     }
 
@@ -71,14 +87,18 @@ public class AnalyzerDeviceFactory
         _soundCard = new SoundCardSetting();
         _experimental384k = new Experimental384kSetting();
         _stepDownDelay = new AutoRangeStepDownDelaySetting();
+        _split = new SplitDeviceSetting();
         _pinned = pinned;
 
-        // A three-way test, not "simulator or else": a pinned sound card reported itself as
-        // Hardware while the status bar showed a QA403 that was not there.
+        // A four-way test, not "simulator or else": a pinned sound card reported itself as
+        // Hardware while the status bar showed a QA403 that was not there, and a composite would do
+        // the same — it is neither a SimulatedDevice nor a SoundCardDevice, so it would fall through
+        // to Hardware and a two-device bench would be described as one QA403.
         InitialKind = pinned switch
         {
             SimulatedDevice => DeviceKind.Simulated,
             SoundCardDevice => DeviceKind.SoundCard,
+            SplitAnalyzerDevice => DeviceKind.Split,
             _ => DeviceKind.Hardware,
         };
     }
@@ -131,10 +151,9 @@ public class AnalyzerDeviceFactory
             // Built from the settings as they stand right now rather than from a captured copy: a
             // card chosen or calibrated since the last switch must be the one that opens, and the
             // session reconnects through this factory after every change for exactly that reason.
-            DeviceKind.SoundCard => new SoundCardDevice(
-                _soundCard.DeviceSettings,
-                _soundCard.Calibration,
-                _loggerFactory.CreateLogger<SoundCardDevice>()),
+            DeviceKind.SoundCard => CreateSoundCard(_soundCard.DeviceSettings),
+
+            DeviceKind.Split => BuildSplit(),
 
             // Allow384kHz is a Func, so unlike the sound card's settings it is NOT captured here:
             // the checkbox takes effect on this already-built device, and a device built before the
@@ -145,6 +164,71 @@ public class AnalyzerDeviceFactory
                 Allow384kHz = () => _experimental384k.Enabled,
             },
         };
+
+    /// <summary>
+    /// A composite analyzer from the two kinds <c>device.split</c> names.
+    ///
+    /// <para><b>A sound-card half is built for one direction only.</b>
+    /// <see cref="SoundCardSettings.ForDirection"/> blanks the other direction's device name, so
+    /// <c>Direction</c> derives <c>InputOnly</c> or <c>OutputOnly</c> — without it a
+    /// fully-configured duplex card used as one half opens <i>duplex</i> and claims an input the
+    /// split is not using, which under WASAPI exclusive takes an endpoint away from whatever else
+    /// wanted it.</para>
+    ///
+    /// <para>The pairing cannot be unbuildable here: <see cref="SplitDeviceSetting"/> falls back to
+    /// its default rather than holding one this build cannot make, because this runs inside the
+    /// session's field initializer where a refusal would be a crash at startup rather than a
+    /// message on the status bar.</para>
+    /// </summary>
+    private IAnalyzerDevice BuildSplit()
+    {
+        IAnalyzerDevice input = BuildHalf(_split.InputKind, SoundCardStreamDirection.InputOnly);
+        IAnalyzerDevice output = BuildHalf(_split.OutputKind, SoundCardStreamDirection.OutputOnly);
+
+        return new SplitAnalyzerDevice(
+            input,
+            output,
+            _split.DeviceSettings(
+                LabelFor(_split.InputKind, asInput: true),
+                LabelFor(_split.OutputKind, asInput: false)),
+            _loggerFactory.CreateLogger<SplitAnalyzerDevice>());
+    }
+
+    private IAnalyzerDevice BuildHalf(DeviceKind kind, SoundCardStreamDirection direction) =>
+        ApplyStoredSettings(kind == DeviceKind.SoundCard
+            ? CreateSoundCard(_soundCard.DeviceSettings.ForDirection(direction))
+            : Build(kind));
+
+    /// <summary>
+    /// A sound card from the settings given, which for one half of a split are masked to one
+    /// direction.
+    ///
+    /// <para><b>Virtual for the reason <see cref="Create"/> is</b>, and the same reason spelled a
+    /// second time: a <c>SoundCardDevice</c>'s constructor reaches <c>PortAudioNative.Shared</c>,
+    /// which initialises a native audio stack on a thread of its own, so a unit test must not build
+    /// one. Overriding this is how the composite's tests check <i>which</i> settings each half was
+    /// built from — the direction masking being a rule that is invisible on a card chosen for only
+    /// one direction and wrong on a fully-configured duplex one.</para>
+    /// </summary>
+    protected virtual IAnalyzerDevice CreateSoundCard(SoundCardSettings settings) =>
+        new SoundCardDevice(settings, _soundCard.Calibration, _loggerFactory.CreateLogger<SoundCardDevice>());
+
+    /// <summary>
+    /// What to call a half in a log line or a connect failure, before anything has connected and so
+    /// before a <see cref="DeviceInfo"/> exists. A card is named by the device the user picked,
+    /// which is the only one of the three a bench can have two of.
+    /// </summary>
+    private string LabelFor(DeviceKind kind, bool asInput) => kind switch
+    {
+        DeviceKind.SoundCard => asInput
+            ? FirstNonEmpty(_soundCard.Config.InputDeviceName, "the input card")
+            : FirstNonEmpty(_soundCard.Config.OutputDeviceName, "the output card"),
+        DeviceKind.Simulated => "the simulator",
+        _ => "the QA40x",
+    };
+
+    private static string FirstNonEmpty(string value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value;
 
     /// <summary>
     /// The simulator as the app hands it to the user: noise floor and the generator's fixed harmonic

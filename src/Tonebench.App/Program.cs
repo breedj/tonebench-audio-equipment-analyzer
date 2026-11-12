@@ -115,7 +115,8 @@ try
         simulate ? DeviceKind.Simulated : sp.GetRequiredService<AnalyzerKindSetting>().Kind,
         sp.GetRequiredService<SoundCardSetting>(),
         sp.GetRequiredService<Experimental384kSetting>(),
-        sp.GetRequiredService<AutoRangeStepDownDelaySetting>()));
+        sp.GetRequiredService<AutoRangeStepDownDelaySetting>(),
+        sp.GetRequiredService<SplitDeviceSetting>()));
 
     // WindowType/AveragingMode read back as "Hann"/"Linear" etc, matching what /spectrum-config
     // already accepts on the way in — one representation, not int-in/string-out. Enum-as-string
@@ -152,6 +153,11 @@ try
     builder.Services.AddSingleton<ExternalGainSetting>();
     builder.Services.AddSingleton<SoundCardSetting>();
     builder.Services.AddSingleton<AnalyzerKindSetting>();
+
+    // Which two devices a composite analyzer is made of. Order-sensitive in the same way as the two
+    // above -- the factory reads it to build the first device -- so it is loaded in the same block;
+    // see StartupSettingsLoader.
+    builder.Services.AddSingleton<SplitDeviceSetting>();
 
     // The programmable load. Unlike the analyzer's, none of these three has to be registered or
     // loaded in any particular order: LoadSessionService builds nothing in its constructor, so

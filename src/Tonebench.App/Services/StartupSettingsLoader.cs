@@ -66,6 +66,15 @@ public static class StartupSettingsLoader
         services.GetRequiredService<AnalyzerKindSetting>().Kind =
             await ConfigEndpoints.ReadAnalyzerKindAsync(config, ct);
 
+        // Which two devices a composite analyzer is made of, and the rate its generator runs at.
+        // Order-sensitive for exactly the reason the two settings above are: on a bench that came up
+        // on Split, AnalyzerDeviceFactory reads this to build *both halves* the moment anything
+        // resolves the session, so a document read afterwards would come up on the default pairing
+        // -- a QA403 capturing while an unconfigured card plays -- on a bench where two devices had
+        // been chosen.
+        services.GetRequiredService<SplitDeviceSetting>().Config =
+            await ConfigEndpoints.ReadSplitDeviceAsync(config, ct);
+
         // Which programmable load to look for. This one is *not* order-sensitive --
         // LoadSessionService builds nothing in its constructor, so resolving it cannot pin the kind
         // the way resolving DeviceSessionService pins the analyzer's. It is loaded here anyway,

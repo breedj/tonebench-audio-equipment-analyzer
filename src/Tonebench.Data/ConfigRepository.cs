@@ -419,6 +419,51 @@ public sealed record AnalyzerKindConfig(string Kind = "Hardware")
 }
 
 /// <summary>
+/// A composite analyzer: which device plays, which device captures, and the rate the generator runs
+/// at. Read when the app comes up on <c>DeviceKind.Split</c>, and by the split dialog.
+/// </summary>
+/// <param name="InputKind">
+/// The <c>DeviceKind</c> name of the capturing half -- "Hardware", "Simulated" or "SoundCard",
+/// stored as a string for the reason <see cref="AnalyzerKindConfig"/> is. "Split" is not one of
+/// them: a composite cannot be half of a composite.
+/// </param>
+/// <param name="OutputKind">The <c>DeviceKind</c> name of the generating half.</param>
+/// <param name="GeneratorSampleRateHz">
+/// The rate the generating half is streamed at, or <b>0</b> for "follow the analysis rate" -- which
+/// is the default, and makes a split behave exactly like a single device.
+///
+/// <para>Stored rather than derived because it is a measurement decision: a DAC under test wants
+/// its own rate, and a slow DAC against a fast ADC is the correct configuration for ultrasonic
+/// residue rather than a compromise. Whether the pair is <i>usable</i> is checked when the
+/// generator is configured, not here -- a document that refused its own values could not be
+/// stored, and a figure a later hardware change invalidates has to be reportable rather than
+/// unloadable.</para>
+/// </param>
+public sealed record SplitDeviceConfig(
+    string InputKind = "Hardware",
+    string OutputKind = "SoundCard",
+    double GeneratorSampleRateHz = 0.0)
+{
+    /// <summary>A QA40x capturing while a sound card plays -- the bench this feature was asked for.</summary>
+    public static SplitDeviceConfig Default { get; } = new();
+
+    /// <summary>
+    /// Past this a figure is a typo rather than a sample rate. Deliberately well above anything the
+    /// app offers (192 kHz on a card, 384 experimental on a QA403 input): the ladder a half can
+    /// actually play is the device's own answer, and checking membership here would make this
+    /// document unloadable the day a card is replaced.
+    /// </summary>
+    public const double MaxGeneratorSampleRateHz = 768_000.0;
+
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(InputKind)
+        && !string.IsNullOrWhiteSpace(OutputKind)
+        && double.IsFinite(GeneratorSampleRateHz)
+        && GeneratorSampleRateHz >= 0.0
+        && GeneratorSampleRateHz <= MaxGeneratorSampleRateHz;
+}
+
+/// <summary>
 /// Which programmable load the app should look for, so a bench that has one comes up with it
 /// connected and a bench that has not is never told about a device it does not own.
 /// </summary>
@@ -753,6 +798,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>Which programmable load to look for. One document, see <see cref="ProgrammableLoadConfig"/>.</summary>
     public const string ProgrammableLoadKey = "device.load";
+
+    /// <summary>The composite analyzer's two halves and generator rate. One document, see <see cref="SplitDeviceConfig"/>.</summary>
+    public const string SplitDeviceKey = "device.split";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

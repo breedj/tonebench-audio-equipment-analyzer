@@ -257,6 +257,36 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
+    /// Reads the composite analyzer's document, falling back to the default on anything unreadable
+    /// <i>or unbuildable</i> — the same rule every setting here follows, and load bearing twice over
+    /// here: the session builds its first device in a field initializer, so a refusal would be a
+    /// crash at startup rather than a message on the status bar.
+    ///
+    /// <para>"Unbuildable" is <see cref="SplitPairing.Resolve"/>'s question, not this one's: two
+    /// sound cards cannot both be pumped, two QA40x analyzers are one device opened twice, and a
+    /// composite cannot be half of a composite.</para>
+    /// </summary>
+    public static async Task<SplitDeviceConfig> ReadSplitDeviceAsync(
+        ConfigRepository repo, CancellationToken ct)
+    {
+        string? json = await repo.GetAsync(ConfigRepository.SplitDeviceKey, ct);
+        if (string.IsNullOrWhiteSpace(json))
+            return SplitDeviceConfig.Default;
+
+        try
+        {
+            SplitDeviceConfig? config = JsonSerializer.Deserialize(json, AppJsonContext.Default.SplitDeviceConfig);
+            return config is not null && SplitPairing.Resolve(config, out _) is not null
+                ? config
+                : SplitDeviceConfig.Default;
+        }
+        catch (JsonException)
+        {
+            return SplitDeviceConfig.Default;
+        }
+    }
+
+    /// <summary>
     /// Reads the sound-card document, falling back to the default on anything unreadable — the same
     /// rule every setting here follows, because a configuration that will not parse must not stop
     /// the app starting.
@@ -548,6 +578,49 @@ public static class ConfigEndpoints
                 // Rebuild the device so the new card, rate, channel pair and calibration are the
                 // ones in use -- Capabilities is documented as valid only after ConnectAsync, and
                 // the two range rungs come from the calibration.
+                try
+                {
+                    await session.ReopenAsync(ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Results.Conflict(ex.Message);
+                }
+            }
+
+            return Results.Ok(config);
+        });
+
+        // The composite analyzer's two halves. Written by the split dialog, and followed by a
+        // reconnect for the reason the sound card's is: the live copy is what AnalyzerDeviceFactory
+        // builds from, and both halves plus the merged Capabilities are only read at connect.
+        group.MapGet("/split-device", async (
+            ConfigRepository repo, CancellationToken ct) =>
+            Results.Ok(await ReadSplitDeviceAsync(repo, ct)));
+
+        group.MapPut("/split-device", async (
+            SplitDeviceConfig config, ConfigRepository repo, SplitDeviceSetting setting,
+            DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            // Refused with the reason rather than silently defaulted: the reader falls back so the
+            // app can always start, but a user who has just chosen two cards has to be told why
+            // that pairing is not one.
+            if (SplitPairing.Resolve(config, out string? problem) is null)
+                return Results.BadRequest(problem);
+
+            // Refused while a measurement owns the session, like every other device change: both
+            // halves are about to be reopened underneath it.
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            await repo.SetAsync(
+                ConfigRepository.SplitDeviceKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.SplitDeviceConfig),
+                ct);
+            setting.Config = config;
+
+            if (session.Kind == DeviceKind.Split)
+            {
                 try
                 {
                     await session.ReopenAsync(ct);

@@ -53,11 +53,23 @@ public sealed class StartupSettingsLoaderTests : IDisposable
     /// under test is which kind the factory captured, not what it then built.
     /// </summary>
     private sealed class TestFactory(
-        AnalyzerKindSetting kind, SoundCardSetting soundCard, AutoRangeStepDownDelaySetting stepDownDelay)
-        : AnalyzerDeviceFactory(NullLoggerFactory.Instance, kind.Kind, soundCard, stepDownDelay: stepDownDelay)
+        AnalyzerKindSetting kind, SoundCardSetting soundCard, AutoRangeStepDownDelaySetting stepDownDelay,
+        SplitDeviceSetting split)
+        : AnalyzerDeviceFactory(
+            NullLoggerFactory.Instance, kind.Kind, soundCard, stepDownDelay: stepDownDelay, split: split)
     {
         private readonly SoundCardSetting _soundCard = soundCard;
         private readonly AutoRangeStepDownDelaySetting _stepDownDelay = stepDownDelay;
+        private readonly SplitDeviceSetting _split = split;
+
+        /// <summary>
+        /// What <see cref="SplitDeviceSetting"/> held when the device was built. On a bench that came
+        /// up on Split the factory reads it right there to build <i>both halves</i>, so a document
+        /// read afterwards leaves the session on the default pairing — the same trap as the sound
+        /// card's settings, one setting along, and equally invisible from the setting's own value
+        /// at the end.
+        /// </summary>
+        public SplitDeviceConfig? SplitWhenBuilt { get; private set; }
 
         /// <summary>
         /// What the device was handed as its step-down delay, which is the only thing that carries
@@ -79,6 +91,7 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         {
             ConfigWhenBuilt = _soundCard.Config;
             DelayWhenBuilt = _stepDownDelay.Ms;
+            SplitWhenBuilt = _split.Config;
             var device = new SimulatedDevice();
             device.AutoRangeStepDownDelayMs = _stepDownDelay.Ms;
             return device;
@@ -100,6 +113,7 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<ExternalGainSetting>();
         services.AddSingleton<SoundCardSetting>();
         services.AddSingleton<AnalyzerKindSetting>();
+        services.AddSingleton<SplitDeviceSetting>();
 
         // The load's selection is read in the same block. It needs no factory or session here:
         // unlike the analyzer's, nothing builds a load at resolution time, which is the whole
@@ -121,7 +135,8 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<AnalyzerDeviceFactory>(sp => new TestFactory(
             sp.GetRequiredService<AnalyzerKindSetting>(),
             sp.GetRequiredService<SoundCardSetting>(),
-            sp.GetRequiredService<AutoRangeStepDownDelaySetting>()));
+            sp.GetRequiredService<AutoRangeStepDownDelaySetting>(),
+            sp.GetRequiredService<SplitDeviceSetting>()));
         services.AddSingleton<DeviceSessionService>();
 
         return services.BuildServiceProvider();
@@ -177,6 +192,29 @@ public sealed class StartupSettingsLoaderTests : IDisposable
 
         var factory = (TestFactory)provider.GetRequiredService<AnalyzerDeviceFactory>();
         Assert.Equal("Test Interface", factory.ConfigWhenBuilt?.InputDeviceName);
+    }
+
+    [Fact]
+    public async Task TheSplitsTwoHalves_AreLoadedBeforeTheFirstDeviceIsBuilt()
+    {
+        // The same rule as the sound card's, and it costs more here: the factory reads this document
+        // to build *both* halves, so one read too late comes up on the default pairing — a QA40x
+        // capturing while an unconfigured card plays — on a bench where two devices were chosen.
+        await using ServiceProvider provider = BuildContainer();
+        await StoreKindAsync(provider, DeviceKind.Split);
+        await provider.GetRequiredService<ConfigRepository>().SetAsync(
+            ConfigRepository.SplitDeviceKey,
+            System.Text.Json.JsonSerializer.Serialize(
+                new SplitDeviceConfig("Simulated", "Simulated", 48_000.0),
+                AppJsonContext.Default.SplitDeviceConfig),
+            CancellationToken.None);
+
+        await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
+
+        var factory = (TestFactory)provider.GetRequiredService<AnalyzerDeviceFactory>();
+        Assert.Equal(DeviceKind.Split, factory.InitialKind);
+        Assert.Equal("Simulated", factory.SplitWhenBuilt?.OutputKind);
+        Assert.Equal(48_000.0, factory.SplitWhenBuilt?.GeneratorSampleRateHz);
     }
 
     [Fact]

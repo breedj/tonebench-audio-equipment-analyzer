@@ -8,8 +8,28 @@ public sealed record DeviceCapabilities(
     IReadOnlyList<double> SampleRatesHz,
     IReadOnlyList<double> InputRangesDbv,
     IReadOnlyList<double> OutputRangesDbv,
-    int MaxChannelCount)
+    int MaxChannelCount,
+    IReadOnlyList<double>? DeclaredOutputSampleRatesHz = null)
 {
+    /// <summary>
+    /// The rates this analyzer's <i>generator</i> can be driven at, which on every device with one
+    /// clock is simply <see cref="SampleRatesHz"/> -- hence the null default on
+    /// <see cref="DeclaredOutputSampleRatesHz"/>, which keeps every existing construction and every
+    /// <c>with</c>-derivation below untouched.
+    ///
+    /// <para>A composite analyzer is where the two ladders genuinely differ, and where they must
+    /// <b>not</b> be intersected: a QA403 capturing at 384 kHz while a 192 kHz DAC plays is the one
+    /// configuration that makes that input mode a real measurement, and intersecting would delete
+    /// it. The rate pair is checked for usability when the generator is configured instead -- see
+    /// <c>DeviceSessionService.RequireGeneratorRateUsable</c> -- because a capture-only run with the
+    /// generator silent is legitimate at a rate the output side cannot play.</para>
+    ///
+    /// <para>Note this ladder says nothing about <see cref="IAnalyzerDevice.MaxGeneratorSampleRateHz"/>,
+    /// which is a separate, hardware-protection rule: <see cref="Qa403Experimental"/> lists 384 kHz
+    /// here too, and it is that ceiling -- not this list -- which keeps the QA403's own DAC off it.</para>
+    /// </summary>
+    public IReadOnlyList<double> OutputSampleRatesHz => DeclaredOutputSampleRatesHz ?? SampleRatesHz;
+
     /// <summary>
     /// The real QA403's ranges, per <c>docs/protocol.md</c> (register 5 = input range, 0..7 ->
     /// {0,6,...,42} dBV in 6 dB steps; register 6 = output range, 0..3 -> {-12,-2,8,18} dBV).

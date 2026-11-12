@@ -205,6 +205,32 @@ public interface IAnalyzerDevice
     double MaxGeneratorSampleRateHz => double.PositiveInfinity;
 
     /// <summary>
+    /// The rate this analyzer's <i>generator</i> is being driven at, when that is not the rate
+    /// <see cref="StreamAsync"/> was asked for. Null -- the default -- means "the stream's own
+    /// rate", which is true of every device with one clock.
+    ///
+    /// <para>Only a composite analyzer answers this: there the DAC and the ADC are two devices with
+    /// two crystals, and nothing makes them run at one rate. A deliberate benefit rather than a
+    /// compromise -- a DAC under test wants its own rate, ultrasonic residue wants a fast ADC and
+    /// only a slow DAC, and the QA403's 384 kHz input is only usable at all when the stimulus comes
+    /// from somewhere other than its own DAC.</para>
+    ///
+    /// <para><b>A default member, and <c>double?</c> rather than a sentinel</b>, for the two reasons
+    /// the members above it are: only the one implementation that has the property mentions it, so
+    /// the app's test doubles need no edit; and a non-finite double cannot be serialized --
+    /// <c>System.Text.Json</c> refuses one and finds out part way through, truncating the response
+    /// behind a 200 OK, which is why <c>DeviceSessionService.MaxGeneratorSampleRateHz</c> maps
+    /// infinity to null on its way to the wire.</para>
+    ///
+    /// <para>It is a <i>report</i>, not a setting: the composite is told its generator rate when it
+    /// is built, and every rate-dependent generator quantity -- the chirp's period, a square's
+    /// quantised frame count, the periodic-noise crest factor -- is read from here rather than from
+    /// the analysis rate. Tone <i>snapping</i> deliberately is not: it snaps to analysis bins, which
+    /// is the whole reason tones survive two clocks.</para>
+    /// </summary>
+    double? GeneratorSampleRateHz => null;
+
+    /// <summary>
     /// Where this device copies the samples it hands its DAC, or null -- the default -- for no
     /// copying at all. Set by the session while the stream recorder is armed, cleared when it is
     /// not; see <see cref="IStimulusTap"/> for what the recording can and cannot answer, and for why

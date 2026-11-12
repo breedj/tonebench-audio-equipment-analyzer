@@ -121,4 +121,29 @@ public sealed record SoundCardSettings
         HasInput && HasOutput ? SoundCardStreamDirection.Duplex
         : HasInput ? SoundCardStreamDirection.InputOnly
         : SoundCardStreamDirection.OutputOnly;
+
+    /// <summary>
+    /// This bench with one direction masked off, so <see cref="Direction"/> derives the one that is
+    /// left. What a composite analyzer needs of a card that is only half of it.
+    ///
+    /// <para><b>It blanks the two device-name fields rather than storing a direction</b>, because
+    /// <see cref="Direction"/> is derived on purpose -- "the two device names are what the user
+    /// picked, and a stored direction could contradict them". Masking keeps that invariant: a
+    /// settings record still says exactly what it will open.</para>
+    ///
+    /// <para>Without it a fully-configured duplex card used as one half of a split would open
+    /// <i>duplex</i> and claim an input the split is not using -- which on a card that is the split's
+    /// generator means a capture nobody reads, and under WASAPI exclusive means an input endpoint
+    /// taken away from whatever else wanted it.</para>
+    ///
+    /// <para>The host API, the channel offsets, the settle and the two front-end gains are all left
+    /// alone: the masked direction's fields are inert, and a figure the user typed should survive
+    /// being looked at.</para>
+    /// </summary>
+    public SoundCardSettings ForDirection(SoundCardStreamDirection direction) => direction switch
+    {
+        SoundCardStreamDirection.InputOnly => this with { OutputHostApi = string.Empty, OutputDeviceName = string.Empty },
+        SoundCardStreamDirection.OutputOnly => this with { InputHostApi = string.Empty, InputDeviceName = string.Empty },
+        _ => this,
+    };
 }

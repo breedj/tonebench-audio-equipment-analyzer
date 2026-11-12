@@ -205,6 +205,26 @@ const storedDrift = computed(() => {
   }
 })
 
+/**
+ * Closing the drift dialog re-reads the card's settings, because the run it just finished wrote
+ * them.
+ *
+ * <p><c>ClockDriftRunner.RememberAsync</c> stores the figure the moment a run ends — there is no
+ * Keep button, by design — so by the time this dialog closes the server holds a newer
+ * configuration than the one <c>config</c> was loaded with when the <i>Sound card</i> dialog
+ * opened. Without this the Clock drift panel behind it goes on showing the previous run: the old
+ * ppm, the old timestamp, and dashes for the two figures the new run actually measured. Reported
+ * 2026-11-12, against a run reading 83.18 ppm over a panel still saying 84.59.</p>
+ *
+ * <p>A plain reload rather than <c>reconcileWithDevices</c>: no device has moved, only the stored
+ * drift, and re-running the reconcile would rewrite the whole form for a change that cannot have
+ * touched it.</p>
+ */
+async function onClockDriftClosed() {
+  clockDriftOpen.value = false
+  await load(true)
+}
+
 /** A stored figure, or a dash. Matches the drift dialog's own `fmt`, so the two cannot disagree. */
 function driftFigure(value: number | null, digits: number, unit: string) {
   return value === null || !Number.isFinite(value) ? '—' : `${value.toFixed(digits)}${unit}`
@@ -1678,5 +1698,8 @@ function mvRms(value: number | null | undefined) {
       </button>
     </template>
   </Modal>
-  <ClockDriftDialog :open="clockDriftOpen" :pairing-note="modeNote" @close="clockDriftOpen = false" />
+  <!-- @close re-reads the config as well as hiding this: the run stored its figure as it ended.
+       See onClockDriftClosed — a bare `clockDriftOpen = false` leaves the panel behind showing the
+       previous run. -->
+  <ClockDriftDialog :open="clockDriftOpen" :pairing-note="modeNote" @close="onClockDriftClosed" />
 </template>

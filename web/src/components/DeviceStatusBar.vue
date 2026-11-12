@@ -23,6 +23,7 @@ import ExternalGainPopover from './ExternalGainPopover.vue'
 const DEVICE_KINDS: { value: DeviceKindName; label: string }[] = [
   { value: 'Hardware', label: 'QA40x' },
   { value: 'SoundCard', label: 'Sound card' },
+  { value: 'Split', label: 'Split (two devices)' },
   { value: 'Simulated', label: 'Simulator' },
 ]
 
@@ -249,6 +250,7 @@ const emit = defineEmits<{
   setInputRange: [dbv: number]
   openSoundCard: []
   openQa40x: []
+  openSplit: []
   openLoad: []
   setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
@@ -493,7 +495,7 @@ const telemetryStaleTitle =
  * one fixed full scale on each side. What varies on that bench is the front-end in front of it, so
  * that is what the bar offers instead.
  */
-const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
+const isSoundCard = computed(() => splitHalves.value.includes('SoundCard'))
 
 /**
  * Whose gear button is the QA40x's.
@@ -510,7 +512,39 @@ const isSoundCard = computed(() => props.status?.deviceKind === 'SoundCard')
  * itself, and a title naming one model while opening on either is the fault this spelling exists
  * to remove.</p>
  */
-const isQa40x = computed(() => props.status?.deviceKind === 'Hardware' || props.status?.deviceKind === 'Simulated')
+/**
+ * Whichever halves a split is made of, or the kind itself on any other analyzer. The three gears
+ * below are keyed on these rather than on the kind, because on a split every one of those settings
+ * still belongs to something in the path: a QA403 capturing half still has the 384 kHz opt-in, and a
+ * card half still has to be chosen and calibrated — it may be the half that only plays.
+ */
+const splitHalves = computed<DeviceKindName[]>(() =>
+  props.status?.deviceKind === 'Split'
+    ? ([props.status.splitInputKind, props.status.splitOutputKind].filter(Boolean) as DeviceKindName[])
+    : props.status
+      ? [props.status.deviceKind]
+      : [],
+)
+
+const isQa40x = computed(
+  () => splitHalves.value.includes('Hardware') || splitHalves.value.includes('Simulated'),
+)
+
+/**
+ * The split's own settings: which device plays, which captures, and the rate the generator runs at.
+ * Keyed on the selected analyzer rather than on a connection, like the two gears beside it — the
+ * pairing has to be choosable before either half is up, and when the default pairing is not the
+ * bench in the room this button is the only way to get anywhere.
+ */
+const isSplit = computed(() => props.status?.deviceKind === 'Split')
+
+const splitTitle = computed(() => {
+  const s = props.status
+  if (!s) return ''
+  const generator = s.splitOutputKind === 'SoundCard' ? (s.soundCardOutputDevice || 'a sound card') : s.splitOutputKind
+  const capture = s.splitInputKind === 'SoundCard' ? (s.soundCardInputDevice || 'a sound card') : s.splitInputKind
+  return `Two devices as one analyzer: ${generator} generates, ${capture} captures. Two clocks, so tone measurements are unaffected while a chirp's phase and impulse response need the drift correction or a measured reference channel.`
+})
 
 const qa40xTitle = computed(() =>
   props.status?.deviceKind === 'Simulated'
@@ -638,6 +672,22 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    </button>
+    <!-- The split's own settings: which two devices, and the generator's rate. -->
+    <button
+      v-if="isSplit"
+      type="button"
+      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      aria-label="Split device settings"
+      :title="splitTitle"
+      @click="emit('openSplit')"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 7h5l4 5 4-5h5" />
+        <path d="M3 17h5l4-5" />
+        <circle cx="20" cy="7" r="1.6" />
+        <circle cx="20" cy="17" r="1.6" />
       </svg>
     </button>
     <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the

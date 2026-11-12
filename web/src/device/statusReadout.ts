@@ -78,7 +78,10 @@ export function telemetryRows(status: DeviceStatus | null): TelemetryRow[] {
   // included although it models a QA403 elsewhere in this bar: it has no sensors, so there is
   // nothing for a dash to stand in for. QA40x, because the kind covers the QA402 as well, whose
   // 0x11/0x12/0x16 sensors are the same three.
-  const isQa40x = status.deviceKind === 'Hardware'
+  const isQa40x =
+    status.deviceKind === 'Hardware'
+    || status.splitInputKind === 'Hardware'
+    || status.splitOutputKind === 'Hardware'
   const telemetry = status.telemetry
 
   const rows: TelemetryRow[] = []

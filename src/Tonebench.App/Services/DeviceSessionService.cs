@@ -4,6 +4,7 @@ using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Device.Hardware;
 using Tonebench.Device.Simulation;
+using Tonebench.Device.Split;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
@@ -18,7 +19,7 @@ public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
     ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
     SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null,
-    AutoRangeStepDownDelaySetting? stepDownDelay = null)
+    AutoRangeStepDownDelaySetting? stepDownDelay = null, SplitDeviceSetting? split = null)
     : IDisposable, IMeasurementRun
 {
     /// <summary>
@@ -43,6 +44,14 @@ public sealed class DeviceSessionService(
     /// <see cref="ApplyEffectiveExternalGain"/>.
     /// </summary>
     private readonly SoundCardSetting _soundCard = soundCard ?? new SoundCardSetting();
+
+    /// <summary>
+    /// Which two devices a composite analyzer is made of, when that is the kind in use. Read rather
+    /// than type-tested, so "is the capturing half a sound card" has one answer and the settings
+    /// document stays the thing that decides it -- the split endpoint reopens the device on a
+    /// change, so the two cannot drift apart.
+    /// </summary>
+    private readonly SplitDeviceSetting _split = split ?? new SplitDeviceSetting();
 
     /// <summary>
     /// The external gain to fall back to when the analyzer is not the sound card, i.e. the one
@@ -74,7 +83,7 @@ public sealed class DeviceSessionService(
     /// </summary>
     private void ApplyEffectiveExternalGain()
     {
-        if (_kind == DeviceKind.SoundCard)
+        if (InputIsSoundCard)
         {
             // Captured lazily rather than at construction, because Program loads the external-gain
             // document into the setting after the container has built this service -- seeding it in
@@ -115,16 +124,62 @@ public sealed class DeviceSessionService(
     /// Never null, so the client has no "which unit did it mean" case to handle.
     /// </summary>
     public string ExternalGainUnit =>
-        _kind == DeviceKind.SoundCard
+        InputIsSoundCard
             ? Tonebench.Data.ExternalGainConfig.NormaliseUnit(_soundCard.Config.GainDisplayUnit)
             : _sharedExternalGainDb?.Unit ?? Tonebench.Data.ExternalGainConfig.DefaultUnit;
 
     /// <summary>Re-applies the sound card's gain after its settings change, without a reconnect.</summary>
     public void RefreshSoundCardGain()
     {
-        if (_kind == DeviceKind.SoundCard)
+        if (InputIsSoundCard)
             ApplyEffectiveExternalGain();
     }
+
+    /// <summary>
+    /// Whether the <i>capturing</i> device is a sound card — directly, or as one half of a split.
+    ///
+    /// <para>The front-end gain is the question this answers, and it belongs to whichever device is
+    /// measuring: it describes a divider or a preamp in front of an <i>input</i>, and the card's own
+    /// document remembers it separately from the QA40x's because they are different benches. A split
+    /// whose generator is a card and whose capture is a QA403 therefore uses the QA403's figure,
+    /// which is the one in front of the input the samples come from.</para>
+    /// </summary>
+    private bool InputIsSoundCard =>
+        _kind == DeviceKind.SoundCard
+        || (_kind == DeviceKind.Split && _split.InputKind == DeviceKind.SoundCard);
+
+    /// <summary>
+    /// Whether a sound card is anywhere on this bench. What the status bar's card fields and the
+    /// card dialog gate on: on a split the card may be the half that only plays, and its device
+    /// name, its calibration and its control panel are all still worth reaching.
+    /// </summary>
+    private bool UsesSoundCard =>
+        _kind == DeviceKind.SoundCard
+        || (_kind == DeviceKind.Split
+            && (_split.InputKind == DeviceKind.SoundCard || _split.OutputKind == DeviceKind.SoundCard));
+
+    /// <summary>
+    /// The capturing half's kind, which on anything but a split is the kind itself. Reported so the
+    /// status bar can name both devices and keep the telemetry rows a QA40x half still has.
+    /// </summary>
+    public DeviceKind InputDeviceKind => _kind == DeviceKind.Split ? _split.InputKind : _kind;
+
+    /// <summary>The generating half's kind. See <see cref="InputDeviceKind"/>.</summary>
+    public DeviceKind OutputDeviceKind => _kind == DeviceKind.Split ? _split.OutputKind : _kind;
+
+    /// <summary>
+    /// The rate the generator is being driven at. The stream's own rate on every device with one
+    /// clock, and the generating half's own on a composite — see
+    /// <c>IAnalyzerDevice.GeneratorSampleRateHz</c>.
+    ///
+    /// <para>Every rate-dependent <i>generator</i> quantity reads this rather than the analysis
+    /// rate: a square's quantised period and the level that follows from it, the periodic-noise
+    /// crest factor the output range is derived from, and the chirp's period in generator frames.
+    /// Tone snapping deliberately does not — it snaps to <i>analysis</i> bins, which is the whole
+    /// reason tones survive two clocks.</para>
+    /// </summary>
+    public double GeneratorSampleRateHz =>
+        _device.GeneratorSampleRateHz ?? (_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
     /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
@@ -353,7 +408,7 @@ public sealed class DeviceSessionService(
     /// measurement the user is looking at.</para>
     /// </summary>
     public bool OutputRangeClipping =>
-        _info is not null && OutputRangeSelector.Clips(_generatorConfig, _outputRangeDbv, _lastSampleRateHz);
+        _info is not null && OutputRangeSelector.Clips(_generatorConfig, _outputRangeDbv, GeneratorSampleRateHz);
 
     /// <summary>
     /// Whether the generator has clipped at any point since this acquisition started, as against
@@ -445,7 +500,7 @@ public sealed class DeviceSessionService(
     /// type test rather than through <see cref="IAnalyzerDevice"/>: real hardware has no such knob,
     /// so putting it on the interface would be a lie. See <see cref="SimulatedSignalProfile"/>.
     /// </summary>
-    public bool? SimulatedNoiseEnabled => (_device as SimulatedDevice)?.SignalProfile.NoiseEnabled;
+    public bool? SimulatedNoiseEnabled => SimulatedHalf?.SignalProfile.NoiseEnabled;
 
     /// <summary>
     /// Whether the simulated DUT adds mains hum (a 50 Hz fundamental plus two harmonics 6 dB apart),
@@ -453,7 +508,7 @@ public sealed class DeviceSessionService(
     /// <see cref="SimulatedNoiseEnabled"/> — hum is a deterministic tone stack, not part of the
     /// noise path.
     /// </summary>
-    public bool? SimulatedHumEnabled => (_device as SimulatedDevice)?.SignalProfile.HumEnabled;
+    public bool? SimulatedHumEnabled => SimulatedHalf?.SignalProfile.HumEnabled;
 
     /// <summary>
     /// Whether the simulated generator carries its fixed harmonic stack (H2 at −46 dBc, H3 at
@@ -462,23 +517,58 @@ public sealed class DeviceSessionService(
     /// nonlinear DUT models switch the stack off regardless (<see cref="SimulatedDevice"/>), so
     /// under one of those it reads true while contributing nothing.
     /// </summary>
-    public bool? SimulatedHarmonicsEnabled => (_device as SimulatedDevice)?.SignalProfile.HarmonicsEnabled;
+    public bool? SimulatedHarmonicsEnabled => SimulatedHalf?.SignalProfile.HarmonicsEnabled;
 
     /// <summary>
     /// Which simulated device under test is patched in, or <c>null</c> when the device isn't the
     /// simulator. Unlike the noise and hum switches this one changes the DUT's <i>response</i>
     /// rather than what is added to it — see <see cref="SimulatedDutModel"/>.
     /// </summary>
-    public SimulatedDutModel? SimulatedDut => (_device as SimulatedDevice)?.SignalProfile.Dut;
+    public SimulatedDutModel? SimulatedDut => SimulatedHalf?.SignalProfile.Dut;
 
     /// <summary>Whether the simulator couples its channels — see <see cref="SimulatedCrosstalk"/>; null when the device isn't the simulator.</summary>
-    public bool? SimulatedCrosstalkEnabled => (_device as SimulatedDevice)?.SignalProfile.CrosstalkEnabled;
+    public bool? SimulatedCrosstalkEnabled => SimulatedHalf?.SignalProfile.CrosstalkEnabled;
 
     /// <summary>The simulated amplifier's output stage — see <see cref="SimulatedOutputStage"/>; null when the device isn't the simulator.</summary>
-    public SimulatedOutputStageModel? SimulatedOutputStage => (_device as SimulatedDevice)?.SignalProfile.OutputStage;
+    public SimulatedOutputStageModel? SimulatedOutputStage => SimulatedHalf?.SignalProfile.OutputStage;
 
     /// <summary>What hangs on the simulated amplifier's output; null when the device isn't the simulator.</summary>
-    public SimulatedLoad? SimulatedLoad => (_device as SimulatedDevice)?.SignalProfile.Load;
+    public SimulatedLoad? SimulatedLoad => SimulatedHalf?.SignalProfile.Load;
+
+    /// <summary>
+    /// The simulator the knobs describe: the device itself, or whichever half of a split is one.
+    ///
+    /// <para><b>The capturing half first</b>, because every one of these knobs is about what the
+    /// captured signal looks like — the DUT, its noise and hum, the crosstalk, the output stage and
+    /// its load are all applied on the way <i>in</i>. The generator's harmonic stack is the
+    /// exception, and <see cref="SimulatedHalves"/> is why that still works: a write goes to every
+    /// simulated half, so on a two-simulator bench the stack reaches the one that plays.</para>
+    /// </summary>
+    private SimulatedDevice? SimulatedHalf => SimulatedHalves.FirstOrDefault();
+
+    /// <summary>
+    /// Every simulated device on this bench, capturing half first. One entry on a plain simulator,
+    /// none on hardware, and on a split whatever of its two halves is simulated.
+    /// </summary>
+    private IEnumerable<SimulatedDevice> SimulatedHalves
+    {
+        get
+        {
+            if (_device is SimulatedDevice single)
+            {
+                yield return single;
+                yield break;
+            }
+
+            if (_device is not SplitAnalyzerDevice split)
+                yield break;
+
+            if (split.Input is SimulatedDevice input)
+                yield return input;
+            if (split.Output is SimulatedDevice output)
+                yield return output;
+        }
+    }
 
     /// <summary>
     /// Patches the simulated DUT's signal profile; <c>null</c> leaves a setting alone. Returns
@@ -489,22 +579,30 @@ public sealed class DeviceSessionService(
         bool? noiseEnabled, bool? humEnabled, bool? harmonicsEnabled = null, SimulatedDutModel? dut = null, bool? crosstalkEnabled = null,
         SimulatedOutputStageModel? outputStage = null, SimulatedLoad? load = null)
     {
-        if (_device is not SimulatedDevice simulated)
+        // Every simulated half, not just the one the knobs are read from. On a two-simulator split
+        // the DUT and the noise belong to the capturing half while the generator's harmonic stack
+        // belongs to the half that plays, so a write to one of them would silently do nothing to
+        // whichever setting lives on the other.
+        var halves = SimulatedHalves.ToArray();
+        if (halves.Length == 0)
             return false;
 
-        // Snapshot once: the property returns an immutable record, and re-reading it per field
-        // could mix two different profiles into the one being written back.
-        var profile = simulated.SignalProfile;
-        simulated.SignalProfile = profile with
+        foreach (SimulatedDevice simulated in halves)
         {
-            NoiseEnabled = noiseEnabled ?? profile.NoiseEnabled,
-            HumEnabled = humEnabled ?? profile.HumEnabled,
-            HarmonicsEnabled = harmonicsEnabled ?? profile.HarmonicsEnabled,
-            Dut = dut ?? profile.Dut,
-            CrosstalkEnabled = crosstalkEnabled ?? profile.CrosstalkEnabled,
-            OutputStage = outputStage ?? profile.OutputStage,
-            Load = load ?? profile.Load,
-        };
+            // Snapshot once: the property returns an immutable record, and re-reading it per field
+            // could mix two different profiles into the one being written back.
+            var profile = simulated.SignalProfile;
+            simulated.SignalProfile = profile with
+            {
+                NoiseEnabled = noiseEnabled ?? profile.NoiseEnabled,
+                HumEnabled = humEnabled ?? profile.HumEnabled,
+                HarmonicsEnabled = harmonicsEnabled ?? profile.HarmonicsEnabled,
+                Dut = dut ?? profile.Dut,
+                CrosstalkEnabled = crosstalkEnabled ?? profile.CrosstalkEnabled,
+                OutputStage = outputStage ?? profile.OutputStage,
+                Load = load ?? profile.Load,
+            };
+        }
 
         return true;
     }
@@ -594,7 +692,7 @@ public sealed class DeviceSessionService(
     /// <summary>
     /// The highest sample rate the analyzer in use can <i>play</i> a stimulus at, in Hz, or null on
     /// one with no ceiling. The FFT screen's Generator panel reads it to stand down at a
-    /// capture-only rate, so <see cref="RequireGeneratorRateSupported"/>'s refusal is what catches a
+    /// capture-only rate, so <see cref="RequireGeneratorRateUsable"/>'s refusal is what catches a
     /// mistake rather than what tells the user about a known limitation.
     ///
     /// <para><b>Null, never <see cref="double.PositiveInfinity"/>,</b> because this crosses the
@@ -650,10 +748,37 @@ public sealed class DeviceSessionService(
     /// one asked for, or quietly capturing with no stimulus at all, would both be reported as a
     /// successful measurement of something nobody requested.</para>
     /// </summary>
-    private void RequireGeneratorRateSupported(GeneratorConfig config, double sampleRateHz)
+    private void RequireGeneratorRateUsable(GeneratorConfig config, double sampleRateHz, double analysisRateHz)
     {
         if (!config.Left.Enabled && !config.Right.Enabled)
             return;
+
+        // A rate the generating half cannot play at all. Reachable only on a composite, where the
+        // two ladders are deliberately not intersected -- a capture-only run at a rate the output
+        // side has never heard of is legitimate, and it is asking it to *play* that is not.
+        IReadOnlyList<double> playable = Capabilities.OutputSampleRatesHz;
+        if (playable.Count > 0 && !playable.Any(rate => Math.Abs(rate - sampleRateHz) < 1e-6))
+        {
+            throw new InvalidOperationException(
+                $"This bench's generator cannot run at {sampleRateHz / 1000.0:0.###} kHz. It accepts "
+                    + $"{string.Join(", ", playable.Select(rate => $"{rate / 1000.0:0.###}"))} kHz. Choose one of "
+                    + "those as the generator rate, or turn the generator off to capture without it.");
+        }
+
+        // Two rates have to be an integer ratio or nothing periodic survives: the chirp's period,
+        // the multitone comb and the periodic-noise sequence all have to be a whole number of frames
+        // on *both* sides, and 44.1 kHz against a power-of-two record provably cannot be (a record of
+        // N frames at 192 kHz needs N x 147/640 to be an integer). Every rate the app offers is a
+        // power-of-two multiple of 48 kHz, so this cannot fire today; it exists so that the day one
+        // is added it says this rather than putting a drifting ripple on every trace.
+        if (!IsPeriodicRatePair(sampleRateHz, analysisRateHz))
+        {
+            throw new InvalidOperationException(
+                $"A generator at {sampleRateHz / 1000.0:0.###} kHz against a capture at "
+                    + $"{analysisRateHz / 1000.0:0.###} kHz is not an integer ratio, so a periodic stimulus "
+                    + "cannot line up with the analysis record. Tones, IMD and stepped sweeps are unaffected; "
+                    + "the chirp, periodic noise and the multitone comb need a 1:2, 1:4 or 1:8 pairing.");
+        }
 
         double maxHz = _device.MaxGeneratorSampleRateHz;
         if (sampleRateHz <= maxHz + 1e-6)
@@ -668,12 +793,28 @@ public sealed class DeviceSessionService(
     }
 
     /// <summary>
+    /// Whether two sample rates are an integer ratio either way round, which is what a periodic
+    /// stimulus needs to land on the same grid at both ends. Equal rates trivially are.
+    /// </summary>
+    internal static bool IsPeriodicRatePair(double aHz, double bHz)
+    {
+        if (!double.IsFinite(aHz) || !double.IsFinite(bHz) || aHz <= 0 || bHz <= 0)
+            return false;
+
+        double high = Math.Max(aHz, bHz);
+        double low = Math.Min(aHz, bHz);
+        double ratio = high / low;
+
+        return Math.Abs(ratio - Math.Round(ratio)) < 1e-9;
+    }
+
+    /// <summary>
     /// One of the sound card's settings, or null when that is not the analyzer in use — the null
     /// convention the <c>Simulated*</c> fields established, so the UI can gate on the field rather
     /// than on a device-kind string.
     /// </summary>
     private string? SoundCardField(Func<Tonebench.Data.SoundCardConfig, string> select) =>
-        _kind == DeviceKind.SoundCard ? select(_soundCard.Config) : null;
+        UsesSoundCard ? select(_soundCard.Config) : null;
 
     /// <summary>
     /// Replaces the analyzer with one of the requested kind: real QA403 or simulator, chosen at
@@ -931,7 +1072,9 @@ public sealed class DeviceSessionService(
                 ExternalGainLeftDb: ExternalGainLeftDb, ExternalGainRightDb: ExternalGainRightDb,
                 RangingMode: _rangingMode.ToString(), OutputRangeClipping: OutputRangeClipping,
                 OutputClippedDuringAcquisition: OutputClippedDuringAcquisition,
-                ExternalGainUnit: ExternalGainUnit);
+                ExternalGainUnit: ExternalGainUnit,
+                SplitInputKind: _kind == DeviceKind.Split ? _split.InputKind.ToString() : null,
+                SplitOutputKind: _kind == DeviceKind.Split ? _split.OutputKind.ToString() : null);
 
         return new DeviceStatusResponse(
             true, info.ProductName, info.SerialNumber, info.FirmwareVersion, info.IsSimulated,
@@ -946,10 +1089,12 @@ public sealed class DeviceSessionService(
             Telemetry: ToResponse(_device.Telemetry),
             SoundCardInputDevice: SoundCardField(c => c.InputDeviceName),
             SoundCardOutputDevice: SoundCardField(c => c.OutputDeviceName),
-            SoundCardCalibrated: _kind == DeviceKind.SoundCard
+            SoundCardCalibrated: UsesSoundCard
                 ? _soundCard.Calibration is { IsInputCalibrated: true, IsOutputCalibrated: true }
                 : null,
-            ExternalGainUnit: ExternalGainUnit);
+            ExternalGainUnit: ExternalGainUnit,
+            SplitInputKind: _kind == DeviceKind.Split ? _split.InputKind.ToString() : null,
+            SplitOutputKind: _kind == DeviceKind.Split ? _split.OutputKind.ToString() : null);
     }
 
     /// <summary>
@@ -1325,9 +1470,8 @@ public sealed class DeviceSessionService(
     /// it is, is a derived <i>reading</i> of it. Note it rewrites <c>Wave.FrequencyHz</c> as well, so
     /// that the figure the device synthesizes from and the figure status reports are one number.</para>
     /// </summary>
-    private GeneratorConfig ResolveWaves(GeneratorConfig config)
+    private GeneratorConfig ResolveWaves(GeneratorConfig config, double sampleRateHz)
     {
-        double sampleRateHz = _lastSampleRateHz;
         if (sampleRateHz <= 0)
             return config;
 
@@ -1437,8 +1581,8 @@ public sealed class DeviceSessionService(
         _outputClippedDuringAcquisition = true;
 
         double peakV = Math.Max(
-            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Left, _lastSampleRateHz),
-            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Right, _lastSampleRateHz));
+            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Left, GeneratorSampleRateHz),
+            OutputRangeSelector.RequiredPeakVolts(_generatorConfig.Right, GeneratorSampleRateHz));
 
         logger.LogWarning(
             "Generator clipped: the stimulus needs a {PeakV:0.000} V peak, which is more than the "
@@ -1518,9 +1662,15 @@ public sealed class DeviceSessionService(
     {
         _lastSampleRateHz = streamConfigHint?.SampleRateHz ?? _streamConfig?.SampleRateHz ?? _lastSampleRateHz;
 
+        // The rate the *generator* runs at, which on everything but a composite is the rate being
+        // captured. Taken once, here, because the five readers below are all generator quantities
+        // and reading the analysis rate for any of them is wrong by the rate ratio -- see
+        // GeneratorSampleRateHz.
+        double generatorRateHz = _device.GeneratorSampleRateHz ?? _lastSampleRateHz;
+
         // Before anything is cached or snapped: a rate whose DAC does not work must refuse the
-        // stimulus rather than play a mangled one. See RequireGeneratorRateSupported.
-        RequireGeneratorRateSupported(config, _lastSampleRateHz);
+        // stimulus rather than play a mangled one. See RequireGeneratorRateUsable.
+        RequireGeneratorRateUsable(config, generatorRateHz, _lastSampleRateHz);
 
         _requestedGeneratorConfig = config;
 
@@ -1529,10 +1679,16 @@ public sealed class DeviceSessionService(
 
         // Before SnapTones, which leaves these kinds alone precisely because this has already put
         // the real frequency on their tone list.
-        config = ResolveWaves(config);
+        config = ResolveWaves(config, generatorRateHz);
+
+        // SnapTones keeps the *analysis* rate, and the two lines being adjacent is the point: a
+        // square's period is a count of the generator's frames, while a tone is snapped to an
+        // analysis bin. That second one is why tones survive two clocks at all, and swapping either
+        // for the other is silent -- one reports a frequency the DAC is not playing, the other
+        // leaks a tone across its neighbours.
         config = SnapTones(config);
         SetMultitoneSpec(config);
-        WarmPeriodicNoise(config, _lastSampleRateHz);
+        WarmPeriodicNoise(config, generatorRateHz);
 
         // Silencing a generator there is no device to silence is a success, not a 409: deviceControl's
         // stopRun (Stop, and every measurement switch) disables both channels unconditionally, and
@@ -1559,7 +1715,7 @@ public sealed class DeviceSessionService(
         // rather than quietly corrected: correcting it would make "Manual" mean "manual until the
         // app disagrees".
         double nextOutputRangeDbv = _rangingMode == RangingMode.Auto
-            ? OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv, _lastSampleRateHz)
+            ? OutputRangeSelector.Select(config, Capabilities.OutputRangesDbv, generatorRateHz)
             : _outputRangeDbv;
         bool widening = nextOutputRangeDbv > _outputRangeDbv;
 

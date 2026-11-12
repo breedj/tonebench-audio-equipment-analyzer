@@ -257,6 +257,45 @@ public class SplitAnalyzerDeviceTests
     // ---- connect ----
 
     [Fact]
+    public async Task ASimulatedCapturingHalf_IsHandedTheStimulusToo_BecauseThatIsTheCable()
+    {
+        // Two simulators are two devices with nothing wired between them: the one that plays plays
+        // into nothing, and the one that captures hears its own silenced generator. Measured the
+        // first time it was run -- a bare noise floor and THD in the hundreds of per cent. A
+        // simulator models what arrives at its input by synthesizing its own generator config, so
+        // mirroring the stimulus onto it *is* the wire, and it has no DAC to drive anything with.
+        var input = new FakeAnalyzerDevice("sim") { IsSimulated = true };
+        var output = new FakeAnalyzerDevice("card");
+        var split = Build(input, output);
+        await split.ConnectAsync(CancellationToken.None);
+
+        // Not silenced at connect, unlike a real one.
+        Assert.Empty(input.Generators);
+
+        await split.ConfigureGeneratorAsync(GeneratorConfig.Off with { SnapToBin = false }, CancellationToken.None);
+
+        Assert.Single(output.Generators);
+        Assert.Single(input.Generators);
+    }
+
+    [Fact]
+    public async Task ARealCapturingHalf_IsNeverHandedTheStimulus()
+    {
+        var input = new FakeAnalyzerDevice("qa403");
+        var output = new FakeAnalyzerDevice("card");
+        var split = Build(input, output);
+        await split.ConnectAsync(CancellationToken.None);
+
+        await split.ConfigureGeneratorAsync(GeneratorConfig.Off with { SnapToBin = false }, CancellationToken.None);
+
+        // One write, and it is the silencing one from connect -- the stimulus went to the generating
+        // half alone.
+        GeneratorConfig only = Assert.Single(input.Generators);
+        Assert.False(only.Left.Enabled);
+        Assert.True(only.SnapToBin);
+    }
+
+    [Fact]
     public async Task Connect_SilencesTheCapturingHalvesOwnGenerator()
     {
         var input = new FakeAnalyzerDevice("qa403");

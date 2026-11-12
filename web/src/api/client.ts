@@ -126,6 +126,15 @@ export interface DeviceStatus {
    * The chosen sound-card input, or null when the analyzer is not a sound card — the same null
    * convention as the `simulated*` fields, so the bar gates on this rather than on a kind string.
    */
+  /**
+   * On a split, the kind of the capturing half; null on every other analyzer. The bar names both
+   * devices from these two, and the telemetry rows are gated on them — a QA40x inside a split still
+   * has its three sensors, and the row it reserves is part of what the bar's width is laid out
+   * around.
+   */
+  splitInputKind: SplitHalfKindName | null
+  /** The generating half's kind. See `splitInputKind`. */
+  splitOutputKind: SplitHalfKindName | null
   soundCardInputDevice: string | null
   soundCardOutputDevice: string | null
   /**
@@ -198,7 +207,27 @@ export type SimulatedDutModel =
  * Real QA403 over USB, the synthetic device, or a sound card with an analog front-end. Switchable
  * at runtime — no restart, no flag.
  */
-export type DeviceKindName = 'Hardware' | 'Simulated' | 'SoundCard'
+export type DeviceKindName = 'Hardware' | 'Simulated' | 'SoundCard' | 'Split'
+
+/** The two halves a `Split` analyzer can be made of. A split cannot be half of a split. */
+export type SplitHalfKindName = 'Hardware' | 'Simulated' | 'SoundCard'
+
+/** Mirrors Tonebench.Data.SplitDeviceConfig: which device plays, which captures, and at what rate. */
+export interface SplitDeviceConfig {
+  /** The capturing half. */
+  inputKind: SplitHalfKindName
+  /** The generating half. */
+  outputKind: SplitHalfKindName
+  /**
+   * The rate the generating half is streamed at, or 0 for "follow the analysis rate" — which is the
+   * default and makes a split behave exactly like a single device.
+   *
+   * Two rates have to be an integer ratio, which every rate the app offers is (all are power-of-two
+   * multiples of 48 kHz). The server refuses a pair that is not, because nothing periodic — the
+   * chirp, the noise sequence, the multitone comb — can line up with the analysis record otherwise.
+   */
+  generatorSampleRateHz: number
+}
 
 /**
  * Who picks the input and output attenuators. One mode for both: they are the two ends of the same
@@ -2099,6 +2128,19 @@ export interface DeviceRanges {
   clockDriftPpm: number | null
   /** ISO-8601, for the caption beside that checkbox. Null when there is no figure. */
   clockDriftMeasuredUtc: string | null
+  /**
+   * The rates this analyzer's *generator* can be driven at, which on every device with one clock is
+   * the same list as `sampleRatesHz`. The two differ only on a split, where they are deliberately
+   * not intersected — that is what makes a QA403 capturing at 384 kHz against a 192 kHz DAC
+   * reachable at all.
+   */
+  outputSampleRatesHz: number[] | null
+  /**
+   * The rate the generator is being driven at right now. `periodicWave.ts` reads it, because a
+   * square's or triangle's period is a count of the *generator's* frames: a scope trigger computed
+   * at the capture rate walks the trace sideways on a bench whose halves differ.
+   */
+  generatorSampleRateHz: number | null
 }
 
 export interface GeneratorTone {
@@ -3732,6 +3774,9 @@ export const api = {
     inputChannelOffset?: number
     outputChannelOffset?: number
   }) => request<SoundCardProbe>(`/soundcard/probe${toQuery({ ...q })}`),
+  getSplitDeviceConfig: () => request<SplitDeviceConfig>('/config/split-device'),
+  setSplitDeviceConfig: (config: SplitDeviceConfig) =>
+    request<SplitDeviceConfig>('/config/split-device', { method: 'PUT', body: JSON.stringify(config) }),
   getSoundCardConfig: () => request<SoundCardConfig>('/config/soundcard'),
   setSoundCardConfig: (config: SoundCardConfig) =>
     request<SoundCardConfig>('/config/soundcard', { method: 'PUT', body: JSON.stringify(config) }),

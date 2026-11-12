@@ -113,8 +113,30 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
 
     // ---- output side ----
 
-    public Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct) =>
-        _output.ConfigureGeneratorAsync(config, ct);
+    /// <summary>
+    /// The stimulus, to the generating half — and to a <i>simulated</i> capturing half as well,
+    /// which is the cable between them.
+    ///
+    /// <para><b>A simulator models what arrives at its input by synthesizing its own generator
+    /// config</b>, so two simulators paired as a split are two devices with nothing wired between
+    /// them: the one that plays plays into nothing, the one that captures hears its own silenced
+    /// generator, and the screen reads a bare noise floor with THD in the hundreds of per cent.
+    /// Measured, first time it was run. Mirroring the config onto a simulated capture half is the
+    /// wire, and it costs nothing physical — that half has no DAC to drive anything with.</para>
+    ///
+    /// <para>A <b>real</b> capturing half is silenced instead and never handed a voiced config: a
+    /// QA403 used as the input still has a DAC, and a tone left configured by an earlier session
+    /// would drive whatever is wired to its output with nothing on screen naming it. So the test is
+    /// <see cref="DeviceInfo.IsSimulated"/> rather than "which half" — the same flag the status pill
+    /// reads.</para>
+    /// </summary>
+    public async Task ConfigureGeneratorAsync(GeneratorConfig config, CancellationToken ct)
+    {
+        await _output.ConfigureGeneratorAsync(config, ct).ConfigureAwait(false);
+
+        if (InputInfo?.IsSimulated == true)
+            await _input.ConfigureGeneratorAsync(config, ct).ConfigureAwait(false);
+    }
 
     public Task SetOutputRangeAsync(double dbv, CancellationToken ct) =>
         _output.SetOutputRangeAsync(dbv, ct);
@@ -289,22 +311,27 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
                 : new SplitSideException("capture side", _settings.InputLabel, ex);
         }
 
-        // **The capturing half's own generator is silenced, and never handed a voiced config.**
+        InputInfo = input;
+        OutputInfo = output;
+
+        // **A real capturing half's own generator is silenced, and never handed a voiced config.**
         // A QA403 used as the input still has a DAC, and a tone left configured by an earlier
         // session would drive whatever is wired to its output with nothing on screen naming it.
         // Swallowed rather than fatal, like the front-panel I2S stop at the QA403's own connect: a
-        // device that cannot be silenced must not be one the app refuses to open.
-        try
+        // device that cannot be silenced must not be one the app refuses to open. A *simulated*
+        // capture half is the opposite case and is left alone -- see ConfigureGeneratorAsync, where
+        // its generator config is the wire between the two halves.
+        if (!input.IsSimulated)
         {
-            await _input.ConfigureGeneratorAsync(GeneratorConfig.Off, ct).ConfigureAwait(false);
+            try
+            {
+                await _input.ConfigureGeneratorAsync(GeneratorConfig.Off, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Could not silence the capture side's own generator.");
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogDebug(ex, "Could not silence the capture side's own generator.");
-        }
-
-        InputInfo = input;
-        OutputInfo = output;
 
         _logger.LogInformation(
             "Split analyzer connected: {Output} generates at {GenRate}, {Input} captures. Two clocks — "

@@ -68,6 +68,7 @@ import ConfigDialog from './components/ConfigDialog.vue'
 import ProgrammableLoadDialog from './components/ProgrammableLoadDialog.vue'
 import Qa40xDialog from './components/Qa40xDialog.vue'
 import SoundCardDialog from './components/SoundCardDialog.vue'
+import SplitDeviceDialog from './components/SplitDeviceDialog.vue'
 import { useProgrammableLoad } from './composables/useProgrammableLoad'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
@@ -633,6 +634,7 @@ const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
 const soundCardDialogOpen = ref(false)
 const qa40xDialogOpen = ref(false)
+const splitDialogOpen = ref(false)
 const loadDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
@@ -2390,6 +2392,25 @@ function closeSoundCardDialog() {
 function closeQa40xDialog() {
   qa40xDialogOpen.value = false
   void refreshRanges()
+}
+
+/**
+ * And so does closing the split's, for a third variation on the same reason: the pairing decides
+ * both rate ladders and the generator's own rate, and a Save in there reopens the device. Without
+ * this the panels would keep the previous bench's rates for the rest of the session.
+ */
+function closeSplitDialog() {
+  splitDialogOpen.value = false
+  void refreshRanges()
+}
+
+/**
+ * The split dialog's link to the sound-card one: which card each half is, and its calibration, live
+ * in that document rather than in the pairing. One dialog at a time, so this closes on the way.
+ */
+function openSoundCardFromSplit() {
+  closeSplitDialog()
+  soundCardDialogOpen.value = true
 }
 
 /**
@@ -6159,6 +6180,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
       @set-input-range="setInputRangeManually"
       @open-sound-card="soundCardDialogOpen = true"
       @open-qa40x="qa40xDialogOpen = true"
+      @open-split="splitDialogOpen = true"
       @open-load="loadDialogOpen = true"
       @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
@@ -6272,6 +6294,15 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :status="status"
       @close="closeQa40xDialog"
       @configuration="openConfigurationFromQa40x"
+    />
+    <!-- Fed by the app's own status poll and range read, like the QA40x's: the generator's rate
+         ladder is the *generating half's* and comes from /ranges, not from a list in the client. -->
+    <SplitDeviceDialog
+      :open="splitDialogOpen"
+      :status="status"
+      :ranges="ranges"
+      @close="closeSplitDialog"
+      @sound-card="openSoundCardFromSplit"
     />
     <!-- Always mounted, like the others, and fed by the app's own load poll — never one of its own.
          Harmless on a bench with no load: the box that opens it does not exist there. -->

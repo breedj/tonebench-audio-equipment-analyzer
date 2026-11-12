@@ -66,7 +66,8 @@ public static class DeviceEndpoints
             return Results.Ok(new DeviceRangesResponse(
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,
                 session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz,
-                drift?.Ppm, drift?.MeasuredUtc));
+                drift?.Ppm, drift?.MeasuredUtc,
+                caps.OutputSampleRatesHz, session.GeneratorSampleRateHz));
         });
 
         group.MapPost("/input-range", async (
@@ -271,6 +272,13 @@ internal static class ConnectFailure
     {
         Qa40xDeviceNotFoundException =>
             "No QA40x analyzer was found. Check that it is connected over USB and switched on, then press Connect again.",
+
+        // Unwrapped so the half that failed keeps the message its own kind of device earns -- a
+        // composite's QA40x half still says to check the USB cable -- while the sentence names which
+        // half it was. On a two-device bench "no analyzer was found" alone leaves the user guessing.
+        Tonebench.Device.Split.SplitSideException split =>
+            $"The {split.Side} ({split.Label}) did not connect. {MessageFor(split.InnerException!)}",
+
         _ => ex.Message,
     };
 }
@@ -426,7 +434,16 @@ public sealed record DeviceStatusResponse(
     /// gain: it follows whichever bench is live, because each stores its own. Never null — there is
     /// always some unit the figures are being read in.</para>
     /// </summary>
-    string ExternalGainUnit = "Db");
+    string ExternalGainUnit = "Db",
+    /// <summary>
+    /// On a composite analyzer, the <c>DeviceKind</c> name of the capturing half; null on every
+    /// other kind. The bar names both devices from these, and the telemetry rows are gated on them:
+    /// a QA40x inside a split still has its three sensors, and the row it reserves is part of what
+    /// the bar's width is laid out around.
+    /// </summary>
+    string? SplitInputKind = null,
+    /// <summary>The generating half's kind. See <see cref="SplitInputKind"/>.</summary>
+    string? SplitOutputKind = null);
 
 /// <summary>
 /// Wire shape of <see cref="Tonebench.Device.DeviceTelemetry"/>: the figures QuantAsylum's own software
@@ -502,7 +519,21 @@ public sealed record DeviceRangesResponse(
     /// </summary>
     double? ClockDriftPpm = null,
     /// <summary>When the figure above was measured, for the caption beside the checkbox. Null when there is no figure.</summary>
-    DateTimeOffset? ClockDriftMeasuredUtc = null);
+    DateTimeOffset? ClockDriftMeasuredUtc = null,
+    /// <summary>
+    /// The rates this analyzer's <i>generator</i> can be driven at, which on every device with one
+    /// clock is the same list as <see cref="SampleRatesHz"/>. The two differ only on a composite,
+    /// where they are deliberately not intersected — see
+    /// <see cref="Tonebench.Device.DeviceCapabilities.OutputSampleRatesHz"/>.
+    /// </summary>
+    IReadOnlyList<double>? OutputSampleRatesHz = null,
+    /// <summary>
+    /// The rate the generator is being driven at right now. The client's mirror of the square and
+    /// triangle quantisation reads it (<c>periodicWave.ts</c>), because that period is a count of
+    /// the <i>generator's</i> frames: a trigger computed at the capture rate walks the trace across
+    /// the screen on a bench whose two halves differ.
+    /// </summary>
+    double? GeneratorSampleRateHz = null);
 
 public sealed record InputRangeRequest(double Dbv);
 

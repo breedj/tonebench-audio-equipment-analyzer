@@ -646,7 +646,8 @@ internal static class ResponseCaptureSupport
         FrequencyResponseRequest request,
         FrequencyResponseResult leftResult,
         FrequencyResponseResult rightResult,
-        ReferenceChannelReading? reference)
+        ReferenceChannelReading? reference,
+        ILogger? logger = null)
     {
         // Chirp only: the ramp lives on the sweep's own frequency-to-time map, and a periodic-noise
         // stimulus has none -- the same restriction the correction itself carries.
@@ -683,6 +684,46 @@ internal static class ResponseCaptureSupport
         // reading that cannot be reported is reported as absent.
         if (!double.IsFinite(fit.ResidualPpm) || !double.IsFinite(fit.SigmaPpm) || !double.IsFinite(fit.FitRmsDeg))
             return null;
+
+        // **A fit that does not fit reports nothing.** The model is one drift ramp plus a bulk
+        // delay plus a constant; where the phase is really that, the residual after fitting is a
+        // fraction of a degree. Anything far above that means the phase is being shaped by
+        // something this model cannot express, and the ppm that comes out is then a projection of
+        // that something onto the ramp -- a confident number about a quantity it did not measure.
+        //
+        // Measured on a real two-card bench 2026-11-12 (MOTU M4 in, Topping D50 III out, WASAPI
+        // exclusive, reference genuinely fed and reading 64-69 dB throughout). Every reading was
+        // wrong and the misfit said so:
+        //
+        //   band top / Nyquist   0.53    0.80    0.89    0.93    0.94    0.95
+        //   fit miss, deg rms    14.8    19.6    27.8    37.4    42.3    40-42
+        //   residual, ppm        +34    -159    -239    -202    -179    -286/-693
+        //
+        // against a true residual of ~0 (the bench's own +83.18 ppm had just been applied). Three
+        // *identical* runs at one span disagreed by 273 ppm. The relationship with the band's top
+        // is the whole story: a converter's anti-alias and reconstruction filters are flat in
+        // magnitude almost to their corner and then cliff, so FlatBand -- which reads the
+        // magnitude -- keeps bins whose phase left the ramp long before. Raising the chirp's start
+        // to 200 Hz changed nothing, so it is the top of the band and not the AC coupling.
+        //
+        // So this refusal is the honest floor, not a fix: it converts every one of those readings
+        // into no reading. Making the detector *work* on such a bench needs the fitted band chosen
+        // by where the phase is linear rather than by where the magnitude is flat, which is a
+        // design change and not a threshold.
+        //
+        // Logged on the way out rather than silently dropped: a refusal is the most interesting
+        // thing this estimator can say, and a log that goes quiet cannot be told from one where
+        // the measurement never ran. At Debug, which is on by default (see DiagnosticLoggingSetting).
+        if (fit.FitRmsDeg > ChirpDriftResidual.MaxFitRmsDeg)
+        {
+            logger?.LogDebug(
+                "Clock drift residual not reported: the fit missed by {Rms:0.0} deg rms over " +
+                "{Bins} bins from {From:0} to {To:0} Hz, past the {Max:0.0} deg this model is " +
+                "worth anything at. It would have read {Residual:+0.00;-0.00;0.00} ppm.",
+                fit.FitRmsDeg, fit.Bins, fitFrom * binHz, fitTo * binHz,
+                ChirpDriftResidual.MaxFitRmsDeg, fit.ResidualPpm);
+            return null;
+        }
 
         double applied = request.ClockDrift is not null ? request.ClockDriftPpm : 0.0;
         if (!double.IsFinite(applied)) applied = 0.0;

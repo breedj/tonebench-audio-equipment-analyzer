@@ -867,7 +867,7 @@ public sealed class FrequencyResponseRunner(
         // a parameter of it, so it does not belong in BuildTraces -- which ApplyBandwidthReference
         // calls again on the same results, where re-fitting would spend the work for an answer that
         // cannot have changed.
-        var residual = ResponseCaptureSupport.EstimateDriftResidual(effective, results.Item2, results.Item3, referenceCheck);
+        var residual = ResponseCaptureSupport.EstimateDriftResidual(effective, results.Item2, results.Item3, referenceCheck, logger);
         ResponseCaptureSupport.LogDriftResidual(logger, residual);
 
         lock (_stateLock)

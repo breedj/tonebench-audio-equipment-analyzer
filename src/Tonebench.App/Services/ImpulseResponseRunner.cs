@@ -1031,7 +1031,7 @@ public sealed class ImpulseResponseRunner(
         var reference = ResponseCaptureSupport.CheckReferenceChannel(acquisition, rightResult);
         ResponseCaptureSupport.LogReferenceChannel(logger, reference);
 
-        var residual = ResponseCaptureSupport.EstimateDriftResidual(acquisition, leftResult, rightResult, reference);
+        var residual = ResponseCaptureSupport.EstimateDriftResidual(acquisition, leftResult, rightResult, reference, logger);
         ResponseCaptureSupport.LogDriftResidual(logger, residual);
 
         var impulses = new List<ImpulseTrace>

@@ -79,6 +79,22 @@ public static class ChirpDriftResidual
     public const int MinBins = 64;
 
     /// <summary>
+    /// How far the three-term fit may miss the measured phase, in degrees rms, before the ppm it
+    /// produces means nothing.
+    ///
+    /// <para>A drift ramp plus a bulk delay plus a constant <i>is</i> the phase where this
+    /// measurement applies, so a genuine fit leaves a fraction of a degree — the synthetic cases
+    /// in <c>ChirpDriftResidualTests</c> land at essentially zero. Measured on a real two-card
+    /// bench the misses ran <b>14.8 to 42.3 degrees</b>, and every one of those readings was wrong
+    /// by hundreds of ppm. Five is comfortably between the two and well clear of either, which is
+    /// what a threshold wants to be: nothing in the measurements lies near it.</para>
+    ///
+    /// <para>It is a constant here rather than in the caller because it is a property of the model
+    /// this class fits, and the figure it guards is the one this class returns.</para>
+    /// </summary>
+    public const double MaxFitRmsDeg = 5.0;
+
+    /// <summary>
     /// Fits the ramp to a measured phase and returns the ε left on it, or null where there is
     /// nothing to fit — too few usable bins, or a design matrix a band that narrow cannot
     /// condition.

@@ -421,6 +421,49 @@ public class SoundCardDeviceTests
         Assert.True(pa.WarmUpStream.Disposed, "the throwaway stream was left open");
     }
 
+    /// <summary>
+    /// <b>A refused start is retried, not reported as a lost device.</b> Measured 2026-11-12 on a
+    /// MOTU M4 / Topping D50 III pair over WASAPI exclusive, 100 % reproducible: every sample-rate
+    /// change lost the device, because <c>Pa_OpenStream</c> succeeded and <c>Pa_StartStream</c>
+    /// came back <c>paUnanticipatedHostError</c> 5 ms later — the previous client had not given
+    /// the device back yet. A same-rate reopen was always fine.
+    ///
+    /// <para>The open has to be retried along with the start, which is what this asserts through
+    /// <c>OpenCount</c>: PortAudio's contract after a failed start is to close the stream, so
+    /// re-calling Start on the same handle is not a retry, it is undefined.</para>
+    /// </summary>
+    [Fact]
+    public async Task StreamAsync_WhenTheDriverRefusesTheFirstStarts_ReopensRatherThanLosingTheDevice()
+    {
+        var (device, pa) = Build();
+        pa.NextStream.StartFailuresRemaining = 2;
+
+        await device.ConnectAsync(CancellationToken.None);
+
+        var blocks = await TakeAsync(device, count: 2);
+
+        Assert.Equal(2, blocks.Count);
+        Assert.True(pa.NextStream.Started, "the stream never started");
+        Assert.Equal(3, pa.NextStream.StartAttempts);
+
+        // One warm-up open plus three of the real stream: each refused start is answered by a
+        // close and a fresh open, which is the half a Start-only retry would get wrong.
+        Assert.Equal(4, pa.OpenCount);
+    }
+
+    /// <summary>And a device that is genuinely gone still fails, rather than being retried for ever.</summary>
+    [Fact]
+    public async Task StreamAsync_WhenTheDriverNeverStarts_FailsRatherThanRetryingForEver()
+    {
+        var (device, pa) = Build();
+        pa.NextStream.StartFailuresRemaining = 99;
+
+        await device.ConnectAsync(CancellationToken.None);
+
+        await Assert.ThrowsAnyAsync<Exception>(async () => await TakeAsync(device, count: 1));
+        Assert.True(pa.NextStream.StartAttempts <= 8, $"asked {pa.NextStream.StartAttempts} times");
+    }
+
     [Fact]
     public async Task StreamAsync_WaitingForTheFirstBuffer_IsNotCountedAsADroppedChunk()
     {

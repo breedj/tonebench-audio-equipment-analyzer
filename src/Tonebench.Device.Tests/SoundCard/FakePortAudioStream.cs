@@ -61,8 +61,27 @@ internal sealed class FakePortAudioStream : IPortAudioStream
         }
     }
 
+    /// <summary>
+    /// How many more times <see cref="Start"/> throws before it works, as a WASAPI-exclusive
+    /// device does while the previous client still holds it — see
+    /// <c>SoundCardDevice.OpenAndStart</c> and the bench measurement in its remarks, where
+    /// <c>Pa_OpenStream</c> succeeded and <c>Pa_StartStream</c> was refused 5 ms later.
+    /// </summary>
+    public int StartFailuresRemaining { get; set; }
+
+    public int StartAttempts { get; private set; }
+
     public void Start()
     {
+        StartAttempts++;
+        if (StartFailuresRemaining > 0)
+        {
+            StartFailuresRemaining--;
+            Calls.Add("start-refused");
+            // paUnanticipatedHostError, which is what the real driver answered with.
+            throw new PortAudioException("Could not start the audio stream: Unanticipated host error", -9999);
+        }
+
         Calls.Add("start");
         Started = true;
     }

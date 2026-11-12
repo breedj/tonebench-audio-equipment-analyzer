@@ -424,7 +424,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         // charge every run three seconds for nothing.
         int settleFrames = reclocked ? StreamStartSettleFrames(config.SampleRateHz) : 0;
 
-        IPortAudioStream stream = _portAudio.OpenStream(request, TransferFrames);
+        IPortAudioStream stream = OpenAndStart(request, config.SampleRateHz);
         // The stream's own lifecycle, at Debug: a reopened stream and a reused one behave
         // differently and nothing else in the log distinguishes them.
         // Information, not Debug: these two figures are the size of PortAudio's own ring buffers,
@@ -605,7 +605,9 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         try
         {
-            stream.Start();
+            // The stream arrives started — see OpenAndStart, which owns that because a failed
+            // Pa_StartStream has to be answered by closing and reopening, and this method is given
+            // a stream it does not own the lifetime of.
 
             // Priming: as much audio ahead of the DAC as the ring PortAudio actually allocated will
             // hold, in whole transfers.
@@ -1100,6 +1102,10 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
                 warmUp.Stop();
             }
 
+            // Closing is not releasing — see DeviceReleaseSettle. Without this the real open
+            // followed about 60 ms later and its Start was refused by the driver every time.
+            Thread.Sleep(DeviceReleaseSettle);
+
             _logger.LogDebug(
                 "Sound card re-clocked to {Rate:0} Hz with a throwaway stream before opening the real one.",
                 sampleRateHz);
@@ -1115,6 +1121,90 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
     /// <summary>How long the throwaway stream is left running for the driver to settle on the new rate.</summary>
     private static readonly TimeSpan ReclockSettle = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// How long to leave the device alone after closing a stream on it, before opening the next.
+    ///
+    /// <para>Closing is not releasing. Under WASAPI <b>exclusive</b> the device belongs to one
+    /// client, and the audio engine hands it back some time after that client lets go — measured
+    /// 2026-11-12 on a MOTU M4 / Topping D50 III pair, 60 ms was not enough. This is the gap
+    /// between the throwaway re-clock stream and the real one, and it exists so the first attempt
+    /// below normally succeeds; the retry is the backstop, not the mechanism.</para>
+    /// </summary>
+    private static readonly TimeSpan DeviceReleaseSettle = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Waits between attempts at opening and starting the stream. Four attempts, ~1.5 s in all,
+    /// which is small against the 2 s re-clock settle a rate change is already paying for.
+    /// </summary>
+    private static readonly TimeSpan[] OpenRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(150),
+        TimeSpan.FromMilliseconds(400),
+        TimeSpan.FromMilliseconds(900),
+    ];
+
+    /// <summary>
+    /// Opens the stream <b>and starts it</b>, retrying the pair when the device is not ready.
+    ///
+    /// <para><b>The two have to be one step, and that is the whole point.</b> PortAudio's contract
+    /// after a failed <c>Pa_StartStream</c> is to close the stream — the handle is open but the
+    /// stream is not running, and there is no supported way to start it a second time — so a retry
+    /// that only re-called Start would be retrying on a handle that has to go. Hence open, start,
+    /// and on failure dispose and begin again.</para>
+    ///
+    /// <para><b>Measured, 2026-11-12</b>, MOTU M4 in / Topping D50 III out, WASAPI exclusive,
+    /// 100 % reproducible: <i>every</i> sample-rate change lost the device.
+    /// <c>Pa_OpenStream</c> succeeded and <c>Pa_StartStream</c> returned
+    /// <c>paUnanticipatedHostError</c> 5 ms later — and this after the throwaway re-clock stream
+    /// had itself opened and started at that same rate moments before, which is what rules out the
+    /// rate and points at the handover. A same-rate reopen was always fine, and so was the first
+    /// open after a reconnect; what failed was the third stream in quick succession. The rate
+    /// probe cannot see any of it, <c>Pa_IsFormatSupported</c> being a question about a format
+    /// rather than an open.</para>
+    ///
+    /// <para>Each attempt is logged at Debug and the last failure is rethrown, so a device that is
+    /// genuinely gone still fails — and says how many times it was asked.</para>
+    /// </summary>
+    private IPortAudioStream OpenAndStart(SoundCardStreamRequest request, double sampleRateHz)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            IPortAudioStream? stream = null;
+            try
+            {
+                stream = _portAudio.OpenStream(request, TransferFrames);
+                stream.Start();
+                if (attempt > 0)
+                {
+                    _logger.LogDebug(
+                        "Sound card stream opened at {Rate:0} Hz on attempt {Attempt}.",
+                        sampleRateHz, attempt + 1);
+                }
+
+                return stream;
+            }
+            catch (Exception ex) when (attempt < OpenRetryDelays.Length)
+            {
+                // Dispose before waiting, not after: the point of the wait is to give the device
+                // back, and it cannot be given back while this handle is still holding it.
+                stream?.Dispose();
+
+                _logger.LogDebug(
+                    ex,
+                    "Opening the sound card stream at {Rate:0} Hz failed (attempt {Attempt} of {Total}); waiting {Delay:0} ms for the device to be released.",
+                    sampleRateHz, attempt + 1, OpenRetryDelays.Length + 1,
+                    OpenRetryDelays[attempt].TotalMilliseconds);
+
+                Thread.Sleep(OpenRetryDelays[attempt]);
+            }
+            catch
+            {
+                stream?.Dispose();
+                throw;
+            }
+        }
+    }
 
     private static void RequireSupportedRange(IReadOnlyList<double> ranges, double dbv)
     {

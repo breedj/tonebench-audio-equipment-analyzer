@@ -523,6 +523,25 @@
     @apply text-neutral-600 dark:text-neutral-300;
   }
 
+  /*
+   * One direction's rows, read as a block: the card, the device on it, and the channel pair within
+   * that device. Spacing and a captioned rule rather than a box, deliberately — a nested box would
+   * need its own horizontal padding, which would pull the grouped rows' label column out of line
+   * with the ungrouped rows below them (Sample rates, Lowest usable frequency), and a dialog whose
+   * labels do not share one left edge looks broken in a way a missing border does not.
+   */
+  .sc-group {
+    @apply mt-2.5 first:mt-0;
+  }
+  /*
+   * The rule carries its own hairline, so the row under it must not draw a second one. Keyed on
+   * the caption rather than on :first-child, because the first row is a <div> when the device is
+   * fixed and a <label> when it is a dropdown, and no type selector matches both.
+   */
+  .sc-group-head + * {
+    @apply border-t-0;
+  }
+
   /* An action button in its section's own accent — "Generate sine" in the output step's orange,
      "Estimate peak input" in the input step's green. The tone is set at the call site from the
      `--kind-*` pair, because which section it belongs to is what decides it. */

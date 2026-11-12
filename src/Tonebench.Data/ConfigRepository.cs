@@ -501,6 +501,24 @@ public sealed record SoundCardConfig(
     double? ClockDriftPpm = null,
     /// <summary>The spread of the readings it was averaged from, in ppm; null from a single reading.</summary>
     double? ClockDriftSpreadPpm = null,
+    // **The two figures that say whether the stored drift is worth believing**, kept beside it for
+    // the reason the stamp below is: a number with no quality beside it cannot be re-judged later,
+    // and this one goes on to *change* every chirp measurement. The dialog that measured them shows
+    // all four; without these two, reopening the sound-card dialog a week later shows a bare ppm
+    // figure and no way to tell a settled run from a scattered one.
+    //
+    // Sigma is the robust scatter of one reading (ClockDriftStatus.SigmaPpm) and is what the
+    // stability verdict keys on; the spread above is raw max-minus-min and is the only thing that
+    // reveals an outlier at all. Read together they separate "one bad record" from "genuinely
+    // unsettled" -- which is why both are stored and neither replaces the other.
+    double? ClockDriftSigmaPpm = null,
+    /// <summary>
+    /// The <b>weakest</b> record's tone-against-everything-else margin over the run, in dB — not
+    /// the best and not the mean. A run whose worst record was marginal is a run where a cable was
+    /// half out for part of it, which is exactly the fault a summary of the good records hides.
+    /// Matches what the drift dialog shows while measuring.
+    /// </summary>
+    double? ClockDriftToneMarginDb = null,
     DateTimeOffset? ClockDriftMeasuredUtc = null,
     // **Which two devices it was measured between**, for the same reason the full scales carry
     // theirs: a figure measured between one pair says nothing about another, and this one is used
@@ -587,10 +605,17 @@ public sealed record SoundCardConfig(
     /// applied where their figures are produced: a stamp written anywhere later is a claim rather
     /// than a fact.
     /// </summary>
-    public SoundCardConfig StampClockDrift(double ppm, double? spreadPpm, DateTimeOffset measuredUtc) => this with
+    public SoundCardConfig StampClockDrift(
+        double ppm,
+        double? spreadPpm,
+        double? sigmaPpm,
+        double? toneMarginDb,
+        DateTimeOffset measuredUtc) => this with
     {
         ClockDriftPpm = ppm,
         ClockDriftSpreadPpm = spreadPpm,
+        ClockDriftSigmaPpm = sigmaPpm,
+        ClockDriftToneMarginDb = toneMarginDb,
         ClockDriftMeasuredUtc = measuredUtc,
         ClockDriftInputHostApi = InputHostApi,
         ClockDriftInputDeviceName = InputDeviceName,

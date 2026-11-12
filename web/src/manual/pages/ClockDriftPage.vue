@@ -10,9 +10,19 @@
     </p>
 
     <p>
-      It is reached from the <strong>Sound card</strong> dialog: pick two different cards, and the
-      amber two-clocks note gains a <strong>Measure the drift</strong> button. On one card there is
-      nothing to compare, so the button is not offered.
+      It is reached from the <strong>Sound card</strong> dialog: pick two different cards and a
+      <strong>Clock drift</strong> panel appears between <em>Device</em> and <em>Full scale
+      output</em>, with a <strong>Measure the drift</strong> button. On one card there is one clock
+      and nothing to compare, so the panel is not shown at all.
+    </p>
+    <p>
+      Once the test has run, that panel also keeps the last reading: the drift itself, the
+      <strong>spread</strong>, <strong>σ</strong> and the <strong>tone margin</strong> — the same
+      four figures the test shows while it is running — plus when it was taken and which two devices
+      it was measured between. They are kept together because no one of them can be read alone —
+      see <em>Readings</em> below — and they are kept at all because the figure goes on to change
+      every chirp measurement on the bench: a bare ppm number with no scatter beside it cannot be
+      judged a week later.
     </p>
 
     <h3>What it does</h3>

@@ -86,6 +86,17 @@ const { showPage } = useManual()
       left relative to it. The generator and the cabling divide out, and the reported delay becomes
       the DUT's own — but nothing on the analyzer's input side is cancelled.
     </p>
+    <p class="manual-callout">
+      Under this mode the app checks that the right input <em>is</em> carrying something, and says
+      underneath how much signal is arriving against that channel's own noise. Dividing by an
+      unconnected input produces a gated response, a phase, a group delay and a delay reading that
+      all look plausible and mean nothing, so a reading below about 20 dB turns amber and names both
+      ways out. A real reference tap reads 60 dB and better. The frequency-response page explains
+      <button type="button" class="manual-link" @click="showPage('frequency-response')">
+        how that is measured
+      </button>
+      and what it cannot catch.
+    </p>
     <p>
       <strong>Stored loopback calibration</strong> divides out a previously captured impulse response
       of the analyzer itself. Capture one with <em>Capture new loopback…</em>: patch the generator

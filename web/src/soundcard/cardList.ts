@@ -426,18 +426,56 @@ export function clampChannelOffset(offset: number, channelCount: number): number
  * (<c>SoundCardEnumerator.Find</c>), so a card under a now-hidden host API still resolves and still
  * works — but it would not appear in its own dropdown, which reads as the card having vanished. The
  * dialog turns Advanced on for that case instead.</p>
+ *
+ * <p><b>Both directions, and the separate-mode collapse</b> — this asked only about the input
+ * against the plain list until 2026-11-12, and on a two-card bench that is the wrong list. The
+ * default list keeps <i>one entry per interface under its best host API</i>, so a MOTU appears only
+ * as ASIO; a bench that deliberately runs it under WASAPI (which is what two ASIO drivers force,
+ * since one stream cannot span two of them) was told on every open that its saved card needed
+ * Advanced, and the checkbox came up ticked for ever. It is reachable — the input dropdown is built
+ * collapsed towards the output's host API and offers it — so the answer was simply taken from a
+ * list that is not the one on screen. Reported 2026-11-12.</p>
  */
 export function savedCardNeedsAdvanced(
   inputs: readonly SoundCardOption[],
   outputs: readonly SoundCardOption[],
-  hostApi: string,
-  deviceName: string,
+  inputHostApi: string,
+  inputDeviceName: string,
+  outputHostApi = '',
+  outputDeviceName = '',
 ): boolean {
-  if (!hostApi && !deviceName) return false
+  const devices = [...inputs, ...outputs]
+  const find = (hostApi: string, name: string) =>
+    hostApi || name ? devices.find((o) => o.hostApi === hostApi && o.name === name) : undefined
 
-  const device = [...inputs, ...outputs].find((o) => o.hostApi === hostApi && o.name === deviceName)
-  if (!device) return false
+  const inputDevice = find(inputHostApi, inputDeviceName)
+  const outputDevice = find(outputHostApi, outputDeviceName)
+  if (!inputDevice && !outputDevice) return false
 
-  const key = keyOf(device.hostApi, device.interfaceName)
-  return !buildCards(inputs, outputs, false).some((c) => c.key === key)
+  const inputCardKey = inputDevice ? keyOf(inputDevice.hostApi, inputDevice.interfaceName) : ''
+  const outputCardKey = outputDevice ? keyOf(outputDevice.hostApi, outputDevice.interfaceName) : ''
+
+  // One card, or only one direction saved: the ordinary collapsed list is what that dropdown shows.
+  if (!inputCardKey || !outputCardKey || inputCardKey === outputCardKey) {
+    const key = inputCardKey || outputCardKey
+    return !buildCards(inputs, outputs, false).some((c) => c.key === key)
+  }
+
+  // Separate devices, and this is the half the single-direction version got wrong. Each dropdown is
+  // built collapsed towards the *other* side's host API (see cardsFor in the dialog, and
+  // collapseToBestApi's preferHostApi), so asking the plain list whether a saved card is reachable
+  // answers a question about a list that is not on screen.
+  const reachable = (
+    devicesForSide: readonly SoundCardOption[],
+    cardKey: string,
+    preferHostApi: string,
+  ) =>
+    cardsOffering(buildCards(inputs, outputs, false, preferHostApi), devicesForSide).some(
+      (c) => c.key === cardKey,
+    )
+
+  return (
+    !reachable(inputs, inputCardKey, outputDevice!.hostApi) ||
+    !reachable(outputs, outputCardKey, inputDevice!.hostApi)
+  )
 }

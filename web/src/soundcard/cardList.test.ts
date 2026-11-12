@@ -188,6 +188,43 @@ describe('savedCardNeedsAdvanced', () => {
     expect(savedCardNeedsAdvanced(inputs, outputs, '', '')).toBe(false)
     expect(savedCardNeedsAdvanced(inputs, outputs, 'ASIO', 'Focusrite USB ASIO')).toBe(false)
   })
+
+  /**
+   * **The bug this pair of cases exists for**, reported 2026-11-12: a two-card bench came up with
+   * Advanced ticked on every open and no way to untick it.
+   *
+   * The MOTU under WASAPI really is collapsed away from the *plain* default list — the case two
+   * tests above — but a separate-devices bench never sees that list. Each dropdown is built
+   * collapsed towards the other side's host API, so with a WASAPI output chosen the input dropdown
+   * offers the MOTU under WASAPI and the saved card is reachable without Advanced at all. Asking
+   * the plain list answered a question about a list that is not on screen.
+   */
+  it('is false for a two-card WASAPI pairing, where each dropdown collapses towards the other side', () => {
+    expect(
+      savedCardNeedsAdvanced(
+        inputs,
+        outputs,
+        'Windows WASAPI',
+        'In 1-2 (MOTU M Series)',
+        'Windows WASAPI',
+        'Speakers (Realtek(R) Audio)',
+      ),
+    ).toBe(false)
+  })
+
+  /** And the output is checked too, which the single-direction version never did. */
+  it('is true when only the output needs the full list', () => {
+    expect(
+      savedCardNeedsAdvanced(
+        inputs,
+        outputs,
+        'ASIO',
+        'MOTU M Series',
+        'Windows WDM-KS',
+        'Out 1-2 (Out 1-2)',
+      ),
+    ).toBe(true)
+  })
 })
 
 describe('reselectCardKey', () => {

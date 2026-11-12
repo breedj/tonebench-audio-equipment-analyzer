@@ -173,10 +173,42 @@ function cardKeyFor(hostApi: string, deviceName: string) {
 const advanced = ref(false)
 
 /**
- * The clock-drift test, opened from the two-clocks note. Its own dialog rather than another
+ * The clock-drift test, opened from the Clock drift panel. Its own dialog rather than another
  * section: it is a measurement with a chart, and this dialog is already the longest in the app.
  */
 const clockDriftOpen = ref(false)
+
+/**
+ * What the last drift run left on this card, for the Clock drift panel to show.
+ *
+ * <p>Null until the test has been run. <b>Provenance, not a decision</b> — whether a chirp
+ * measurement may actually be corrected is the server's answer on <c>/api/device/ranges</c>
+ * (<c>ClockDriftCorrection.ForBench</c> weighs four separate conditions), and nothing here
+ * re-derives it. This exists because the four figures lived only inside the drift dialog and were
+ * gone the moment it closed: a week later the bench had a stored ppm number and no way to judge
+ * it.</p>
+ */
+const storedDrift = computed(() => {
+  const c = config.value
+  if (!c || c.clockDriftPpm === null || c.clockDriftPpm === undefined) return null
+
+  const input = c.clockDriftInputDeviceName ?? ''
+  const output = c.clockDriftOutputDeviceName ?? ''
+  return {
+    ppm: c.clockDriftPpm,
+    spreadPpm: c.clockDriftSpreadPpm ?? null,
+    sigmaPpm: c.clockDriftSigmaPpm ?? null,
+    toneMarginDb: c.clockDriftToneMarginDb ?? null,
+    when: c.clockDriftMeasuredUtc ? new Date(c.clockDriftMeasuredUtc).toLocaleString() : 'date not recorded',
+    // Both names or neither: half a pairing says less than nothing about which bench it describes.
+    between: input && output ? `${output} → ${input}` : '',
+  }
+})
+
+/** A stored figure, or a dash. Matches the drift dialog's own `fmt`, so the two cannot disagree. */
+function driftFigure(value: number | null, digits: number, unit: string) {
+  return value === null || !Number.isFinite(value) ? '—' : `${value.toFixed(digits)}${unit}`
+}
 
 /**
  * The cards the machine has, each a host API and an interface within it.
@@ -545,6 +577,61 @@ const modeNote = computed(() => {
   }
 })
 
+/**
+ * Brings the form into line with the device list that is in hand, and re-probes.
+ *
+ * <p>Shared by opening the dialog and by <b>Refresh</b>, which is the whole point: until
+ * 2026-11-12 Refresh replaced the inventory and did nothing else, so the card dropdown picked up a
+ * card that had appeared while every <i>derived</i> piece of state stayed as it was — Advanced,
+ * the three card keys, the two device keys, and the probe. A device that had gone left
+ * <c>form.inputKey</c> pointing at nothing, which renders as a blank Input row; a device that had
+ * arrived was not selected; and the sample rates and any refusal still described the previous
+ * list. Reopening the dialog ran all of this and so appeared to be the only thing that worked,
+ * which is exactly how it was reported.</p>
+ *
+ * <p>It reads <c>config</c> rather than the form, so it is idempotent: run twice with nothing
+ * plugged or unplugged it writes the same values, and Refresh therefore cannot move a selection
+ * the user has just made away from what was saved any more than reopening does.</p>
+ */
+async function reconcileWithDevices() {
+  if (config.value) {
+    // A card saved under a host API the default list hides still resolves on the server — the
+    // config stores names, not indices — but it would be missing from its own dropdown, which
+    // reads as the card having vanished. Show the full list for that case instead.
+    advanced.value = savedCardNeedsAdvanced(
+      inventory.value?.inputs ?? [],
+      inventory.value?.outputs ?? [],
+      config.value.inputHostApi,
+      config.value.inputDeviceName,
+      config.value.outputHostApi,
+      config.value.outputDeviceName,
+    )
+    const savedInputCard = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
+    const savedOutputCard = cardKeyFor(config.value.outputHostApi, config.value.outputDeviceName)
+
+    // Derived, never stored, so a saved configuration cannot contradict its own checkbox. Two
+    // different cards is separate mode; so is a bench with only one direction saved, which is
+    // exactly how a capture-only ADC or a playback-only DAC comes back.
+    form.separateDevices = savedInputCard !== savedOutputCard
+    form.cardKey = savedInputCard || savedOutputCard
+    form.inputCardKey = savedInputCard
+    form.outputCardKey = savedOutputCard
+    form.inputKey = keyOf(config.value.inputHostApi, config.value.inputDeviceName)
+    form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
+    form.inputChannelOffset = config.value.inputChannelOffset
+    form.outputChannelOffset = config.value.outputChannelOffset
+    form.minStimulusFrequencyHz = config.value.minStimulusFrequencyHz
+    form.streamStartSettleMs = config.value.streamStartSettleMs
+  }
+  await reprobe()
+}
+
+/** Re-read the device list, then put the form back in step with it. */
+async function refreshDevices() {
+  await loadDevices(true)
+  await reconcileWithDevices()
+}
+
 watch(
   () => props.open,
   async (open) => {
@@ -555,34 +642,7 @@ watch(
     await Promise.all([load(true), loadDevices(), syncCalibrationState()])
     stopLevels?.()
     stopLevels = watchLevels()
-    if (config.value) {
-      // A card saved under a host API the default list hides still resolves on the server — the
-      // config stores names, not indices — but it would be missing from its own dropdown, which
-      // reads as the card having vanished. Show the full list for that case instead.
-      advanced.value = savedCardNeedsAdvanced(
-        inventory.value?.inputs ?? [],
-        inventory.value?.outputs ?? [],
-        config.value.inputHostApi,
-        config.value.inputDeviceName,
-      )
-      const savedInputCard = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
-      const savedOutputCard = cardKeyFor(config.value.outputHostApi, config.value.outputDeviceName)
-
-      // Derived, never stored, so a saved configuration cannot contradict its own checkbox. Two
-      // different cards is separate mode; so is a bench with only one direction saved, which is
-      // exactly how a capture-only ADC or a playback-only DAC comes back.
-      form.separateDevices = savedInputCard !== savedOutputCard
-      form.cardKey = savedInputCard || savedOutputCard
-      form.inputCardKey = savedInputCard
-      form.outputCardKey = savedOutputCard
-      form.inputKey = keyOf(config.value.inputHostApi, config.value.inputDeviceName)
-      form.outputKey = keyOf(config.value.outputHostApi, config.value.outputDeviceName)
-      form.inputChannelOffset = config.value.inputChannelOffset
-      form.outputChannelOffset = config.value.outputChannelOffset
-      form.minStimulusFrequencyHz = config.value.minStimulusFrequencyHz
-      form.streamStartSettleMs = config.value.streamStartSettleMs
-    }
-    await reprobe()
+    await reconcileWithDevices()
   },
   { immediate: true },
 )
@@ -822,7 +882,7 @@ function mvRms(value: number | null | undefined) {
               class="inline-flex h-[30px] items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-100 px-2.5 text-xs font-medium hover:bg-neutral-200 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:bg-neutral-700"
               :disabled="devicesLoading"
               title="Re-read the device list. A newly plugged ASIO interface needs the app restarted — PortAudio reads its list once at startup."
-              @click="loadDevices(true)"
+              @click="refreshDevices"
             >
               {{ devicesLoading ? 'Refreshing…' : 'Refresh' }}
             </button>
@@ -830,6 +890,19 @@ function mvRms(value: number | null | undefined) {
         </div>
 
         <div class="sc-body">
+        <!-- Grouped by direction. The card, the device on it and the channel pair within
+             that device are three answers about one side of the bench, and on a two-card bench
+             they are checked one side at a time -- which the old order made impossible, since the
+             two card dropdowns sat together at the top and the two device rows four rows below
+             them. Asked for 2026-11-12. The rule-and-caption is the app's own group idiom
+             (.tb-rule / .tb-group), already used by every settings panel.
+
+             In one-card mode the card row keeps its "Sound card" label and stays in the Input
+             group: there is no second card row to pair it with, and that card really is the
+             input's. -->
+        <div class="sc-group">
+          <div class="tb-rule sc-group-head"><span class="tb-group">Input</span></div>
+
         <!-- The card first, the channels second. Picking the interface is what guarantees both
              directions are one piece of hardware, and therefore one clock: two cards run on two,
              and the drift between them is reported as DUT response rather than as a fault. -->
@@ -898,83 +971,6 @@ function mvRms(value: number | null | undefined) {
           </span>
         </div>
 
-        <!-- Only in separate mode: in the ordinary one the output's card is the input's, and a
-             second dropdown that can only ever agree with the first is a control with no state. -->
-        <label v-if="form.separateDevices" class="sc-row">
-          <span class="sc-label">Output card</span>
-          <!-- Memoised for the reason the input's is — see the comment there. -->
-          <select
-            v-model="form.outputCardKey"
-            v-memo="[outputCards, form.outputCardKey]"
-            class="tb-input"
-          >
-            <option value="">—</option>
-            <option v-for="c in outputCards" :key="c.key" :value="c.key">
-              {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
-            </option>
-          </select>
-        </label>
-
-        <!-- What the chosen pair costs: two clocks, or half a bench. Advisory, never a refusal —
-             a bench with no other option must stay usable. See modeNote for the wording and why. -->
-        <p
-          v-if="modeNote"
-          class="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200"
-        >
-          {{ modeNote }}
-          <!-- The note states the problem without a number; this measures it. Inside the note
-               rather than beside it, because the button means nothing without the sentence. Only
-               where two cards are really chosen: on one card there are no two clocks to compare
-               and the test would read zero by construction. -->
-          <button
-            v-if="pairing === 'separate'"
-            type="button"
-            class="btn-chip mt-2"
-            :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
-            :disabled="!settingsInEffect"
-            :title="
-              settingsInEffect
-                ? 'Plays a tone on the output card and reads it back on the input card.'
-                : 'These settings are not in effect yet, so there is nothing to measure.'
-            "
-            @click="clockDriftOpen = true"
-          >
-            Measure the drift
-          </button>
-        </p>
-
-        <!-- The calibration's own state, here rather than beside the two steps: changing a
-             dropdown above is what makes a stored full scale stale, so the complaint belongs where
-             the cause is. See calibrationNotices. -->
-        <p
-          v-for="notice in calibrationNotices"
-          :key="notice.action + notice.detail"
-          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
-        >
-          <!-- What to do first, on its own line: asked for 2026-11-11, and it is the right way
-               round. The reason is two clauses of hardware names, and a reader who has already
-               decided to act should not have to read to the end of them to find out what. -->
-          <strong class="block">{{ notice.action }}</strong>
-          {{ notice.detail }}
-        </p>
-
-        <!-- What a host API that offered nothing reported. Under the dropdown because it is about
-             that list: an empty one otherwise says only "no cards", which is the same picture
-             whether the machine has no interface, the driver declined to start, or the driver
-             started and reported no channels. See hostApiNotes for the rule and the reasoning. -->
-        <p
-          v-for="note in apiNotes"
-          :key="note.hostApi"
-          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
-        >
-          {{ note.text }}
-          <!-- Its own span, dimmed: the first sentence is what the host API reported and this is
-               what to do about it. Not a trailing mustache inside a <template>, which is how this
-               was first written — Vue condenses away the leading space of an element's children,
-               so the two sentences ran together with no gap. -->
-          <span v-if="note.hint" class="opacity-80">{{ note.hint }}</span>
-        </p>
-
         <!-- One device is not a choice, so it is not a dropdown -- but it is still the answer to
              "which hardware is being driven", and hiding the row entirely left that answer
              nowhere on screen. Asked on 2026-11-11, with a G6 selected whose single WASAPI output
@@ -1015,6 +1011,28 @@ function mvRms(value: number | null | undefined) {
           </select>
         </label>
 
+        </div>
+
+        <div class="sc-group">
+          <div class="tb-rule sc-group-head"><span class="tb-group">Output</span></div>
+
+        <!-- Only in separate mode: in the ordinary one the output's card is the input's, and a
+             second dropdown that can only ever agree with the first is a control with no state. -->
+        <label v-if="form.separateDevices" class="sc-row">
+          <span class="sc-label">Output card</span>
+          <!-- Memoised for the reason the input's is — see the comment there. -->
+          <select
+            v-model="form.outputCardKey"
+            v-memo="[outputCards, form.outputCardKey]"
+            class="tb-input"
+          >
+            <option value="">—</option>
+            <option v-for="c in outputCards" :key="c.key" :value="c.key">
+              {{ c.interfaceName }} — {{ c.hostApi }}{{ c.duplex ? ' (full duplex)' : '' }}
+            </option>
+          </select>
+        </label>
+
         <div v-if="cardOutputs.length === 1" class="sc-row">
           <span class="sc-label">Output</span>
           <span class="text-neutral-600 dark:text-neutral-300">{{ cardOutputs[0]!.name }}</span>
@@ -1047,6 +1065,40 @@ function mvRms(value: number | null | undefined) {
             <option v-for="pair in outputPairs" :key="pair.offset" :value="pair.offset">{{ pair.label }}</option>
           </select>
         </label>
+
+        </div>
+
+        <!-- The calibration's own state, here rather than beside the two steps: changing a
+             dropdown above is what makes a stored full scale stale, so the complaint belongs where
+             the cause is. See calibrationNotices. -->
+        <p
+          v-for="notice in calibrationNotices"
+          :key="notice.action + notice.detail"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          <!-- What to do first, on its own line: asked for 2026-11-11, and it is the right way
+               round. The reason is two clauses of hardware names, and a reader who has already
+               decided to act should not have to read to the end of them to find out what. -->
+          <strong class="block">{{ notice.action }}</strong>
+          {{ notice.detail }}
+        </p>
+
+        <!-- What a host API that offered nothing reported. Under the dropdown because it is about
+             that list: an empty one otherwise says only "no cards", which is the same picture
+             whether the machine has no interface, the driver declined to start, or the driver
+             started and reported no channels. See hostApiNotes for the rule and the reasoning. -->
+        <p
+          v-for="note in apiNotes"
+          :key="note.hostApi"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ note.text }}
+          <!-- Its own span, dimmed: the first sentence is what the host API reported and this is
+               what to do about it. Not a trailing mustache inside a <template>, which is how this
+               was first written — Vue condenses away the leading space of an element's children,
+               so the two sentences ran together with no gap. -->
+          <span v-if="note.hint" class="opacity-80">{{ note.hint }}</span>
+        </p>
 
 <!-- The probed rates, which are the pairing's and not either card's -- see rateSummary for
              why this row came back. It sits here, immediately above the refusal that replaces it
@@ -1161,6 +1213,90 @@ function mvRms(value: number | null | undefined) {
         <p v-if="saved" class="text-[11px] text-emerald-700 dark:text-emerald-400">
           Selected — the card is open and ready to calibrate.
         </p>
+        </div>
+      </section>
+
+      <!-- 1b. Clock drift ------------------------------------------------------------- -->
+      <!-- Its own panel since 2026-11-12, where it used to be a callout inside Device. Two
+           reasons, and the second is what asked for it. It is not a property of the *picker* --
+           nothing above it changes what it says except which two cards are chosen -- and it now
+           carries four stored figures, which is a readout rather than a notice. A paragraph that
+           grows a four-column grid has stopped being a paragraph.
+
+           Rendered only where there are two cards. On one card there is one clock, there is
+           nothing to measure, and the test would read zero by construction; an empty panel saying
+           so would be a section about a problem this bench does not have. -->
+      <section v-if="pairing === 'separate'" class="sc-section">
+        <div class="sc-head">
+          <PanelIcon icon="stopwatch" tone="violet" />
+          <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Clock drift</h3>
+          <button
+            type="button"
+            class="btn-chip"
+            :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
+            :disabled="!settingsInEffect"
+            :title="
+              settingsInEffect
+                ? 'Plays a tone on the output card and reads it back on the input card.'
+                : 'These settings are not in effect yet, so there is nothing to measure.'
+            "
+            @click="clockDriftOpen = true"
+          >
+            {{ storedDrift ? 'Measure again' : 'Measure the drift' }}
+          </button>
+        </div>
+
+        <div class="sc-body">
+          <!-- What two cards cost, in the words the Device section used to carry. Kept verbatim:
+               it is the sentence the two chirp screens' correction checkbox refers back to. -->
+          <p v-if="modeNote" class="pt-1 text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
+            {{ modeNote }}
+          </p>
+
+          <!-- The last run's own figures, which until now existed only inside the drift dialog and
+               so were gone the moment it closed. All four together, because no one of them can be
+               read alone: the drift is the answer, the spread is the only thing that reveals an
+               outlier, sigma says whether an ordinary reading is scattered, and the tone margin
+               says whether any of it was measured on a signal worth believing. Asked for
+               2026-11-12. -->
+          <div v-if="storedDrift" class="sc-row">
+            <span class="sc-label">Last measured</span>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] sm:grid-cols-4">
+              <div>
+                <span class="text-neutral-500 dark:text-neutral-400">Drift</span><br />
+                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.ppm, 2, ' ppm') }}</span>
+              </div>
+              <div>
+                <span class="text-neutral-500 dark:text-neutral-400">Spread</span><br />
+                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.spreadPpm, 2, ' ppm') }}</span>
+              </div>
+              <div>
+                <span class="text-neutral-500 dark:text-neutral-400">&#963;</span><br />
+                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.sigmaPpm, 3, ' ppm') }}</span>
+              </div>
+              <div>
+                <span class="text-neutral-500 dark:text-neutral-400">Tone margin</span><br />
+                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.toneMarginDb, 1, ' dB') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Provenance, not a decision: whether a chirp may actually be corrected is the
+               server's answer on /api/device/ranges, and nothing here re-derives it. Naming the
+               two devices is what lets a reader see for themselves that a figure describes a
+               pairing they have since changed. -->
+          <div v-if="storedDrift" class="sc-row">
+            <span class="sc-label">Measured</span>
+            <span class="text-[12px] text-neutral-600 dark:text-neutral-300">
+              {{ storedDrift.when }}<template v-if="storedDrift.between"> &#183; {{ storedDrift.between }}</template>
+            </span>
+          </div>
+
+          <p v-else class="pt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+            Not measured on this bench yet. Until it is, the two chirp screens offer no correction
+            and a sweep's phase, group delay and impulse response carry whatever the two clocks
+            differ by.
+          </p>
         </div>
       </section>
 

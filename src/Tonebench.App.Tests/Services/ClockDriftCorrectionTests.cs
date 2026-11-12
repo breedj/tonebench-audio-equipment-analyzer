@@ -226,7 +226,7 @@ public class ClockDriftCorrectionTests
         var stamped = new SoundCardConfig(
                 InputHostApi: "ASIO", InputDeviceName: "Line In (G6)",
                 OutputHostApi: "ASIO", OutputDeviceName: "Main Out (M4)")
-            .StampClockDrift(-104.038, 0.33, measured);
+            .StampClockDrift(-104.038, 0.33, 0.019, 41.2, measured);
 
         Assert.Equal(-104.038, stamped.ClockDriftPpm);
         Assert.Equal(0.33, stamped.ClockDriftSpreadPpm);
@@ -235,6 +235,33 @@ public class ClockDriftCorrectionTests
         Assert.Equal("Main Out (M4)", stamped.ClockDriftOutputDeviceName);
         Assert.True(stamped.ClockDriftMatchesPairing);
         Assert.True(stamped.IsValid);
+    }
+
+    /// <summary>
+    /// <b>The quality of the figure is stored beside it</b>, which it was not until 2026-11-12.
+    /// The drift is what gets applied; sigma says whether an ordinary reading was scattered, the
+    /// spread is the only thing that reveals a single wild record, and the tone margin says
+    /// whether any of it was measured on a signal worth believing. Without them, reopening the
+    /// sound-card dialog a week later shows a bare ppm number that no longer be judged — and that
+    /// number goes on to change every chirp measurement on the bench.
+    /// </summary>
+    [Fact]
+    public void StampingKeepsTheFiguresThatSayWhetherTheDriftIsWorthBelieving()
+    {
+        var stamped = new SoundCardConfig(
+                InputHostApi: "Windows WASAPI", InputDeviceName: "in",
+                OutputHostApi: "Windows WASAPI", OutputDeviceName: "out")
+            .StampClockDrift(-104.038, 273.0, 1.9, 38.4, DateTimeOffset.UtcNow);
+
+        Assert.Equal(1.9, stamped.ClockDriftSigmaPpm);
+        Assert.Equal(38.4, stamped.ClockDriftToneMarginDb);
+
+        // Both nullable, because a run of one reading has no scatter and a figure stored by an
+        // older build has neither. A dash on screen is the honest answer; a zero is not.
+        var sparse = stamped.StampClockDrift(-104.038, null, null, null, DateTimeOffset.UtcNow);
+        Assert.Null(sparse.ClockDriftSigmaPpm);
+        Assert.Null(sparse.ClockDriftToneMarginDb);
+        Assert.True(sparse.IsValid);
     }
 
     /// <summary>
@@ -248,8 +275,8 @@ public class ClockDriftCorrectionTests
         var pair = new SoundCardConfig(
             InputHostApi: "ASIO", InputDeviceName: "in", OutputHostApi: "ASIO", OutputDeviceName: "out");
 
-        Assert.True(pair.StampClockDrift(-81_250.0, null, DateTimeOffset.UtcNow).IsValid);
-        Assert.False(pair.StampClockDrift(5_000_000.0, null, DateTimeOffset.UtcNow).IsValid);
-        Assert.False(pair.StampClockDrift(double.NaN, null, DateTimeOffset.UtcNow).IsValid);
+        Assert.True(pair.StampClockDrift(-81_250.0, null, null, null, DateTimeOffset.UtcNow).IsValid);
+        Assert.False(pair.StampClockDrift(5_000_000.0, null, null, null, DateTimeOffset.UtcNow).IsValid);
+        Assert.False(pair.StampClockDrift(double.NaN, null, null, null, DateTimeOffset.UtcNow).IsValid);
     }
 }

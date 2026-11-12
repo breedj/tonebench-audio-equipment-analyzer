@@ -332,6 +332,26 @@ export interface SoundCardConfig {
   gainDisplayUnit: string
   /** Below this a sweep reports the card's own AC coupling as DUT response. */
   minStimulusFrequencyHz: number
+  /**
+   * What the Clock drift test last measured on this bench, and how well.
+   *
+   * All null until it has been run. These are **provenance, not a decision**: whether a chirp
+   * measurement may actually be corrected is the server's answer on `/api/device/ranges`
+   * (`ClockDriftCorrection.ForBench`, four separate conditions), and nothing in the client
+   * re-derives it. The sound-card dialog shows these so a figure that was measured a week ago can
+   * still be judged — a bare ppm number with no scatter beside it cannot be.
+   */
+  clockDriftPpm: number | null
+  /** Raw max minus min. The only figure that reveals an outlier at all; nothing keys on it. */
+  clockDriftSpreadPpm: number | null
+  /** The robust scatter of one reading. Read against the spread, this separates one bad record from a run that never settled. */
+  clockDriftSigmaPpm: number | null
+  /** The **weakest** record's tone margin over the run, in dB — the worst, not the mean. */
+  clockDriftToneMarginDb: number | null
+  clockDriftMeasuredUtc: string | null
+  /** Which two devices it was measured between, so a figure can be seen not to describe this pairing. */
+  clockDriftInputDeviceName: string
+  clockDriftOutputDeviceName: string
 }
 
 /** Which programmable load this bench has, if any. Chosen in Configuration ▸ Acquisition. */

@@ -348,7 +348,11 @@ async function close() {
         </p>
       </div>
 
-      <div v-if="status && points.length" class="dialog-card shrink-0 text-[12px]">
+      <!-- px-3 py-2 like the verdict card below it: .dialog-card sets a border, a radius and a
+           ground and deliberately no padding, so a card that does not add its own has its content
+           flush against the frame. Every other card here adds it; this one did not, which left the
+           four figures hard against the left edge. Reported 2026-11-12. -->
+      <div v-if="status && points.length" class="dialog-card shrink-0 px-3 py-2 text-[12px]">
         <div class="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
           <div><span class="text-neutral-500">Drift</span><br /><span class="font-mono tabular-nums">{{ fmt(status.driftPpm, 2, ' ppm') }}</span></div>
           <div><span class="text-neutral-500">Spread</span><br /><span class="font-mono tabular-nums">{{ fmt(status.spreadPpm, 2, ' ppm') }}</span></div>

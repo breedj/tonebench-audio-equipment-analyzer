@@ -379,7 +379,15 @@ public sealed class ClockDriftRunner(
             var current = soundCard.Config;
             if (!current.IsConfigured) return;
 
-            var updated = current.StampClockDrift(ppm, status.SpreadPpm, DateTimeOffset.UtcNow);
+            // The weakest record's margin, not the mean or the best — the same figure the dialog
+            // shows while measuring, and for the reason given there: a run with one marginal record
+            // is a cable half out for part of it, which an average over the good ones hides.
+            double? toneMarginDb = status.Points.Count > 0
+                ? status.Points.Min(p => p.DominanceDb)
+                : null;
+
+            var updated = current.StampClockDrift(
+                ppm, status.SpreadPpm, status.SigmaPpm, toneMarginDb, DateTimeOffset.UtcNow);
             if (!updated.IsValid)
             {
                 logger.LogWarning("Clock drift: {Ppm:0.0} ppm is outside what can be stored; the figure was not kept.", ppm);

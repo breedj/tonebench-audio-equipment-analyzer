@@ -62,14 +62,42 @@ const { showPage } = useManual()
       phase — and only in this mode do the Nyquist and Nichols projections become available.
     </p>
 
+    <h3 id="reference-guard">The app checks the reference input is fed</h3>
     <p class="manual-callout">
       <strong>The box is ticked by default, so check that the right input really is fed.</strong>
       A bench with one channel wired has nothing on it, and dividing by nothing produces a Gain
       trace, a phase, a group delay and a delay reading that all look entirely plausible and mean
-      nothing. The app now measures that input and says so underneath the box — it reports how much
-      signal is arriving against that channel's own noise, and turns amber below about 20 dB. If you
-      only have one cable, clear the box: the measurement against the generated sweep is correct and
-      complete, it simply includes the analyzer's own output path.
+      nothing. If you only have one cable, clear the box: the measurement against the generated
+      sweep is correct and complete, it simply includes the analyzer's own output path.
+    </p>
+    <p>
+      Underneath the checkbox the app reports <strong>how much signal is arriving on that input
+      against the channel's own noise</strong>, in dB. A real reference tap reads 60 dB and better.
+      Below about 20 dB the line turns amber and names both ways out — feed the right input, or
+      clear the box.
+    </p>
+    <p>
+      It measures this without a second capture, from a property that holds for any real signal
+      path: <strong>a transfer function is smooth from one frequency bin to the next, and noise is
+      not.</strong> A cable, a delay, a filter however steep — each moves the phase by nearly the
+      same amount between neighbouring bins, so the <em>second</em> difference of the phase is
+      essentially zero. Noise shows up there directly, and its size gives the signal-to-noise ratio
+      of that channel. The estimate is good to two or three decibels from 0 to 60 dB, and a clean
+      path still reads 160 dB and better even through a steep anti-alias filter — so a sharp
+      converter filter is never mistaken for a disconnected input.
+    </p>
+    <p>
+      The same reading gates the <strong>clock-drift staleness check</strong>: a run whose reference
+      input is carrying almost nothing makes no residual reading at all, rather than fitting a ramp
+      to noise. That guard exists because the first such reading taken on a real bench was a false
+      alarm of exactly that kind — one channel wired, the box ticked by default, and a confident
+      claim that a drift figure three independent measurements agreed on was a fifth out.
+    </p>
+    <p>
+      <strong>What it cannot catch</strong>, and the reading must not be taken for more: a reference
+      input carrying a loud clean signal that is not the stimulus — an unrelated source, or heavy
+      crosstalk from the other channel — passes. It bounds the noise on that channel; it does not
+      establish that the channel is fed from the generator.
     </p>
 
     <h2>Running it</h2>

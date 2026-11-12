@@ -332,6 +332,35 @@ const { showPage } = useManual()
       advisory rather than a refusal, because WDM-KS names genuinely cannot be matched up.
     </p>
 
+    <h3 id="two-asio">Two cards cannot both be ASIO</h3>
+    <p>
+      If you deliberately want two separate interfaces — a playback-only DAC and a capture-only ADC,
+      say — then <strong>ASIO is the one host API that cannot do it</strong>, and the reason is worth
+      knowing because it looks like a rate problem.
+    </p>
+    <p>
+      ASIO is a single host API containing many <em>drivers</em>, and a stream belongs to one driver.
+      The driver owns the interface: it calls the application back once per buffer, and that one
+      callback delivers the input and collects the output together, because they came off the same
+      converter on the same clock edge. There is no seam to splice two drivers into. The audio
+      library refuses such a pair outright, before it ever considers a sample rate, and it allows
+      only one ASIO device open at a time in any case.
+    </p>
+    <p>
+      So <em>all</em> rates are refused, and the dialog used to report that as “this pairing accepts
+      none of 48, 96 or 192 kHz”. It now names the real cause and the way out, which is to pick
+      <strong>both</strong> sides under <strong>WASAPI</strong>: there each endpoint is its own
+      device, the application does the pumping, and two can be combined. The app always opens WASAPI
+      in exclusive mode, so nothing is mixed or resampled — what you give up relative to ASIO is
+      latency, which no measurement here depends on.
+    </p>
+    <p class="manual-callout">
+      Note that WASAPI does not <em>solve</em> the clock problem, it merely permits it. Two cards
+      still run on two clocks, and a chirp still reads the difference as DUT phase. Measure it with
+      the <strong>Clock drift</strong> panel and let the two chirp screens take it off — see
+      <button type="button" class="manual-link" @click="showPage('clock-drift')">Clock drift</button>.
+    </p>
+
     <h3>Channel pairs</h3>
     <p>
       A card with more than two channels on a side offers a <strong>channel pair</strong> dropdown:

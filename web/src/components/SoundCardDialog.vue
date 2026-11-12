@@ -361,6 +361,24 @@ function pairsFor(channels: number) {
 const rates = computed(() => probe.value?.sampleRatesHz ?? [])
 
 /**
+ * The probed rates as the Device section prints them — "48, 96 and 192 kHz".
+ *
+ * This readout was taken out once, on the reasoning that the rate a measurement runs at is the
+ * measurement's and every screen's rate dropdown is already filtered to this list, so a row here
+ * only said which entries those dropdowns would be missing. That holds for one card. It is much
+ * weaker for **two**, which is where the list stops being a property of a card and becomes the
+ * intersection of a pairing you are in the middle of choosing: the dialog otherwise answers only
+ * pass or fail, and a pair that offers 48 kHz alone is a materially worse bench than one offering
+ * all three, discovered later and somewhere else. Asked for from the bench 2026-11-12.
+ */
+const rateSummary = computed(() => {
+  const khz = rates.value.map((r) => r / 1000)
+  if (khz.length === 0) return ''
+  if (khz.length === 1) return `${khz[0]} kHz`
+  return `${khz.slice(0, -1).join(', ')} and ${khz[khz.length - 1]} kHz`
+})
+
+/**
  * The one warning that matters: two endpoints of different interfaces run on different clocks, and
  * the drift is reported as DUT response rather than as a fault. Advisory because it has to be —
  * WDM-KS device names carry no interface name at all, so a correct pairing there is indistinguishable
@@ -1030,12 +1048,13 @@ function mvRms(value: number | null | undefined) {
           </select>
         </label>
 
-<!-- The probed rate list is not shown. The rate a measurement runs at is the measurement's,
-             and every screen's rate and span dropdowns are already filtered to it, so a row here
-             only told you which spans those dropdowns would be missing. The probe itself still
-             runs on every change -- it is what `rates` below, `canSave` and the "accepts none of
-             48, 96 or 192 kHz" refusal are made of -- so nothing about the checking changed, only
-             its standing readout. -->
+<!-- The probed rates, which are the pairing's and not either card's -- see rateSummary for
+             why this row came back. It sits here, immediately above the refusal that replaces it
+             when the list is empty, so one place always says what the pairing can do. -->
+        <div v-if="rates.length > 0 && form.inputKey && form.outputKey" class="sc-row">
+          <span class="sc-label">Sample rates</span>
+          <span class="text-neutral-600 dark:text-neutral-300">{{ rateSummary }}</span>
+        </div>
 
         <label
           class="sc-row"

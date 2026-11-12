@@ -117,6 +117,59 @@ public class SplitGeneratorRateTests
     }
 
     [Fact]
+    public async Task AChirp_OnABenchWhoseHalvesRunAtDifferentRates_IsRefused()
+    {
+        // A chirp is deconvolved against a reference built at the *analysis* rate with a period of
+        // the analysis size. Played by a half running at another rate that is a different waveform,
+        // and what comes back is a response the DUT never had — the chirp's own failure mode, a
+        // plausible-looking delay, which this codebase has already paid for once.
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        var chirp = new GeneratorConfig(
+            new ChannelGeneratorConfig(Enabled: true, Tones: []) { Kind = GeneratorKind.EchoChirp },
+            ChannelGeneratorConfig.Off);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.ConfigureGeneratorAsync(chirp, CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096)));
+
+        Assert.Contains("has to be played at the rate it is analysed at", ex.Message);
+        Assert.Contains("stepped sweeps are unaffected", ex.Message);
+    }
+
+    [Fact]
+    public async Task AToneOrAWave_OnThatSameBench_IsNotRefused()
+    {
+        // The other half of the rule: a tone is snapped to an analysis bin and played exactly from a
+        // frame index, and a wave is quantised onto the generator's own frames and reported at what
+        // it really plays. Neither needs the two rates to match.
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(
+            Tone(1000.0), CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096));
+        await session.ConfigureGeneratorAsync(
+            Square(1000.0), CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096));
+
+        Assert.True(session.EffectiveGeneratorConfig.Left.Enabled);
+    }
+
+    [Fact]
+    public async Task AChirp_OnABenchWithOneRate_IsFine()
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 0.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        var chirp = new GeneratorConfig(
+            new ChannelGeneratorConfig(Enabled: true, Tones: []) { Kind = GeneratorKind.EchoChirp },
+            ChannelGeneratorConfig.Off);
+
+        await session.ConfigureGeneratorAsync(chirp, CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096));
+
+        Assert.Equal(GeneratorKind.EchoChirp, session.EffectiveGeneratorConfig.Left.Kind);
+    }
+
+    [Fact]
     public async Task SilencingTheGenerator_AtARateItCannotPlay_StillSucceeds()
     {
         // Stop and every measurement switch disable both channels unconditionally, and that must

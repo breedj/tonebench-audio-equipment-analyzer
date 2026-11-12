@@ -780,6 +780,28 @@ public sealed class DeviceSessionService(
                     + "the chirp, periodic noise and the multitone comb need a 1:2, 1:4 or 1:8 pairing.");
         }
 
+        // **A deconvolved stimulus is not yet built at the generator's own rate, so two rates are
+        // refused for it rather than quietly measured wrong.** The chirp and the periodic-noise
+        // sequences are deconvolved against a reference this app builds from the *analysis* rate and
+        // a period of the analysis size; played by a half running at another rate those are a
+        // different waveform, and what comes back is a response the DUT never had. It is the
+        // chirp's own failure mode — a plausible-looking delay — which this codebase has already
+        // paid for once, so it is a refusal with a sentence rather than a curve.
+        //
+        // Everything else survives two rates and is deliberately not refused: a tone is snapped to
+        // an *analysis* bin and played exactly from a frame index, the multitone comb is the same
+        // thing many times over, and a square or triangle is quantised onto the generator's own
+        // frames and reported at the frequency it really plays.
+        if (Math.Abs(sampleRateHz - analysisRateHz) > 1e-6 && UsesDeconvolvedStimulus(config))
+        {
+            throw new InvalidOperationException(
+                $"A chirp or periodic-noise stimulus has to be played at the rate it is analysed at, and this "
+                    + $"bench generates at {sampleRateHz / 1000.0:0.###} kHz while it captures at "
+                    + $"{analysisRateHz / 1000.0:0.###} kHz. Set the generator rate to follow the capture rate in "
+                    + "the split settings, or measure with tones — THD, IMD and the stepped sweeps are unaffected "
+                    + "by two rates.");
+        }
+
         double maxHz = _device.MaxGeneratorSampleRateHz;
         if (sampleRateHz <= maxHz + 1e-6)
             return;
@@ -796,6 +818,18 @@ public sealed class DeviceSessionService(
     /// Whether two sample rates are an integer ratio either way round, which is what a periodic
     /// stimulus needs to land on the same grid at both ends. Equal rates trivially are.
     /// </summary>
+    /// <summary>
+    /// Whether either channel plays something the analysis deconvolves against a reference it builds
+    /// itself — a chirp or one of the periodic-noise sequences. Those are the two stimuli whose
+    /// period has to be the analysis record, and the only ones a rate difference breaks.
+    /// </summary>
+    private static bool UsesDeconvolvedStimulus(GeneratorConfig config) =>
+        IsDeconvolved(config.Left) || IsDeconvolved(config.Right);
+
+    private static bool IsDeconvolved(ChannelGeneratorConfig channel) =>
+        channel.Enabled
+        && channel.Kind is GeneratorKind.EchoChirp or GeneratorKind.PinkNoise or GeneratorKind.WhiteNoise;
+
     internal static bool IsPeriodicRatePair(double aHz, double bHz)
     {
         if (!double.IsFinite(aHz) || !double.IsFinite(bHz) || aHz <= 0 || bHz <= 0)

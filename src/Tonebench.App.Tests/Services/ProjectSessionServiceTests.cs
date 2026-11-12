@@ -13,7 +13,18 @@ namespace Tonebench.App.Tests.Services;
 /// One project per file. Everything here runs on temp files under a throwaway directory, with a
 /// config database of its own for the recent list, and the "busy" signal faked — the session asks
 /// <see cref="IMeasurementRun"/> and nothing else about the device.
+///
+/// <para><b>Runs alone</b>, for the reason <see cref="SqlitePoolCollection"/> gives: a throwaway
+/// directory per test is not isolation, because <c>SqliteConnection.ClearAllPools</c> is
+/// process-wide and this class both calls it (in <c>Dispose</c>, and through
+/// <c>ProjectSessionService.CloseAsync</c>) and asserts on what it destroys. Two tests here were
+/// caught failing that way on 2026-11-12 — <c>Delete_RemovesTheFileItsWalAndShm_AndForgetsIt</c>
+/// on its <i>precondition</i> that a <c>-wal</c> exists at all, a parallel class having already
+/// closed the last connection and taken it; and <c>Open_UsesTheStoredRetentionRatherThanTheDefault</c>,
+/// where the purge's deliberate swallow-and-log turns a yanked config connection into a trashed
+/// measurement that is simply still there.</para>
 /// </summary>
+[Collection(nameof(SqlitePoolCollection))]
 public class ProjectSessionServiceTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"qa403-session-{Guid.NewGuid():N}");

@@ -19,11 +19,13 @@ namespace Tonebench.App.Tests.Services;
 /// on the last connection closing, and the assertion that the WAL is non-empty <i>before</i>
 /// shutdown fails. Intermittently, and more often on a busy machine, which is exactly how it
 /// presented: green alone, roughly one full-suite run in three red.
+///
+/// <para>The collection this names used to be defined here and for this class alone. It moved to
+/// <see cref="SqlitePoolCollection"/> on 2026-11-12, when <c>ProjectSessionServiceTests</c> was
+/// found failing the identical way — one named hazard with one place to add the next class, rather
+/// than a second private collection saying the same thing.</para>
 /// </summary>
-[CollectionDefinition(nameof(DatabaseLifecycleCollection), DisableParallelization = true)]
-public sealed class DatabaseLifecycleCollection;
-
-[Collection(nameof(DatabaseLifecycleCollection))]
+[Collection(nameof(SqlitePoolCollection))]
 public class DatabaseLifecycleHostedServiceTests
 {
     private static (DatabaseLifecycleHostedService Service, DatabaseHealth Health, CurrentProjectFile Current, string DbPath, string ConfigPath) Create()

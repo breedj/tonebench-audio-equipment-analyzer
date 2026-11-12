@@ -209,6 +209,48 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
 
     private static string Capitalise(string text) => char.ToUpperInvariant(text[0]) + text[1..];
 
+    /// <summary>
+    /// Why these two devices cannot form a duplex stream at all, or null when they can — asked
+    /// <b>before</b> the rate probe, because a combination PortAudio refuses outright refuses every
+    /// rate, and <see cref="SupportedRatesHz"/> reports that as an empty list indistinguishable
+    /// from a card that genuinely does not do 48, 96 or 192 kHz.
+    ///
+    /// <para><b>ASIO is one host API with many drivers, and a duplex stream belongs to one
+    /// driver.</b> A driver owns the whole interface and its callback, so PortAudio's ASIO backend
+    /// returns <c>paBadIODeviceCombination</c> for any pair whose devices differ — there is nothing
+    /// to negotiate and no rate at which it would work. Every other Windows host API presents each
+    /// endpoint separately and can combine two of them.</para>
+    ///
+    /// <para>Reported from the bench 2026-11-12: a MOTU M4 input and a Topping D50 III output, both
+    /// picked under ASIO, refused all three rates. The dialog said the pairing accepted none of
+    /// them — true, and so wrong about the cause that the fix it then suggested ("put both cards on
+    /// a host API the other also offers") had already been followed. Both <i>were</i> on one host
+    /// API. Same host API is necessary and, for ASIO alone, not sufficient.</para>
+    ///
+    /// <para>This is a rule about the host API rather than a probe, so it costs no native call and
+    /// is testable against descriptors. The general version — reading the <c>PaError</c> that
+    /// <c>Pa_IsFormatSupported</c> already returns and which this code throws away for a bool —
+    /// would also catch whatever WASAPI and WDM-KS refuse, and is the better shape the day a second
+    /// case turns up; it is not built, because this is the one that bites.</para>
+    /// </summary>
+    public static string? DuplexCombinationProblem(
+        SoundCardDeviceDescriptor? input, SoundCardDeviceDescriptor? output)
+    {
+        // A one-direction bench has no combination to refuse, and one device used both ways is the
+        // case ASIO is built for.
+        if (input is null || output is null || input.Index == output.Index)
+            return null;
+
+        if (input.HostApiKind != SoundCardHostApiKind.Asio || output.HostApiKind != SoundCardHostApiKind.Asio)
+            return null;
+
+        return $"ASIO cannot take its input from one driver and its output from another: a duplex "
+            + $"stream belongs to a single ASIO driver, so '{input.Name}' and '{output.Name}' "
+            + "cannot be combined whatever the sample rate. Pick both sides under one of the other "
+            + "host APIs — WASAPI, which this analyzer opens in exclusive mode and trusts, offers "
+            + "every card Windows can see.";
+    }
+
     /// <summary>Whether the two devices look like one physical interface. Advisory — see <see cref="SoundCardPairing.Unknown"/>.</summary>
     public static SoundCardPairing Pairing(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {

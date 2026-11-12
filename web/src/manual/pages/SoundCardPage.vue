@@ -666,8 +666,10 @@ const { showPage } = useManual()
         <tr>
           <td>“This pairing accepts none of 48, 96 or 192 kHz”</td>
           <td>
-            The two chosen devices cannot agree on a rate the app measures at — usually a mismatched
-            input and output. Try the ASIO entry for the card instead.
+            The two chosen devices cannot agree on a rate the app measures at. On a single card,
+            try its ASIO entry instead. On <strong>two</strong> cards, do the opposite: ASIO cannot
+            take its input from one driver and its output from another, whatever the rate, so pick
+            both sides under WASAPI. The app says so by name when that is the cause.
           </td>
         </tr>
         <tr>

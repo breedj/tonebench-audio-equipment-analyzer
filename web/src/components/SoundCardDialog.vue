@@ -1086,7 +1086,14 @@ function mvRms(value: number | null | undefined) {
              below are gated on the latter. The two differ for the 250 ms of the debounce and the
              save that follows it, when the settings are genuinely not yet in effect but are about
              to be -- turning two buttons off for a quarter second is nothing, and flashing a red
-             box on every ordinary change of a dropdown is alarming and wrong.</p> -->
+             box on every ordinary change of a dropdown is alarming and wrong.</p>
+             <p>It states the consequence and suggests no fix, which it used to: "putting both
+             cards on a host API the other also offers is usually what fixes it" was a guess
+             standing beside the real reason, and on 2026-11-12 it sent a bench round in a circle
+             — both cards already <em>were</em> on one host API, ASIO, which is the one host API
+             where that is not enough (see SoundCardEnumerator.DuplexCombinationProblem). The
+             specific message is directly above; a second, vaguer one underneath can only
+             contradict it.</p> -->
         <p
           v-if="settingsRefused"
           class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
@@ -1094,8 +1101,7 @@ function mvRms(value: number | null | undefined) {
           Nothing here is in effect. These settings apply themselves as you change them, but only
           once the pairing can be opened — and it cannot, for the reason just above. The analyzer
           is still using the card it had before, so the calibration steps are turned off: they
-          would measure <em>that</em> card while this dialog describes a different one. Putting
-          both cards on a host API the other also offers is usually what fixes it.
+          would measure <em>that</em> card while this dialog describes a different one.
         </p>
 
         <!-- Said at the moment the output moves, not minutes later when a calibration has already

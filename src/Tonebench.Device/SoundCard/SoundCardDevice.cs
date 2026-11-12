@@ -218,6 +218,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         RequireChannels(input, output);
 
+        // Ahead of the rate probe, which cannot tell "this pairing is refused outright" from
+        // "this card does not do 192 kHz" -- both arrive as an empty list.
+        if (SoundCardEnumerator.DuplexCombinationProblem(input, output) is { } combinationProblem)
+            throw new SoundCardNotFoundException(combinationProblem);
+
         var rates = enumerator.SupportedRatesHz(
             input, output, exclusive: true, InputChannelCount, OutputChannelCount);
 

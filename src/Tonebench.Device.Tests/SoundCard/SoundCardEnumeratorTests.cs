@@ -502,4 +502,70 @@ public class SoundCardEnumeratorTests
             ["ASIO", "Windows WASAPI"],
             inventory.DistinctDevices().Select(o => o.HostApi));
     }
+
+    // ---- which pairings cannot be opened at all --------------------------------------------
+
+    private static SoundCardDeviceDescriptor Asio(string name, int inputs, int outputs, int index) =>
+        new(index, name, 0, "ASIO", SoundCardHostApiKind.Asio, inputs, outputs, 0.01, 0.01, 48_000.0);
+
+    /// <summary>
+    /// The bench of 2026-11-12: a MOTU M4 input and a Topping D50 III output, both under ASIO.
+    /// PortAudio's ASIO backend refuses any pair whose devices differ, so every rate came back
+    /// refused and the dialog blamed the rates.
+    /// </summary>
+    [Fact]
+    public void TwoAsioDrivers_CannotBeCombined_AndTheMessageSaysSoRatherThanBlamingTheRates()
+    {
+        var problem = SoundCardEnumerator.DuplexCombinationProblem(
+            Asio("MOTU M Series", inputs: 4, outputs: 4, index: 0),
+            Asio("Topping USB Audio Device", inputs: 0, outputs: 2, index: 1));
+
+        Assert.NotNull(problem);
+        Assert.Contains("MOTU M Series", problem);
+        Assert.Contains("Topping USB Audio Device", problem);
+        // It has to name a way out, and the way out is not "same host API" -- which is what the
+        // advice it replaced said, to a bench that was already on one.
+        Assert.Contains("WASAPI", problem);
+        Assert.DoesNotContain("sample rate the", problem);
+    }
+
+    /// <summary>One ASIO driver carrying both directions is the case ASIO exists for.</summary>
+    [Fact]
+    public void OneAsioDeviceUsedBothWays_IsFine()
+    {
+        var duplex = Asio("MOTU M Series", inputs: 4, outputs: 4, index: 0);
+
+        Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(duplex, duplex));
+    }
+
+    /// <summary>
+    /// Two cards under any other host API is the configuration this whole separate-devices feature
+    /// is for, and must not be refused — the restriction belongs to ASIO alone.
+    /// </summary>
+    [Theory]
+    [InlineData(SoundCardHostApiKind.Wasapi)]
+    [InlineData(SoundCardHostApiKind.WdmKs)]
+    [InlineData(SoundCardHostApiKind.Mme)]
+    public void TwoDevicesUnderAnyOtherHostApi_AreNotRefused(SoundCardHostApiKind kind)
+    {
+        var input = Device("In (Card A)", inputs: 2, outputs: 0, kind: kind, index: 0);
+        var output = Device("Out (Card B)", inputs: 0, outputs: 2, kind: kind, index: 1);
+
+        Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(input, output));
+    }
+
+    /// <summary>
+    /// A mixed pair is refused by PortAudio for a different reason — a stream cannot span two host
+    /// APIs at all — which this rule deliberately does not claim to cover: it is about ASIO's own
+    /// per-driver restriction, and a message naming the wrong cause is what it exists to stop.
+    /// </summary>
+    [Fact]
+    public void AOneDirectionBench_HasNoCombinationToRefuse()
+    {
+        var only = Asio("MOTU M Series", inputs: 4, outputs: 4, index: 0);
+
+        Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(only, null));
+        Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(null, only));
+        Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(null, null));
+    }
 }

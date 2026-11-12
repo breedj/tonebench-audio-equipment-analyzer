@@ -246,6 +246,14 @@ public static class SoundCardCatalog
                 return new SoundCardProbe([], pairing, inputTrust, outputTrust, channelProblem);
             }
 
+            // Before the rates, not after: a combination PortAudio refuses outright refuses every
+            // rate, and the empty list that comes back then reads as a card that cannot do 48, 96
+            // or 192 kHz. See DuplexCombinationProblem for what that cost on a real bench.
+            if (SoundCardEnumerator.DuplexCombinationProblem(input, output) is { } combinationProblem)
+            {
+                return new SoundCardProbe([], pairing, inputTrust, outputTrust, combinationProblem);
+            }
+
             var rates = enumerator.SupportedRatesHz(
                 input, output, exclusive: true, inputChannels, outputChannels);
 

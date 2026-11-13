@@ -218,19 +218,19 @@ async function save() {
       </p>
 
       <section class="dialog-card">
-        <div class="sc-row">
+        <div class="sc-row border-t-0 px-3.5">
           <span class="sc-label">Generates</span>
           <select v-model="form.outputKind" class="tb-input w-64" title="The device the stimulus is played from.">
             <option v-for="half in HALVES" :key="half.value" :value="half.value">{{ half.label }}</option>
           </select>
         </div>
-        <div class="sc-row">
+        <div class="sc-row px-3.5">
           <span class="sc-label">Captures</span>
           <select v-model="form.inputKind" class="tb-input w-64" title="The device the measurement is taken with. Its input range, its ranging and its drop counters are the bench's.">
             <option v-for="half in HALVES" :key="half.value" :value="half.value">{{ half.label }}</option>
           </select>
         </div>
-        <div class="sc-row">
+        <div class="sc-row px-3.5">
           <span class="sc-label">Generator rate</span>
           <select
             v-model.number="form.generatorSampleRateHz"

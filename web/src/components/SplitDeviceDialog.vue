@@ -47,9 +47,37 @@ const clockDriftOpen = ref(false)
  */
 const benchDrift = ref<BenchClockDrift | null>(null)
 
+/** The pairing the server has, so a staged one can be told from it. */
+const storedPairing = ref<{ generates: SplitHalfKindName; captures: SplitHalfKindName } | null>(null)
+
+/**
+ * Whether the two dropdowns have been turned away from what is saved.
+ *
+ * <p>The panel follows them, but the <em>run</em> cannot: it measures the bench the session has
+ * open, which is the saved one. So the button is held until Save, rather than letting a press
+ * measure one pairing and store it against the figure shown for another.</p>
+ */
+const pairingPending = computed(
+  () =>
+    storedPairing.value !== null
+    && (storedPairing.value.generates !== form.outputKind || storedPairing.value.captures !== form.inputKind),
+)
+
+/**
+ * Read for the pairing the dropdowns are <em>staging</em>, not the one the session has open.
+ *
+ * <p>This dialog applies on Save, so answered for the session's own bench the panel shows the
+ * figure for the pairing being replaced — which is what it did: a reading taken with the card
+ * generating stayed on screen, under a "Measured" summary, after the dropdowns were turned round
+ * (reported 2026-11-13). The server resolves it, so BenchClockKey stays the one thing that decides
+ * what a pairing is keyed by.</p>
+ */
 async function loadBenchDrift() {
   try {
-    benchDrift.value = await api.getBenchClockDrift()
+    benchDrift.value = await api.getBenchClockDrift({
+      generates: form.outputKind,
+      captures: form.inputKind,
+    })
   } catch {
     benchDrift.value = null
   }
@@ -84,6 +112,7 @@ watch(
       form.inputKind = stored.inputKind
       form.outputKind = stored.outputKind
       form.generatorSampleRateHz = stored.generatorSampleRateHz
+      storedPairing.value = { generates: stored.outputKind, captures: stored.inputKind }
       loaded.value = true
       await loadBenchDrift()
     } catch (e) {
@@ -91,6 +120,16 @@ watch(
     }
   },
   { immediate: true },
+)
+
+// The panel is the pairing's, so it has to be re-read when the pairing changes -- not only when
+// the dialog opens. The generator rate is deliberately not in this list: a clock difference is a
+// property of two crystals, and the rate one of them is clocked at does not change which two.
+watch(
+  () => [form.outputKind, form.inputKind],
+  async () => {
+    if (props.open && loaded.value) await loadBenchDrift()
+  },
 )
 
 /**
@@ -249,7 +288,12 @@ async function save() {
             type="button"
             class="btn-chip"
             :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
-            title="Plays a tone on the generating device and reads it back on the capturing one. It measures through whatever is connected, because a DUT changes a tone's level and phase but not its frequency."
+            :disabled="pairingPending"
+            :title="
+              pairingPending
+                ? 'Save the pairing first: the test measures the bench the app has open, which is still the saved one.'
+                : `Plays a tone on the generating device and reads it back on the capturing one. It measures through whatever is connected, because a DUT changes a tone's level and phase but not its frequency.`
+            "
             @click="clockDriftOpen = true"
           >
             {{ benchDrift?.ppm === null || benchDrift?.ppm === undefined ? 'Measure the drift' : 'Measure again' }}
@@ -258,6 +302,9 @@ async function save() {
         <p class="m-0 p-3.5 text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
           {{ driftSummary }}
           Measured, the two chirp screens offer to take the clock's delay ramp off a sweep.
+          <template v-if="pairingPending">
+            This is the pairing above, not the one the app has open — press Save before measuring it.
+          </template>
         </p>
       </section>
 

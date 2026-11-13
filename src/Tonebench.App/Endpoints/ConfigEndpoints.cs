@@ -675,12 +675,43 @@ public static class ConfigEndpoints
             return Results.Ok(config);
         });
 
-        // The clock difference measured on the bench as it stands, which both device dialogs show
-        // and the drift test writes. One endpoint rather than each dialog reading a document of its
-        // own: the figure is keyed by the *pairing*, and only the session knows what that is.
-        group.MapGet("/clock-drift", (DeviceSessionService session, ClockDriftSetting drift) =>
+        // The clock difference measured on a pairing, which both device dialogs show and the drift
+        // test writes. One endpoint rather than each dialog reading a document of its own: the figure
+        // is keyed by the *pairing*, and BenchClockKey is the one thing that decides what a key looks
+        // like.
+        //
+        // `generates` and `captures` name a pairing being *staged* rather than the one in use. The
+        // split dialog applies its two dropdowns on Save, so without them its panel answers for the
+        // bench being replaced -- a figure measured with the card generating stayed on screen after
+        // the dropdowns were turned round (reported 2026-11-13). Both or neither; an unparseable one
+        // is a client bug rather than user input, so it is refused rather than quietly falling back
+        // to the session's own bench and answering about a different pairing.
+        group.MapGet("/clock-drift", (
+            DeviceSessionService session,
+            ClockDriftSetting drift,
+            SoundCardSetting soundCard,
+            string? generates,
+            string? captures) =>
         {
-            if (session.BenchClocks is not { } clocks)
+            BenchClocks? staged = null;
+            if (generates is not null || captures is not null)
+            {
+                if (ParseHalfKind(generates) is not { } outputKind || ParseHalfKind(captures) is not { } inputKind)
+                {
+                    return Results.BadRequest(
+                        "generates and captures must both name one half of a bench: Hardware, SoundCard or Simulated.");
+                }
+
+                staged = BenchClocks.Between(outputKind, inputKind, soundCard.Config);
+
+                // A staged pairing with one clock -- two simulators, or two halves that resolve to
+                // the same card -- is the same answer the session gives for a single device, and it
+                // must not fall through to the session's own bench.
+                if (staged is null)
+                    return Results.Ok(new BenchClockDriftResponse(null, null, null, null, null, null, null, false));
+            }
+
+            if ((staged ?? session.BenchClocks) is not { } clocks)
                 return Results.Ok(new BenchClockDriftResponse(null, null, null, null, null, null, null, false));
 
             ClockDriftEntry? entry = drift.Config.For(clocks.OutputKey, clocks.InputKey);
@@ -695,6 +726,14 @@ public static class ConfigEndpoints
                 clocks.InputLabel,
                 TwoClocks: true));
         });
+
+        // One half of a bench as the split dialog names it. Split itself is deliberately refused:
+        // BenchClockKey maps anything that is not a card or the simulator to "qa40x", so a composite
+        // passed here would silently read as a QA40x rather than as the nonsense it is.
+        static DeviceKind? ParseHalfKind(string? value) =>
+            Enum.TryParse(value, ignoreCase: true, out DeviceKind kind) && kind != DeviceKind.Split
+                ? kind
+                : null;
 
         // The composite analyzer's two halves. Written by the split dialog, and followed by a
         // reconnect for the reason the sound card's is: the live copy is what AnalyzerDeviceFactory

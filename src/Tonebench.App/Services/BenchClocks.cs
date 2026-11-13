@@ -85,7 +85,17 @@ public sealed record BenchClocks(string OutputKey, string InputKey, string Outpu
         return Between(DeviceKind.SoundCard, DeviceKind.SoundCard, card);
     }
 
-    private static BenchClocks? Between(DeviceKind outputKind, DeviceKind inputKind, SoundCardConfig card)
+    /// <summary>
+    /// The pairing two named halves would be, whether or not that is the bench in use.
+    ///
+    /// <para>Public so a dialog can ask about a pairing it is <i>staging</i>. The split dialog applies
+    /// its two dropdowns on Save, so a drift panel answered for the session's own bench shows the
+    /// figure for the pairing being replaced — which is exactly what it did: a reading taken with the
+    /// card generating stayed on screen after the dropdowns were turned round (reported
+    /// 2026-11-13). Asking here keeps <see cref="BenchClockKey"/> the one function that decides what
+    /// a key looks like, which a client-side answer could not.</para>
+    /// </summary>
+    public static BenchClocks? Between(DeviceKind outputKind, DeviceKind inputKind, SoundCardConfig card)
     {
         string outputKey = BenchClockKey.For(outputKind, card, asInput: false);
         string inputKey = BenchClockKey.For(inputKind, card, asInput: true);

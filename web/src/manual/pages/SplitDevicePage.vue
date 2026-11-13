@@ -148,6 +148,14 @@ const { showPage } = useManual()
       delay ramp off the measurement.
     </p>
     <p>
+      <strong>The panel follows the two dropdowns</strong>, not the bench the app currently has
+      open: turn Generates and Captures round and it reads the figure for <em>that</em> pairing, or
+      says there is none. The two directions really are two pairings — a drift figure's sign is a
+      property of which clock is the reference, so a reading taken one way round is not offered the
+      other. <strong>Measure the drift</strong> is held until you press Save, because the test
+      itself cannot follow: it measures the bench the app has open.
+    </p>
+    <p>
       <strong>Or use the right input as a reference</strong>, which escapes the problem rather than
       correcting it. Feed the generator's second channel straight back to the right input and tick
       <strong>Right channel is reference</strong>: the gain trace is then one captured channel

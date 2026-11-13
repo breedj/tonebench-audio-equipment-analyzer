@@ -52,6 +52,49 @@ public class ClockDriftCorrectionTests
         Assert.Equal(Measured, found?.MeasuredUtc);
     }
 
+    /// <summary>
+    /// A pairing asked about <i>directly</i>, which is what a dialog staging one needs.
+    ///
+    /// <para>The split dialog applies its two dropdowns on Save, so a panel answered for the
+    /// session's own bench describes the pairing being replaced — reported 2026-11-13, where a
+    /// figure measured with the card generating stayed on screen after the dropdowns were turned
+    /// round. <c>Between</c> is how the endpoint resolves the staged one, so <c>BenchClockKey</c>
+    /// stays the single thing that decides what a key looks like.</para>
+    /// </summary>
+    [Fact]
+    public void APairingAskedAboutDirectly_IsKeyedTheSameWayTheSessionsIs()
+    {
+        SoundCardConfig cards = Cards();
+
+        BenchClocks? session = BenchClocks.For(DeviceKind.Split, cards, Split("Hardware", "SoundCard"));
+        BenchClocks? asked = BenchClocks.Between(DeviceKind.SoundCard, DeviceKind.Hardware, cards);
+
+        Assert.Equal(session, asked);
+    }
+
+    /// <summary>
+    /// And the two directions are <b>not</b> the same pairing, which is why the panel had to follow
+    /// the dropdowns rather than merely be refreshed: a figure is stored against which half plays.
+    /// </summary>
+    [Fact]
+    public void TheTwoDirectionsOfOnePair_AreDifferentPairings()
+    {
+        SoundCardConfig cards = Cards();
+
+        BenchClocks cardPlays = BenchClocks.Between(DeviceKind.SoundCard, DeviceKind.Hardware, cards)!;
+        BenchClocks qaPlays = BenchClocks.Between(DeviceKind.Hardware, DeviceKind.SoundCard, cards)!;
+
+        Assert.NotEqual(cardPlays, qaPlays);
+
+        // A figure taken one way round is not offered the other way round -- the quantity's sign is
+        // a property of which clock is the reference.
+        Assert.NotNull(ClockDriftCorrection.ForBench(cardPlays, Store(cardPlays)));
+        Assert.Null(ClockDriftCorrection.ForBench(qaPlays, Store(cardPlays)));
+    }
+
+    [Fact]
+    public void APairingAskedAboutDirectly_WhoseHalvesAreOneDevice_IsOneClock() =>
+        Assert.Null(BenchClocks.Between(DeviceKind.Simulated, DeviceKind.Simulated, Cards()));
     [Theory]
     [InlineData(DeviceKind.Hardware)]
     [InlineData(DeviceKind.Simulated)]

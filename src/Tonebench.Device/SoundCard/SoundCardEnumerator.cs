@@ -251,6 +251,39 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
             + "every card Windows can see.";
     }
 
+    /// <summary>
+    /// The suffix PortAudio's WASAPI backend appends to a <b>render loopback</b> endpoint.
+    ///
+    /// <para>Windows exposes one of these beside every playback endpoint, and PortAudio lists it as
+    /// a device with input channels and no output channels — indistinguishable, by channel counts
+    /// alone, from a real ADC. It is not one: what it captures is the digital stream Windows is
+    /// <i>rendering to</i> that endpoint, taken after the mixer and before the converter, so there
+    /// is no analog input anywhere in it.</para>
+    ///
+    /// <para>A literal in <c>pa_win_wasapi.c</c>, not a localised string, which is what makes this
+    /// test sound.</para>
+    /// </summary>
+    public const string RenderLoopbackSuffix = " [Loopback]";
+
+    /// <summary>
+    /// Whether a device name is a render loopback endpoint — <see cref="RenderLoopbackSuffix"/>.
+    ///
+    /// <para><b>Why this is refused rather than merely discouraged.</b> There is no measurement it
+    /// can make: it hears nothing the analyzer's generator plays unless this app is also rendering
+    /// to that very endpoint, and then what it hears is its own output bit for bit, with neither
+    /// converter in the path. Worse, it does not <i>fail</i> — WASAPI delivers loopback data only
+    /// while something is rendering, so with the endpoint idle <c>Pa_ReadStream</c> simply never
+    /// returns a buffer, and <c>SoundCardDevice.Pump</c> treats a timeout before the first block as
+    /// a wait rather than a gap (which is right for a driver spinning up). So it waits for ever:
+    /// measured 2026-11-13 on a TOPPING D50 III as the capturing half of a split, 8 s with the
+    /// QA403 playing and the recorder armed reported <b>0 input frames</b> against 71 680 stimulus
+    /// frames, no dropped chunks, no timeouts logged and the status bar reading Acquiring
+    /// throughout.</para>
+    /// </summary>
+    public static bool IsRenderLoopback(string? deviceName) =>
+        deviceName is not null
+        && deviceName.EndsWith(RenderLoopbackSuffix, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Whether the two devices look like one physical interface. Advisory — see <see cref="SoundCardPairing.Unknown"/>.</summary>
     public static SoundCardPairing Pairing(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {

@@ -206,6 +206,21 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             input = enumerator.Find(_settings.InputHostApi, _settings.InputDeviceName)
                 ?? throw new SoundCardNotFoundException(
                     $"The input '{_settings.InputDeviceName}' ({_settings.InputHostApi}) is not there. Plug the card in, or pick another in the sound-card settings.");
+
+            // The picker no longer offers one, but a document written before it stopped still names
+            // one -- and opening it is the worst failure available here: WASAPI hands out loopback
+            // data only while something is rendering to that endpoint, so an idle one delivers no
+            // first buffer, the pump waits for it as it would for a driver spinning up, and the
+            // acquisition runs for ever with nothing arriving and nothing said.
+            if (SoundCardEnumerator.IsRenderLoopback(input.Name))
+            {
+                throw new SoundCardNotFoundException(
+                    $"'{input.Name}' is not a recording device: Windows offers it beside every "
+                    + "playback device so an app can capture what is being played to it, after the "
+                    + "mixer and before the converter. There is no analog input in it, so it cannot "
+                    + "hear what the analyzer plays. Pick the card's own input in the sound-card "
+                    + "settings.");
+            }
         }
 
         SoundCardDeviceDescriptor? output = null;

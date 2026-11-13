@@ -177,7 +177,17 @@ public static class SoundCardCatalog
                 Available: true,
                 Version: pa.VersionText,
                 HostApis: new SoundCardEnumerator(pa).HostApiOptions(),
-                Inputs: [.. options.Where(o => o.MaxInputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)],
+                // Channel counts alone cannot tell a capture device from a WASAPI render loopback,
+                // which reports input channels and no output channels exactly as an ADC does -- see
+                // SoundCardEnumerator.IsRenderLoopback for what it actually hears and why an
+                // acquisition through one hangs rather than failing.
+                Inputs:
+                [
+                    .. options
+                        .Where(o => o.MaxInputChannels > 0 && !SoundCardEnumerator.IsRenderLoopback(o.Name))
+                        .OrderBy(o => o.Preference)
+                        .ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase),
+                ],
                 Outputs: [.. options.Where(o => o.MaxOutputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)]);
         }
         catch (Exception ex)

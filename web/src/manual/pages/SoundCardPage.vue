@@ -65,6 +65,16 @@ const { showPage } = useManual()
       reached through MME, DirectSound, WASAPI and WDM-KS is four list entries for one piece of
       hardware, and three of them are worse than the fourth.
     </p>
+    <p class="manual-callout">
+      <strong>One kind of device is never offered as an input: a playback endpoint's
+      loopback.</strong> Windows exposes one beside every playback device so an app can record what
+      is being played to it, and it looks exactly like a recording device — it has input channels and
+      no output channels. It is not one: what it captures is the digital stream on its way to that
+      device, taken after the Windows mixer and before the converter, so there is no analog input
+      anywhere in it and it cannot hear what the analyzer plays. Offered, it was selectable as the
+      input for a DAC that has no inputs at all. A card's <em>own</em> hardware loopback — the MOTU's
+      internal mix bus, say — is a real input and is still listed.
+    </p>
     <p>
       <strong>Advanced</strong>, beside <strong>Refresh</strong>, shows the unfiltered list: every
       host API, one entry per interface within each, with the count it adds in brackets. It is there

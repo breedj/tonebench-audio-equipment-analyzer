@@ -90,6 +90,78 @@ public class SoundCardDeviceTests
         Assert.Contains("Gone", ex.Message);
     }
 
+    /// <summary>
+    /// A WASAPI render loopback as the input is refused at connect, and that is the <i>worst</i>
+    /// failure this driver has rather than one more bad configuration.
+    ///
+    /// <para>Windows offers one beside every playback endpoint and PortAudio lists it with input
+    /// channels and no output channels, so the picker offered a DAC as an input card (reported
+    /// 2026-11-13). Opened, it does not fail: WASAPI hands out loopback data only while something
+    /// is rendering to that endpoint, so an idle one delivers no first buffer, and
+    /// <c>Pump</c> rightly treats a timeout before the first block as a driver spinning up. So it
+    /// waits for ever -- measured on that bench, 8 s with the QA403 playing recorded <b>0 input
+    /// frames</b> against 71 680 stimulus frames, with no drops and no timeouts logged.</para>
+    ///
+    /// <para>The picker no longer offers one, so this is for a document written before it stopped.
+    /// It is the backstop rather than the fix, which is the same shape as every other refusal
+    /// here.</para>
+    /// </summary>
+    [Fact]
+    public async Task Connect_WithARenderLoopbackAsTheInput_IsRefusedAndSaysWhatItIs()
+    {
+        var pa = new FakePortAudio();
+        var api = pa.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
+        pa.AddDevice(api, "Luidsprekers (Test DAC) [Loopback]", inputs: 2, outputs: 0);
+        pa.AddDevice(api, "Luidsprekers (Test DAC)", inputs: 0, outputs: 2);
+
+        var device = new SoundCardDevice(
+            new SoundCardSettings
+            {
+                InputHostApi = "Windows WASAPI",
+                InputDeviceName = "Luidsprekers (Test DAC) [Loopback]",
+                OutputHostApi = "Windows WASAPI",
+                OutputDeviceName = "Luidsprekers (Test DAC)",
+            },
+            SoundCardCalibration.Uncalibrated,
+            NullLogger<SoundCardDevice>.Instance,
+            pa);
+
+        var ex = await Assert.ThrowsAsync<SoundCardNotFoundException>(
+            () => device.ConnectAsync(CancellationToken.None));
+
+        Assert.Contains("not a recording device", ex.Message);
+        Assert.Contains("[Loopback]", ex.Message);
+    }
+
+    /// <summary>
+    /// And the same endpoint as the <i>output</i> is fine, which is what it is: the loopback suffix
+    /// marks a render endpoint's capture side, and the render endpoint itself is an ordinary output.
+    /// </summary>
+    [Fact]
+    public async Task Connect_WithARenderEndpointAsTheOutput_IsNotRefused()
+    {
+        var pa = new FakePortAudio();
+        var api = pa.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
+        pa.AddDevice(api, "In 1-2 (Test Card)", inputs: 2, outputs: 0);
+        pa.AddDevice(api, "Luidsprekers (Test DAC)", inputs: 0, outputs: 2);
+
+        var device = new SoundCardDevice(
+            new SoundCardSettings
+            {
+                InputHostApi = "Windows WASAPI",
+                InputDeviceName = "In 1-2 (Test Card)",
+                OutputHostApi = "Windows WASAPI",
+                OutputDeviceName = "Luidsprekers (Test DAC)",
+            },
+            SoundCardCalibration.Uncalibrated,
+            NullLogger<SoundCardDevice>.Instance,
+            pa);
+
+        DeviceInfo info = await device.ConnectAsync(CancellationToken.None);
+
+        Assert.Contains("Test Card", info.ProductName);
+    }
+
     /// <summary>A channel pair past what the card has is a configuration mistake, not something to clamp silently.</summary>
     [Fact]
     public async Task Connect_AskingForAChannelPairTheCardDoesNotHave_IsRefused()

@@ -37,6 +37,33 @@ public class SoundCardEnumeratorTests
     public void InterfaceStem_WhenTheNameNamesNoInterface_IsEmpty(string deviceName) =>
         Assert.Equal(string.Empty, SoundCardEnumerator.InterfaceStem(deviceName));
 
+    // ---- render loopback -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A WASAPI render loopback is not a recording device, and nothing but its name says so.
+    ///
+    /// <para>Windows offers one beside every playback endpoint and PortAudio lists it with input
+    /// channels and no output channels, which is exactly an ADC's shape -- so the picker offered a
+    /// TOPPING D50 III, a DAC with no inputs at all, as an input card (reported 2026-11-13). What
+    /// it captures is the stream being rendered to that endpoint, after the mixer and before the
+    /// converter, so it cannot hear what the analyzer plays.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("Luidsprekers (TOPPING USB DAC) [Loopback]", true)]
+    [InlineData("Speakers (Realtek(R) Audio) [Loopback]", true)]
+    // The case PortAudio does not produce, checked because the comparison ignores case.
+    [InlineData("Speakers [loopback]", true)]
+    [InlineData("In 1-2 (MOTU M Series)", false)]
+    // A card that merely has the word in its own name is a real input, and the suffix is a suffix.
+    [InlineData("Loopback In 1-2 (Some Card)", false)]
+    [InlineData("", false)]
+    public void IsRenderLoopback_ReadsTheSuffixPortAudioAppends(string deviceName, bool expected) =>
+        Assert.Equal(expected, SoundCardEnumerator.IsRenderLoopback(deviceName));
+
+    [Fact]
+    public void IsRenderLoopback_OfNothing_IsFalse() =>
+        Assert.False(SoundCardEnumerator.IsRenderLoopback(null));
+
     // ---- pairing -------------------------------------------------------------------------------
 
     [Fact]

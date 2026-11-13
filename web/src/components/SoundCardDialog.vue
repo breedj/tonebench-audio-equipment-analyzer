@@ -325,6 +325,23 @@ const hiddenCardCount = computed(() =>
 const apiNotes = computed(() => hostApiNotes(inventory.value?.hostApis ?? [], cards.value.length))
 
 /**
+ * A stored <em>render loopback</em> endpoint that the device list no longer offers.
+ *
+ * <p>Windows offers one beside every playback device so an app can capture what is being played
+ * to it, and PortAudio lists it with input channels and no output channels -- which is what an ADC
+ * looks like, so the picker offered a DAC as an input card. It cannot hear anything the analyzer
+ * plays, and an acquisition through one does not fail: it delivers no first buffer at all and the
+ * pump waits for it, so the app reads Acquiring for ever with nothing arriving. The device is gone
+ * from the list and the server refuses to open it, so the only thing left is to say where the
+ * empty dropdown came from -- without which the selection simply vanishes.</p>
+ */
+const storedLoopbackInput = ref<string | null>(null)
+
+/** The suffix PortAudio's WASAPI backend appends -- SoundCardEnumerator.RenderLoopbackSuffix. */
+const RENDER_LOOPBACK_SUFFIX = ' [loopback]'
+
+
+/**
  * Which card each direction is filtered to. The same key both ways in the ordinary mode, which is
  * what makes that path behave exactly as it did before separate devices existed.
  */
@@ -739,6 +756,14 @@ watch(
     await Promise.all([load(true), loadDevices(), syncCalibrationState(), loadBenchDrift()])
     stopLevels?.()
     stopLevels = watchLevels()
+    // Captured *before* the reconcile, which is the thing that drops it: a stored device that is
+    // no longer in the list is cleared and autosaved, so by the time anything renders there is
+    // nothing left to read and the selection has simply vanished.
+    const storedInput = config.value?.inputDeviceName ?? ''
+    storedLoopbackInput.value = storedInput.toLowerCase().endsWith(RENDER_LOOPBACK_SUFFIX)
+      ? storedInput
+      : null
+
     await reconcileWithDevices()
 
     // On a split the two sides are never one card -- a card on both halves is refused outright --
@@ -1238,6 +1263,17 @@ function mvRms(value: number | null | undefined) {
              that list: an empty one otherwise says only "no cards", which is the same picture
              whether the machine has no interface, the driver declined to start, or the driver
              started and reported no channels. See hostApiNotes for the rule and the reasoning. -->
+        <p
+          v-if="storedLoopbackInput"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          <strong class="block">Pick the card's own input.</strong>
+          &lsquo;{{ storedLoopbackInput }}&rsquo; was chosen, and it is not a recording device:
+          Windows offers it beside every playback device so an app can capture what is being played
+          to it, after the mixer and before the converter. There is no analog input in it, so it
+          cannot hear what the analyzer plays. It is no longer offered in the list above.
+        </p>
+
         <p
           v-for="note in apiNotes"
           :key="note.hostApi"

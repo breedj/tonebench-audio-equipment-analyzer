@@ -1,4 +1,6 @@
-﻿namespace Tonebench.App.Services;
+﻿using Tonebench.Dsp;
+
+namespace Tonebench.App.Services;
 
 /// <summary>What to play, for how long, and how often to take a reading.</summary>
 /// <param name="ToneHz">
@@ -64,13 +66,31 @@ public sealed record ClockDriftVerdict(
 /// ±50 to ±100 ppm, and the quantity here is the <i>difference</i> of two of them, so anything up to
 /// about ±200 ppm is two perfectly healthy cards and says nothing bad about either. Measured on this
 /// project's own bench, a MOTU M4 against a Sound BlasterX G6 reads −104.37 ppm and is stable to a
-/// quarter of a ppm. Below about 1 ppm the two are not independent at all — the same card both ways,
-/// or two locked to one word clock. Far above 200 ppm is the interesting failure: not a bad crystal,
-/// but a card that is not running at the rate it was asked for, or a resampler in the path.</para>
+/// quarter of a ppm. Far above 200 ppm is the interesting failure: not a bad crystal, but a card
+/// that is not running at the rate it was asked for, or a resampler in the path.</para>
+///
+/// <para><b>The bottom of the scale used to claim too much.</b> It read "one clock" below 1 ppm and
+/// explained it as <i>"the two sides are not running independently: this is one card used both ways,
+/// or two locked to the same word clock"</i> — and this project's own bench disproves that premise.
+/// A Topping D50 III against a QA403 reads <b>+0.45 ppm and −0.83 to −0.85 ppm across separate
+/// runs</b> (2026-11-13), and those are two free-running crystals in two boxes with nothing but a
+/// cable between them. Sub-ppm agreement is evidence of nothing.</para>
+///
+/// <para><b>And it contradicted what the app then did.</b> The chirp screens offer a correction from
+/// <see cref="ChirpClockDrift.NegligiblePpm"/> — 0.05 ppm — up, so everything in 0.05…1 ppm was told
+/// "nothing here is affected by clock drift" <i>and</i> handed a correction. On that same bench the
+/// correction is worth 4.2° of phase at 20 kHz over this test's own record, and 16.7° over the
+/// frequency-response chirp's 2.73 s one, which is not nothing. So the band below 1 ppm now says
+/// <i>unusually close</i> and quotes the cost, and only below 0.05 ppm — where no correction is
+/// offered at all — does the verdict say there is nothing to correct.</para>
 /// </summary>
 public static class ClockDriftReading
 {
-    /// <summary>Below this the two sides are one clock, or locked to one.</summary>
+    /// <summary>
+    /// Below this two clocks agree more closely than two independent crystals normally do, so a
+    /// shared or locked clock is the usual explanation — but see the class remarks: it is not a
+    /// safe one, and a figure in this band is still corrected.
+    /// </summary>
     public const double LockedPpm = 1.0;
 
     /// <summary>Two independent crystals, each within its own ±100 ppm, cannot exceed this.</summary>
@@ -97,22 +117,29 @@ public static class ClockDriftReading
         double slipSamples = slipSeconds * sampleRateHz;
         double degAt20k = slipSeconds * 20000.0 * 360.0;
 
+        // Reaching down to the first figure that earns a correction rather than to LockedPpm: the
+        // band below that is now corrected like any other, and an unsettled correction is the one
+        // thing this verdict exists to warn about. The sigma floor stays a whole ppm, so a small
+        // reading is not called unstable merely for being small -- the case pinned by
+        // AStableReadingIsNotCalledUnstableMerelyForBeingSmall.
         bool unstable = sigmaPpm is { } sigma
-            && magnitude > LockedPpm
+            && magnitude > ChirpClockDrift.NegligiblePpm
             && sigma > Math.Max(UnstableFraction * magnitude, LockedPpm);
 
         string headline;
         string quality;
         string detail;
 
-        if (magnitude < LockedPpm)
+        if (magnitude < ChirpClockDrift.NegligiblePpm)
         {
-            headline = $"{driftPpm:+0.00;-0.00;0.00} ppm — one clock.";
+            headline = $"{driftPpm:+0.00;-0.00;0.00} ppm — nothing to correct.";
             quality = "Good";
             detail =
-                "The two sides are not running independently: this is one card used both ways, or " +
-                "two locked to the same word clock. Nothing here is affected by clock drift, and " +
-                "the two-clocks warning does not apply to this bench.";
+                "Below the figure the chirp screens act on, so no correction is offered and none is " +
+                "needed, and the two-clocks warning does not apply to this bench. Two sides this " +
+                "close are usually one device used both ways, or two locked to the same word clock " +
+                "— though two independent crystals can agree this well, so it is not proof of " +
+                "either.";
         }
         else if (unstable)
         {
@@ -124,6 +151,20 @@ public static class ClockDriftReading
                 "after a sample-rate change, and a sound card can do the same after its stream is " +
                 "reopened. Leave it running, or start the test again once the bench has been playing " +
                 "for a minute. If it never settles, something in the path is resampling.";
+        }
+        else if (magnitude < LockedPpm)
+        {
+            headline = $"{driftPpm:+0.00;-0.00;0.00} ppm — two clocks, unusually close.";
+            quality = "Good";
+            detail =
+                $"Closer than two consumer crystals have to be — each is specified at ±50 to " +
+                $"±100 ppm — so the two sides may share a clock or be locked to one. They may also " +
+                $"be independent and simply agree this well, which happens: a Topping D50 III " +
+                $"against a QA403 reads about this. Either way it is not nothing. A correction is " +
+                $"offered from {ChirpClockDrift.NegligiblePpm:0.00} ppm up, and over one " +
+                $"{recordSeconds:0.00} s record this separates the two sides by " +
+                $"{slipSeconds * 1e6:0.0} µs — {degAt20k:0.0}° of phase at 20 kHz, reported as the " +
+                $"DUT's own. Tone measurements are unaffected either way.";
         }
         else if (magnitude <= TwoCrystalsPpm)
         {

@@ -154,7 +154,7 @@ export const GLOSSARY: GlossaryEntry[] = [
   {
     term: 'Clock drift',
     definition:
-      'How far the input device’s sample clock runs from the output device’s, in parts per million. Zero when one card does both directions, since there is then one clock; tens to a couple of hundred ppm when they are two cards, which is two ordinary crystals and normal. Tone measurements are untouched by it, but anything measured from a chirp reads it as a delay that grows with frequency — i.e. as the DUT’s own phase and group delay. Measured by Sound card ▸ Measure the drift.',
+      'How far the input device’s sample clock runs from the output device’s, in parts per million. Zero when one card does both directions, since there is then one clock; tens to a couple of hundred ppm when they are two cards, which is two ordinary crystals and normal. Two devices can also agree to well under a ppm without sharing a clock — a USB DAC against a QA403 does — and such a figure is still corrected. Tone measurements are untouched by it, but anything measured from a chirp reads it as a delay that grows with frequency — i.e. as the DUT’s own phase and group delay. Measured by Sound card ▸ Measure the drift.',
   },
   {
     term: 'ppm',

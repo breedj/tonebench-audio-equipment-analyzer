@@ -12,13 +12,73 @@ public class ClockDriftReadingTests
     private const int Fft = 32768;
 
     [Fact]
-    public void OneCard_ReadsAsOneClock_AndSaysTheWarningDoesNotApply()
+    public void BelowTheFirstFigureThatEarnsACorrection_ThereIsNothingToCorrect()
     {
         var verdict = ClockDriftReading.Describe(0.02, sigmaPpm: 0.05, Rate, Fft);
 
         Assert.Equal("Good", verdict.Quality);
-        Assert.Contains("one clock", verdict.Headline, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nothing to correct", verdict.Headline);
         Assert.Contains("does not apply", verdict.Detail);
+
+        // And it no longer asserts what produced it. Two independent crystals can land here.
+        Assert.Contains("not proof of either", verdict.Detail);
+    }
+
+    /// <summary>
+    /// The band this project's own split bench sits in, and the one the verdict used to be wrong
+    /// about.
+    ///
+    /// <para>It read "one clock" below 1 ppm and explained it as one card used both ways or two
+    /// locked to a word clock, while the chirp screens offered a correction from 0.05 ppm up — so a
+    /// Topping D50 III against a QA403, which reads +0.45 and −0.83 to −0.85 ppm across runs
+    /// (2026-11-13), was told nothing was affected and handed a correction at the same time.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(-0.85)]
+    [InlineData(0.4546)]
+    [InlineData(-0.999)]
+    public void SubPpmButCorrected_SaysUnusuallyCloseAndQuotesTheCost(double ppm)
+    {
+        var verdict = ClockDriftReading.Describe(ppm, sigmaPpm: 0.003, Rate, Fft);
+
+        Assert.Equal("Good", verdict.Quality);
+        Assert.Contains("unusually close", verdict.Headline);
+
+        // The two claims that were wrong are gone...
+        Assert.DoesNotContain("not running independently", verdict.Detail);
+        Assert.DoesNotContain("Nothing here is affected", verdict.Detail);
+
+        // ...and what replaced them names the correction and what it is worth.
+        Assert.Contains("0.05 ppm up", verdict.Detail);
+        Assert.Contains("at 20 kHz", verdict.Detail);
+    }
+
+    /// <summary>
+    /// The arithmetic that makes "nothing is affected" the wrong thing to have said: 0.85 ppm over
+    /// a 0.6827 s record is 0.58 us, which is 4.2 degrees at 20 kHz.
+    /// </summary>
+    [Fact]
+    public void TheCostItQuotesInThatBand_IsTheOneMeasuredByHand()
+    {
+        var verdict = ClockDriftReading.Describe(-0.85, sigmaPpm: 0.003, Rate, Fft);
+
+        Assert.Equal(0.580, verdict.SlipMicroseconds, 3);
+        Assert.Equal(4.18, verdict.PhaseErrorDegAt20k, 2);
+        Assert.Contains("4.2", verdict.Detail);
+    }
+
+    /// <summary>
+    /// And a figure in that band that has not settled is still called out, which it could not be
+    /// while the unstable test started at 1 ppm: the band is corrected now, and an unsettled
+    /// correction is what this verdict exists to warn about.
+    /// </summary>
+    [Fact]
+    public void AnUnsettledReadingInThatBand_IsStillCalledProvisional()
+    {
+        var verdict = ClockDriftReading.Describe(0.6, sigmaPpm: 4.0, Rate, Fft);
+
+        Assert.Equal("Fair", verdict.Quality);
+        Assert.Contains("still moving", verdict.Headline);
     }
 
     [Fact]

@@ -140,10 +140,22 @@
       </thead>
       <tbody>
         <tr>
-          <td>under 1 ppm</td>
+          <td>under 0.05 ppm</td>
           <td>
-            <strong>One clock.</strong> This is one card used both ways, or two locked to the same
-            word clock. The two-clocks warning does not apply to that bench at all.
+            <strong>Nothing to correct.</strong> Below the figure the chirp screens act on, so no
+            correction is offered and the two-clocks warning does not apply to that bench. Usually
+            one device used both ways, or two locked to the same word clock.
+          </td>
+        </tr>
+        <tr>
+          <td>0.05 to 1 ppm</td>
+          <td>
+            <strong>Two clocks, unusually close.</strong> Closer than two consumer crystals have to
+            be, so they may share a clock — but they need not: a Topping D50 III against a QA403
+            reads about this, and those are two free-running crystals in two boxes. <strong>It is
+            corrected like any other figure</strong>, and the verdict quotes what the correction is
+            worth, because 0.85 ppm is still 4° of phase at 20 kHz over a 0.68 s record and 17° over
+            the frequency-response chirp’s 2.73 s one.
           </td>
         </tr>
         <tr>

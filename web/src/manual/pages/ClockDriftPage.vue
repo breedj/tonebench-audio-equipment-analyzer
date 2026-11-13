@@ -10,10 +10,20 @@
     </p>
 
     <p>
-      It is reached from the <strong>Sound card</strong> dialog: pick two different cards and a
-      <strong>Clock drift</strong> panel appears between <em>Device</em> and <em>Full scale
-      output</em>, with a <strong>Measure the drift</strong> button. On one card there is one clock
-      and nothing to compare, so the panel is not shown at all.
+      It is reached from whichever dialog describes the bench. On the <strong>Sound card</strong>
+      dialog: pick two different cards and a <strong>Clock drift</strong> panel appears between
+      <em>Device</em> and <em>Full scale output</em>, with a <strong>Measure the drift</strong>
+      button. On the <strong>Split (two devices)</strong> dialog the same panel is at the foot —
+      a QA40x capturing while a USB DAC plays is two crystals exactly as much as two cards are. Where
+      one device both plays and captures there is one clock and nothing to compare, so no panel is
+      shown at all.
+    </p>
+    <p>
+      A figure is kept <strong>against the two devices it was measured between</strong>, so a bench
+      that swaps a card for an afternoon and swaps back does not have to measure again: the old
+      reading is still there under its own pairing. Change either device and the panel says the
+      pairing has not been measured yet, rather than quoting a figure for devices that are no longer
+      in the path.
     </p>
     <p>
       Once the test has run, that panel also keeps the last reading: the drift itself, the
@@ -28,7 +38,8 @@
     <h3>What it does</h3>
 
     <p>
-      It plays a tone on the output card and reads that tone's frequency on the input card. What
+      It plays a tone on the device that generates and reads that tone's frequency on the device
+      that captures. What
       comes back is the frequency that was played multiplied by the ratio of the two clocks, so the
       difference between the two <em>is</em> the difference between the clocks. Neither card's own
       error against true time is knowable from one cable, and neither needs to be — only the

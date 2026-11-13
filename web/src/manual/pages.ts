@@ -142,6 +142,14 @@ const GUIDE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/guide/GuideSoundCardPage.vue')),
   },
   {
+    id: 'guide-dac',
+    title: 'Measuring a USB DAC',
+    summary: 'Play through the DAC and listen with the QA403: what to plug in, what works straight away, and the one thing to know about two clocks.',
+    group: 'Start here',
+    counterpart: 'split-device',
+    component: manualPage(() => import('./pages/guide/GuideDacPage.vue')),
+  },
+  {
     id: 'guide-first-measurement',
     title: 'Your first measurement',
     summary: 'A loopback, a 1 kHz tone, and a spectrum on screen — ten minutes, step by step.',
@@ -404,10 +412,18 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/SoundCardPage.vue')),
   },
   {
+    id: 'split-device',
+    title: 'Two devices, one analyzer',
+    summary:
+      'One device plays and another captures: measuring a USB DAC with the QA403, what two clocks cost, and running the two halves at different rates.',
+    group: 'Basics',
+    component: manualPage(() => import('./pages/SplitDevicePage.vue')),
+  },
+  {
     id: 'clock-drift',
     title: 'Clock drift',
     summary:
-      'Two cards run on two crystals: measuring how far apart, what the figure means, and which measurements it reaches.',
+      'Two devices run on two crystals: measuring how far apart, what the figure means, and which measurements it reaches.',
     group: 'Basics',
     component: manualPage(() => import('./pages/ClockDriftPage.vue')),
   },

@@ -3794,11 +3794,18 @@ export const api = {
   }) => request<SoundCardProbe>(`/soundcard/probe${toQuery({ ...q })}`),
   /**
    * The figure measured on a pairing. With no argument, the bench in use; with one, the pairing
-   * named -- which is what a dialog staging a pairing has to ask, since it applies on Save and the
-   * session still describes the bench being replaced.
+   * named -- which is what a dialog has to ask when it shows a pairing the server does not have
+   * yet. The split dialog names the two *kinds* (it applies on Save), the sound-card dialog the two
+   * *cards* (its own pairing is which two it has selected).
    */
-  getBenchClockDrift: (pairing?: { generates: SplitHalfKindName; captures: SplitHalfKindName }) =>
-    request<BenchClockDrift>(`/config/clock-drift${pairing ? toQuery({ ...pairing }) : ''}`),
+  getBenchClockDrift: (pairing?: {
+    generates?: SplitHalfKindName
+    captures?: SplitHalfKindName
+    inputHostApi?: string
+    inputDevice?: string
+    outputHostApi?: string
+    outputDevice?: string
+  }) => request<BenchClockDrift>(`/config/clock-drift${pairing ? toQuery({ ...pairing }) : ''}`),
   getSplitDeviceConfig: () => request<SplitDeviceConfig>('/config/split-device'),
   setSplitDeviceConfig: (config: SplitDeviceConfig) =>
     request<SplitDeviceConfig>('/config/split-device', { method: 'PUT', body: JSON.stringify(config) }),

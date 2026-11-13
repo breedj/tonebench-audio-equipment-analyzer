@@ -370,6 +370,15 @@ const { showPage } = useManual()
       the <strong>Clock drift</strong> panel and let the two chirp screens take it off — see
       <button type="button" class="manual-link" @click="showPage('clock-drift')">Clock drift</button>.
     </p>
+    <p>
+      <strong>That panel follows the two cards selected above</strong>, not whichever pair the app
+      currently has open: change one and it reads the figure for the new pair, or says there is
+      none. A figure is kept per <em>pair</em>, and per direction within it — a drift figure's sign
+      is a property of which clock is the reference — but <em>not</em> per channel pair, so moving
+      from channels 1/2 to 3/4 on the same interface keeps it. <strong>Measure again</strong> is
+      held while the selection has not reached the app, for the same reason the two calibration
+      buttons are: there would be nothing to measure.
+    </p>
 
     <h3>Channel pairs</h3>
     <p>

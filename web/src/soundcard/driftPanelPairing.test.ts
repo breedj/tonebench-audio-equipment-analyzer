@@ -3,23 +3,28 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The split dialog's Clock drift panel describes the pairing its dropdowns are <em>staging</em>.
+ * A device dialog's Clock drift panel describes the pairing <em>it</em> shows, not the bench the
+ * session has open.
  *
- * It applies on Save, so a panel answered for the session's own bench describes the pairing being
- * replaced: reported 2026-11-13, where a figure measured with the card generating stayed on screen
- * under a "Measured" summary after Generates and Captures had been turned round. The two directions
- * of one pair are different pairings -- a drift figure's sign is a property of which clock is the
- * reference -- so refreshing was not enough; the panel has to ask about the staged pair.
+ * Reported 2026-11-13 against the split dialog: a figure measured with the card generating stayed on
+ * screen, under a "Measured" summary, after Generates and Captures had been turned round. Re-fetching
+ * could not fix it — the endpoint resolved the pairing from the *saved* document, and that dialog
+ * applies its dropdowns on Save — so the pairing is passed as an argument and resolved server-side,
+ * which keeps `BenchClockKey` the one thing that decides what a pairing is keyed by.
  *
- * It lives in a `.vue`, which is not mountable under this suite's node environment, so this reads the
- * component as text the way `settingsInEffect.test.ts` and `splitNarrowing.test.ts` do.
+ * The two directions of one pair are genuinely two pairings: a drift figure's sign is a property of
+ * which clock is the reference, so a reading taken one way round is correctly not offered the other.
+ *
+ * Both dialogs live in `.vue` files, which are not mountable under this suite's node environment, so
+ * this reads them as text the way `settingsInEffect.test.ts` and `splitNarrowing.test.ts` do.
  */
-const source = readFileSync(
-  fileURLToPath(new URL('../components/SplitDeviceDialog.vue', import.meta.url)),
-  'utf8',
-)
-  .replace(/^\ufeff/, '')
-  .replace(/\r\n/g, '\n')
+const read = (name: string) =>
+  readFileSync(fileURLToPath(new URL(`../components/${name}`, import.meta.url)), 'utf8')
+    .replace(/^﻿/, '')
+    .replace(/\r\n/g, '\n')
+
+const source = read('SplitDeviceDialog.vue')
+const cardSource = read('SoundCardDialog.vue')
 
 describe('the drift panel follows the dropdowns', () => {
   it('asks about the staged pairing rather than the bench in use', () => {
@@ -48,7 +53,7 @@ describe('the drift panel follows the dropdowns', () => {
    * while the panel showed it for another -- the fault above, made durable.
    */
   it('holds the Measure button while the staged pairing is unsaved', () => {
-    expect(computedBody('pairingPending')).toContain('storedPairing')
+    expect(computedBody(source, 'pairingPending')).toContain('storedPairing')
 
     const at = source.indexOf('clockDriftOpen = true')
     const button = source.slice(source.lastIndexOf('<button', at), source.indexOf('>', at))
@@ -64,11 +69,66 @@ describe('the drift panel follows the dropdowns', () => {
   })
 })
 
+/**
+ * The same rule in the sound-card dialog, where the pairing is the two <em>cards</em> selected.
+ *
+ * That dialog applies its selection 250 ms after it changes rather than behind a button, so the form
+ * and the server normally agree — but not while the write is in flight, and not at all when it
+ * cannot be applied (no common sample rate), where the form says one pairing and the server holds
+ * another. Answered for the session's bench the panel then quotes a figure measured between two
+ * other devices under a heading that reads as this one's.
+ */
+describe('the card dialog follows its selection', () => {
+  const loadFn = cardSource.slice(
+    cardSource.indexOf('async function loadBenchDrift'),
+    cardSource.indexOf('async function loadBenchDrift') + 900,
+  )
+
+  it('asks about the two cards the form names', () => {
+    expect(loadFn).toContain('api.getBenchClockDrift(')
+    for (const field of ['inputHostApi', 'inputDevice', 'outputHostApi', 'outputDevice']) {
+      expect(loadFn, field).toContain(field)
+    }
+
+    // Both host APIs, not the device names alone: one card appears under several, and a pairing is
+    // keyed by host API as well as by the interface.
+    expect(loadFn).toContain('next.inputHostApi')
+    expect(loadFn).toContain('next.outputHostApi')
+  })
+
+  it('falls back to the bench in use before a config has loaded', () => {
+    // toConfig() is null until the stored document arrives, and a query of four empty strings is a
+    // pairing between nothing and nothing rather than "whatever the app has open".
+    expect(loadFn).toMatch(/next === null\s*\?\s*undefined/)
+  })
+
+  it('re-reads it when the cards change', () => {
+    const at = cardSource.indexOf("[form.cardKey, form.inputKey, form.outputKey].join('|')")
+    expect(at, 'a watcher over the three card fields').toBeGreaterThan(-1)
+    expect(cardSource.slice(at, at + 260)).toContain('loadBenchDrift()')
+  })
+
+  it('does not re-read it for a channel-pair change', () => {
+    // BenchClockKey keys a card by its interface stem rather than its endpoint, precisely so a
+    // figure survives a channel-pair change. Re-reading on one would ask the same question again,
+    // and listing it here would assert the opposite.
+    const at = cardSource.indexOf("[form.cardKey, form.inputKey, form.outputKey].join('|')")
+    expect(cardSource.slice(at, at + 260)).not.toContain('ChannelOffset')
+  })
+
+  /** The run is held the same way, and this dialog already had that half. */
+  it('holds its Measure button while the settings are not in effect', () => {
+    const at = cardSource.indexOf('clockDriftOpen = true')
+    const button = cardSource.slice(cardSource.lastIndexOf('<button', at), cardSource.indexOf('>', at))
+    expect(button).toContain(':disabled="!settingsInEffect"')
+  })
+})
+
 /** The body of a computed, up to the next top-level `const`. */
-function computedBody(name: string): string {
-  const start = source.indexOf(`const ${name} = computed`)
+function computedBody(text: string, name: string): string {
+  const start = text.indexOf(`const ${name} = computed`)
   expect(start, `${name} is declared`).toBeGreaterThan(-1)
-  const rest = source.slice(start + 1)
+  const rest = text.slice(start + 1)
   const end = rest.indexOf('\nconst ')
   return end === -1 ? rest : rest.slice(0, end)
 }

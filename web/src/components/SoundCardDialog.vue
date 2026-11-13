@@ -205,9 +205,30 @@ const clockDriftOpen = ref(false)
  */
 const benchDrift = ref<BenchClockDrift | null>(null)
 
+/**
+ * Read for the pairing <em>this form</em> names, not the one the session has open.
+ *
+ * <p>The selection is applied 250 ms after it changes rather than behind a button, so the two are
+ * normally the same — but not while the write is in flight, and not at all when it cannot be
+ * applied (no common sample rate, say), where the form says one pairing and the server still holds
+ * another. Answered for the session's bench the panel then quotes a figure measured between two
+ * other devices under a heading that reads as this one's. It is the split dialog's fault one
+ * dialog along — see that one's own note — and the server resolves it either way, so
+ * <c>BenchClockKey</c> stays the single thing that decides what a pairing is keyed by.</p>
+ */
 async function loadBenchDrift() {
+  const next = toConfig()
   try {
-    benchDrift.value = await api.getBenchClockDrift()
+    benchDrift.value = await api.getBenchClockDrift(
+      next === null
+        ? undefined
+        : {
+            inputHostApi: next.inputHostApi,
+            inputDevice: next.inputDeviceName,
+            outputHostApi: next.outputHostApi,
+            outputDevice: next.outputDeviceName,
+          },
+    )
   } catch {
     benchDrift.value = null
   }
@@ -906,6 +927,20 @@ watch(
       form.streamStartSettleMs,
     ].join('|'),
   () => applyDeviceSoon(),
+)
+
+// The Clock drift panel is the *pairing's*, so it follows the three fields that can change which
+// two devices that is. Not debounced with the write: it is one cheap GET and the panel should
+// track the dropdown rather than the reopening.
+//
+// The channel offsets are deliberately absent. BenchClockKey keys a card by its interface stem
+// rather than its endpoint, precisely so a figure survives a channel-pair change -- re-reading on
+// one would ask the same question again, and including it here would say the opposite.
+watch(
+  () => [form.cardKey, form.inputKey, form.outputKey].join('|'),
+  async () => {
+    if (props.open) await loadBenchDrift()
+  },
 )
 
 async function toggleTone() {

@@ -690,10 +690,31 @@ public static class ConfigEndpoints
             DeviceSessionService session,
             ClockDriftSetting drift,
             SoundCardSetting soundCard,
+            SplitDeviceSetting split,
             string? generates,
-            string? captures) =>
+            string? captures,
+            string? inputHostApi,
+            string? inputDevice,
+            string? outputHostApi,
+            string? outputDevice) =>
         {
-            BenchClocks? staged = null;
+            // The cards a staged pairing is between, where a dialog names them -- the sound-card
+            // dialog's are the two it has selected. Built by handing BenchClockKey a config wearing
+            // those names, which is the idiom CarriedForward below already uses.
+            SoundCardConfig card = inputDevice is null && outputDevice is null
+                ? soundCard.Config
+                : soundCard.Config with
+                {
+                    InputHostApi = inputHostApi ?? string.Empty,
+                    InputDeviceName = inputDevice ?? string.Empty,
+                    OutputHostApi = outputHostApi ?? string.Empty,
+                    OutputDeviceName = outputDevice ?? string.Empty,
+                };
+
+            // And the two halves' kinds, where a dialog names those instead -- the split dialog's
+            // two dropdowns. With neither given this is the session's own bench, since
+            // DeviceSessionService.BenchClocks is this same call over this same card document.
+            BenchClocks? pairing;
             if (generates is not null || captures is not null)
             {
                 if (ParseHalfKind(generates) is not { } outputKind || ParseHalfKind(captures) is not { } inputKind)
@@ -702,16 +723,16 @@ public static class ConfigEndpoints
                         "generates and captures must both name one half of a bench: Hardware, SoundCard or Simulated.");
                 }
 
-                staged = BenchClocks.Between(outputKind, inputKind, soundCard.Config);
-
-                // A staged pairing with one clock -- two simulators, or two halves that resolve to
-                // the same card -- is the same answer the session gives for a single device, and it
-                // must not fall through to the session's own bench.
-                if (staged is null)
-                    return Results.Ok(new BenchClockDriftResponse(null, null, null, null, null, null, null, false));
+                pairing = BenchClocks.Between(outputKind, inputKind, card);
+            }
+            else
+            {
+                pairing = BenchClocks.For(session.Kind, card, split);
             }
 
-            if ((staged ?? session.BenchClocks) is not { } clocks)
+            // One clock -- a single device, two simulators, or two halves that resolve to the same
+            // card -- is the one answer that is not about a figure at all.
+            if (pairing is not { } clocks)
                 return Results.Ok(new BenchClockDriftResponse(null, null, null, null, null, null, null, false));
 
             ClockDriftEntry? entry = drift.Config.For(clocks.OutputKey, clocks.InputKey);

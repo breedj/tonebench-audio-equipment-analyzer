@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
-import type { SoundCardConfig, SoundCardOption, VoltageEntryUnitName } from '../api/client'
+import type { BenchClockDrift, SoundCardConfig, SoundCardOption, VoltageEntryUnitName } from '../api/client'
+import { api } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
 import {
@@ -188,18 +189,36 @@ const clockDriftOpen = ref(false)
  * gone the moment it closed: a week later the bench had a stored ppm number and no way to judge
  * it.</p>
  */
-const storedDrift = computed(() => {
-  const c = config.value
-  if (!c || c.clockDriftPpm === null || c.clockDriftPpm === undefined) return null
+/**
+ * The figure measured on the bench as it stands, read from the server rather than from the card's
+ * own document.
+ *
+ * A drift figure is keyed by the *pairing* it was measured between — which since 2026-11-13 may be
+ * a QA40x against a card, and so cannot live on the card's settings at all. Only the session knows
+ * what the bench is, so it is the session that answers.
+ */
+const benchDrift = ref<BenchClockDrift | null>(null)
 
-  const input = c.clockDriftInputDeviceName ?? ''
-  const output = c.clockDriftOutputDeviceName ?? ''
+async function loadBenchDrift() {
+  try {
+    benchDrift.value = await api.getBenchClockDrift()
+  } catch {
+    benchDrift.value = null
+  }
+}
+
+const storedDrift = computed(() => {
+  const d = benchDrift.value
+  if (!d || d.ppm === null || d.ppm === undefined) return null
+
+  const input = d.inputLabel ?? ''
+  const output = d.outputLabel ?? ''
   return {
-    ppm: c.clockDriftPpm,
-    spreadPpm: c.clockDriftSpreadPpm ?? null,
-    sigmaPpm: c.clockDriftSigmaPpm ?? null,
-    toneMarginDb: c.clockDriftToneMarginDb ?? null,
-    when: c.clockDriftMeasuredUtc ? new Date(c.clockDriftMeasuredUtc).toLocaleString() : 'date not recorded',
+    ppm: d.ppm,
+    spreadPpm: d.spreadPpm ?? null,
+    sigmaPpm: d.sigmaPpm ?? null,
+    toneMarginDb: d.toneMarginDb ?? null,
+    when: d.measuredUtc ? new Date(d.measuredUtc).toLocaleString() : 'date not recorded',
     // Both names or neither: half a pairing says less than nothing about which bench it describes.
     between: input && output ? `${output} → ${input}` : '',
   }
@@ -222,6 +241,7 @@ const storedDrift = computed(() => {
  */
 async function onClockDriftClosed() {
   clockDriftOpen.value = false
+  await loadBenchDrift()
   await load(true)
 }
 
@@ -659,7 +679,7 @@ watch(
     saved.value = false
     // The tone state comes from the server, not from what this tab last did: another tab, or this
     // one before a reload, may have left one playing.
-    await Promise.all([load(true), loadDevices(), syncCalibrationState()])
+    await Promise.all([load(true), loadDevices(), syncCalibrationState(), loadBenchDrift()])
     stopLevels?.()
     stopLevels = watchLevels()
     await reconcileWithDevices()

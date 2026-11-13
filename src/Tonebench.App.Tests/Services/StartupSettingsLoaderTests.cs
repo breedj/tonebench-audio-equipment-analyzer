@@ -114,6 +114,7 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         services.AddSingleton<SoundCardSetting>();
         services.AddSingleton<AnalyzerKindSetting>();
         services.AddSingleton<SplitDeviceSetting>();
+        services.AddSingleton<ClockDriftSetting>();
 
         // The load's selection is read in the same block. It needs no factory or session here:
         // unlike the analyzer's, nothing builds a load at resolution time, which is the whole
@@ -215,6 +216,90 @@ public sealed class StartupSettingsLoaderTests : IDisposable
         Assert.Equal(DeviceKind.Split, factory.InitialKind);
         Assert.Equal("Simulated", factory.SplitWhenBuilt?.OutputKind);
         Assert.Equal(48_000.0, factory.SplitWhenBuilt?.GeneratorSampleRateHz);
+    }
+
+    /// <summary>
+    /// The clock-drift figure moved out of the sound card's document and into one of its own on
+    /// 2026-11-13, keyed by the pair of devices it was measured between. It has to come with it: it
+    /// is thirty readings and a minute of tone, and on this bench it is the only thing that makes a
+    /// chirp's phase trustworthy.
+    ///
+    /// <para>Carried in C# rather than by a SQL migration because the key is
+    /// <c>SoundCardCatalog.CardOf</c>'s stem rule, which SQL cannot reproduce — and a migration
+    /// that guessed would write a key nothing matches, which does not fail, it silently orphans the
+    /// figure.</para>
+    /// </summary>
+    [Fact]
+    public async Task AStoredClockDriftFigure_IsCarriedIntoItsOwnDocument()
+    {
+        await using ServiceProvider provider = BuildContainer();
+        await StoreKindAsync(provider, DeviceKind.SoundCard);
+
+        var card = SoundCardConfig.Default with
+        {
+            InputHostApi = "ASIO",
+            InputDeviceName = "Line In (G6)",
+            OutputHostApi = "ASIO",
+            OutputDeviceName = "Out 3-4 (MOTU M Series)",
+            ClockDriftPpm = -104.038,
+            ClockDriftSpreadPpm = 0.33,
+            ClockDriftMeasuredUtc = new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero),
+            ClockDriftInputHostApi = "ASIO",
+            ClockDriftInputDeviceName = "Line In (G6)",
+            ClockDriftOutputHostApi = "ASIO",
+            ClockDriftOutputDeviceName = "Out 3-4 (MOTU M Series)",
+        };
+
+        await provider.GetRequiredService<ConfigRepository>().SetAsync(
+            ConfigRepository.SoundCardKey,
+            System.Text.Json.JsonSerializer.Serialize(card, AppJsonContext.Default.SoundCardConfig),
+            CancellationToken.None);
+
+        await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
+
+        ClockDriftConfig drift = provider.GetRequiredService<ClockDriftSetting>().Config;
+        BenchClocks clocks = BenchClocks.For(DeviceKind.SoundCard, card, new SplitDeviceSetting())!;
+
+        // Found under the pairing it was measured on, and offered to the chirp screens.
+        Assert.Equal(-104.038, ClockDriftCorrection.ForBench(clocks, drift)?.Ppm);
+        Assert.Equal(
+            new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero),
+            ClockDriftCorrection.ForBench(clocks, drift)?.MeasuredUtc);
+
+        // And written, so the next start reads the document rather than carrying it again.
+        Assert.False(string.IsNullOrWhiteSpace(
+            await provider.GetRequiredService<ConfigRepository>().GetAsync(
+                ConfigRepository.ClockDriftKey, CancellationToken.None)));
+    }
+
+    [Fact]
+    public async Task AnExistingClockDriftDocument_IsLeftAlone()
+    {
+        // Once, because it runs only when the document is absent -- a bench that has since
+        // re-measured, or cleared an entry, has one and must not have the old figure pushed back in.
+        await using ServiceProvider provider = BuildContainer();
+        var repo = provider.GetRequiredService<ConfigRepository>();
+
+        await repo.SetAsync(
+            ConfigRepository.ClockDriftKey,
+            System.Text.Json.JsonSerializer.Serialize(ClockDriftConfig.Default, AppJsonContext.Default.ClockDriftConfig),
+            CancellationToken.None);
+
+        await repo.SetAsync(
+            ConfigRepository.SoundCardKey,
+            System.Text.Json.JsonSerializer.Serialize(
+                SoundCardConfig.Default with
+                {
+                    InputDeviceName = "Line In (G6)",
+                    OutputDeviceName = "Out 3-4 (MOTU M Series)",
+                    ClockDriftPpm = -104.038,
+                },
+                AppJsonContext.Default.SoundCardConfig),
+            CancellationToken.None);
+
+        await StartupSettingsLoader.LoadAsync(provider, CancellationToken.None);
+
+        Assert.Empty(provider.GetRequiredService<ClockDriftSetting>().Config.Entries);
     }
 
     [Fact]

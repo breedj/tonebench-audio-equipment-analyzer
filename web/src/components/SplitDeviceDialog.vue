@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import type { DeviceRanges, DeviceStatus, SplitDeviceConfig, SplitHalfKindName } from '../api/client'
+import type { BenchClockDrift, DeviceRanges, DeviceStatus, SplitDeviceConfig, SplitHalfKindName } from '../api/client'
 import { api } from '../api/client'
+import ClockDriftDialog from './ClockDriftDialog.vue'
 import Modal from './Modal.vue'
 
 /**
@@ -37,6 +38,41 @@ const form = reactive<SplitDeviceConfig>({
 const error = ref<string | null>(null)
 const saving = ref(false)
 const loaded = ref(false)
+const clockDriftOpen = ref(false)
+
+/**
+ * What this bench's two clocks were last measured to differ by. Read from the server rather than
+ * from any document here: the figure is keyed by the *pairing*, and only the session knows what
+ * the bench is — which is the whole reason it could not live on the sound card's settings.
+ */
+const benchDrift = ref<BenchClockDrift | null>(null)
+
+async function loadBenchDrift() {
+  try {
+    benchDrift.value = await api.getBenchClockDrift()
+  } catch {
+    benchDrift.value = null
+  }
+}
+
+const driftSummary = computed(() => {
+  const d = benchDrift.value
+  if (!d?.twoClocks) return null
+  if (d.ppm === null || d.ppm === undefined) return 'Not measured on this pairing yet.'
+
+  const when = d.measuredUtc ? new Date(d.measuredUtc).toLocaleString() : 'date not recorded'
+  const spread = d.spreadPpm === null || d.spreadPpm === undefined ? '' : `, spread ${d.spreadPpm.toFixed(2)} ppm`
+  return `${d.ppm.toFixed(2)} ppm${spread} — measured ${when}.`
+})
+
+/**
+ * The run stores its figure the moment it ends — there is no Keep button, by design — so the panel
+ * behind this dialog is a run out of date the moment it closes.
+ */
+async function onClockDriftClosed() {
+  clockDriftOpen.value = false
+  await loadBenchDrift()
+}
 
 watch(
   () => props.open,
@@ -49,6 +85,7 @@ watch(
       form.outputKind = stored.outputKind
       form.generatorSampleRateHz = stored.generatorSampleRateHz
       loaded.value = true
+      await loadBenchDrift()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     }
@@ -201,10 +238,35 @@ async function save() {
         side it needs has to be chosen there.
       </p>
 
+      <!-- Rendered only once the pairing really is two devices. On a bench whose two halves are one
+           device there is one clock, nothing to measure, and the test would read zero by
+           construction -- a panel saying so would be a section about a problem this bench does not
+           have. -->
+      <section v-if="benchDrift?.twoClocks" class="dialog-card">
+        <div class="flex items-center gap-2 border-b border-neutral-100 p-3.5 dark:border-neutral-800">
+          <span class="flex-1 text-sm font-semibold">Clock drift</span>
+          <button
+            type="button"
+            class="btn-chip"
+            :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
+            title="Plays a tone on the generating device and reads it back on the capturing one. It measures through whatever is connected, because a DUT changes a tone's level and phase but not its frequency."
+            @click="clockDriftOpen = true"
+          >
+            {{ benchDrift?.ppm === null || benchDrift?.ppm === undefined ? 'Measure the drift' : 'Measure again' }}
+          </button>
+        </div>
+        <p class="m-0 p-3.5 text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+          {{ driftSummary }}
+          Measured, the two chirp screens offer to take the clock's delay ramp off a sweep.
+        </p>
+      </section>
+
       <p v-if="error" class="m-0 rounded-md bg-red-50 px-3 py-2 text-[12.5px] text-red-800 dark:bg-red-950/40 dark:text-red-300">
         {{ error }}
       </p>
     </div>
+
+    <ClockDriftDialog :open="clockDriftOpen" :pairing-note="summary" @close="onClockDriftClosed" />
 
     <template #footer>
       <button type="button" class="btn-secondary" @click="emit('close')">Cancel</button>

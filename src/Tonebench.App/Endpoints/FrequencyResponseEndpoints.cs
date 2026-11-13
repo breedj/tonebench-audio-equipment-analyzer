@@ -13,7 +13,7 @@ public static class FrequencyResponseEndpoints
 
         group.MapPost("/start", async (
             FrequencyResponseStartRequest request, FrequencyResponseRunner runner,
-            DeviceSessionService session, SoundCardSetting soundCard, CancellationToken ct) =>
+            DeviceSessionService session, ClockDriftSetting clockDrift, CancellationToken ct) =>
         {
             if (!EnumParsing.TryParse(request.LevelMode, ThdSweepLevelMode.GeneratorVoltage, out ThdSweepLevelMode levelMode, out var modeError))
                 return Results.BadRequest(modeError);
@@ -36,7 +36,7 @@ public static class FrequencyResponseEndpoints
 
             var measurement = request.ToMeasurement(
                 levelMode, levelUnit, bandwidthReference, stimulus,
-                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config),
+                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.BenchClocks, clockDrift.Config),
                 // A property of the bench rather than anything the client sends, like the drift
                 // above it: on a split the generating half may run at its own rate, and the stimulus
                 // has to be built at that rate to be the waveform the DUT is really being handed.

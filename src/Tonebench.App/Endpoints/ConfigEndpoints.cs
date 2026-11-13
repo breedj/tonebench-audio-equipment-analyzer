@@ -257,6 +257,88 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
+    /// Reads every measured clock difference, and — exactly once per install — carries the sound
+    /// card's own stored figure into the new document.
+    ///
+    /// <para><b>The carry-over is here rather than in a SQL migration</b>, which is where this
+    /// project's config changes normally live, for one reason: the key a figure is stored against
+    /// is <c>SoundCardCatalog.CardOf</c>'s stem rule, a C# string function that SQL cannot
+    /// reproduce. A migration that guessed at it would write a key nothing matches, which does not
+    /// fail — it silently orphans a figure that took thirty readings to measure.</para>
+    ///
+    /// <para>Once, because it runs only when the document is <i>absent</i>. A bench that has since
+    /// re-measured, or deleted an entry, has a document and is left alone.</para>
+    /// </summary>
+    public static async Task<ClockDriftConfig> ReadClockDriftAsync(
+        ConfigRepository repo, SoundCardConfig card, CancellationToken ct)
+    {
+        string? json = await repo.GetAsync(ConfigRepository.ClockDriftKey, ct);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                ClockDriftConfig? stored = JsonSerializer.Deserialize(json, AppJsonContext.Default.ClockDriftConfig);
+                return stored is { IsValid: true } ? stored : ClockDriftConfig.Default;
+            }
+            catch (JsonException)
+            {
+                return ClockDriftConfig.Default;
+            }
+        }
+
+        if (CarriedForward(card) is not { } carried)
+            return ClockDriftConfig.Default;
+
+        await repo.SetAsync(
+            ConfigRepository.ClockDriftKey,
+            JsonSerializer.Serialize(carried, AppJsonContext.Default.ClockDriftConfig),
+            ct);
+
+        return carried;
+    }
+
+    /// <summary>
+    /// The sound card's own stamped figure as an entry, or null where there is nothing to carry.
+    ///
+    /// <para>Keyed from the <i>stamp</i> rather than the current selection, because the stamp is
+    /// what names the pairing the figure was measured on — a bench that has swapped a card since
+    /// should find the old figure under the old pairing and not under the new one. Built by handing
+    /// <see cref="BenchClockKey"/> a config wearing the stamped names, so there is still exactly one
+    /// function that decides what a key looks like.</para>
+    /// </summary>
+    private static ClockDriftConfig? CarriedForward(SoundCardConfig card)
+    {
+        if (card.ClockDriftPpm is not { } ppm || !double.IsFinite(ppm))
+            return null;
+
+        SoundCardConfig measured = string.IsNullOrWhiteSpace(card.ClockDriftInputDeviceName)
+            ? card
+            : card with
+            {
+                InputHostApi = card.ClockDriftInputHostApi,
+                InputDeviceName = card.ClockDriftInputDeviceName,
+                OutputHostApi = card.ClockDriftOutputHostApi,
+                OutputDeviceName = card.ClockDriftOutputDeviceName,
+            };
+
+        if (!ClockDriftCorrection.UsesTwoCards(measured))
+            return null;
+
+        var entry = new ClockDriftEntry(
+            BenchClockKey.For(DeviceKind.SoundCard, measured, asInput: false),
+            BenchClockKey.For(DeviceKind.SoundCard, measured, asInput: true),
+            BenchClockKey.LabelFor(DeviceKind.SoundCard, measured, asInput: false),
+            BenchClockKey.LabelFor(DeviceKind.SoundCard, measured, asInput: true),
+            ppm,
+            card.ClockDriftSpreadPpm,
+            card.ClockDriftSigmaPpm,
+            card.ClockDriftToneMarginDb,
+            card.ClockDriftMeasuredUtc ?? default);
+
+        return entry.IsValid ? ClockDriftConfig.Default.With(entry) : null;
+    }
+
+    /// <summary>
     /// Reads the composite analyzer's document, falling back to the default on anything unreadable
     /// <i>or unbuildable</i> — the same rule every setting here follows, and load bearing twice over
     /// here: the session builds its first device in a field initializer, so a refusal would be a
@@ -589,6 +671,27 @@ public static class ConfigEndpoints
             }
 
             return Results.Ok(config);
+        });
+
+        // The clock difference measured on the bench as it stands, which both device dialogs show
+        // and the drift test writes. One endpoint rather than each dialog reading a document of its
+        // own: the figure is keyed by the *pairing*, and only the session knows what that is.
+        group.MapGet("/clock-drift", (DeviceSessionService session, ClockDriftSetting drift) =>
+        {
+            if (session.BenchClocks is not { } clocks)
+                return Results.Ok(new BenchClockDriftResponse(null, null, null, null, null, null, null, false));
+
+            ClockDriftEntry? entry = drift.Config.For(clocks.OutputKey, clocks.InputKey);
+
+            return Results.Ok(new BenchClockDriftResponse(
+                entry?.Ppm,
+                entry?.SpreadPpm,
+                entry?.SigmaPpm,
+                entry?.ToneMarginDb,
+                entry is { MeasuredUtc.Ticks: > 0 } ? entry.MeasuredUtc : null,
+                clocks.OutputLabel,
+                clocks.InputLabel,
+                TwoClocks: true));
         });
 
         // The composite analyzer's two halves. Written by the split dialog, and followed by a
@@ -937,3 +1040,20 @@ public sealed record ImportWeightingRequest(string Path);
 
 /// <summary>The folder to remember for one browse purpose.</summary>
 public sealed record LastDirectoryRequest(string Path);
+
+/// <summary>
+/// The clock difference measured on the bench as it stands, for the two device dialogs.
+///
+/// <para><see cref="TwoClocks"/> is the distinction a null <see cref="Ppm"/> cannot make on its own:
+/// a bench with one device has no such quantity at all, where one with two has simply never
+/// measured it. The first wants no drift panel; the second wants one, with a button.</para>
+/// </summary>
+public sealed record BenchClockDriftResponse(
+    double? Ppm,
+    double? SpreadPpm,
+    double? SigmaPpm,
+    double? ToneMarginDb,
+    DateTimeOffset? MeasuredUtc,
+    string? OutputLabel,
+    string? InputLabel,
+    bool TwoClocks);

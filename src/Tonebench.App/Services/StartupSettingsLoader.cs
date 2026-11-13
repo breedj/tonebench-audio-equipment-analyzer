@@ -75,6 +75,15 @@ public static class StartupSettingsLoader
         services.GetRequiredService<SplitDeviceSetting>().Config =
             await ConfigEndpoints.ReadSplitDeviceAsync(config, ct);
 
+        // Every clock difference this bench has measured. Not order-sensitive -- nothing builds a
+        // device from it -- but read here for the reason the load kind is: the rule about this
+        // method is an order rather than a case-by-case judgement. It takes the sound card's
+        // document because this is also where that document's own stored figure is carried into the
+        // new one, once, which is why it has to come after the card's load rather than before it.
+        services.GetRequiredService<ClockDriftSetting>().Config =
+            await ConfigEndpoints.ReadClockDriftAsync(
+                config, services.GetRequiredService<SoundCardSetting>().Config, ct);
+
         // Which programmable load to look for. This one is *not* order-sensitive --
         // LoadSessionService builds nothing in its constructor, so resolving it cannot pin the kind
         // the way resolving DeviceSessionService pins the analyzer's. It is loaded here anyway,

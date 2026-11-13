@@ -41,6 +41,7 @@ public sealed class ClockDriftRunner(
     SpectrumPipeline pipeline,
     ConfigRepository config,
     SoundCardSetting soundCard,
+    ClockDriftSetting clockDrift,
     ILogger<ClockDriftRunner> logger) : IMeasurementRun
 {
     /// <summary>
@@ -374,10 +375,13 @@ public sealed class ClockDriftRunner(
             var status = Status;
             if (status.Phase is not ("Finished" or "Cancelled")) return;
             if (status.DriftPpm is not { } ppm || status.Verdict is null) return;
-            if (session.Kind != DeviceKind.SoundCard) return;
 
-            var current = soundCard.Config;
-            if (!current.IsConfigured) return;
+            // One question where there used to be two: a figure is kept against the two devices it
+            // was measured between, and a bench with one clock has no pairing to key it on. That
+            // covers what "the analyzer is a sound card" and "both directions are chosen" used to
+            // say between them, and it covers the bench neither of them could -- a QA40x capturing
+            // while a USB DAC plays.
+            if (session.BenchClocks is not { } clocks) return;
 
             // The weakest record's margin, not the mean or the best — the same figure the dialog
             // shows while measuring, and for the reason given there: a run with one marginal record
@@ -386,19 +390,23 @@ public sealed class ClockDriftRunner(
                 ? status.Points.Min(p => p.DominanceDb)
                 : null;
 
-            var updated = current.StampClockDrift(
+            var entry = new ClockDriftEntry(
+                clocks.OutputKey, clocks.InputKey, clocks.OutputLabel, clocks.InputLabel,
                 ppm, status.SpreadPpm, status.SigmaPpm, toneMarginDb, DateTimeOffset.UtcNow);
-            if (!updated.IsValid)
+
+            if (!entry.IsValid)
             {
                 logger.LogWarning("Clock drift: {Ppm:0.0} ppm is outside what can be stored; the figure was not kept.", ppm);
                 return;
             }
 
+            var updated = clockDrift.Config.With(entry);
+
             await config.SetAsync(
-                ConfigRepository.SoundCardKey,
-                System.Text.Json.JsonSerializer.Serialize(updated, Json.AppJsonContext.Default.SoundCardConfig),
+                ConfigRepository.ClockDriftKey,
+                System.Text.Json.JsonSerializer.Serialize(updated, Json.AppJsonContext.Default.ClockDriftConfig),
                 CancellationToken.None).ConfigureAwait(false);
-            soundCard.Config = updated;
+            clockDrift.Config = updated;
 
             // "Remembered" means kept *and usable*, which is what the dialog goes on to claim --
             // it tells the reader the two chirp screens now offer this correction. On a bench whose
@@ -406,7 +414,7 @@ public sealed class ClockDriftRunner(
             // (it is a real reading, and "0 ppm, one clock" is worth having) and the claim is not
             // made. Asking ForBench rather than re-deriving the conditions is what keeps the two
             // from drifting apart.
-            bool usable = ClockDriftCorrection.ForBench(session.Kind, updated) is not null;
+            bool usable = ClockDriftCorrection.ForBench(clocks, updated) is not null;
             lock (_stateLock)
             {
                 _remembered = usable;
@@ -419,7 +427,7 @@ public sealed class ClockDriftRunner(
             // describes.
             logger.LogInformation(
                 "Clock drift: stored {Ppm:0.000} ppm (spread {Spread:0.000} ppm) between {Output} and {Input}; {Usable}",
-                ppm, status.SpreadPpm ?? 0.0, updated.OutputDeviceName, updated.InputDeviceName,
+                ppm, status.SpreadPpm ?? 0.0, clocks.OutputLabel, clocks.InputLabel,
                 usable ? "the chirp screens will offer it" : "nothing can use it on this pairing");
         }
         catch (Exception ex)

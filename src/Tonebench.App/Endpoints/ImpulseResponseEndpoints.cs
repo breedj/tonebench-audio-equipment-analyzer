@@ -16,7 +16,7 @@ public static class ImpulseResponseEndpoints
 
         group.MapPost("/start", async (
             ImpulseResponseStartRequest request, ImpulseResponseRunner runner,
-            DeviceSessionService session, SoundCardSetting soundCard, CancellationToken ct) =>
+            DeviceSessionService session, ClockDriftSetting clockDrift, CancellationToken ct) =>
         {
             if (!EnumParsing.TryParse(request.LevelMode, ThdSweepLevelMode.GeneratorVoltage, out ThdSweepLevelMode levelMode, out var modeError))
                 return Results.BadRequest(modeError);
@@ -38,7 +38,7 @@ public static class ImpulseResponseEndpoints
 
             var measurement = request.ToMeasurement(
                 levelMode, levelUnit, referenceMode, gateWindow, stimulus,
-                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config),
+                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.BenchClocks, clockDrift.Config),
                 // The bench's own, like the drift above it -- see the frequency-response endpoint.
                 session.GeneratorSampleRateHz);
 

@@ -23,33 +23,36 @@ public sealed record ClockDriftAvailable(double Ppm, DateTimeOffset? MeasuredUtc
 /// the client decides this.</para>
 ///
 /// <para>It is in the App layer rather than on <see cref="SoundCardConfig"/> because the first of
-/// the four is about the analyzer rather than the configuration: the stored figure names whichever
-/// sound card was last selected, and a <see cref="DeviceKind.Hardware"/> or
-/// <see cref="DeviceKind.Simulated"/> session leaves that naming in place — so a QA403, which has
-/// one clock, would be offered a correction measured between two cards that are not in the path.
+/// them is about the <i>bench</i> rather than the configuration: a figure measured between two
+/// devices means nothing on a bench those two devices are not both in. <see cref="BenchClocks"/> is
+/// what answers that, and it is the only thing here that knows what a device is.
 /// Guarded by <c>ClockDriftCorrectionTests</c>.</para>
+///
+/// <para><b>Keyed on a pairing since 2026-11-13</b>, where it used to be a single figure on the
+/// sound card's own document behind a <c>kind == SoundCard</c> gate. The quantity is a property of
+/// two crystals and neither has to be a card: a QA403 capturing while a USB DAC plays is two clocks
+/// exactly as much as two cards are, and that bench was offered no correction at all.</para>
 /// </summary>
 public static class ClockDriftCorrection
 {
     /// <summary>
     /// The drift that applies to the bench as it stands, or null when nothing does.
     ///
-    /// <para>Null for each of: an analyzer that is not a sound card; a bench whose two sides are
-    /// one card, which has one clock; a bench that has never run the drift test; a figure measured
-    /// between a different pair of devices from the one now selected; and a figure too small to be
-    /// worth correcting, which is the <i>same</i> threshold <see cref="ChirpClockDrift.For"/>
-    /// refuses at — read from there rather than restated, so a bench cannot be offered a
-    /// correction that the estimator then declines to make.</para>
+    /// <para>Null for each of: a bench with one clock (<see cref="BenchClocks.For"/> carries those
+    /// cases); a pairing the drift test has never been run on, which includes one measured between
+    /// devices that are no longer both selected — the keys simply do not match, so a figure for
+    /// another pairing is not so much refused as not found; and a figure too small to be worth
+    /// correcting, which is the <i>same</i> threshold <see cref="ChirpClockDrift.For"/> refuses at —
+    /// read from there rather than restated, so a bench cannot be offered a correction that the
+    /// estimator then declines to make.</para>
     /// </summary>
-    public static ClockDriftAvailable? ForBench(DeviceKind kind, SoundCardConfig? config)
+    public static ClockDriftAvailable? ForBench(BenchClocks? clocks, ClockDriftConfig? drift)
     {
-        if (kind != DeviceKind.SoundCard) return null;
-        if (config is null || !UsesTwoCards(config)) return null;
-        if (config.ClockDriftPpm is not { } ppm) return null;
-        if (!config.ClockDriftMatchesPairing) return null;
-        if (!double.IsFinite(ppm) || Math.Abs(ppm) < ChirpClockDrift.NegligiblePpm) return null;
+        if (clocks is null) return null;
+        if (drift?.For(clocks.OutputKey, clocks.InputKey) is not { } entry) return null;
+        if (!double.IsFinite(entry.Ppm) || Math.Abs(entry.Ppm) < ChirpClockDrift.NegligiblePpm) return null;
 
-        return new ClockDriftAvailable(ppm, config.ClockDriftMeasuredUtc);
+        return new ClockDriftAvailable(entry.Ppm, entry.MeasuredUtc == default ? null : entry.MeasuredUtc);
     }
 
     /// <summary>
@@ -93,6 +96,6 @@ public static class ClockDriftCorrection
     /// mount. What the run actually used is then recorded with the result, so a corrected
     /// measurement can always say which ε corrected it.</para>
     /// </summary>
-    public static double Resolve(bool requested, DeviceKind kind, SoundCardConfig? config) =>
-        requested ? ForBench(kind, config)?.Ppm ?? 0.0 : 0.0;
+    public static double Resolve(bool requested, BenchClocks? clocks, ClockDriftConfig? drift) =>
+        requested ? ForBench(clocks, drift)?.Ppm ?? 0.0 : 0.0;
 }

@@ -168,6 +168,17 @@ public sealed class DeviceSessionService(
     public DeviceKind OutputDeviceKind => _kind == DeviceKind.Split ? _split.OutputKind : _kind;
 
     /// <summary>
+    /// The two clocks this bench is running on, or null where one device both plays and captures.
+    /// Everything in the clock-drift feature asks this — what the response screens are offered, what
+    /// the drift test stores it against, and what the dialog says it measured between.
+    ///
+    /// <para>Answered here because this is the one place that knows all three of the analyzer kind,
+    /// the sound card's document and the split's halves. The endpoints would otherwise each have to
+    /// take two more settings to ask the same question three different ways.</para>
+    /// </summary>
+    public BenchClocks? BenchClocks => Services.BenchClocks.For(_kind, _soundCard.Config, _split);
+
+    /// <summary>
     /// The rate the generator is being driven at. The stream's own rate on every device with one
     /// clock, and the generating half's own on a composite — see
     /// <c>IAnalyzerDevice.GeneratorSampleRateHz</c>.

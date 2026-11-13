@@ -212,6 +212,24 @@ export type DeviceKindName = 'Hardware' | 'Simulated' | 'SoundCard' | 'Split'
 /** The two halves a `Split` analyzer can be made of. A split cannot be half of a split. */
 export type SplitHalfKindName = 'Hardware' | 'Simulated' | 'SoundCard'
 
+/**
+ * The clock difference measured on the bench as it stands — what both device dialogs show.
+ *
+ * `twoClocks` is the distinction a null `ppm` cannot make on its own: a bench with one device has
+ * no such quantity at all, where one with two has simply never measured it. The first wants no
+ * drift panel; the second wants one, with a button.
+ */
+export interface BenchClockDrift {
+  ppm: number | null
+  spreadPpm: number | null
+  sigmaPpm: number | null
+  toneMarginDb: number | null
+  measuredUtc: string | null
+  outputLabel: string | null
+  inputLabel: string | null
+  twoClocks: boolean
+}
+
 /** Mirrors Tonebench.Data.SplitDeviceConfig: which device plays, which captures, and at what rate. */
 export interface SplitDeviceConfig {
   /** The capturing half. */
@@ -3774,6 +3792,7 @@ export const api = {
     inputChannelOffset?: number
     outputChannelOffset?: number
   }) => request<SoundCardProbe>(`/soundcard/probe${toQuery({ ...q })}`),
+  getBenchClockDrift: () => request<BenchClockDrift>('/config/clock-drift'),
   getSplitDeviceConfig: () => request<SplitDeviceConfig>('/config/split-device'),
   setSplitDeviceConfig: (config: SplitDeviceConfig) =>
     request<SplitDeviceConfig>('/config/split-device', { method: 'PUT', body: JSON.stringify(config) }),

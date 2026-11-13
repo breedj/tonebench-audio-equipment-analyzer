@@ -55,13 +55,13 @@ public static class DeviceEndpoints
             }
         });
 
-        group.MapGet("/ranges", (DeviceSessionService session, SoundCardSetting soundCard) =>
+        group.MapGet("/ranges", (DeviceSessionService session, ClockDriftSetting clockDrift) =>
         {
             var caps = session.Capabilities;
 
             // Read here rather than in the session, which knows nothing about the configuration
             // database -- the same division DatabaseProblem on the status response follows.
-            var drift = ClockDriftCorrection.ForBench(session.Kind, soundCard.Config);
+            var drift = ClockDriftCorrection.ForBench(session.BenchClocks, clockDrift.Config);
 
             return Results.Ok(new DeviceRangesResponse(
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,

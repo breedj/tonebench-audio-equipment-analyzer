@@ -159,6 +159,10 @@ try
     // see StartupSettingsLoader.
     builder.Services.AddSingleton<SplitDeviceSetting>();
 
+    // Every clock difference this bench has measured, kept per device pairing. Read by the two
+    // chirp screens through /api/device/ranges and written by the drift test.
+    builder.Services.AddSingleton<ClockDriftSetting>();
+
     // The programmable load. Unlike the analyzer's, none of these three has to be registered or
     // loaded in any particular order: LoadSessionService builds nothing in its constructor, so
     // resolving it cannot pin a setting that is read afterwards -- see LoadKindSetting.

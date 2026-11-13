@@ -419,6 +419,81 @@ public sealed record AnalyzerKindConfig(string Kind = "Hardware")
 }
 
 /// <summary>
+/// One measured clock difference, kept against the pair of devices it was measured between.
+/// </summary>
+/// <param name="OutputKey">
+/// A stable identity for the device that played — see <c>BenchClockKey</c>, which is the only thing
+/// that makes one. A <i>card</i> rather than an endpoint: one interface shows up as several
+/// endpoints with different names, and a crystal belongs to the whole device.
+/// </param>
+/// <param name="InputKey">The same for the device that captured.</param>
+/// <param name="OutputLabel">What to call the playing device on screen. Display only — never compared.</param>
+/// <param name="InputLabel">The same for the capturing device.</param>
+/// <param name="Ppm">How far the input's clock runs from the output's, in parts per million.</param>
+public sealed record ClockDriftEntry(
+    string OutputKey,
+    string InputKey,
+    string OutputLabel,
+    string InputLabel,
+    double Ppm,
+    double? SpreadPpm = null,
+    double? SigmaPpm = null,
+    double? ToneMarginDb = null,
+    DateTimeOffset MeasuredUtc = default)
+{
+    public bool IsValid =>
+        !string.IsNullOrWhiteSpace(OutputKey)
+        && !string.IsNullOrWhiteSpace(InputKey)
+        && double.IsFinite(Ppm)
+        && Math.Abs(Ppm) <= SoundCardConfig.MaxAbsClockDriftPpm;
+
+    /// <summary>Whether this entry was measured between the two devices named.</summary>
+    public bool Matches(string outputKey, string inputKey) =>
+        string.Equals(OutputKey, outputKey, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(InputKey, inputKey, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Every clock difference this bench has measured, kept per pair of devices.
+///
+/// <para><b>A list rather than one slot</b>, because a figure is expensive to take — thirty
+/// readings, a minute of tone — and a bench that swaps a card for an afternoon should not have to
+/// re-measure both ways round. It is capped all the same: a pairing nobody has used for sixteen
+/// pairings is one whose devices have probably moved anyway.</para>
+///
+/// <para>Its own document rather than a field on <c>SoundCardConfig</c>, where the figure lived
+/// until 2026-11-13, because the quantity is a property of <i>two devices</i> and neither has to be
+/// a sound card: a QA403 captuing while a USB DAC plays is two crystals exactly as much as two
+/// cards are. The old fields are still there, unread, and were carried into here once.</para>
+/// </summary>
+public sealed record ClockDriftConfig(IReadOnlyList<ClockDriftEntry> Entries)
+{
+    public static ClockDriftConfig Default { get; } = new([]);
+
+    /// <summary>Oldest dropped past this. A bench has a handful of pairings; sixteen is generous.</summary>
+    public const int MaxEntries = 16;
+
+    public bool IsValid => Entries is not null && Entries.All(e => e.IsValid);
+
+    /// <summary>The figure measured between these two devices, or null.</summary>
+    public ClockDriftEntry? For(string outputKey, string inputKey) =>
+        Entries?.FirstOrDefault(e => e.Matches(outputKey, inputKey));
+
+    /// <summary>
+    /// This store with <paramref name="entry"/> in it, replacing any earlier reading of the same
+    /// pairing and newest first — so the cap drops the pairing nobody has measured for longest.
+    /// </summary>
+    public ClockDriftConfig With(ClockDriftEntry entry)
+    {
+        var kept = (Entries ?? [])
+            .Where(e => !e.Matches(entry.OutputKey, entry.InputKey))
+            .Take(MaxEntries - 1);
+
+        return new ClockDriftConfig([entry, .. kept]);
+    }
+}
+
+/// <summary>
 /// A composite analyzer: which device plays, which device captures, and the rate the generator runs
 /// at. Read when the app comes up on <c>DeviceKind.Split</c>, and by the split dialog.
 /// </summary>
@@ -801,6 +876,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The composite analyzer's two halves and generator rate. One document, see <see cref="SplitDeviceConfig"/>.</summary>
     public const string SplitDeviceKey = "device.split";
+
+    /// <summary>Measured clock differences, per device pairing. One document, see <see cref="ClockDriftConfig"/>.</summary>
+    public const string ClockDriftKey = "device.clockDrift";
 
     /// <summary>A user weighting table's key, one document per slot (1 or 2) — see <see cref="UserWeightingTable"/>.</summary>
     public static string UserWeightingKey(int slot)

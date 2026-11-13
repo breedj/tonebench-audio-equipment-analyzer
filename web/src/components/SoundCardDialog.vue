@@ -518,6 +518,21 @@ function pairsFor(channels: number) {
 const rates = computed(() => probe.value?.sampleRatesHz ?? [])
 
 /**
+ * The rates a pairing is <em>asked</em> about, from the server, which is the app's list and not a
+ * card's. Held separately from {@link rates} because the difference is the whole point: a rate
+ * missing from the probe was refused by the driver, and one missing from here was never asked for.
+ */
+const candidateRates = computed(() => inventory.value?.candidateRatesHz ?? [])
+
+/** "48, 96, 192, 384 and 768 kHz" — one spelling, wherever a list of rates is printed. */
+function ratesInKhz(values: number[]): string {
+  const khz = values.map((r) => r / 1000)
+  if (khz.length === 0) return ''
+  if (khz.length === 1) return `${khz[0]} kHz`
+  return `${khz.slice(0, -1).join(', ')} and ${khz[khz.length - 1]} kHz`
+}
+
+/**
  * The probed rates as the Device section prints them — "48, 96 and 192 kHz".
  *
  * This readout was taken out once, on the reasoning that the rate a measurement runs at is the
@@ -528,11 +543,25 @@ const rates = computed(() => probe.value?.sampleRatesHz ?? [])
  * pass or fail, and a pair that offers 48 kHz alone is a materially worse bench than one offering
  * all three, discovered later and somewhere else. Asked for from the bench 2026-11-12.
  */
-const rateSummary = computed(() => {
-  const khz = rates.value.map((r) => r / 1000)
-  if (khz.length === 0) return ''
-  if (khz.length === 1) return `${khz[0]} kHz`
-  return `${khz.slice(0, -1).join(', ')} and ${khz[khz.length - 1]} kHz`
+const rateSummary = computed(() => ratesInKhz(rates.value))
+
+/**
+ * What the Sample rates row says on hover, and the correction to what that row used to imply.
+ *
+ * <p>It prints the probe's answer, which is the <em>subset of this app's candidates</em> the pairing
+ * accepted — not the card's own ceiling. A Topping D50 III goes to 768 kHz and read "48, 96 and
+ * 192 kHz" here for as long as those were the only three asked about (reported 2026-11-13). The
+ * row cannot say which it is, so the tooltip does.</p>
+ */
+const rateSummaryHint = computed(() => {
+  const asked = candidateRates.value
+  if (asked.length === 0) return ''
+  const accepted = rates.value.length
+  return accepted === asked.length
+    ? `Every rate this analyzer asks about — ${ratesInKhz(asked)} — opened on this pairing.`
+    : `Of ${ratesInKhz(asked)}, which is what this analyzer asks a card about, these are the ones `
+      + 'the driver accepted in exclusive mode. A rate missing here was refused by the driver; a '
+      + 'rate outside that list was never asked for.'
 })
 
 /**
@@ -1327,7 +1356,7 @@ function mvRms(value: number | null | undefined) {
              when the list is empty, so one place always says what the pairing can do. -->
         <div v-if="rates.length > 0 && form.inputKey && form.outputKey" class="sc-row">
           <span class="sc-label">Sample rates</span>
-          <span class="text-neutral-600 dark:text-neutral-300">{{ rateSummary }}</span>
+          <span class="text-neutral-600 dark:text-neutral-300" :title="rateSummaryHint">{{ rateSummary }}</span>
         </div>
 
         <label
@@ -1370,7 +1399,7 @@ function mvRms(value: number | null | undefined) {
           v-if="probe && rates.length === 0 && form.inputKey && form.outputKey"
           class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
         >
-          {{ probe.problem ?? 'This pairing accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.' }}
+          {{ probe.problem ?? `This pairing accepts none of ${ratesInKhz(candidateRates)}, which are the rates this analyzer asks a card about.` }}
         </p>
 
         <!-- The consequence of the refusal above, stated separately because it is what the user

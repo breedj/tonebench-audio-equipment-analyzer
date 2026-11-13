@@ -553,7 +553,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Sample rate',
     aliases: ['fs'],
     definition:
-      'How many samples per second the converters run at: 48, 96 or 192 kHz. It sets the measurable band (up to the Nyquist frequency), and with the FFT size it sets both the bin size and how long a record takes.',
+      'How many samples per second the converters run at: 48, 96, 192, 384 or 768 kHz, of which a QA403 reaches 384 for capture only and a sound card whichever its driver accepts. It sets the measurable band (up to the Nyquist frequency), and with the FFT size it sets both the bin size and how long a record takes.',
     see: ['settings'],
   },
   {

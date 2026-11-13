@@ -53,7 +53,11 @@ public class SoundCardDeviceTests
     public async Task Connect_ReportsTheCardAndTheRatesItAccepts()
     {
         var (device, pa) = Build();
-        pa.FormatSupported = r => r.SampleRateHz != 192_000.0;
+
+        // A card that stops at 96 kHz, expressed as a ceiling rather than by naming the one rate to
+        // refuse: written as "everything but 192" this expectation had to be rewritten the moment
+        // 384 and 768 were added to the candidate list.
+        pa.FormatSupported = r => r.SampleRateHz <= 96_000.0;
 
         DeviceInfo info = await device.ConnectAsync(CancellationToken.None);
 

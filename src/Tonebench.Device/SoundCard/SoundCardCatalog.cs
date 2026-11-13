@@ -111,7 +111,17 @@ public sealed record SoundCardInventory(
     IReadOnlyList<SoundCardHostApiOption> HostApis,
     IReadOnlyList<SoundCardOption> Inputs,
     IReadOnlyList<SoundCardOption> Outputs,
-    string? Problem = null)
+    string? Problem = null,
+    /// <summary>
+    /// The rates a pairing is asked about — <see cref="SoundCardEnumerator.CandidateRatesHz"/>.
+    ///
+    /// <para>Sent so the dialog can tell a rate the <i>driver</i> refused from one this app never
+    /// asked for, which the Sample rates row had been printing as if they were the same thing. Also
+    /// so the "accepts none of these" refusal names the list rather than spelling it out a second
+    /// time in the client, where it had already been written as "48, 96 or 192 kHz" and would have
+    /// been wrong the moment a fourth was added — which it was.</para>
+    /// </summary>
+    IReadOnlyList<double>? CandidateRatesHz = null)
 {
     /// <summary>
     /// Every device once, ordered as the picker offers them: <see cref="Inputs"/> and
@@ -188,7 +198,8 @@ public static class SoundCardCatalog
                         .OrderBy(o => o.Preference)
                         .ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase),
                 ],
-                Outputs: [.. options.Where(o => o.MaxOutputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)]);
+                Outputs: [.. options.Where(o => o.MaxOutputChannels > 0).OrderBy(o => o.Preference).ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)],
+                CandidateRatesHz: SoundCardEnumerator.CandidateRatesHz);
         }
         catch (Exception ex)
         {

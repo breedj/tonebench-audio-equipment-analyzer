@@ -134,16 +134,22 @@ public class SoundCardEnumeratorTests
         var enumerator = new SoundCardEnumerator(fake);
 
         Assert.Equal([48_000.0], enumerator.SupportedRatesHz(input, output, exclusive: false));
-        Assert.Equal([48_000.0, 96_000.0, 192_000.0], enumerator.SupportedRatesHz(input, output, exclusive: true));
+
+        // Everything asked about, derived rather than listed: this fake accepts every rate in
+        // exclusive mode, so the expectation is the candidate list itself and does not have to be
+        // rewritten the next time one is added -- which is what broke it when 384 and 768 arrived.
+        Assert.Equal(
+            SoundCardEnumerator.CandidateRatesHz,
+            enumerator.SupportedRatesHz(input, output, exclusive: true));
     }
 
     /// <summary>
-    /// Only the three the rest of the app is built around. A card offering 44.1 kHz does not get to
-    /// put it in front of a user, because every FFT-size table and chirp period downstream assumes
-    /// one of these three.
+    /// Only the rates this app asks about. A card offering 44.1 kHz does not get to put it in front
+    /// of a user: a split runs its two halves at independent rates and refuses a pair whose ratio is
+    /// not a whole number, which 44.1 against any of these is not.
     /// </summary>
     [Fact]
-    public void SupportedRates_AreOnlyEverTheThreeTheAppIsBuiltAround()
+    public void SupportedRates_AreOnlyEverTheOnesTheAppAsksAbout()
     {
         var fake = new FakePortAudio();
         var api = fake.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
@@ -154,6 +160,24 @@ public class SoundCardEnumeratorTests
 
         Assert.Equal(SoundCardEnumerator.CandidateRatesHz, rates);
         Assert.DoesNotContain(44_100.0, rates);
+    }
+
+    /// <summary>
+    /// Every candidate is a power-of-two multiple of 48 kHz, which is the rule and not a tidiness:
+    /// a split refuses a generator/capture pair whose ratio is not a whole number, because nothing
+    /// periodic -- a chirp, a noise sequence, a multitone comb -- lines up with a power-of-two
+    /// analysis record otherwise. Adding 44.1 kHz or any of its multiples here would put a rate in
+    /// the picker that half the app then refuses.
+    /// </summary>
+    [Fact]
+    public void EveryCandidateRate_IsAPowerOfTwoMultipleOf48kHz()
+    {
+        foreach (double rate in SoundCardEnumerator.CandidateRatesHz)
+        {
+            double ratio = rate / 48_000.0;
+            Assert.Equal(Math.Round(ratio), ratio);
+            Assert.Equal(0, (int)Math.Round(ratio) & ((int)Math.Round(ratio) - 1));
+        }
     }
 
     [Fact]

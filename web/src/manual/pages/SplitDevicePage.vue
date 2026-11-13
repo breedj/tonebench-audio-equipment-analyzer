@@ -231,8 +231,12 @@ const { showPage } = useManual()
         engineer around. A 44.1 kHz DAC measurement is still ahead.
       </li>
       <li>
-        <strong>Sound-card rates above 192 kHz.</strong> The card ladder is 48, 96 and 192 kHz; only
-        a QA40x input reaches 384 kHz, and only with the experimental setting on.
+        <strong>Nothing about the rates any more, except 44.1 kHz above.</strong> A card is asked
+        about 48, 96, 192, 384 and 768 kHz and offers whichever its driver accepts, so a fast DAC
+        can be driven at its own rate; a QA40x reaches 384 kHz for capture, and only with the
+        experimental setting on. Verified on this bench: a Topping D50 III accepts all five in
+        exclusive mode, and a split with it generating at 384 kHz into a QA403 capturing at 384 kHz
+        runs with no dropped chunks or blocks.
       </li>
     </ul>
   </div>

@@ -55,11 +55,36 @@ public enum SoundCardHostApiTrust
 internal sealed class SoundCardEnumerator(IPortAudio portAudio)
 {
     /// <summary>
-    /// The rates the rest of the app is built around. Deliberately the intersection rather than
-    /// everything a card offers: every FFT-size table, chirp period and panel default is written
-    /// against these three, and a card that cannot do 192 kHz simply does not offer it.
+    /// The rates a card is asked about, one at a time, in exclusive mode.
+    ///
+    /// <para><b>This is the app's list, not the card's</b>, and that distinction is worth keeping in
+    /// view: a rate absent from a pairing's probe result was refused by the driver, but a rate absent
+    /// from <i>here</i> was never asked for. It stopped at 192 kHz until 2026-11-13, which is how a
+    /// Topping D50 III — a DAC that goes to 768 — came to report "48, 96 and 192 kHz" as though that
+    /// were its own limit.</para>
+    ///
+    /// <para><b>Every rate must be a power-of-two multiple of 48 kHz, and that is not a convention.</b>
+    /// A split runs its two halves at independent rates and refuses a pair whose ratio is not a whole
+    /// number (<c>DeviceSessionService.IsPeriodicRatePair</c>): nothing periodic — a chirp, a noise
+    /// sequence, a multitone comb — can line up with an analysis record otherwise. 44.1 kHz and its
+    /// multiples are excluded by that same arithmetic and not by preference.</para>
+    ///
+    /// <para><b>What raising the ceiling did and did not cost.</b> Nothing downstream is sized in
+    /// frames: <c>SoundCardDevice.TargetBufferedSeconds</c> asks PortAudio for its rings as a time,
+    /// the DAC prime is a time, the re-clock settle is a time converted per rate, and the analysis
+    /// hop is a fraction of a record. What does get tighter is the transfer loop — a 1024-frame
+    /// transfer is 1.33 ms at 768 kHz against 5.3 ms at 192 — which is the same figure the QA403's
+    /// 512-frame chunks already run at 384 kHz, so it is a precedent rather than a new risk.</para>
+    ///
+    /// <para><b>What it does not reach.</b> The response screens derive their rate from the chosen
+    /// <i>span</i> (<c>FrequencyResponseRequest.SampleRateHz</c> is the span doubled) and those spans
+    /// are a client-side list, so a card offering 768 kHz widens the FFT screen's rate dropdown and
+    /// not the chirp's span choices. <c>ImpedanceRequest.MaxSpanHz</c> stays at 96 kHz deliberately:
+    /// it is the width a stored calibration standard is captured at, chosen so one standard covers
+    /// every measurement, and it was never meant as "the maximum the hardware can do".</para>
     /// </summary>
-    public static readonly double[] CandidateRatesHz = [48_000.0, 96_000.0, 192_000.0];
+    public static readonly double[] CandidateRatesHz =
+        [48_000.0, 96_000.0, 192_000.0, 384_000.0, 768_000.0];
 
     public IReadOnlyList<SoundCardHostApi> HostApis => portAudio.HostApis;
 

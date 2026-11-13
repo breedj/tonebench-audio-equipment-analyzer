@@ -332,6 +332,15 @@ export interface SoundCardInventory {
   inputs: SoundCardOption[]
   outputs: SoundCardOption[]
   problem: string | null
+  /**
+   * The rates a pairing is asked about, which is the app's list and not any card's.
+   *
+   * Sent so the dialog can tell a rate the driver refused from one that was never asked for — the
+   * Sample rates row printed the probe result as though it were the card's own ceiling, which is
+   * how a DAC that goes to 768 kHz came to read "48, 96 and 192 kHz". Null only when the audio
+   * library would not start, where a list of candidates is no use.
+   */
+  candidateRatesHz: number[] | null
 }
 
 export interface SoundCardProbe {

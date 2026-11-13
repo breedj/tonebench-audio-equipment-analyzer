@@ -120,7 +120,7 @@ public sealed class SoundCardCalibrationRunner(
     /// </summary>
     public async Task StartOutputToneAsync(double dbFs, CancellationToken ct)
     {
-        RequireSoundCard();
+        RequireCardOn(capturing: false);
 
         if (!OutputLevelsDbFs.Contains(dbFs))
             throw new ArgumentOutOfRangeException(nameof(dbFs), dbFs, $"Pick one of {string.Join(", ", OutputLevelsDbFs)} dB.");
@@ -133,8 +133,7 @@ public sealed class SoundCardCalibrationRunner(
 
         try
         {
-            // Full scale is the one output rung, so a tone dbFs below it is that rung plus dbFs.
-            double levelDbv = session.Capabilities.OutputRangesDbv[0] + dbFs;
+            double levelDbv = ToneDbvFor(dbFs);
             var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(ToneHz, levelDbv)])
             {
                 Kind = GeneratorKind.Tones,
@@ -174,7 +173,7 @@ public sealed class SoundCardCalibrationRunner(
     public async Task<SoundCardCalibrationResult> ApplyOutputAsync(
         double measured, VoltageEntryUnit unit, CancellationToken ct)
     {
-        RequireSoundCard();
+        RequireCardOn(capturing: false);
 
         double dbFs;
         lock (_gate)
@@ -237,20 +236,24 @@ public sealed class SoundCardCalibrationRunner(
     public async Task<SoundCardCalibrationResult> MeasureInputViaLoopbackAsync(
         double dbFs, CancellationToken ct)
     {
-        RequireSoundCard();
+        RequireCardOn(capturing: true);
 
         if (!OutputLevelsDbFs.Contains(dbFs))
             throw new ArgumentOutOfRangeException(nameof(dbFs), dbFs, $"Pick one of {string.Join(", ", OutputLevelsDbFs)} dB.");
 
-        SoundCardCalibration calibration = soundCard.Calibration;
-        if (!calibration.IsOutputCalibrated)
+        // Only where the thing playing is an uncalibrated card. A QA40x's output level is factory
+        // calibrated, so on a split that plays through one the voltage *is* known and this step is
+        // the better of the two rather than the fallback -- which is the whole point of letting a
+        // capture-only converter be calibrated this way.
+        if (session.OutputDeviceKind == DeviceKind.SoundCard && !soundCard.Calibration.IsOutputCalibrated)
         {
             throw new InvalidOperationException(
                 "Calibrate the output first. This measures the inputs against what the card is playing, and until the output is calibrated that voltage is not known — the result would look measured and be invented.");
         }
 
-        // What the card is about to play, in volts, from the output calibration.
-        double knownPeakV = calibration.OutputFullScaleV * Math.Pow(10.0, dbFs / 20.0);
+        // What is about to be played, in volts peak.
+        double toneDbv = ToneDbvFor(dbFs);
+        double knownPeakV = Math.Sqrt(2.0) * Math.Pow(10.0, toneDbv / 20.0);
 
         lock (_gate)
         {
@@ -272,9 +275,7 @@ public sealed class SoundCardCalibrationRunner(
                 FftSize = CalibrationFftSize,
             };
 
-            var tone = new ChannelGeneratorConfig(
-                Enabled: true,
-                Tones: [new GeneratorTone(ToneHz, session.Capabilities.OutputRangesDbv[0] + dbFs)])
+            var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(ToneHz, toneDbv)])
             {
                 Kind = GeneratorKind.Tones,
             };
@@ -306,8 +307,8 @@ public sealed class SoundCardCalibrationRunner(
             await SaveAndReopenAsync(updated, ct);
 
             logger.LogInformation(
-                "Sound card calibration: input full scale {Left:0.0} / {Right:0.0} mV peak, from a loopback of {Known:0.0} mV peak measured at {LeftDb:0.00} / {RightDb:0.00} dBFS",
-                leftMv, rightMv, knownPeakV * 1000.0, leftDbFs, rightDbFs);
+                "Sound card calibration: input full scale {Left:0.0} / {Right:0.0} mV peak, from {Source} playing {Known:0.0} mV peak measured at {LeftDb:0.00} / {RightDb:0.00} dBFS",
+                leftMv, rightMv, session.OutputDeviceKind, knownPeakV * 1000.0, leftDbFs, rightDbFs);
 
             double difference = 20.0 * Math.Log10(rightMv / leftMv);
 
@@ -355,7 +356,7 @@ public sealed class SoundCardCalibrationRunner(
     public async Task<SoundCardCalibrationResult> MeasureInputAsync(
         double known, VoltageEntryUnit unit, StreamChannel channel, CancellationToken ct)
     {
-        RequireSoundCard();
+        RequireCardOn(capturing: true);
 
         double knownPeakV = VoltageEntry.MillivoltsToPeakVolts(known, unit);
 
@@ -668,10 +669,45 @@ public sealed class SoundCardCalibrationRunner(
         await session.ReopenAsync(ct);
     }
 
-    private void RequireSoundCard()
+    /// <summary>
+    /// The level a step plays, in dBV, <paramref name="dbFs"/> below the generating device's own
+    /// full scale.
+    ///
+    /// <para><b>The top rung is that full scale, which is why this is not simply <c>[0]</c>.</b> A
+    /// card has one output rung and it is both — so for a card this is bit-identical to the
+    /// expression it replaces, including <c>OutputFullScaleV · 10^(dbFs/20)</c> once the peak is
+    /// taken: a rung is <c>20·log10(FS/√2)</c>, so <c>√2 · 10^((rung + dbFs)/20)</c> is
+    /// <c>FS · 10^(dbFs/20)</c> exactly. A QA40x has four rungs and only the loudest is its full
+    /// scale, so reading <c>[0]</c> there would ask for 30 dB less than the slider says.</para>
+    ///
+    /// <para>Max rather than <c>[^1]</c>: both ladders ascend today and nothing here should depend
+    /// on that. On a split <c>Capabilities.OutputRangesDbv</c> is already the generating half's, so
+    /// this needs no branch of its own.</para>
+    /// </summary>
+    private double ToneDbvFor(double dbFs) => session.Capabilities.OutputRangesDbv.Max() + dbFs;
+
+    /// <summary>
+    /// Refuses a step whose own half of the bench is not a sound card.
+    ///
+    /// <para><b>Per direction, because a split has two halves and only one of them has a
+    /// calibration to measure.</b> This was one whole-bench check, so every step refused on every
+    /// split — including the bench the split exists for, a QA40x driving a capture-only converter,
+    /// where the card is the <i>only</i> thing that needs calibrating and the QA40x is the known
+    /// source that can do it.</para>
+    ///
+    /// <para>The output steps want the card to be what plays; both input steps want it to be what
+    /// captures. Nothing is required of the <i>other</i> half here — what the loopback step needs of
+    /// it is a known voltage, which it checks for itself.</para>
+    /// </summary>
+    private void RequireCardOn(bool capturing)
     {
-        if (session.Kind != DeviceKind.SoundCard)
-            throw new InvalidOperationException("The analyzer is not a sound card, so there is nothing to calibrate.");
+        DeviceKind half = capturing ? session.InputDeviceKind : session.OutputDeviceKind;
+        if (half != DeviceKind.SoundCard)
+        {
+            throw new InvalidOperationException(capturing
+                ? "This bench does not capture with a sound card, so there is no input calibration to measure."
+                : "This bench does not play through a sound card, so there is no output calibration to measure.");
+        }
 
         if (!session.Connected)
             throw new InvalidOperationException("Connect the sound card before calibrating it.");

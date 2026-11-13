@@ -6286,7 +6286,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :client-state="issueReportClientState"
       @close="issueReportDialogOpen = false"
     />
-    <SoundCardDialog :open="soundCardDialogOpen" @close="closeSoundCardDialog" />
+    <SoundCardDialog :open="soundCardDialogOpen" :status="status" @close="closeSoundCardDialog" />
     <!-- The status's own poll feeds this rather than a second one of its own: the step-down delay is
          read back off the device, and ConfigDialog's draft-string bug was a dialog that polled. -->
     <Qa40xDialog

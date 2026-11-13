@@ -655,11 +655,13 @@ public static class ConfigEndpoints
             setting.Config = config;
             session.RefreshSoundCardGain();
 
-            if (session.Kind == DeviceKind.SoundCard)
+            if (session.UsesSoundCard)
             {
                 // Rebuild the device so the new card, rate, channel pair and calibration are the
                 // ones in use -- Capabilities is documented as valid only after ConnectAsync, and
-                // the two range rungs come from the calibration.
+                // the two range rungs come from the calibration. UsesSoundCard rather than
+                // Kind == SoundCard: a split's card half is built from this same document, so a
+                // card saved there reached the configuration and never the bench.
                 try
                 {
                     await session.ReopenAsync(ct);

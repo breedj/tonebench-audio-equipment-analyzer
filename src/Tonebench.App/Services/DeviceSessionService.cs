@@ -152,8 +152,14 @@ public sealed class DeviceSessionService(
     /// Whether a sound card is anywhere on this bench. What the status bar's card fields and the
     /// card dialog gate on: on a split the card may be the half that only plays, and its device
     /// name, its calibration and its control panel are all still worth reaching.
+    ///
+    /// <para>Public because three callers outside this class ask the same question and had each
+    /// asked it as <c>Kind == SoundCard</c>, which is false on every split: saving the card document
+    /// would not rebuild the device (so a new card, channel pair or calibration never reached the
+    /// bench in use), and an issue report left the whole card block out — on exactly the bench whose
+    /// faults are hardest to read without it.</para>
     /// </summary>
-    private bool UsesSoundCard =>
+    public bool UsesSoundCard =>
         _kind == DeviceKind.SoundCard
         || (_kind == DeviceKind.Split
             && (_split.InputKind == DeviceKind.SoundCard || _split.OutputKind == DeviceKind.SoundCard));

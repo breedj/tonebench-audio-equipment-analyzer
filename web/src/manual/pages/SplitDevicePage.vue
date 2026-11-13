@@ -58,7 +58,30 @@ const { showPage } = useManual()
       <em>Which</em> card each half is, its channel pair and its calibration stay in
       <button type="button" class="manual-link" @click="showPage('sound-card')">the sound-card
       settings</button>. There is one card document, and a split simply uses one direction of it —
-      so only the side it needs has to be chosen there.
+      so that dialog shows only the side this bench opens, and says which half the other device is.
+      The unused side's stored settings are left alone, so switching back to the
+      <strong>Sound card</strong> analyzer finds its own bench as it was.
+    </p>
+
+    <h3>Calibrating a capture-only converter</h3>
+    <p>
+      An ADC with no output of its own cannot be calibrated the usual way: the patch-cable step plays
+      a known voltage out of the card and measures what comes back, and there is nothing to play out
+      of. A split answers that, and it is the reason the pairing exists.
+    </p>
+    <p>
+      With the <strong>QA40x generating</strong> and the card capturing, the patch-cable step uses the
+      QA40x as its known source — so <strong>Full scale input</strong> can be measured with no output
+      calibration at all. The QA40x's output level is a factory figure, which makes this the better of
+      the two routes rather than the fallback: on an ordinary card bench the input figures inherit
+      whatever error the output calibration carries, and here there is no such figure to inherit from.
+      Patch both QA40x outputs to the card's two inputs and press
+      <strong>Estimate peak input mV</strong>.
+    </p>
+    <p>
+      The dialog narrows to match. A bench that plays through the card shows <strong>Full scale
+      output</strong> and not the input step; one that captures with it shows the input step and not
+      the output one, and does not complain about an output calibration it is not using.
     </p>
 
     <h3>Two pairings are refused</h3>

@@ -329,7 +329,9 @@ public sealed class IssueReportService(
         sb.AppendLine($"- Capture delay: {session.CaptureDelayMs:0} ms, stream settle {session.StreamSettleMs:0} ms");
         sb.AppendLine($"- Dropped: {session.DroppedRxChunks} RX chunks, {session.DroppedBlocks} blocks this acquisition");
 
-        if (session.Kind == DeviceKind.SoundCard)
+        // Either half being a card is enough: a split's card is where its own faults live, and
+        // that is the bench whose report is hardest to read without this block.
+        if (session.UsesSoundCard)
         {
             SoundCardConfig card = soundCard.Config;
             sb.AppendLine($"- Sound card: {card.InputHostApi} / {card.InputDeviceName} + {card.OutputDeviceName}, "

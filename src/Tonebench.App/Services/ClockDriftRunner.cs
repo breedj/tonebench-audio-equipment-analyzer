@@ -40,7 +40,8 @@ public sealed class ClockDriftRunner(
     DeviceSessionService session,
     SpectrumPipeline pipeline,
     ConfigRepository config,
-    SoundCardSetting soundCard,
+    // No SoundCardSetting: the figure is stored against a *pairing* now, under device.clockDrift,
+    // so this runner has no business reading the card's own document.
     ClockDriftSetting clockDrift,
     ILogger<ClockDriftRunner> logger) : IMeasurementRun
 {

@@ -12,17 +12,51 @@ namespace Tonebench.App.Tests.Services;
 /// The calibration steps' rules. The capture itself needs a card, so what is pinned here is the
 /// refusals and the arithmetic — which is where a wrong answer would look like a right one.
 /// </summary>
-public class SoundCardCalibrationRunnerTests
+public class SoundCardCalibrationRunnerTests : IDisposable
 {
+    // A real configuration database, not null!: a step that gets past its refusals ends by writing
+    // the card document, and on a split both of whose halves are simulated the loopback step really
+    // does get that far -- the simulator hands its own generator back, so there is a level to read.
+    // Stubbed out, the step that proved the gate had opened failed with a NullReferenceException one
+    // line later, which is a test that cannot tell "allowed" from "broken".
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"tonebench-cal-{Guid.NewGuid():N}");
+    private readonly ConfigRepository _config;
+
+    public SoundCardCalibrationRunnerTests()
+    {
+        Directory.CreateDirectory(_dir);
+        string path = Path.Combine(_dir, "config.db");
+        _config = new ConfigRepository(new ConfigConnectionFactory(
+            new TonebenchConfigDatabaseOptions { Path = path }));
+
+        using var connection = SqliteConnectionFactory
+            .OpenAtAsync(path, create: true, CancellationToken.None).GetAwaiter().GetResult();
+        new MigrationRunner(MigrationRunner.ConfigResourcePrefix)
+            .RunAsync(connection, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public void Dispose()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
     private sealed class AnyKindFactory(DeviceKind initialKind, SoundCardSetting soundCard)
         : AnalyzerDeviceFactory(NullLoggerFactory.Instance, initialKind, soundCard)
     {
         public override IAnalyzerDevice Create(DeviceKind kind) => new SimulatedDevice();
     }
 
-    private static (SoundCardCalibrationRunner Runner, SoundCardSetting Card, DeviceSessionService Session,
+    private (SoundCardCalibrationRunner Runner, SoundCardSetting Card, DeviceSessionService Session,
         SpectrumPipeline Pipeline) Build(
-        DeviceKind kind = DeviceKind.SoundCard, double? outputFullScaleMv = null)
+        DeviceKind kind = DeviceKind.SoundCard, double? outputFullScaleMv = null,
+        SplitDeviceConfig? split = null)
     {
         var card = new SoundCardSetting
         {
@@ -43,10 +77,11 @@ public class SoundCardCalibrationRunnerTests
             new CaptureDelaySetting(),
             NullLogger<DeviceSessionService>.Instance,
             new ExternalGainSetting(),
-            card);
+            card,
+            split: split is null ? null : new SplitDeviceSetting { Config = split });
 
         var runner = new SoundCardCalibrationRunner(
-            session, pipeline, card, null!, NullLogger<SoundCardCalibrationRunner>.Instance);
+            session, pipeline, card, _config, NullLogger<SoundCardCalibrationRunner>.Instance);
 
         return (runner, card, session, pipeline);
     }
@@ -89,6 +124,104 @@ public class SoundCardCalibrationRunnerTests
             () => runner.MeasureInputViaLoopbackAsync(-20.0, CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => runner.MeasureInputAsync(500.0, VoltageEntryUnit.Rms, StreamChannel.Left, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// A step is refused by <i>its own</i> half of the bench, not by the bench as a whole.
+    ///
+    /// <para>One whole-bench check refused every step on every split, including the bench a split
+    /// exists for: a QA40x driving a capture-only converter, where the card is the only thing with a
+    /// calibration to measure. The card's direction is what decides — the output steps want it
+    /// playing, both input steps want it capturing — so a split offers exactly the half it uses, and
+    /// the message names which half rather than saying there is nothing to calibrate.</para>
+    /// </summary>
+    [Fact]
+    public async Task OnASplitThatCapturesWithTheCard_TheInputStepsAreOffered_AndTheOutputStepIsNot()
+    {
+        var (runner, _, session, _) = Build(
+            DeviceKind.Split,
+            outputFullScaleMv: 2000.0,
+            split: new SplitDeviceConfig(InputKind: "SoundCard", OutputKind: "Hardware"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.StartOutputToneAsync(-6.0, CancellationToken.None));
+        Assert.Contains("does not play through a sound card", ex.Message);
+
+        // And the input step is past the gate: it is refused by the silence guard instead, because
+        // the external-source step silences the generator and the simulator then presents its own
+        // noise floor. Which is the step's own rule rather than the bench's.
+        InvalidOperationException input = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.MeasureInputAsync(500.0, VoltageEntryUnit.Rms, StreamChannel.Left, CancellationToken.None));
+        Assert.DoesNotContain("sound card", input.Message);
+    }
+
+    [Fact]
+    public async Task OnASplitThatPlaysThroughTheCard_TheOutputStepIsOffered_AndTheInputStepsAreNot()
+    {
+        var (runner, _, session, _) = Build(
+            DeviceKind.Split,
+            outputFullScaleMv: 2000.0,
+            split: new SplitDeviceConfig(InputKind: "Hardware", OutputKind: "SoundCard"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        await runner.StartOutputToneAsync(-6.0, CancellationToken.None);
+        Assert.True(runner.Running);
+        await runner.CancelAsync();
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.MeasureInputAsync(500.0, VoltageEntryUnit.Rms, StreamChannel.Left, CancellationToken.None));
+        Assert.Contains("does not capture with a sound card", ex.Message);
+    }
+
+    /// <summary>
+    /// The loopback step's "calibrate the output first" refusal belongs to an uncalibrated
+    /// <b>card</b>, not to every bench.
+    ///
+    /// <para>That refusal is the whole safety of deriving the known voltage from a stored full
+    /// scale — and a QA40x has no stored full scale to be missing, its output level being factory
+    /// calibrated. Keyed on the bench as a whole it refused the one pairing this step is most useful
+    /// on, with a message telling the user to calibrate an output that has no calibration step.</para>
+    /// </summary>
+    [Fact]
+    public async Task OnASplitPlayedByAQa40x_TheLoopbackStep_DoesNotAskForAnOutputCalibration()
+    {
+        var (runner, _, session, _) = Build(
+            DeviceKind.Split,
+            outputFullScaleMv: null,
+            split: new SplitDeviceConfig(InputKind: "SoundCard", OutputKind: "Hardware"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        SoundCardCalibrationResult result = await runner.MeasureInputViaLoopbackAsync(
+            -20.0, CancellationToken.None);
+
+        // It ran, and what it wrote is an input full scale derived from the generating half's own
+        // top rung rather than from a stored figure that does not exist.
+        Assert.NotNull(result.InputFullScalePeakMvLeft);
+        Assert.True(result.InputFullScalePeakMvLeft > 0.0);
+    }
+
+    /// <summary>
+    /// What "<i>n</i> dB below full scale" is in dBV, and why it is the <b>top</b> rung.
+    ///
+    /// <para>A card has one output rung and it is also its full scale, so for a card the generalised
+    /// expression is identical to the one it replaced — which is what this pins, since the card path
+    /// is the one with measured figures behind it. A QA40x has four rungs and only the loudest is
+    /// its full scale, so reading the first would ask for 30 dB less than the slider says.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(-3.0)]
+    [InlineData(-6.0)]
+    [InlineData(-20.0)]
+    public void OnACard_TheKnownVoltage_IsWhatTheOutputFullScaleExpressionGave(double dbFs)
+    {
+        const double fullScaleV = 2.0;
+        double rungDbv = SoundCardCalibration.PeakVoltsToDbv(fullScaleV);
+
+        double viaRung = Math.Sqrt(2.0) * Math.Pow(10.0, (rungDbv + dbFs) / 20.0);
+        double viaFullScale = fullScaleV * Math.Pow(10.0, dbFs / 20.0);
+
+        Assert.Equal(viaFullScale, viaRung, precision: 12);
     }
 
     [Fact]

@@ -1,6 +1,12 @@
 ﻿<script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
-import type { BenchClockDrift, SoundCardConfig, SoundCardOption, VoltageEntryUnitName } from '../api/client'
+import type {
+  BenchClockDrift,
+  DeviceStatus,
+  SoundCardConfig,
+  SoundCardOption,
+  VoltageEntryUnitName,
+} from '../api/client'
 import { api } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
@@ -31,7 +37,7 @@ import HeaderIcon from './HeaderIcon.vue'
  * server-side (see SoundCardCalibrationRunner): a tone playing is a measurement in progress, and a
  * sweep started over it would take the generator away mid-step.</p>
  */
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean; status: DeviceStatus | null }>()
 const emit = defineEmits<{ close: [] }>()
 
 const {
@@ -206,6 +212,47 @@ async function loadBenchDrift() {
     benchDrift.value = null
   }
 }
+
+/**
+ * Which direction of this document the bench in use actually opens.
+ *
+ * <p><b>A split uses one direction and discards the other.</b> The factory builds its sound-card
+ * half through <c>SoundCardSettings.ForDirection</c>, which blanks the other side's device name —
+ * so on a split that plays through the card, anything chosen as an <em>input</em> here is thrown
+ * away, and a picker offering it is offering a choice that cannot take effect. The capture device
+ * on such a bench is chosen in the split settings, not here.</p>
+ *
+ * <p>Null when no sound card is in the path at all, which is also when this dialog is unreachable.</p>
+ */
+const cardDirection = computed<'both' | 'input' | 'output' | null>(() => {
+  const s = props.status
+  if (!s) return 'both'
+  if (s.deviceKind === 'SoundCard') return 'both'
+  if (s.deviceKind !== 'Split') return null
+  if (s.splitInputKind === 'SoundCard') return 'input'
+  if (s.splitOutputKind === 'SoundCard') return 'output'
+  return null
+})
+
+/** What the half this bench does *not* use the card for is, for the line that says so. */
+const otherHalfName = computed(() => {
+  const kind = cardDirection.value === 'output' ? props.status?.splitInputKind : props.status?.splitOutputKind
+  return kind === 'Simulated' ? 'the simulator' : 'the QA40x'
+})
+
+/**
+ * The sentence that replaces the half of this dialog a split does not use — said rather than left
+ * to be noticed, because the missing picker is the one a reader would go looking for.
+ */
+const splitNote = computed(() => {
+  if (cardDirection.value === 'output') {
+    return `This bench plays through the sound card and captures with ${otherHalfName.value}, so only the output side is set here. Which device captures is in the split settings.`
+  }
+  if (cardDirection.value === 'input') {
+    return `This bench captures with the sound card and plays through ${otherHalfName.value}, so only the input side is set here. Which device plays is in the split settings.`
+  }
+  return null
+})
 
 const storedDrift = computed(() => {
   const d = benchDrift.value
@@ -560,9 +607,18 @@ const calibrationNotices = computed<CalibrationNotice[]>(() => {
   const state = calibrationState(config.value)
   const notices: CalibrationNotice[] = []
 
+  // Only the direction this bench opens. A split that captures with the card has no output
+  // calibration in its path and no output step on screen, so a stale or missing one there is
+  // an instruction the user cannot carry out -- seen in the running app, where a figure taken
+  // through a different DAC months ago read "Run the output step again" beside a dialog with
+  // no output step in it. The figure is left alone, because the Sound card analyzer still
+  // needs it and will complain about it there.
+  const inUse = (direction: 'input' | 'output') =>
+    cardDirection.value === 'both' || cardDirection.value === direction
+
   // Drift first: it is about a figure that exists and is wrong, which is worse than one that is
   // honestly absent, and it is the one the user has just caused.
-  for (const drift of state.drifted) {
+  for (const drift of state.drifted.filter((d) => inUse(d.direction))) {
     notices.push({
       action: `Run the ${drift.direction} step again.`,
       detail:
@@ -574,20 +630,21 @@ const calibrationNotices = computed<CalibrationNotice[]>(() => {
 
   // "again" is the drift wording and is deliberately absent here: there is no stored figure to
   // re-take, so a reader told to run it "again" would go looking for one they never made.
-  if (state.uncalibrated.length === 2) {
+  const uncalibrated = state.uncalibrated.filter(inUse)
+  if (uncalibrated.length === 2) {
     notices.push({
       action: 'Run both calibration steps.',
       detail:
         'This card has not been calibrated: readings are in dBFS rather than volts, and the app ' +
         'does not know what voltage it is playing.',
     })
-  } else if (state.uncalibrated.includes('output')) {
+  } else if (uncalibrated.includes('output')) {
     notices.push({
       action: 'Run the output step.',
       detail:
         'The output has not been calibrated, so the app does not know what voltage it is playing.',
     })
-  } else if (state.uncalibrated.includes('input')) {
+  } else if (uncalibrated.includes('input')) {
     notices.push({
       action: 'Run the input step.',
       detail: 'The input has not been calibrated, so readings are in dBFS rather than volts.',
@@ -683,6 +740,13 @@ watch(
     stopLevels?.()
     stopLevels = watchLevels()
     await reconcileWithDevices()
+
+    // On a split the two sides are never one card -- a card on both halves is refused outright --
+    // so the per-direction pickers are the only ones that mean anything. Set after the reconcile,
+    // which derives this flag from what was saved, and without going through
+    // onSeparateDevicesChanged: the other direction's stored values are left exactly as they are,
+    // so switching back to the Sound card analyzer finds its bench intact.
+    if (cardDirection.value !== 'both') form.separateDevices = true
   },
   { immediate: true },
 )
@@ -836,11 +900,43 @@ async function acceptInput() {
 /** The loopback source needs the output's own calibration to know what it is playing. */
 const outputCalibrated = computed(() => config.value?.outputFullScalePeakMv != null)
 
+/**
+ * Whether the thing that plays the loopback tone is this card.
+ *
+ * <p>On a split it may not be, and that is the whole point of the pairing: a QA40x's output level
+ * is factory calibrated, so it is a source of known voltage with no calibration step of its own —
+ * which is how a capture-only converter gets an input calibration at all.</p>
+ */
+const generatorIsCard = computed(() => cardDirection.value !== 'input')
+
+/** What plays the loopback tone, for the wording of the step that uses it. */
+const generatorName = computed(() => {
+  if (generatorIsCard.value) return "this card's output"
+  return props.status?.splitOutputKind === 'Simulated' ? "the simulator's output" : "the QA40x's output"
+})
+
+/**
+ * The loopback route's one refusal, and it belongs to an uncalibrated <em>card</em> rather than to
+ * every bench: keyed on the bench as a whole it refused the one pairing this route is most useful
+ * on, telling the user to calibrate an output that has no calibration step.
+ */
+/**
+ * The Loopback option's own label. Capitalised, because an option is read as the head of a list
+ * entry where {@link generatorName} is read mid-sentence -- derived from the one name rather than
+ * spelled a second time, so the two cannot come to disagree about what is playing.
+ */
+const loopbackSourceLabel = computed(
+  () =>
+    `${generatorName.value.charAt(0).toUpperCase()}${generatorName.value.slice(1)}, through a patch cable`,
+)
+
+const loopbackNeedsOutputCalibration = computed(() => generatorIsCard.value && !outputCalibrated.value)
+
 const canMeasureInput = computed(
   () =>
     !busy.value &&
     settingsInEffect.value &&
-    (inputStep.source === 'External' || outputCalibrated.value),
+    (inputStep.source === 'External' || !loopbackNeedsOutputCalibration.value),
 )
 
 // The tone must never outlive the dialog: it is the generator, and the user has walked away.
@@ -894,6 +990,7 @@ function mvRms(value: number | null | undefined) {
                  the controls it rearranges. Off by default: one card is one clock, and that is
                  the guarantee the single picker exists to make. -->
             <label
+              v-if="cardDirection === 'both'"
               class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
               title="Lets the input and the output sit on different cards, or on only one of them — which is what a capture-only ADC or a playback-only DAC needs. Two cards run on two clocks, so the chirp's phase and impulse response stop being trustworthy; tone measurements are unaffected."
             >
@@ -930,6 +1027,16 @@ function mvRms(value: number | null | undefined) {
         </div>
 
         <div class="sc-body">
+        <!-- What a split does not use this dialog for. Said rather than left to be noticed: the
+             picker that is missing is exactly the one a reader would go looking for, and its
+             absence on its own reads as a dialog that failed to render. -->
+        <p
+          v-if="splitNote"
+          class="rounded border border-neutral-300 px-3 py-2 text-[11px] text-neutral-700 dark:border-neutral-600 dark:text-neutral-300"
+        >
+          {{ splitNote }}
+        </p>
+
         <!-- Grouped by direction. The card, the device on it and the channel pair within
              that device are three answers about one side of the bench, and on a two-card bench
              they are checked one side at a time -- which the old order made impossible, since the
@@ -940,7 +1047,10 @@ function mvRms(value: number | null | undefined) {
              In one-card mode the card row keeps its "Sound card" label and stays in the Input
              group: there is no second card row to pair it with, and that card really is the
              input's. -->
-        <div class="sc-group">
+        <!-- Hidden where a split captures with something else: the factory masks this direction
+             out of the card's settings, so anything chosen here would be thrown away. Its stored
+             values are left alone, so the Sound card analyzer's own bench survives the visit. -->
+        <div v-if="cardDirection !== 'output'" class="sc-group">
           <div class="tb-rule sc-group-head"><span class="tb-group">Input</span></div>
 
         <!-- The card first, the channels second. Picking the interface is what guarantees both
@@ -1053,7 +1163,8 @@ function mvRms(value: number | null | undefined) {
 
         </div>
 
-        <div class="sc-group">
+        <!-- Hidden where a split plays through something else, for the reason above. -->
+        <div v-if="cardDirection !== 'input'" class="sc-group">
           <div class="tb-rule sc-group-head"><span class="tb-group">Output</span></div>
 
         <!-- Only in separate mode: in the ordinary one the output's card is the input's, and a
@@ -1341,7 +1452,10 @@ function mvRms(value: number | null | undefined) {
       </section>
 
       <!-- 2. Output full scale ---------------------------------------------------------- -->
-      <section class="sc-section">
+      <!-- Only where this card is what plays. A split that captures with the card has no output
+           calibration to take, and the server refuses the step by direction — so offering it would
+           be offering a button whose only answer is a refusal. -->
+      <section v-if="cardDirection !== 'input'" class="sc-section">
         <div class="sc-head">
           <PanelIcon icon="signalOut" tone="orange" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -1466,7 +1580,8 @@ function mvRms(value: number | null | undefined) {
       </section>
 
       <!-- 3. Input full scale ----------------------------------------------------------- -->
-      <section class="sc-section">
+      <!-- Only where this card is what captures, for the reason above. -->
+      <section v-if="cardDirection !== 'output'" class="sc-section">
         <div class="sc-head">
           <PanelIcon icon="signalIn" tone="green" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -1486,13 +1601,21 @@ function mvRms(value: number | null | undefined) {
         <div class="sc-body">
         <label class="sc-row">
           <span class="sc-label">Known source</span>
+            <!-- generatorName is in the memo because the Loopback option's text reads it. A memo
+                 lists what its subtree depends on, and this one was written when that text was a
+                 literal: left out, the option stayed frozen at "this card's output" on a split
+                 the QA40x plays -- measured in the running app, where the note above it had
+                 already updated and only the dropdown had not. -->
           <select
             v-model="inputStep.source"
-            v-memo="[inputStep.source]"
+            v-memo="[inputStep.source, loopbackSourceLabel]"
             class="tb-input"
           >
             <option value="External">A generator of known voltage</option>
-            <option value="Loopback">This card's output, through a patch cable</option>
+            <!-- Named rather than fixed as "this card's": on a split it is whatever plays, and a
+                 QA40x is the better source of the two — factory calibrated, so nothing of this
+                 bench's own has to be measured first. -->
+            <option value="Loopback">{{ loopbackSourceLabel }}</option>
           </select>
         </label>
 
@@ -1514,13 +1637,21 @@ function mvRms(value: number | null | undefined) {
           <strong>Patch both outputs straight back to their own inputs</strong>, then measure.
           Both channels are done in one press: the two figures are then measured under identical
           conditions, and the difference between them — the reading that catches a wiring mistake —
-          is available immediately. Once the output is calibrated the app knows what it is playing in
-          volts, so the cables are a source of known voltage and no second generator is needed. Note
-          the figures are linked: any error in the output calibration lands directly in these, where
-          a separate generator would be independent of it.
+          is available immediately.
+          <template v-if="generatorIsCard">
+            Once the output is calibrated the app knows what it is playing in volts, so the cables
+            are a source of known voltage and no second generator is needed. Note the figures are
+            linked: any error in the output calibration lands directly in these, where a separate
+            generator would be independent of it.
+          </template>
+          <template v-else>
+            On this bench the tone comes from {{ generatorName }}, whose level is calibrated at the
+            factory — so there is nothing of this card's to measure first, and nothing of its error
+            to carry into these figures.
+          </template>
         </p>
         <p
-          v-if="inputStep.source === 'Loopback' && !outputCalibrated"
+          v-if="inputStep.source === 'Loopback' && loopbackNeedsOutputCalibration"
           class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
         >
           Calibrate the output first — until then the app does not know what voltage it is playing,

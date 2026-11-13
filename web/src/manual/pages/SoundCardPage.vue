@@ -511,7 +511,12 @@ const { showPage } = useManual()
 
     <h4>With a patch cable (easiest)</h4>
     <ol>
-      <li>Calibrate the output first — this option is refused until you have.</li>
+      <li>
+        Calibrate the output first — this option is refused until you have. The exception is a
+        <button type="button" class="manual-link" @click="showPage('split-device')">split
+        bench</button> whose generator is the QA40x: its output level is calibrated at the factory,
+        so there is nothing of this card's to measure first and the dropdown names it instead.
+      </li>
       <li>
         Patch <strong>both</strong> outputs straight back to their own inputs. Both are measured
         together, so both need a cable; an input left unconnected reads as silence and the step
@@ -537,6 +542,14 @@ const { showPage } = useManual()
       a source of known voltage and no second generator is needed. The one cost:
       <strong>the figures are linked</strong>. Any error in the output calibration lands directly
       in both of these, where a separate generator would be independent of it.
+    </p>
+    <p class="manual-callout">
+      <strong>On a split bench the QA40x can be that source, and then nothing is linked.</strong>
+      Select <strong>Split (two devices)</strong> with the QA40x generating and the card capturing,
+      patch its two outputs to the card's two inputs, and this step works with no output calibration
+      at all — the QA40x's level is a factory figure, so there is no error of this bench's to inherit.
+      That is how a <em>capture-only</em> converter, which has no output to calibrate, is calibrated
+      here.
     </p>
 
     <h4>With a signal generator</h4>

@@ -218,7 +218,13 @@ internal static class ResponseCaptureSupport
     public static GeneratorConfig BuildGenerator(
         FrequencyResponseRequest request, double amplitudeDbv, int? repeatFrames = null)
     {
-        int period = repeatFrames ?? request.FftSize;
+        // **The period is converted to the generator's own frames here, and nowhere else.** Every
+        // caller passes the size it will *analyse* at -- the run's, or a probe's own shorter one --
+        // and on a bench whose halves run at one rate that is what the generator gets, unchanged. On
+        // a split it is scaled by the rate ratio, which is the same number of seconds: the sweep and
+        // both noise sequences express themselves as a function of seconds into the period and
+        // derive that period from their own frame count and their own rate.
+        int period = request.GeneratorFramesFor(repeatFrames ?? request.FftSize);
 
         return request.UsesNoise
             ? BuildNoiseGenerator(amplitudeDbv, period, request.NoiseCutoffHz, request.NoiseShape)
@@ -321,12 +327,20 @@ internal static class ResponseCaptureSupport
     {
         int size = fftSize ?? request.FftSize;
 
-        var period = new double[size];
+        // **Built at the rate it is played at, then expressed on the analysis grid.** The two
+        // periods are the same number of seconds, so the bin widths are identical --
+        // fsOut/sizeOut == fsIn/size -- and bin k is bin k: this is a zero-pad (or, for a faster
+        // generator, a truncation), never a resample. That is item 6 of the split plan, which
+        // measured the reconstruction a quarter-rate DAC hands a full-rate ADC as 87 dB below the
+        // signal, the residue being the sweep's own energy above the generator's Nyquist.
+        int playedSize = request.GeneratorFramesFor(size);
+
+        var period = new double[playedSize];
         if (request.UsesNoise)
         {
-            var noise = PeriodicNoise.For(size, request.SampleRateHz, request.NoiseCutoffHz, request.NoiseShape);
+            var noise = PeriodicNoise.For(playedSize, request.GeneratorRateHz, request.NoiseCutoffHz, request.NoiseShape);
             double rms = Math.Pow(10.0, amplitudeDbv / 20.0);
-            for (int i = 0; i < size; i++)
+            for (int i = 0; i < playedSize; i++)
                 period[i] = rms * noise.Sample(i);
         }
         else
@@ -335,12 +349,28 @@ internal static class ResponseCaptureSupport
                 period,
                 request.ChirpStartHz,
                 request.ChirpEndHz,
-                request.SampleRateHz,
+                request.GeneratorRateHz,
                 ExponentialChirp.PeakVoltsFromDbv(amplitudeDbv));
         }
 
+        var played = new Complex[(playedSize / 2) + 1];
+        fft.Forward(period, played);
+
+        if (playedSize == size)
+            return played;
+
+        // **The scale is not free, and getting it wrong is a level error rather than a shape one.**
+        // An unscaled DFT bin sums its samples, so one period of a waveform sampled at two rates
+        // differs by the sample count: a 1:4 ratio would read 12 dB out, and the output-referred
+        // level probe would drive the DUT by that much. Bins above the generator's Nyquist stay
+        // zero, which is what the estimator's regularisation already bounds for the chirp's
+        // out-of-band decades.
+        double scale = (double)size / playedSize;
         var spectrum = new Complex[(size / 2) + 1];
-        fft.Forward(period, spectrum);
+        int shared = Math.Min(spectrum.Length, played.Length);
+        for (int bin = 0; bin < shared; bin++)
+            spectrum[bin] = played[bin] * scale;
+
         return spectrum;
     }
 

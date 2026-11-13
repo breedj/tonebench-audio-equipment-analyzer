@@ -36,7 +36,11 @@ public static class FrequencyResponseEndpoints
 
             var measurement = request.ToMeasurement(
                 levelMode, levelUnit, bandwidthReference, stimulus,
-                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config));
+                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config),
+                // A property of the bench rather than anything the client sends, like the drift
+                // above it: on a split the generating half may run at its own rate, and the stimulus
+                // has to be built at that rate to be the waveform the DUT is really being handed.
+                session.GeneratorSampleRateHz);
 
             try
             {
@@ -232,7 +236,8 @@ public sealed record FrequencyResponseStartRequest(
         ThdSweepLevelUnit levelUnit,
         BandwidthReferenceMode bandwidthReference,
         ResponseStimulus stimulus,
-        double clockDriftPpm = 0.0) =>
+        double clockDriftPpm = 0.0,
+        double generatorSampleRateHz = 0.0) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -249,7 +254,8 @@ public sealed record FrequencyResponseStartRequest(
             BandwidthReferenceHighHz,
             stimulus,
             NoiseCutoffHz,
-            clockDriftPpm);
+            clockDriftPpm,
+            generatorSampleRateHz);
 }
 
 /// <param name="ChartAnnotations">

@@ -916,11 +916,19 @@ public sealed class ImpedanceRunner(
     /// <para>Both stimuli are periodic over it: the chirp has been since it existed, and the noise
     /// since 2026-10-21. One record, one whole period, either way.</para>
     /// </summary>
-    private static GeneratorConfig BuildStimulus(ImpedanceRequest request, double amplitudeDbv, int repeatFrames) =>
-        request.IsNoise
-            ? ResponseCaptureSupport.BuildPinkNoiseGenerator(amplitudeDbv, repeatFrames, request.NoiseCutoffHz)
+    private static GeneratorConfig BuildStimulus(ImpedanceRequest request, double amplitudeDbv, int repeatFrames)
+    {
+        // In the generator's own frames, which on a bench whose two halves share a clock is the
+        // analysis size unchanged. The period is the only thing a second rate costs this
+        // measurement: it needs no reference spectrum, the two channels' ratio having cancelled the
+        // stimulus out of it.
+        int period = request.GeneratorFramesFor(repeatFrames);
+
+        return request.IsNoise
+            ? ResponseCaptureSupport.BuildPinkNoiseGenerator(amplitudeDbv, period, request.NoiseCutoffHz)
             : ResponseCaptureSupport.BuildChirpGenerator(
-                amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, repeatFrames);
+                amplitudeDbv, request.ChirpStartHz, request.ChirpEndHz, period);
+    }
 
     /// <summary>
     /// One stepped-sine pass: every point measured in turn, published as it goes, then solved.

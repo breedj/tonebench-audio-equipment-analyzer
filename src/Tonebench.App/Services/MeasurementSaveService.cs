@@ -934,7 +934,10 @@ public sealed class MeasurementSaveService(
                 ChartAnnotations: annotations,
                 // 0 means the run was not corrected, which is a null here rather than a zero:
                 // a stored 0 ppm would read as "measured, and found to be nothing".
-                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm),
+                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm,
+                // And null on a bench with one clock, so a figure here means the two halves really
+                // were running at different rates -- which is what the curve's top end reflects.
+                GeneratorSampleRateHz: request.GeneratorSampleRateHz == 0 ? null : request.GeneratorSampleRateHz),
             SerializerOptions);
 
         var info = session.Info;
@@ -1185,7 +1188,11 @@ public sealed class MeasurementSaveService(
                 ChartAnnotations: annotations,
                 // Null rather than 0 where the two ends share a clock, so a stored result reads
                 // "never corrected" rather than "corrected by nothing".
-                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm),
+                ClockDriftPpm: request.ClockDriftPpm == 0 ? null : request.ClockDriftPpm,
+                // Null on a bench with one clock, for the same reason: a figure here means the two
+                // halves really were running at different rates, which is what the curve's own top
+                // end then reflects.
+                GeneratorSampleRateHz: request.GeneratorSampleRateHz == 0 ? null : request.GeneratorSampleRateHz),
             SerializerOptions);
 
         var info = session.Info;

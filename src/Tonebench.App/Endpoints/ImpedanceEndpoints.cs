@@ -12,7 +12,8 @@ public static class ImpedanceEndpoints
         var group = app.MapGroup("/api/impedance");
 
         group.MapPost("/start", async (
-            ImpedanceStartRequest request, ImpedanceRunner runner, CancellationToken ct) =>
+            ImpedanceStartRequest request, ImpedanceRunner runner, DeviceSessionService session,
+            CancellationToken ct) =>
         {
             if (!EnumParsing.TryParse(request.Method, ImpedanceMethod.ReferenceResistor, out ImpedanceMethod method, out var methodError))
                 return Results.BadRequest(methodError);
@@ -34,7 +35,10 @@ public static class ImpedanceEndpoints
                     out ImpedanceStimulus calibrationStimulus, out var calStimulusError))
                 return Results.BadRequest(calStimulusError);
 
-            var measurement = request.ToMeasurement(method, stimulus, levelUnit, calTarget, cableMode, calibrationStimulus);
+            var measurement = request.ToMeasurement(
+                method, stimulus, levelUnit, calTarget, cableMode, calibrationStimulus,
+                // The bench's own, not the client's -- see the frequency-response endpoint.
+                session.GeneratorSampleRateHz);
 
             try
             {
@@ -182,7 +186,8 @@ public sealed record ImpedanceStartRequest(
         ThdSweepLevelUnit levelUnit,
         ImpedanceCalTarget calTarget,
         ImpedanceCableMode cableMode,
-        ImpedanceStimulus calibrationStimulus) =>
+        ImpedanceStimulus calibrationStimulus,
+        double generatorSampleRateHz = 0.0) =>
         new(method,
             stimulus,
             ReferenceOhms,
@@ -211,7 +216,8 @@ public sealed record ImpedanceStartRequest(
             SteppedFftSize,
             SteppedSampleRateHz,
             CalibrationLevelValue,
-            NoiseCutoffHz);
+            NoiseCutoffHz,
+            generatorSampleRateHz);
 }
 
 /// <param name="ChartAnnotations">

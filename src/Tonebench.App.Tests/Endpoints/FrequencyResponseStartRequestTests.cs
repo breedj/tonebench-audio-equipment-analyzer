@@ -67,8 +67,12 @@ public class FrequencyResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
+        // The two differ by one on purpose, and the odd one out is worth naming: the measurement
+        // record carries GeneratorSampleRateHz and the wire record does not, because it is a
+        // property of the bench that the endpoint fills from the session -- exactly as ClockDriftPpm
+        // is. A client cannot ask for it and must not be able to.
         Assert.Equal(17, ConstructorParameterCount(typeof(FrequencyResponseStartRequest)));
-        Assert.Equal(17, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
+        Assert.Equal(18, ConstructorParameterCount(typeof(FrequencyResponseRequest)));
     }
 
     private static int ConstructorParameterCount(Type type) =>

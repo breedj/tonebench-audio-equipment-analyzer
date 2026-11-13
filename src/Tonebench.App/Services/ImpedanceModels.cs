@@ -180,8 +180,31 @@ public sealed record ImpedanceRequest(
     /// Where the periodic pink stimulus stops being pink: flat below, &#8722;3 dB per octave above.
     /// Read only by a noise run — see <see cref="PeriodicNoise"/>, whose default this is.
     /// </summary>
-    double NoiseCutoffHz = 5.0)
+    double NoiseCutoffHz = 5.0,
+    /// <summary>
+    /// The rate the generator is being driven at, or 0 where it is the rate being captured. Filled
+    /// by the endpoint from the session, exactly as the response measurements' is -- a property of
+    /// the bench rather than a setting.
+    ///
+    /// <para>Only the stimulus's <i>period</i> reads it here. Unlike the response measurements this
+    /// one needs no reference spectrum at all: Z = R*H/(1-H) is a ratio of two channels of one
+    /// record, so whatever the stimulus was cancels out of it -- which is also why the chirp's
+    /// arbitrary rotation never has to be removed.</para>
+    /// </summary>
+    double GeneratorSampleRateHz = 0.0)
 {
+    /// <summary>The rate the generator runs at: its own where it has one, the analysis rate otherwise.</summary>
+    public double GeneratorRateHz => GeneratorSampleRateHz > 0 ? GeneratorSampleRateHz : SampleRateHz;
+
+    /// <summary>
+    /// A period in <b>generator</b> frames for a size that will be analysed at the capture rate --
+    /// the same number of seconds. See <see cref="FrequencyResponseRequest.GeneratorFramesFor"/>,
+    /// which this mirrors for the one call site that needs it.
+    /// </summary>
+    public int GeneratorFramesFor(int analysisFrames) =>
+        GeneratorSampleRateHz > 0
+            ? (int)Math.Round(analysisFrames * GeneratorRateHz / SampleRateHz)
+            : analysisFrames;
     /// <summary>
     /// The drive level a calibration run uses by default, in dBV.
     ///

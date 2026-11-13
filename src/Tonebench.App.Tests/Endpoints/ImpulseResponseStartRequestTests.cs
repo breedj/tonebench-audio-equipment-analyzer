@@ -95,8 +95,11 @@ public class ImpulseResponseStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
+        // One apart, and the measurement record is the longer: GeneratorSampleRateHz is the bench's
+        // own, filled by the endpoint from the session the way ClockDriftPpm is, so no client sends
+        // it. See the frequency response's version of this test.
         Assert.Equal(20, ConstructorParameterCount(typeof(ImpulseResponseStartRequest)));
-        Assert.Equal(20, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
+        Assert.Equal(21, ConstructorParameterCount(typeof(ImpulseResponseRequest)));
     }
 
     /// <summary>

@@ -38,7 +38,9 @@ public static class ImpulseResponseEndpoints
 
             var measurement = request.ToMeasurement(
                 levelMode, levelUnit, referenceMode, gateWindow, stimulus,
-                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config));
+                ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.Kind, soundCard.Config),
+                // The bench's own, like the drift above it -- see the frequency-response endpoint.
+                session.GeneratorSampleRateHz);
 
             try
             {
@@ -387,7 +389,8 @@ public sealed record ImpulseResponseStartRequest(
         ImpulseReferenceMode referenceMode,
         WindowType gateWindow,
         ResponseStimulus stimulus,
-        double clockDriftPpm = 0.0) =>
+        double clockDriftPpm = 0.0,
+        double generatorSampleRateHz = 0.0) =>
         new(FrequencySpanHz,
             ResolutionMultiplier,
             levelMode,
@@ -407,7 +410,8 @@ public sealed record ImpulseResponseStartRequest(
             LoadOhms,
             stimulus,
             NoiseCutoffHz,
-            clockDriftPpm);
+            clockDriftPpm,
+            generatorSampleRateHz);
 }
 
 /// <summary>

@@ -60,6 +60,12 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
     private int _deviceLostRaised;
     private volatile bool _outputFaulted;
 
+    /// <summary>
+    /// The rate the capturing half was last streamed at, which <see cref="AcrossTheWire"/> needs to
+    /// know how many of its frames a played period lasts. Zero until the first stream.
+    /// </summary>
+    private volatile int _lastInputRateHz;
+
     public SplitAnalyzerDevice(
         IAnalyzerDevice input,
         IAnalyzerDevice output,
@@ -135,7 +141,41 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
         await _output.ConfigureGeneratorAsync(config, ct).ConfigureAwait(false);
 
         if (InputInfo?.IsSimulated == true)
-            await _input.ConfigureGeneratorAsync(config, ct).ConfigureAwait(false);
+            await _input.ConfigureGeneratorAsync(AcrossTheWire(config), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The stimulus as the capturing half will <i>hear</i> it, which on a bench whose two rates
+    /// differ is not the same record as the one played.
+    ///
+    /// <para><b>A wire preserves seconds, not frames.</b> Every periodic stimulus here states its
+    /// period as a frame count, and a simulated capture half synthesizes from that count at its own
+    /// rate — so handing it the generator's figure unchanged would have it re-create a sweep of a
+    /// quarter the duration at a 1:4 pairing and call it the same waveform. Real hardware has no
+    /// such problem: the ADC resamples a continuous signal and the frame count never crosses the
+    /// cable. This is the simulator's end of that, and it is the only thing in this type that exists
+    /// for a modelled bench rather than a real one.</para>
+    /// </summary>
+    private GeneratorConfig AcrossTheWire(GeneratorConfig config)
+    {
+        if (GeneratorSampleRateHz is not { } fsOut || _lastInputRateHz <= 0 || Math.Abs(fsOut - _lastInputRateHz) < 1e-9)
+            return config;
+
+        double ratio = _lastInputRateHz / fsOut;
+        return config with { Left = Heard(config.Left), Right = Heard(config.Right) };
+
+        ChannelGeneratorConfig Heard(ChannelGeneratorConfig channel)
+        {
+            if (channel.Chirp is { } chirp)
+                channel = channel with { Chirp = chirp with { RepeatFrames = Scaled(chirp.RepeatFrames) } };
+
+            if (channel.Noise is { } noise && noise.PeriodFrames > 0)
+                channel = channel with { Noise = noise with { PeriodFrames = Scaled(noise.PeriodFrames) } };
+
+            return channel;
+        }
+
+        int Scaled(int frames) => Math.Max(1, (int)Math.Round(frames * ratio));
     }
 
     public Task SetOutputRangeAsync(double dbv, CancellationToken ct) =>
@@ -381,6 +421,7 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
         AcquisitionConfig config, [EnumeratorCancellation] CancellationToken ct)
     {
         double fsIn = config.SampleRateHz;
+        _lastInputRateHz = (int)Math.Round(fsIn);
         AcquisitionConfig outputConfig = OutputConfigFor(config);
 
         _outputFaulted = false;

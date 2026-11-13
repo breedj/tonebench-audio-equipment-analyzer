@@ -114,7 +114,14 @@ public sealed record ImpulseResponseRequest(
     double NoiseCutoffHz = 5.0,
     /// <summary>The capture clock's offset from the playback clock in ppm — see
     /// <see cref="FrequencyResponseRequest.ClockDriftPpm"/>, which this is carried to.</summary>
-    double ClockDriftPpm = 0.0)
+    double ClockDriftPpm = 0.0,
+    /// <summary>
+    /// The rate the generator is being driven at, carried to
+    /// <see cref="FrequencyResponseRequest.GeneratorSampleRateHz"/> the way
+    /// <see cref="ClockDriftPpm"/> is. Zero where the two halves share a clock, which is every
+    /// bench but a split.
+    /// </summary>
+    double GeneratorSampleRateHz = 0.0)
 {
     public const double DefaultGatePreMs = 1.0;
 
@@ -160,7 +167,8 @@ public sealed record ImpulseResponseRequest(
             LoadOhms,
             Stimulus: Stimulus,
             NoiseCutoffHz: NoiseCutoffHz,
-            ClockDriftPpm: ClockDriftPpm);
+            ClockDriftPpm: ClockDriftPpm,
+            GeneratorSampleRateHz: GeneratorSampleRateHz);
 
     public double SampleRateHz => AsAcquisition().SampleRateHz;
 

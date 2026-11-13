@@ -305,10 +305,49 @@ public sealed record FrequencyResponseRequest(
     /// measurement nobody has measured the drift of — a wrong epsilon would put a ramp on where
     /// there was none.</para>
     /// </summary>
-    double ClockDriftPpm = 0.0)
+    double ClockDriftPpm = 0.0,
+    /// <summary>
+    /// The rate the <i>generator</i> is being driven at, or <b>0</b> where it is the rate being
+    /// captured — which is every bench with one clock, so every existing caller measures exactly
+    /// what it did. Filled by the endpoint from <c>DeviceSessionService.GeneratorSampleRateHz</c>,
+    /// the way <see cref="ClockDriftPpm"/> is: it is a property of the bench rather than a setting
+    /// anyone types.
+    ///
+    /// <para>It is the <i>stimulus</i> this changes, not the analysis. The period the generator
+    /// plays is a count of its own frames (<see cref="GeneratorPeriodFrames"/>) and the reference
+    /// is built at its rate, which between them are the whole of what a second rate costs — the two
+    /// are the same number of <b>seconds</b>, so the bins come out identical and the reference is a
+    /// zero-pad onto the analysis grid rather than a resample.</para>
+    /// </summary>
+    double GeneratorSampleRateHz = 0.0)
 {
     /// <summary>Whether the stimulus is one of the periodic-noise kinds rather than the sweep.</summary>
     public bool UsesNoise => Stimulus != ResponseStimulus.Chirp;
+
+    /// <summary>The rate the generator runs at: its own where it has one, the analysis rate otherwise.</summary>
+    public double GeneratorRateHz => GeneratorSampleRateHz > 0 ? GeneratorSampleRateHz : SampleRateHz;
+
+    /// <summary>
+    /// Whether the generating half is the slower of the two. The only case anything below has to
+    /// narrow for: a <i>faster</i> generator plays everything the analysis can see, and what it does
+    /// above the capture's Nyquist is invisible — and aliases in, which no band here can fix.
+    /// </summary>
+    public bool GeneratorIsSlower => GeneratorRateHz < SampleRateHz - 1e-6;
+
+    /// <summary>
+    /// The stimulus's period in <b>generator</b> frames: the analysis size scaled by the rate ratio,
+    /// which is the same number of seconds. <c>EchoChirpSettings.RepeatFrames</c> already counts the
+    /// generator's frames, which is what makes this a scale factor rather than a rewrite —
+    /// <c>ChirpAcrossTwoRatesTests</c> pins the two grids as two samplings of one waveform, exact to
+    /// twelve decimal places.
+    /// </summary>
+    public int GeneratorPeriodFrames => GeneratorFramesFor(FftSize);
+
+    /// <summary>The generator-frame count for an analysis size, for a probe that analyses short.</summary>
+    public int GeneratorFramesFor(int analysisFrames) =>
+        GeneratorSampleRateHz > 0
+            ? (int)Math.Round(analysisFrames * GeneratorRateHz / SampleRateHz)
+            : analysisFrames;
 
     /// <summary>
     /// The sequence shape a noise stimulus asks <see cref="Tonebench.Device.PeriodicNoise"/> for.
@@ -394,7 +433,31 @@ public sealed record FrequencyResponseRequest(
 
     public double BinHz => SampleRateHz / FftSize;
 
-    public double ChirpEndHz => ChirpEndNyquistFraction * SampleRateHz / 2.0;
+    /// <summary>
+    /// How high the stimulus reaches, which on a bench whose generator is the slower half is the
+    /// generator's limit rather than the analysis's.
+    ///
+    /// <para><b>0.8 of the generator's own Nyquist for a sweep</b>, which is item 6 of
+    /// <c>docs/separate in out interfaces plan.md</c> written down: a 48 kHz generator cannot sweep
+    /// to its own Nyquist without aliasing at the top, and 20 kHz against a 24 kHz Nyquist is the
+    /// figure that was measured. Noise gets the analysis band's own fraction of that Nyquist, there
+    /// being no sweep to alias — what is above it simply was not played, and the reference says so
+    /// by being zero there.</para>
+    ///
+    /// <para>Infinity when the generator is not the slower half, so a one-rate bench is untouched —
+    /// which is the whole point, and is pinned by its own test.</para>
+    /// </summary>
+    public double StimulusCeilingHz => GeneratorIsSlower
+        ? (UsesNoise ? AnalysisHighNyquistFraction : SweepGeneratorNyquistFraction) * GeneratorRateHz / 2.0
+        : double.PositiveInfinity;
+
+    /// <summary>
+    /// How far up its own Nyquist a sweep may run on a generator that is not the capturing device.
+    /// See <see cref="StimulusCeilingHz"/>.
+    /// </summary>
+    public const double SweepGeneratorNyquistFraction = 0.80;
+
+    public double ChirpEndHz => Math.Min(ChirpEndNyquistFraction * SampleRateHz / 2.0, StimulusCeilingHz);
 
     /// <summary>
     /// The clock correction this run should apply, or null — no drift worth correcting, or a
@@ -409,7 +472,14 @@ public sealed record FrequencyResponseRequest(
         ? ChirpClockDrift.For(ClockDriftPpm, SampleRateHz, FftSize, ChirpStartHz, ChirpEndHz)
         : null;
 
-    public double AnalysisHighHz => AnalysisHighNyquistFraction * SampleRateHz / 2.0;
+    /// <summary>
+    /// The top of the analysed band. Capped by what was actually played, so a bench whose generator
+    /// is the slower half reports the band it measured rather than one that trails off into a dead
+    /// band the regulariser is holding down.
+    /// </summary>
+    public double AnalysisHighHz => Math.Min(
+        AnalysisHighNyquistFraction * SampleRateHz / 2.0,
+        UsesNoise ? StimulusCeilingHz : ChirpEndHz);
 
     /// <summary>The three bandwidth-reference fields as the analyzer wants them.</summary>
     public BandwidthReferenceSpec BandwidthReferenceSpec =>

@@ -1819,7 +1819,13 @@ public sealed record FrequencyResponseParameters(
     /// stored. Null on a type's own params and on a result taken before the correction existed or
     /// on a bench with one clock.
     /// </summary>
-    double? ClockDriftPpm = null)
+    double? ClockDriftPpm = null,
+    /// <summary>
+    /// The rate this run's generator was driven at, where that was not the rate being captured —
+    /// see <see cref="ImpulseResponseParameters.GeneratorSampleRateHz"/>. Null on every bench with
+    /// one clock, which is all of them but a split.
+    /// </summary>
+    double? GeneratorSampleRateHz = null)
 {
     /// <summary>
     /// Set only on a result imported from a simulator's <c>.ac</c> run — the frequency-domain
@@ -2491,7 +2497,19 @@ public sealed record ImpulseResponseParameters(
     /// <c>ChartStartHz</c> is stored, and the reason the mapping test refused this field until it
     /// was.
     /// </summary>
-    double? ClockDriftPpm = null);
+    double? ClockDriftPpm = null,
+    /// <summary>
+    /// The rate this run's <i>generator</i> was driven at, where that was not the rate being
+    /// captured, and null otherwise — which is every bench with one clock.
+    ///
+    /// <para>Provenance, like <see cref="CaptureDelayMs"/> and the external gains: it is read off
+    /// the bench at save time and never pushed back, because it describes the devices that were in
+    /// the path rather than anything the measurement asked for. It is worth keeping for the reason
+    /// <see cref="ClockDriftPpm"/> is — a curve measured with a 48 kHz generator against a 192 kHz
+    /// capture stops where the generator's own Nyquist does, and a stored result that cannot say so
+    /// looks like a DUT that rolls off.</para>
+    /// </summary>
+    double? GeneratorSampleRateHz = null);
 
 /// <summary>
 /// The values <c>measurement_result.source</c> takes. Null in the database means a measured run --

@@ -117,12 +117,12 @@ public class SplitGeneratorRateTests
     }
 
     [Fact]
-    public async Task AChirp_OnABenchWhoseHalvesRunAtDifferentRates_IsRefused()
+    public async Task AChirp_OnABenchWhoseHalvesRunAtDifferentRates_IsAllowed()
     {
-        // A chirp is deconvolved against a reference built at the *analysis* rate with a period of
-        // the analysis size. Played by a half running at another rate that is a different waveform,
-        // and what comes back is a response the DUT never had — the chirp's own failure mode, a
-        // plausible-looking delay, which this codebase has already paid for once.
+        // It was refused for a day, while the reference was still built at the analysis rate. Now
+        // the stimulus is built at the rate it is played at and expressed on the analysis grid --
+        // see TwoRateStimulusTests, which is where that is pinned -- so the session has no business
+        // standing in the way of it.
         (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
         await session.ConnectAsync(CancellationToken.None);
 
@@ -130,11 +130,9 @@ public class SplitGeneratorRateTests
             new ChannelGeneratorConfig(Enabled: true, Tones: []) { Kind = GeneratorKind.EchoChirp },
             ChannelGeneratorConfig.Off);
 
-        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => session.ConfigureGeneratorAsync(chirp, CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096)));
+        await session.ConfigureGeneratorAsync(chirp, CancellationToken.None, new AcquisitionConfig(192_000.0, 2, 4096));
 
-        Assert.Contains("has to be played at the rate it is analysed at", ex.Message);
-        Assert.Contains("stepped sweeps are unaffected", ex.Message);
+        Assert.Equal(GeneratorKind.EchoChirp, session.EffectiveGeneratorConfig.Left.Kind);
     }
 
     [Fact]

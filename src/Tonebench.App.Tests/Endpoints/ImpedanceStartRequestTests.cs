@@ -98,8 +98,12 @@ public class ImpedanceStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
+        // One apart for the reason the response measurements' are: GeneratorSampleRateHz is filled
+        // from the session rather than sent. Here it reaches only the stimulus's period -- an
+        // impedance is a ratio of two channels of one record, so the stimulus cancels out of it and
+        // there is no reference spectrum to rebuild.
         Assert.Equal(29, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
-        Assert.Equal(29, ConstructorParameterCount(typeof(ImpedanceRequest)));
+        Assert.Equal(30, ConstructorParameterCount(typeof(ImpedanceRequest)));
     }
 
     /// <summary>

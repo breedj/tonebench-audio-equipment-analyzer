@@ -40,7 +40,7 @@ public static class FrequencyResponseEndpoints
                 // A property of the bench rather than anything the client sends, like the drift
                 // above it: on a split the generating half may run at its own rate, and the stimulus
                 // has to be built at that rate to be the waveform the DUT is really being handed.
-                session.GeneratorSampleRateHz);
+                session.GeneratorRateOverrideHz);
 
             try
             {

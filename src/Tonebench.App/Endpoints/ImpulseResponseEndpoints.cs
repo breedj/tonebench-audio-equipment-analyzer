@@ -40,7 +40,7 @@ public static class ImpulseResponseEndpoints
                 levelMode, levelUnit, referenceMode, gateWindow, stimulus,
                 ClockDriftCorrection.Resolve(request.CorrectClockDrift, session.BenchClocks, clockDrift.Config),
                 // The bench's own, like the drift above it -- see the frequency-response endpoint.
-                session.GeneratorSampleRateHz);
+                session.GeneratorRateOverrideHz);
 
             try
             {

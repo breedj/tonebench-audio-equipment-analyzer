@@ -193,6 +193,25 @@ public sealed class DeviceSessionService(
         _device.GeneratorSampleRateHz ?? (_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
+    /// The generator rate a measurement <i>request</i> should carry: the device's own where it has
+    /// one, and <b>0</b> — "whatever rate this run is analysed at" — where it does not.
+    ///
+    /// <para><b>Not <see cref="GeneratorSampleRateHz"/>, and the difference cost a bench run.</b>
+    /// That one answers with a concrete figure for the generator arithmetic, falling back to the
+    /// last rate anything streamed at. A runner asks this <i>before</i> its stream exists, so that
+    /// fallback is the rate of whatever ran last — and a request built from it claims a rate
+    /// mismatch that is not there. Measured on a QA403-plus-D50 bench: a 96 kHz chirp started after
+    /// a 48 kHz tone had its band capped at 19.2 kHz, the band a 48 kHz generator would impose, and
+    /// its reference built at the wrong rate entirely. Coherence 0.48, a response the DUT never
+    /// had.</para>
+    ///
+    /// <para>Zero is the honest answer because the request already reads it that way: its
+    /// <c>GeneratorRateHz</c> falls back to the analysis rate, which is what "follow the capture
+    /// rate" means.</para>
+    /// </summary>
+    public double GeneratorRateOverrideHz => _device.GeneratorSampleRateHz ?? 0.0;
+
+    /// <summary>
     /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
     /// the app builds a session this way, and the shape of that call is what this overload exists to
     /// keep — the real app goes through the factory.

@@ -38,7 +38,7 @@ public static class ImpedanceEndpoints
             var measurement = request.ToMeasurement(
                 method, stimulus, levelUnit, calTarget, cableMode, calibrationStimulus,
                 // The bench's own, not the client's -- see the frequency-response endpoint.
-                session.GeneratorSampleRateHz);
+                session.GeneratorRateOverrideHz);
 
             try
             {

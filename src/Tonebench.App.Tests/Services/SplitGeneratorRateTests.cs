@@ -181,6 +181,32 @@ public class SplitGeneratorRateTests
         Assert.False(session.EffectiveGeneratorConfig.Left.Enabled);
     }
 
+    /// <summary>
+    /// What a measurement <i>request</i> is given, which is not the same question.
+    ///
+    /// <para>Found on the bench: a 96 kHz chirp started after a 48 kHz tone had its band capped at
+    /// 19.2 kHz and its reference built at 48 kHz, because "follow the capture rate" fell back to
+    /// the last rate anything had streamed at. A runner asks before its own stream exists, so the
+    /// only honest answer there is zero.</para>
+    /// </summary>
+    [Fact]
+    public async Task TheRateARequestCarries_IsZeroWhenTheGeneratorFollowsTheCapture()
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 0.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        // Something ran at 48 kHz, which is what used to leak into the next run's request.
+        await session.ConfigureGeneratorAsync(
+            Tone(1000.0), CancellationToken.None, new AcquisitionConfig(48_000.0, 2, 4096));
+
+        Assert.Equal(0.0, session.GeneratorRateOverrideHz);
+
+        // And a split that really does drive its generator at its own rate still says so.
+        (DeviceSessionService split, _) = Build(generatorRateHz: 48_000.0);
+        await split.ConnectAsync(CancellationToken.None);
+        Assert.Equal(48_000.0, split.GeneratorRateOverrideHz);
+    }
+
     [Fact]
     public async Task TheReportedGeneratorRate_IsTheGeneratingHalves()
     {

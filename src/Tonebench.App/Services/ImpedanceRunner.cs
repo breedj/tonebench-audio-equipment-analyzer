@@ -161,6 +161,13 @@ public sealed class ImpedanceRunner(
         // DeviceSessionService.RequireSupportedSampleRate for why the call there is not enough.
         session.RequireSupportedSampleRate(request.SampleRateHz);
 
+        // Only the broadband stimuli: a stepped sine plays one tone at a time, snapped to an
+        // analysis bin, which is coherent whatever the two rates are. EffectiveStimulus rather than
+        // Stimulus, because a calibration capture may play a different one from the measurement it
+        // will correct -- the trap that method's own remarks name.
+        if (!request.IsStepped)
+            session.RequirePeriodicStimulusRatePair(request.SampleRateHz);
+
         // Raised to the analyzer's own floor if it has one -- see StimulusFloor. Before anything
         // derives from the start frequency, so the gate, the stimulus and the saved parameters all
         // describe the sweep that was actually played.

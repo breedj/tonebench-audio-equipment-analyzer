@@ -317,6 +317,11 @@ public sealed class ImpulseResponseRunner(
         // DeviceSessionService.RequireSupportedSampleRate for why the call there is not enough.
         session.RequireSupportedSampleRate(request.SampleRateHz);
 
+        // Every stimulus this screen offers -- the sweep and all five noise shapes -- carries its own
+        // period, so a mixed-family rate pairing refuses the whole measurement. Here rather than
+        // waiting for the first ConfigureGeneratorAsync, which happens on the task.
+        session.RequirePeriodicStimulusRatePair(request.SampleRateHz);
+
         // Raised to the analyzer's own floor if it has one -- see StimulusFloor. Before anything
         // derives from the start frequency, so the gate, the stimulus and the saved parameters all
         // describe the sweep that was actually played.

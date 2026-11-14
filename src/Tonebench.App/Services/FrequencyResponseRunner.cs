@@ -181,6 +181,11 @@ public sealed class FrequencyResponseRunner(
         // DeviceSessionService.RequireSupportedSampleRate for why the call there is not enough.
         session.RequireSupportedSampleRate(request.SampleRateHz);
 
+        // Every stimulus this screen offers -- the sweep and all five noise shapes -- carries its own
+        // period, so a mixed-family rate pairing refuses the whole measurement. Here rather than
+        // waiting for the first ConfigureGeneratorAsync, which happens on the task.
+        session.RequirePeriodicStimulusRatePair(request.SampleRateHz);
+
         // Before the gate and before anything derives from the start frequency: AnalysisLowHz, the
         // stimulus, the time estimate and the saved parameters all read it, so a value clamped later
         // would leave some of them describing a sweep that was never played.

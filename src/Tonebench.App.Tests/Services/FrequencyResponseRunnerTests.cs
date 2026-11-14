@@ -3,6 +3,7 @@ using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Device.Simulation;
+using Tonebench.Device.Split;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Tests.Services;
@@ -1657,6 +1658,52 @@ public class FrequencyResponseRunnerTests
         Assert.False(harness.Runner.Running);
         Assert.False(harness.Session.Acquiring);
     }
+
+    /// <summary>
+    /// A chirp across the two rate families is refused <b>on the start request</b> too, for the same
+    /// reason and from the same direction.
+    ///
+    /// <para>Measured on the bench 2026-11-14 — a Topping D50 III generating at 44.1 kHz into a
+    /// QA403 capturing at 192 kHz: <c>POST /api/frequency-response/start</c> answered <b>200 OK</b>
+    /// with a plan, and the refusal arrived three seconds later as <c>phase: Failed</c>. The message
+    /// was right and the moment was wrong, because <c>RequireGeneratorRateUsable</c> is reached from
+    /// <c>ConfigureGeneratorAsync</c>, which the runner calls from <c>RunAsync</c>. The panels
+    /// disable RUN on this pairing, so only the API showed it.</para>
+    /// </summary>
+    [Fact]
+    public async Task AChirpAcrossTheRateFamilies_IsRefusedOnTheRequest()
+    {
+        Harness harness = await CreateAsync(Split(generatorRateHz: 44_100.0));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => harness.Runner.StartAsync(Request(spanHz: 96_000.0), CancellationToken.None));
+
+        Assert.Contains("not an integer ratio", ex.Message);
+        Assert.Contains("stepped sine", ex.Message);
+        Assert.False(harness.Runner.Running);
+    }
+
+    /// <summary>
+    /// And a split inside one family is not refused — the case that would break every existing
+    /// two-device bench if the ratio test were got backwards.
+    /// </summary>
+    [Fact]
+    public async Task AChirpOnASplitInsideOneFamily_IsNotRefused()
+    {
+        Harness harness = await CreateAsync(Split(generatorRateHz: 48_000.0));
+
+        await harness.Runner.StartAsync(Request(spanHz: 96_000.0), CancellationToken.None);
+
+        Assert.True(harness.Runner.Running);
+        await harness.Runner.CancelAsync();
+    }
+
+    /// <summary>Two simulators, one pinned to a generator rate of its own — a split bench in miniature.</summary>
+    private static SplitAnalyzerDevice Split(double generatorRateHz) => new(
+        new SimulatedDevice(),
+        new SimulatedDevice(),
+        new SplitDeviceSettings { GeneratorSampleRateHz = generatorRateHz },
+        NullLogger<SplitAnalyzerDevice>.Instance);
 
     /// <summary>And a span it does have still starts, which is what would break if the check were wrong.</summary>
     [Fact]

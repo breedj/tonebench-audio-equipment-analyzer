@@ -874,15 +874,7 @@ public sealed class DeviceSessionService(
         if ((PlaysAPeriodicStimulus(config.Left) || PlaysAPeriodicStimulus(config.Right))
             && !IsPeriodicRatePair(sampleRateHz, analysisRateHz))
         {
-            throw new InvalidOperationException(
-                $"A generator at {sampleRateHz / 1000.0:0.###} kHz against a capture at "
-                    + $"{analysisRateHz / 1000.0:0.###} kHz is not an integer ratio, so a stimulus with a "
-                    + "period of its own cannot line up with the analysis record — a 44.1 kHz family rate "
-                    + "against a 48 kHz one is that case, at every FFT size. The chirp and periodic "
-                    + "noise need an integer ratio; tones, IMD, the multitone comb, square and triangle "
-                    + "waves and every stepped-sine sweep are unaffected. Measure the frequency response "
-                    + "with the stepped sine instead, or set a generator rate in the same family as the "
-                    + "capture rate.");
+            throw new InvalidOperationException(PeriodicRatePairMessage(sampleRateHz, analysisRateHz));
         }
 
         double maxHz = _device.MaxGeneratorSampleRateHz;
@@ -896,6 +888,48 @@ public sealed class DeviceSessionService(
                 + "device's own output protection relay, which a software stop does not clear. Turn the generator "
                 + "off to capture at this rate, or drop to a lower rate to use it.");
     }
+
+    /// <summary>
+    /// Refuses a run whose stimulus carries its own period on a bench whose two rates are not an
+    /// integer ratio — the same rule <see cref="RequireGeneratorRateUsable"/> applies, asked before
+    /// the run rather than when its first stimulus is configured.
+    ///
+    /// <para><b>Why both.</b> That one is reached from <c>ConfigureGeneratorCoreAsync</c>, which a
+    /// runner calls from <c>RunAsync</c> — on the task, after the endpoint has answered. Measured on
+    /// the bench 2026-11-14 (Topping D50 III at 44.1 kHz into a QA403 at 192 kHz):
+    /// <c>POST /api/frequency-response/start</c> answered <b>200 OK</b> with a plan, and the refusal
+    /// arrived three seconds later as <c>phase: Failed</c>. The message was right and the moment was
+    /// wrong — exactly what <see cref="RequireSupportedSampleRate"/>'s remarks describe, one check
+    /// along. The UI never showed it, because the panels disable RUN on this pairing already; the
+    /// API did.</para>
+    ///
+    /// <para>It needs no <see cref="GeneratorConfig"/>, unlike the fuller check: whether a run plays
+    /// something periodic is a property of the <i>measurement</i>, which the caller knows before it
+    /// has built a stimulus. The three runners whose stimulus has a period ask it; the stepped-sine
+    /// family does not, because one tone at a time is coherent by bin snapping whatever the rates.</para>
+    /// </summary>
+    public void RequirePeriodicStimulusRatePair(double analysisRateHz)
+    {
+        double generatorRateHz = _device.GeneratorSampleRateHz ?? analysisRateHz;
+        if (IsPeriodicRatePair(generatorRateHz, analysisRateHz))
+            return;
+
+        throw new InvalidOperationException(PeriodicRatePairMessage(generatorRateHz, analysisRateHz));
+    }
+
+    /// <summary>
+    /// The one wording, so the two callers above cannot drift about what a mixed-family pairing
+    /// costs — which is the fault this file's own history is full of.
+    /// </summary>
+    private static string PeriodicRatePairMessage(double generatorRateHz, double analysisRateHz) =>
+        $"A generator at {generatorRateHz / 1000.0:0.###} kHz against a capture at "
+            + $"{analysisRateHz / 1000.0:0.###} kHz is not an integer ratio, so a stimulus with a "
+            + "period of its own cannot line up with the analysis record — a 44.1 kHz family rate "
+            + "against a 48 kHz one is that case, at every FFT size. The chirp and periodic "
+            + "noise need an integer ratio; tones, IMD, the multitone comb, square and triangle "
+            + "waves and every stepped-sine sweep are unaffected. Measure the frequency response "
+            + "with the stepped sine instead, or set a generator rate in the same family as the "
+            + "capture rate.";
 
     /// <summary>
     /// Whether two sample rates are an integer ratio either way round, which is what a periodic

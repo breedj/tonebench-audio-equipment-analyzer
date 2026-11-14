@@ -391,17 +391,22 @@ const { showPage } = useManual()
     <p>
       There is nothing to set. Every time the choice of card, device or channel pair changes, the
       app probes the hardware — in the mode it actually opens it in — for the rates it measures at,
-      <strong>48, 96, 192, 384 and 768 kHz</strong>, and keeps whichever of them the card accepts.
+      <strong>44.1, 48, 88.2, 96, 176.4, 192, 384 and 768 kHz</strong>, and keeps whichever of them
+      the card accepts.
     </p>
     <p class="manual-callout">
       <strong>The row shows what was <em>accepted</em>, not what the card can do.</strong> A rate
-      missing from it was refused by the driver; a rate outside that list of five was never asked
+      missing from it was refused by the driver; a rate outside that list of eight was never asked
       for. Until 2026-11-13 the list stopped at 192 kHz, which is how a USB DAC that goes to 768
       came to report “48, 96 and 192 kHz” as though that were its own ceiling. Hover the row and it
-      says which it is. Every rate in the list is a power-of-two multiple of 48 kHz, and that is
-      arithmetic rather than preference — 44.1 kHz and its multiples cannot be periodic against a
-      power-of-two analysis record, and a split refuses a generator/capture pair whose ratio is not
-      a whole number.
+      says which it is.
+    </p>
+    <p>
+      Those eight are two families — 48 kHz and its doublings, and 44.1 kHz and its doublings — and
+      the distinction only matters on a <strong>split</strong> bench, where the generating and
+      capturing halves can be in different ones. There, a chirp or noise run is refused and the
+      tone-based measurements and the stepped sine are not; a single card runs one rate at a time
+      and never meets it. The <em>Split (two devices)</em> page has the detail.
     </p>
     <p>
       <strong>The rate a measurement runs at is the measurement's own setting</strong>, on its

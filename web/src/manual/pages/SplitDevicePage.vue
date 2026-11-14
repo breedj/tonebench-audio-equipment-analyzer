@@ -192,10 +192,68 @@ const { showPage } = useManual()
         by which it becomes a real measurement.
       </li>
     </ul>
+    <h3>The two rate families</h3>
     <p>
-      The two rates have to be a whole-number ratio, which every rate the app offers is. A pairing
-      that is not would be refused, naming both rates: nothing periodic — a chirp, a noise sequence,
-      a multitone comb — can line up with the analysis record otherwise.
+      Sample rates here come in two families, and a stimulus that repeats cannot cross between them.
+      Within a family every pairing is a doubling, so the two sides always line up:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Family</th><th>Rates</th><th>Typically</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>48 kHz</td>
+          <td>48, 96, 192, 384, 768 kHz</td>
+          <td>Every analyzer this app drives, and most interfaces</td>
+        </tr>
+        <tr>
+          <td>44.1 kHz</td>
+          <td>44.1, 88.2, 176.4 kHz</td>
+          <td>A DAC playing CD-rate material — the rate nearly all recorded music is</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Pair <em>across</em> the families — a 44.1 kHz DAC generating into a QA403 capturing at
+      192 kHz, which is the commonest reason to want this — and the ratio is 147:640, never a whole
+      number at any record length. So anything that has to repeat exactly once per record is
+      refused, and the app says so before you press Run rather than after:
+    </p>
+    <table class="manual-wrap">
+      <thead>
+        <tr><th>Still works</th><th>Refused across the families</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            Tones, so THD, THD+N, SNR and linearity; IMD; the multitone comb; square and triangle
+            waves; and <strong>every stepped-sine sweep</strong> — frequency response, crosstalk,
+            output impedance and stepped impedance
+          </td>
+          <td>
+            The chirp and periodic noise, and so the frequency-response, impulse-response and
+            broadband impedance screens
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      That is most of what a converter is actually judged by, and frequency response has a working
+      alternative: measure it with <strong>Stepped sine</strong>, which plays one tone at a time and
+      does not care about the ratio. It is slower and it is correct.
+    </p>
+    <p>
+      The limit is arithmetic rather than something waiting to be fixed. The chirp's period has to be
+      a whole number of frames at <em>both</em> rates at once, and 147:640 never is, whatever record
+      length you choose.
+    </p>
+    <p>
+      Note the 44.1 kHz family is offered as a <strong>generator</strong> rate, and on the FFT screen
+      as a capture rate, but not as a frequency <em>span</em>: the response screens derive their
+      transform length from the span, and only the 48 kHz family gives a usable one. That costs
+      nothing in practice — capturing a 44.1 kHz DAC at 192 kHz is the better measurement anyway,
+      being the only one that sees the reconstruction images above 22 kHz.
     </p>
 
     <h3>What a slower generator costs</h3>
@@ -226,15 +284,21 @@ const { showPage } = useManual()
         <strong>Sound card</strong> analyzer, which handles that bench in one stream.
       </li>
       <li>
-        <strong>44.1 kHz and its multiples.</strong> They cannot be periodic against the app's
-        analysis record, which is a power of two — this is arithmetic rather than a limitation to
-        engineer around. A 44.1 kHz DAC measurement is still ahead.
+        <strong>A chirp or noise run across the two rate families</strong> — see
+        <em>The two rate families</em> above. 44.1 kHz and its multiples are offered and a DAC can
+        be driven at them, but paired with a 48 kHz family capture only the tone-based measurements
+        and the stepped sine run. That is arithmetic rather than a limitation to engineer around.
       </li>
       <li>
-        <strong>Nothing about the rates any more, except 44.1 kHz above.</strong> A card is asked
-        about 48, 96, 192, 384 and 768 kHz and offers whichever its driver accepts, so a fast DAC
-        can be driven at its own rate; a QA40x reaches 384 kHz for capture, and only with the
-        experimental setting on. Verified on this bench: a Topping D50 III accepts all five in
+        <strong>44.1 kHz as a frequency span.</strong> The response screens derive their transform
+        length from the span and only the 48 kHz family gives a usable one, so there is no 22.05 kHz
+        span. Nothing wants one: a 44.1 kHz DAC is the <em>generating</em> half, captured wideband.
+      </li>
+      <li>
+        <strong>Nothing else about the rates.</strong> A card is asked about 44.1, 48, 88.2, 96,
+        176.4, 192, 384 and 768 kHz and offers whichever its driver accepts, so a fast DAC can be
+        driven at its own rate; a QA40x reaches 384 kHz for capture, and only with the experimental
+        setting on. Verified on this bench: a Topping D50 III accepts the 48 kHz family's five in
         exclusive mode, and a split with it generating at 384 kHz into a QA403 capturing at 384 kHz
         runs with no dropped chunks or blocks.
       </li>

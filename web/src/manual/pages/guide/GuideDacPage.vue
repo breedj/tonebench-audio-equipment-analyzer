@@ -96,5 +96,32 @@ const { showPage } = useManual()
       20 kHz. That is not the app giving up: a 48 kHz DAC cannot make a clean tone above about
       that, so there is nothing up there to measure except the DAC's own limit.
     </p>
+
+    <h2>Measuring at 44.1 kHz, the rate your music is</h2>
+    <p>
+      Nearly every recording is 44.1 kHz, so that is often the rate you actually want to test a DAC
+      at. You can: pick it as the <strong>Generator rate</strong> and capture at 192 kHz as above.
+    </p>
+    <p>
+      One thing changes, and the app will tell you when it does. 44.1 kHz does not divide evenly
+      into 48 kHz or any of its multiples, and the <em>sweep</em> measurements need the two rates to
+      divide evenly — so on that pairing the frequency-response and impulse-response screens say so
+      and will not run.
+    </p>
+    <p>What still works is most of what a DAC is judged by:</p>
+    <ul>
+      <li>Distortion and noise at a level — THD, THD+N, signal-to-noise</li>
+      <li>Intermodulation, and the multitone test</li>
+      <li>Linearity, by stepping the level down</li>
+      <li>
+        Frequency response — measure it on the <strong>Stepped response</strong> screen, which plays
+        one tone at a time and is unaffected. It takes longer and gives the same answer.
+      </li>
+    </ul>
+    <p class="manual-callout">
+      If you would rather have the sweep than the exact rate, set the generator to 48 kHz instead.
+      A DAC's response does not usually change much between the two, and you can go back to 44.1 for
+      the distortion and noise numbers, which are the ones that do.
+    </p>
   </div>
 </template>

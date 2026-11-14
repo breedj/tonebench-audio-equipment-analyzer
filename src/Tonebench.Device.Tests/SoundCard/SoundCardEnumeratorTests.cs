@@ -144,9 +144,9 @@ public class SoundCardEnumeratorTests
     }
 
     /// <summary>
-    /// Only the rates this app asks about. A card offering 44.1 kHz does not get to put it in front
-    /// of a user: a split runs its two halves at independent rates and refuses a pair whose ratio is
-    /// not a whole number, which 44.1 against any of these is not.
+    /// Only the rates this app asks about. A card offering 32 kHz does not get to put it in front of
+    /// a user: it is in neither rate family, so nothing here has reasoned about what a split pairing
+    /// it against 48 or 44.1 kHz would do to a periodic stimulus.
     /// </summary>
     [Fact]
     public void SupportedRates_AreOnlyEverTheOnesTheAppAsksAbout()
@@ -159,24 +159,71 @@ public class SoundCardEnumeratorTests
         var rates = new SoundCardEnumerator(fake).SupportedRatesHz(input, output, exclusive: true);
 
         Assert.Equal(SoundCardEnumerator.CandidateRatesHz, rates);
-        Assert.DoesNotContain(44_100.0, rates);
+        Assert.DoesNotContain(32_000.0, rates);
+        Assert.DoesNotContain(22_050.0, rates);
     }
 
     /// <summary>
-    /// Every candidate is a power-of-two multiple of 48 kHz, which is the rule and not a tidiness:
-    /// a split refuses a generator/capture pair whose ratio is not a whole number, because nothing
-    /// periodic -- a chirp, a noise sequence, a multitone comb -- lines up with a power-of-two
-    /// analysis record otherwise. Adding 44.1 kHz or any of its multiples here would put a rate in
-    /// the picker that half the app then refuses.
+    /// Every candidate belongs to one of the two families — a power-of-two multiple of 48 kHz or of
+    /// 44.1 kHz — which is the rule and not a tidiness. A split refuses a generator/capture pair
+    /// whose ratio is not a whole number, because a stimulus carrying its own period cannot line up
+    /// with the analysis record otherwise, and within a family every pairing is a power-of-two ratio
+    /// and so always can. A rate in neither family would be a third set of ratios nothing has
+    /// reasoned about, so this test is what forces that decision rather than letting it arrive as a
+    /// drifting ripple on somebody's trace.
+    ///
+    /// <para>It replaced a one-family version on 2026-11-14 when 44.1 kHz was added. Note what is
+    /// deliberately <i>not</i> asserted: that the two families mix. They do not — see the
+    /// cross-family case below.</para>
     /// </summary>
     [Fact]
-    public void EveryCandidateRate_IsAPowerOfTwoMultipleOf48kHz()
+    public void EveryCandidateRate_BelongsToOneOfTheTwoFamilies()
     {
         foreach (double rate in SoundCardEnumerator.CandidateRatesHz)
         {
-            double ratio = rate / 48_000.0;
-            Assert.Equal(Math.Round(ratio), ratio);
-            Assert.Equal(0, (int)Math.Round(ratio) & ((int)Math.Round(ratio) - 1));
+            Assert.NotNull(SoundCardEnumerator.FamilyBaseHz(rate));
+        }
+    }
+
+    [Theory]
+    [InlineData(48_000.0, 48_000.0)]
+    [InlineData(96_000.0, 48_000.0)]
+    [InlineData(768_000.0, 48_000.0)]
+    [InlineData(44_100.0, 44_100.0)]
+    [InlineData(88_200.0, 44_100.0)]
+    [InlineData(176_400.0, 44_100.0)]
+    public void FamilyBase_IsTheBaseTheRateIsAPowerOfTwoMultipleOf(double rateHz, double expectedBaseHz) =>
+        Assert.Equal(expectedBaseHz, SoundCardEnumerator.FamilyBaseHz(rateHz));
+
+    [Theory]
+    [InlineData(32_000.0)]   // a real card rate, in neither family
+    [InlineData(22_050.0)]   // half of 44.1, so not a multiple of it
+    [InlineData(24_000.0)]   // likewise for 48
+    [InlineData(132_300.0)]  // 3 x 44.1: a whole multiple, but not a power-of-two one
+    [InlineData(144_000.0)]  // 3 x 48, same
+    public void FamilyBase_ForARateInNeitherFamily_IsNull(double rateHz) =>
+        Assert.Null(SoundCardEnumerator.FamilyBaseHz(rateHz));
+
+    /// <summary>
+    /// The property the families exist for, asserted over the candidate list itself rather than
+    /// over examples: two rates in one family are always an integer ratio, and two in different
+    /// families never are. The second half is why a mixed pairing is permanently tone-only.
+    /// </summary>
+    [Fact]
+    public void TwoRatesAreAnIntegerRatio_ExactlyWhenTheyShareAFamily()
+    {
+        double[] rates = SoundCardEnumerator.CandidateRatesHz;
+
+        foreach (double a in rates)
+        {
+            foreach (double b in rates)
+            {
+                double ratio = Math.Max(a, b) / Math.Min(a, b);
+                bool integerRatio = Math.Abs(ratio - Math.Round(ratio)) < 1e-9;
+                bool sameFamily = SoundCardEnumerator.FamilyBaseHz(a) == SoundCardEnumerator.FamilyBaseHz(b);
+
+                Assert.Equal(sameFamily, integerRatio);
+            }
         }
     }
 

@@ -63,11 +63,28 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// Topping D50 III — a DAC that goes to 768 — came to report "48, 96 and 192 kHz" as though that
     /// were its own limit.</para>
     ///
-    /// <para><b>Every rate must be a power-of-two multiple of 48 kHz, and that is not a convention.</b>
-    /// A split runs its two halves at independent rates and refuses a pair whose ratio is not a whole
-    /// number (<c>DeviceSessionService.IsPeriodicRatePair</c>): nothing periodic — a chirp, a noise
-    /// sequence, a multitone comb — can line up with an analysis record otherwise. 44.1 kHz and its
-    /// multiples are excluded by that same arithmetic and not by preference.</para>
+    /// <para><b>Every rate is a power-of-two multiple of 48 kHz or of 44.1 kHz, and those two
+    /// families do not mix.</b> A split runs its two halves at independent rates, and a stimulus
+    /// carrying its own period needs that period to be a whole number of frames at both ends
+    /// (<c>DeviceSessionService.IsPeriodicRatePair</c>). Within one family every pairing is a
+    /// power-of-two ratio and so always is. Across them it provably never is: a record of N frames
+    /// at 192 kHz needs N × 147/640 to be an integer, and 640 = 2⁷ × 5 while 147 = 3 × 7² carries no
+    /// factor 5, so no power-of-two N ever is — and radix-2 forbids the only N that would. So a
+    /// mixed-family pairing is permanently tone-only, which <c>PlaysAPeriodicStimulus</c> refuses
+    /// per stimulus rather than per bench: tones, IMD, the multitone comb, square and triangle waves
+    /// and every stepped-sine sweep are unaffected, and only the chirp and periodic noise are not.
+    /// A third family would be a third set of ratios nothing here has reasoned about, which
+    /// <c>EveryCandidateRate_BelongsToOneOfTheTwoFamilies</c> is there to force a decision on.</para>
+    ///
+    /// <para><b>Why 44.1 kHz is here at all</b>, given that cost (added 2026-11-14): it is what
+    /// nearly all recorded music is, so it is the rate a DAC most needs measuring at, and the
+    /// measurements a converter is actually judged by — THD+N and IMD at a level, linearity,
+    /// dynamic range — are tone measurements that a mixed pairing runs unchanged. Frequency response
+    /// moves to the stepped sine. Capturing a 44.1 kHz DAC at 192 kHz is also the better measurement
+    /// than matching its rate would be: it is the only way to see the reconstruction images and
+    /// shaped noise above 22 kHz, which is the half of a 44.1 kHz converter worth looking at. The
+    /// dead band that creates is the point rather than a cost — <c>SplitDeviceDialog</c>'s own rate
+    /// note already says so.</para>
     ///
     /// <para><b>What raising the ceiling did and did not cost.</b> Nothing downstream is sized in
     /// frames: <c>SoundCardDevice.TargetBufferedSeconds</c> asks PortAudio for its rings as a time,
@@ -84,7 +101,43 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// every measurement, and it was never meant as "the maximum the hardware can do".</para>
     /// </summary>
     public static readonly double[] CandidateRatesHz =
-        [48_000.0, 96_000.0, 192_000.0, 384_000.0, 768_000.0];
+        [44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0, 384_000.0, 768_000.0];
+
+    /// <summary>
+    /// The two rate families, each a base and its power-of-two multiples. Read by
+    /// <see cref="FamilyBaseHz"/> and by the audit over <see cref="CandidateRatesHz"/>; the order
+    /// is the order a mixed pairing is explained in, 48 kHz first because it is what every bench
+    /// here measured at before 2026-11-14.
+    /// </summary>
+    public static readonly double[] RateFamilyBasesHz = [48_000.0, 44_100.0];
+
+    /// <summary>
+    /// Which family a rate belongs to, or null for a rate in neither — i.e. one no pairing rule
+    /// here has reasoned about.
+    ///
+    /// <para>Two rates share a family exactly when a periodic stimulus survives between them, so
+    /// this is the cheap form of the integer-ratio question for a caller that has a rate rather
+    /// than a pair. Tolerance is absolute and tiny because every rate involved is an exact integer
+    /// number of hertz.</para>
+    /// </summary>
+    public static double? FamilyBaseHz(double rateHz)
+    {
+        foreach (double baseHz in RateFamilyBasesHz)
+        {
+            double multiple = rateHz / baseHz;
+            double rounded = Math.Round(multiple);
+
+            // A power of two, and the same one back: 2^k for k >= 0, so 1, 2, 4, 8, ...
+            if (rounded >= 1.0
+                && Math.Abs(multiple - rounded) < 1e-9
+                && ((long)rounded & ((long)rounded - 1)) == 0)
+            {
+                return baseHz;
+            }
+        }
+
+        return null;
+    }
 
     public IReadOnlyList<SoundCardHostApi> HostApis => portAudio.HostApis;
 

@@ -54,28 +54,47 @@ public class SoundCardDeviceTests
     {
         var (device, pa) = Build();
 
-        // A card that stops at 96 kHz, expressed as a ceiling rather than by naming the one rate to
+        // A card that stops at 96 kHz, expressed as a ceiling rather than by naming the rates to
         // refuse: written as "everything but 192" this expectation had to be rewritten the moment
-        // 384 and 768 were added to the candidate list.
+        // 384 and 768 were added to the candidate list. The *expectation* is now derived the same
+        // way, which is what it needed when the 44.1 kHz family arrived on 2026-11-14 and brought
+        // 44.1 and 88.2 under this same ceiling.
         pa.FormatSupported = r => r.SampleRateHz <= 96_000.0;
 
         DeviceInfo info = await device.ConnectAsync(CancellationToken.None);
 
         Assert.Contains("Test Card", info.ProductName);
         Assert.False(info.IsSimulated);
-        Assert.Equal([48_000.0, 96_000.0], device.Capabilities.SampleRatesHz);
+        Assert.Equal(
+            SoundCardEnumerator.CandidateRatesHz.Where(rate => rate <= 96_000.0),
+            device.Capabilities.SampleRatesHz);
     }
 
-    /// <summary>A card that accepts none of the three is not an analyzer this app can drive, and saying so at connect beats a 500 from a run later.</summary>
+    /// <summary>
+    /// A card that accepts none of them is not an analyzer this app can drive, and saying so at
+    /// connect beats a 500 from a run later.
+    ///
+    /// <para>The message names every rate the card was asked about, derived from the candidate list
+    /// rather than written out — it read "48, 96 or 192 kHz" for as long as those were the only
+    /// three and went stale twice without failing anything, so this asserts the <i>whole</i> list
+    /// reaches the message.</para>
+    /// </summary>
     [Fact]
-    public async Task Connect_WhenTheCardAcceptsNoneOfTheThreeRates_IsRefusedWithAMessage()
+    public async Task Connect_WhenTheCardAcceptsNoneOfTheOfferedRates_NamesThemAll()
     {
         var (device, pa) = Build();
         pa.FormatSupported = _ => false;
 
         var ex = await Assert.ThrowsAsync<SoundCardNotFoundException>(
             () => device.ConnectAsync(CancellationToken.None));
-        Assert.Contains("48, 96 or 192", ex.Message);
+
+        foreach (double rate in SoundCardEnumerator.CandidateRatesHz)
+        {
+            Assert.Contains($"{rate / 1000.0:0.###}", ex.Message);
+        }
+
+        Assert.Contains("44.1", ex.Message);
+        Assert.Contains("768", ex.Message);
     }
 
     [Fact]

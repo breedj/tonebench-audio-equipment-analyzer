@@ -246,8 +246,15 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             // Whichever side exists -- on a one-direction stream the other is not a device at all,
             // so naming it would print an empty string.
             string named = (input ?? output)!.Name;
+
+            // Derived from the candidate list rather than written out. It read "48, 96 or 192 kHz"
+            // for as long as those were the only three, and went stale unnoticed twice -- when
+            // 384 and 768 kHz were added on 2026-11-13 and the 44.1 kHz family on 2026-11-14 --
+            // naming a shorter list than the card had actually been asked about.
+            string offered = string.Join(
+                ", ", SoundCardEnumerator.CandidateRatesHz.Select(rate => $"{rate / 1000.0:0.###}"));
             throw new SoundCardNotFoundException(
-                $"'{named}' accepts none of 48, 96 or 192 kHz, which are the rates this analyzer measures at.");
+                $"'{named}' accepts none of the rates this analyzer measures at ({offered} kHz).");
         }
 
         lock (_stateGate)
@@ -276,12 +283,27 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         // Which directions this stream will carry, said once and plainly. A log that named an
         // input and an output unconditionally would invent a device on a one-direction bench, and
         // which half is missing is the first thing a report of "it measures nothing" needs.
+        // Which rate families those rates fall in, because that is what decides whether this card
+        // can be the generating half of a split against a given capture rate: a stimulus carrying
+        // its own period needs the two rates to be an integer ratio, which holds within a family
+        // and provably never across one (SoundCardEnumerator.CandidateRatesHz has the arithmetic).
+        // A log file sent in is the only durable record of why such a pairing was refused.
+        string families = string.Join(
+            "+",
+            rates.Select(SoundCardEnumerator.FamilyBaseHz)
+                .Where(baseHz => baseHz is not null)
+                .Distinct()
+                .OrderBy(baseHz => baseHz)
+                .Select(baseHz => $"{baseHz!.Value / 1000.0:0.###}"));
+
         _logger.LogInformation(
-            "Sound card connected: {HostApi} / {Devices} ({Direction}), rates {Rates}, input full scale {InputDbv:0.00} dBV{Calibrated}",
+            "Sound card connected: {HostApi} / {Devices} ({Direction}), rates {Rates} kHz "
+                + "(family {Families}), input full scale {InputDbv:0.00} dBV{Calibrated}",
             (input ?? output)!.HostApiName,
             DescribeDevices(input, output),
             _settings.Direction,
             string.Join("/", rates.Select(r => r / 1000)),
+            families,
             _calibration.InputRangeDbv,
             _calibration.IsInputCalibrated && _calibration.IsOutputCalibrated ? string.Empty : " (UNCALIBRATED — levels are dBFS)");
 

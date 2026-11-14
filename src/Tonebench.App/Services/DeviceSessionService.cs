@@ -537,6 +537,11 @@ public sealed class DeviceSessionService(
         _device.StimulusTap = streamRecorder;
         streamRecorder.Begin(new StreamRecordingContext(
             SampleRateHz: config.SampleRateHz,
+
+            // The device's own answer, not GeneratorSampleRateHz -- that property falls back to
+            // _streamConfig, which this call runs ahead of. A null here is a device whose generator
+            // shares the capture clock, which is every analyzer but a split.
+            StimulusSampleRateHz: _device.GeneratorSampleRateHz ?? config.SampleRateHz,
             InputChannelCount: config.ChannelCount,
             Analyzer: _info?.ProductName ?? "(not connected)",
             SerialNumber: _info?.SerialNumber,

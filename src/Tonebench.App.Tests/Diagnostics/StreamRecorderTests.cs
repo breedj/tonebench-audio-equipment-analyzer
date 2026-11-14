@@ -56,8 +56,10 @@ public sealed class StreamRecorderTests : IDisposable
         }
     }
 
-    private static StreamRecordingContext Context(double sampleRateHz = 48000, int channels = 2) => new(
+    private static StreamRecordingContext Context(
+        double sampleRateHz = 48000, int channels = 2, double stimulusSampleRateHz = 0.0) => new(
         SampleRateHz: sampleRateHz,
+        StimulusSampleRateHz: stimulusSampleRateHz > 0.0 ? stimulusSampleRateHz : sampleRateHz,
         InputChannelCount: channels,
         Analyzer: "QA403",
         SerialNumber: "1077527945",
@@ -123,6 +125,70 @@ public sealed class StreamRecorderTests : IDisposable
         Assert.Equal(2, output.ChannelCount);
         Assert.Equal(1.5f, output.Samples[0]);
         Assert.Equal(0f, output.Samples[1]);
+    }
+
+    /// <summary>
+    /// A split analyzer's two files are at two rates, and each header has to carry its own.
+    ///
+    /// <para>Reported from the bench on 2026-11-14: a Topping D50 III generating at 44.1 kHz into a
+    /// QA403 capturing at 96 kHz wrote an <c>-out.wav</c> whose header said 96 kHz, so every tool
+    /// opened the stimulus 2.18x fast and its tones read 2.18x high. The file is only labelled
+    /// wrong -- the samples were always right -- which is the worst shape for this particular
+    /// recording, because it is the one reached for to tell a stale stimulus from a mis-measured
+    /// one, and at the wrong rate it answers that question confidently and incorrectly.</para>
+    ///
+    /// <para>Asserted on the <b>headers</b> rather than on the context, because the header is the
+    /// whole of what another program reads.</para>
+    /// </summary>
+    [Fact]
+    public async Task OnASplit_EachWavCarriesItsOwnSampleRate()
+    {
+        var recorder = Create();
+        recorder.Begin(Context(sampleRateHz: 96000, stimulusSampleRateHz: 44100));
+
+        using (var block = Block(128, 2, 96000, (_, _) => 0.25f))
+            recorder.WriteInput(block);
+
+        recorder.WriteStimulus(new float[64 * 2], channelCount: 2, sampleRateHz: 44100, startFrameIndex: 0);
+        await recorder.EndAsync();
+
+        var finished = recorder.Last;
+        Assert.NotNull(finished);
+
+        Assert.Equal(96000, ReadWav(Path.Combine(_dir, finished.Name + "-in.wav")).SampleRateHz);
+        Assert.Equal(44100, ReadWav(Path.Combine(_dir, finished.Name + "-out.wav")).SampleRateHz);
+
+        using var sidecar = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(_dir, finished.Name + "-info.json")));
+        Assert.Equal(96000, sidecar.RootElement.GetProperty("sampleRateHz").GetDouble());
+        Assert.Equal(44100, sidecar.RootElement.GetProperty("stimulusSampleRateHz").GetDouble());
+    }
+
+    /// <summary>
+    /// A single device is the common case and must be untouched: one rate, both files, and the
+    /// sidecar still answering for the stimulus rather than leaving a reader to infer it.
+    /// </summary>
+    [Fact]
+    public async Task OnASingleDevice_BothWavsCarryTheOneRate()
+    {
+        var recorder = Create();
+        recorder.Begin(Context(sampleRateHz: 192000));
+
+        using (var block = Block(128, 2, 192000, (_, _) => 0.25f))
+            recorder.WriteInput(block);
+
+        recorder.WriteStimulus(new float[128 * 2], channelCount: 2, sampleRateHz: 192000, startFrameIndex: 0);
+        await recorder.EndAsync();
+
+        var finished = recorder.Last;
+        Assert.NotNull(finished);
+
+        Assert.Equal(192000, ReadWav(Path.Combine(_dir, finished.Name + "-in.wav")).SampleRateHz);
+        Assert.Equal(192000, ReadWav(Path.Combine(_dir, finished.Name + "-out.wav")).SampleRateHz);
+
+        using var sidecar = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(_dir, finished.Name + "-info.json")));
+        Assert.Equal(192000, sidecar.RootElement.GetProperty("stimulusSampleRateHz").GetDouble());
     }
 
     /// <summary>

@@ -12,7 +12,16 @@ namespace Tonebench.App.Diagnostics;
 /// Everything about an acquisition that is not in its samples, written beside them so the pair can
 /// be read a week later by someone who was not at the bench.
 /// </summary>
-/// <param name="SampleRateHz">The acquisition's rate; both WAVs carry it.</param>
+/// <param name="SampleRateHz">The <i>capture</i> rate, which the input WAV's header carries.</param>
+/// <param name="StimulusSampleRateHz">
+/// The <i>generator's</i> rate, which the stimulus WAV's header carries. The same number as
+/// <paramref name="SampleRateHz"/> on a single device, and genuinely different on a split: the
+/// Topping D50 III generating at 44.1 kHz into a QA403 capturing at 96 kHz wrote an
+/// <c>-out.wav</c> labelled 96 kHz, so every tool opened it 2.18x fast and the tones in it read
+/// 2.18x high. Two rates rather than one because this file is the one a user is asked to send,
+/// and the one reached for to tell a stale stimulus from a mis-measured one -- a header that
+/// misnames the rate makes it answer the wrong question convincingly.
+/// </param>
 /// <param name="InputChannelCount">Channels in the input stream — the stimulus is always two.</param>
 /// <param name="Analyzer">Product name, as the status bar shows it.</param>
 /// <param name="SerialNumber">Null on a device that has none.</param>
@@ -27,6 +36,7 @@ namespace Tonebench.App.Diagnostics;
 /// <param name="GeneratorRight">Likewise.</param>
 public sealed record StreamRecordingContext(
     double SampleRateHz,
+    double StimulusSampleRateHz,
     int InputChannelCount,
     string Analyzer,
     string? SerialNumber,
@@ -434,19 +444,32 @@ public sealed class StreamRecorder : IStimulusTap
         CurrentName = _stem;
 
         int rate = (int)Math.Round(begin.Context.SampleRateHz);
+
+        // Falls back to the capture rate rather than refusing: a recording labelled with one
+        // plausible rate is worth more than no recording at all, and a device that cannot say what
+        // its generator runs at is one where the two are the same anyway.
+        double stimulusHz = begin.Context.StimulusSampleRateHz;
+        int stimulusRate = stimulusHz > 0.0 ? (int)Math.Round(stimulusHz) : rate;
+
         _inputWav = await WavAppender.CreateAsync(
             Path.Combine(Directory, _stem + "-in.wav"), rate, Math.Max(1, begin.Context.InputChannelCount))
             .ConfigureAwait(false);
         _stimulusWav = await WavAppender.CreateAsync(
-            Path.Combine(Directory, _stem + "-out.wav"), rate, 2).ConfigureAwait(false);
+            Path.Combine(Directory, _stem + "-out.wav"), stimulusRate, 2).ConfigureAwait(false);
 
         // Named in the log on purpose: "send me the recording" is only a useful request when the log
         // the user is already sending says which file it is.
+        // The stimulus rate is named only when it differs, so the ordinary single-device line is
+        // unchanged and the split's line says the one thing a reader of these files has to know.
         _logger.LogInformation(
             "Stream recording started: {InputFile} and {OutputFile} in {Directory} "
-                + "({Rate:0} Hz, {Channels} input channels, stopping at {CapMb} MB per file, keeping {Kept} recordings)",
-            _stem + "-in.wav", _stem + "-out.wav", Directory,
-            begin.Context.SampleRateHz, Math.Max(1, begin.Context.InputChannelCount), MaxFileMegabytes, KeptRecordings);
+                + "({Rate:0} Hz{StimulusRate}, {Channels} input channels, stopping at {CapMb} MB per file, "
+                + "keeping {Kept} recordings)",
+            _stem + "-in.wav", _stem + "-out.wav", Directory, begin.Context.SampleRateHz,
+            stimulusRate == rate
+                ? string.Empty
+                : string.Create(CultureInfo.InvariantCulture, $" in, {stimulusRate} Hz out"),
+            Math.Max(1, begin.Context.InputChannelCount), MaxFileMegabytes, KeptRecordings);
     }
 
     private async Task AppendAsync(SampleBuffer buffer)
@@ -612,7 +635,9 @@ public sealed class StreamRecorder : IStimulusTap
             "units",
             "Both files are 32-bit float WAV in volts. The input is what the analyzer digitized, "
                 + "before the external input gain below; the output is what the DAC was told to play, "
-                + "clipped against the output range, left channel first.");
+                + "clipped against the output range, left channel first. On a split analyzer the two "
+                + "files are at different sample rates -- each carries its own in its WAV header, and "
+                + "both are below.");
         json.WriteString(
             "whatTheOutputCannotShow",
             "A DAC starvation gap. The submitted stimulus is always continuous -- a gap is the device "
@@ -628,6 +653,9 @@ public sealed class StreamRecorder : IStimulusTap
         if (context is not null)
         {
             json.WriteNumber("sampleRateHz", context.SampleRateHz);
+            json.WriteNumber(
+                "stimulusSampleRateHz",
+                context.StimulusSampleRateHz > 0.0 ? context.StimulusSampleRateHz : context.SampleRateHz);
             json.WriteNumber("inputChannelCount", context.InputChannelCount);
 
             json.WriteStartObject("analyzer");

@@ -2842,7 +2842,13 @@ async function screenshotChart(settings: ScreenshotSettings) {
   screenshotDialogOpen.value = false
   void rememberScreenshotSettings(settings)
   const chart = chartOnScreen()
-  if (!chart) return
+  if (!chart) {
+    // Said rather than returned. This was a bare `return` until 2026-11-14, so a Screenshot that
+    // found no chart wrote no file and showed nothing at all — the button simply did nothing, which
+    // is the one outcome a user cannot act on or report usefully.
+    reportError('There is no chart on this screen to export.')
+    return
+  }
   try {
     const layout = screenshotFrameLayout(settings.widthPx, settings.aspectRatio, settings.title, settings.addDate)
     const chartPng = await chart.exportPng({ width: layout.chartWidth, height: layout.chartHeight, captureZoom: true })

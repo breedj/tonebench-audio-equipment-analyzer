@@ -42,6 +42,7 @@ import {
   clockDriftCorrectionLabel,
   clockDriftCorrectionNotice,
   clockDriftFreshnessNotice,
+  twoClocksNotice,
   offersClockDriftCorrection,
   readClockDriftCorrection,
   sendsClockDriftCorrection,
@@ -61,6 +62,12 @@ const props = defineProps<{
    * one shared module so they cannot differ about whether a run is corrected.
    */
   clockDriftPpm?: number | null
+  /**
+   * Whether the bench runs on two clocks. Distinct from clockDriftPpm being null, which is also the
+   * answer for a bench with one clock and for a figure too small to correct — only a bench with two
+   * is worth a line about what to do.
+   */
+  benchHasTwoClocks?: boolean
   /** When that figure was measured, ISO-8601. Only for the caption. */
   clockDriftMeasuredUtc?: string | null
   /**
@@ -255,6 +262,15 @@ const driftCorrectionNotice = computed(() =>
  */
 const driftFreshness = computed(() =>
   clockDriftFreshnessNotice(props.driftResidual, props.clockDriftMeasuredUtc),
+)
+
+/** What to do about two clocks when there is no figure to correct with. */
+const twoClocks = computed(() =>
+  twoClocksNotice(
+    props.benchHasTwoClocks,
+    props.clockDriftPpm,
+    form.referenceMode === 'RightChannel',
+  ),
 )
 
 /**
@@ -641,6 +657,17 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         : 'text-neutral-500 dark:text-neutral-400'"
     >
       {{ driftFreshness.text }}
+    </p>
+    <!-- And the bench that has neither a correction nor a line about one: two clocks, never
+         measured. See twoClocksNotice for why it names the reference first. -->
+    <p
+      v-if="twoClocks"
+      class="text-[10px] leading-snug"
+      :class="twoClocks.tone === 'warn'
+        ? 'text-amber-700 dark:text-amber-400'
+        : 'text-neutral-500 dark:text-neutral-400'"
+    >
+      {{ twoClocks.text }}
     </p>
 
     <template #footer>

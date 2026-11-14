@@ -4692,6 +4692,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="impulseRunning"
                   :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
                   :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
+                  :bench-has-two-clocks="ranges?.benchHasTwoClocks ?? false"
                   :drift-residual="impulseDriftResidual"
                   :reference="impulseReference"
                   @capture-reference="loopbackDialogOpen = true"
@@ -5080,6 +5081,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :sample-rates-hz="ranges?.sampleRatesHz"
                   :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
                   :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
+                  :bench-has-two-clocks="ranges?.benchHasTwoClocks ?? false"
                   :drift-residual="responseDriftResidual"
                   :reference="responseReference"
                 />
@@ -6000,7 +6002,12 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 </button>
               </div>
 
-              <GeneratorPanel ref="generatorPanel" :ranges="ranges" @change="applyGeneratorLive" />
+              <GeneratorPanel
+                ref="generatorPanel"
+                :ranges="ranges"
+                :device-kind="status?.deviceKind"
+                @change="applyGeneratorLive"
+              />
               <SpectrumConfigPanel
                 ref="spectrumConfigPanel"
                 :ranges="ranges"

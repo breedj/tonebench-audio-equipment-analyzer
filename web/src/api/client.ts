@@ -2153,6 +2153,18 @@ export interface DeviceRanges {
    * panels show no correction checkbox.
    */
   clockDriftPpm: number | null
+  /**
+   * The rate the generating half is pinned to, or 0 where it follows the capture rate. Only ever
+   * non-zero on a split; the generator panel needs it to tell "the staged rate is what the generator
+   * will be asked for" from "the generator plays its own rate whatever is staged".
+   */
+  generatorRateOverrideHz: number
+  /**
+   * Whether the bench runs on two clocks. Distinct from {@link clockDriftPpm} being null, which
+   * covers both "one clock, nothing to correct" and "two clocks, never measured" — only the second
+   * is worth a line on the chirp panels.
+   */
+  benchHasTwoClocks: boolean
   /** ISO-8601, for the caption beside that checkbox. Null when there is no figure. */
   clockDriftMeasuredUtc: string | null
   /**

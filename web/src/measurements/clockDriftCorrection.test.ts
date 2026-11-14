@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DriftResidualJson } from '../api/client'
 import {
+  twoClocksNotice,
   CLOCK_DRIFT_ACTIONABLE_PPM,
   CLOCK_DRIFT_MAX_FIT_MISS_DEG,
   CLOCK_DRIFT_STALE_DAYS,
@@ -345,5 +346,60 @@ describe('clockDriftFreshnessNotice', () => {
   it('says nothing when neither has anything to say', () => {
     expect(clockDriftFreshnessNotice(null, measured, new Date('2026-11-12T12:00:00Z'))).toBeNull()
     expect(clockDriftFreshnessNotice(reading(0.1, 0), null)).toBeNull()
+  })
+})
+
+/**
+ * The line for a bench that has two clocks and no figure to correct with.
+ *
+ * Neither the correction notice nor the freshness line fires there — the first needs a figure, the
+ * second needs a residual or a date — so until 2026-11-14 the two chirp panels said nothing at all
+ * on exactly the bench most worth telling: a chirp reads the clock ratio as a delay that grows with
+ * frequency and reports it as the DUT's own.
+ */
+describe('twoClocksNotice', () => {
+  it('says nothing on a bench with one clock', () => {
+    expect(twoClocksNotice(false, null, false)).toBeNull()
+    expect(twoClocksNotice(undefined, null, true)).toBeNull()
+  })
+
+  it('says nothing when a correction is available, which has its own line', () => {
+    expect(twoClocksNotice(true, -0.85, false)).toBeNull()
+    expect(twoClocksNotice(true, 83.18, true)).toBeNull()
+  })
+
+  /** The reference first, because it cancels the clock exactly where a stored figure estimates it. */
+  it('with no reference, names the reference and the drift test, in that order', () => {
+    const notice = twoClocksNotice(true, null, false)
+
+    expect(notice?.tone).toBe('ok')
+    const text = notice?.text ?? ''
+    expect(text).toContain('two clocks')
+    expect(text).toContain('Right channel is reference')
+    expect(text).toContain('Clock drift test')
+    expect(text.indexOf('Right channel is reference')).toBeLessThan(text.indexOf('Clock drift test'))
+  })
+
+  /**
+   * And with it already ticked, what is left: the gain trace is clean, the other two are not.
+   * Measured on a QA403 fed by a USB DAC — gain −0.03 dB with 0.11° of phase against 17° on the
+   * same capture's left trace.
+   */
+  it('with the reference on, says the gain trace is covered and the others are not', () => {
+    const text = twoClocksNotice(true, null, true)?.text ?? ''
+
+    expect(text).toContain('already cancels it on the Gain trace')
+    expect(text).toContain('Left and Right traces still')
+    expect(text).not.toContain('Tick Right channel')
+  })
+
+  /**
+   * Informing, not alarming: a figure below the correction threshold reads here exactly like one
+   * never taken, since the server answers null for both, and a bench whose clocks agree to a
+   * hundredth of a ppm has nothing to fix.
+   */
+  it('is never amber', () => {
+    expect(twoClocksNotice(true, null, false)?.tone).toBe('ok')
+    expect(twoClocksNotice(true, null, true)?.tone).toBe('ok')
   })
 })

@@ -67,7 +67,8 @@ public static class DeviceEndpoints
                 caps.SampleRatesHz, caps.InputRangesDbv, caps.OutputRangesDbv, caps.MaxChannelCount,
                 session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz,
                 drift?.Ppm, drift?.MeasuredUtc,
-                caps.OutputSampleRatesHz, session.GeneratorSampleRateHz));
+                caps.OutputSampleRatesHz, session.GeneratorSampleRateHz,
+                session.GeneratorRateOverrideHz, session.BenchClocks is not null));
         });
 
         group.MapPost("/input-range", async (
@@ -533,7 +534,26 @@ public sealed record DeviceRangesResponse(
     /// the <i>generator's</i> frames: a trigger computed at the capture rate walks the trace across
     /// the screen on a bench whose two halves differ.
     /// </summary>
-    double? GeneratorSampleRateHz = null);
+    double? GeneratorSampleRateHz = null,
+    /// <summary>
+    /// The rate the generator is <i>pinned</i> to, or 0 where it follows the capture rate — the
+    /// setting rather than the reading above, which is the last rate anything streamed at.
+    ///
+    /// <para>The generator panel needs the difference: pinned, the staged capture rate cannot make
+    /// the generator fail and there is nothing to warn about; following, the staged rate <b>is</b>
+    /// the rate the generator will be asked for, and a bench whose generating half cannot play it
+    /// should say so before Run rather than answering a 409.</para>
+    /// </summary>
+    double GeneratorRateOverrideHz = 0.0,
+    /// <summary>
+    /// Whether this bench is running on two clocks — <c>DeviceSessionService.BenchClocks</c>.
+    ///
+    /// <para>Carried here so the two chirp panels can say what to do about it when there is no
+    /// stored figure to correct with: <see cref="ClockDriftPpm"/> being null covers both "one clock,
+    /// nothing to correct" and "two clocks, never measured", and only the second is worth a line.
+    /// </para>
+    /// </summary>
+    bool BenchHasTwoClocks = false);
 
 public sealed record InputRangeRequest(double Dbv);
 

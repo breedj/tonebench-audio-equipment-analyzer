@@ -12,6 +12,12 @@ import CollapsibleSection from './CollapsibleSection.vue'
 
 const props = defineProps<{
   ranges: DeviceRanges | null
+  /**
+   * Which analyzer is selected, read only to decide which lever the rate notice names: a split's
+   * generator rate is a control in its own settings, and on a single analyzer the second device is
+   * the thing that does not exist yet.
+   */
+  deviceKind?: string | null
 }>()
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
@@ -42,7 +48,13 @@ const { stagedSampleRateHz } = useStagedSampleRate()
  * tried out of curiosity does not cost the user their stimulus.
  */
 const rateCeilingNotice = computed(() =>
-  generatorRateCeilingNotice(stagedSampleRateHz.value, props.ranges?.maxGeneratorSampleRateHz),
+  generatorRateCeilingNotice({
+    stagedSampleRateHz: stagedSampleRateHz.value,
+    generatorRateOverrideHz: props.ranges?.generatorRateOverrideHz,
+    generatorRatesHz: props.ranges?.outputSampleRatesHz,
+    maxGeneratorRateHz: props.ranges?.maxGeneratorSampleRateHz,
+    isSplit: props.deviceKind === 'Split',
+  }),
 )
 const generatorUsable = computed(() => rateCeilingNotice.value === null)
 

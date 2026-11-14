@@ -294,6 +294,54 @@ export function clockDriftResidualNotice(
 }
 
 /**
+ * What to do about two clocks when nothing on this screen is correcting for them.
+ *
+ * <p>The correction notice and the freshness line both answer for a bench that <em>has</em> a
+ * figure. A bench that has never measured one gets neither, and it is the bench most worth telling:
+ * a chirp reads the clock ratio as a delay that grows with frequency and reports it as the DUT's
+ * own phase and group delay, with nothing on the trace saying so.</p>
+ *
+ * <p><b>It names the reference first, because that is the better of the two answers.</b> Dividing
+ * two channels of one capture cancels the clock <em>exactly</em> — measured on a QA403 fed by a USB
+ * DAC, both channels wired straight: the gain trace reads −0.03 dB flat with 0.11° of phase across
+ * 200 Hz–20 kHz against 17° on the same capture's left trace. A stored drift figure is an estimate;
+ * this is an identity. The catch is what it makes the measurement <em>of</em>, which is why the
+ * other half is still offered.</p>
+ *
+ * <p>Tone <c>ok</c> rather than <c>warn</c>: on a bench whose two clocks agree to a hundredth of a
+ * ppm there is genuinely nothing to fix, and this line cannot tell that from never-measured — the
+ * server answers null for both, since a figure below <c>ChirpClockDrift.NegligiblePpm</c> earns no
+ * correction. Informing is right either way; alarming is not.</p>
+ */
+export function twoClocksNotice(
+  benchHasTwoClocks: boolean | null | undefined,
+  clockDriftPpm: number | null | undefined,
+  rightChannelIsReference: boolean,
+): ClockDriftNotice | null {
+  if (!benchHasTwoClocks) return null
+
+  // A correction is available and has its own line; this one is for when there is none.
+  if (typeof clockDriftPpm === 'number' && Number.isFinite(clockDriftPpm)) return null
+
+  const common =
+    'This bench runs on two clocks, and nothing here is correcting for them: a chirp reads the ' +
+    "difference as a delay that grows with frequency and reports it as the DUT's own phase and " +
+    'group delay. '
+
+  return {
+    tone: 'ok',
+    text: rightChannelIsReference
+      ? common +
+        'Right channel is reference already cancels it on the Gain trace — that is two channels of ' +
+        'one capture, so the clock ratio divides out exactly — but the Left and Right traces still ' +
+        'carry the ramp. Run the Clock drift test if you need those.'
+      : common +
+        'Tick Right channel is reference, which cancels it exactly by dividing two channels of one ' +
+        'capture, or run the Clock drift test in the analyzer settings and this screen will offer ' +
+        'to take the ramp off.',
+  }
+}
+/**
  * The one line the panel prints: what the measurement says if it said anything, and the calendar
  * otherwise.
  *

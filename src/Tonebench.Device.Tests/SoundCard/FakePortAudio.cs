@@ -43,13 +43,44 @@ internal sealed class FakePortAudio : IPortAudio
 
     public bool IsFormatSupported(SoundCardStreamRequest request) => FormatSupported(request);
 
+    private readonly Lock _dispatcherGate = new();
     private StaDispatcher? _dispatcher;
 
-    /// <summary>Created on demand so an enumerator-only test never starts a thread it does not need.</summary>
-    public StaDispatcher Dispatcher => _dispatcher ??= new StaDispatcher("FakePortAudio");
+    /// <summary>
+    /// Created on demand so an enumerator-only test never starts a thread it does not need, and
+    /// behind a lock for the reason <c>PortAudioNative.Shared</c> has one: two devices streaming at
+    /// once reach this from two threads, and an unguarded <c>??=</c> hands each of them a
+    /// dispatcher of its own. That reads as the two cards having separate transfer threads when
+    /// they were meant to be sharing one — the exact thing a two-card test is asking about, so the
+    /// race could only ever produce a wrong answer.
+    /// </summary>
+    public StaDispatcher Dispatcher
+    {
+        get
+        {
+            lock (_dispatcherGate)
+            {
+                return _dispatcher ??= new StaDispatcher("FakePortAudio");
+            }
+        }
+    }
 
     /// <summary>The stream the next OpenStream hands out, so a test can arm it before the pump starts.</summary>
     public FakePortAudioStream NextStream { get; set; } = new();
+
+    /// <summary>
+    /// Supplies a stream per open instead of handing out the one <see cref="NextStream"/>, so two
+    /// devices can run over one fake library. Null keeps the single-stream behaviour every other
+    /// test here is written against.
+    /// </summary>
+    public Func<SoundCardStreamRequest, FakePortAudioStream>? StreamFactory { get; set; }
+
+    /// <summary>
+    /// The loop dispatcher handed to every open, in order, warm-ups included -- so a test can
+    /// assert that two devices were not given the same transfer thread, which is the thing that
+    /// makes the second one's pump queue behind the first and never run.
+    /// </summary>
+    public List<StaDispatcher?> LoopDispatchers { get; } = [];
 
     public SoundCardStreamRequest? OpenedWith { get; private set; }
 
@@ -68,10 +99,33 @@ internal sealed class FakePortAudio : IPortAudio
     /// </summary>
     public FakePortAudioStream? WarmUpStream { get; private set; }
 
-    public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer)
+    /// <summary>
+    /// The loop dispatcher the most recent open was given, warm-ups included, so a test can assert
+    /// two devices were not handed the same one. The warm-up opens first and the stream that runs
+    /// second, so after a stream has started this is that stream's.
+    /// </summary>
+    public StaDispatcher? OpenedLoopDispatcher { get; private set; }
+
+    public IPortAudioStream OpenStream(
+        SoundCardStreamRequest request, int framesPerBuffer, StaDispatcher? loopDispatcher = null)
     {
         OpenedWith = request;
         OpenedFramesPerBuffer = framesPerBuffer;
+        OpenedLoopDispatcher = loopDispatcher;
+        LoopDispatchers.Add(loopDispatcher);
+
+        // Two devices over one fake library, which is how two cards really run: there is one
+        // PortAudioNative for the process, so a test about two of them cannot give each its own
+        // fake without testing something else. A factory sidesteps NextStream/WarmUpStream
+        // entirely -- both are single-valued, and the warm-up branch below counts opens across the
+        // whole fake, so the second device would be handed the first one's stream.
+        if (StreamFactory is not null)
+        {
+            OpenCount++;
+            FakePortAudioStream made = StreamFactory(request);
+            made.SampleRateHz = request.SampleRateHz;
+            return made;
+        }
 
         // The first open of a rate is the device's throwaway; the next one is the stream that runs.
         if (OpenCount++ == 0 && WarmUpStream is null)

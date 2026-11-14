@@ -124,11 +124,29 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
     /// </summary>
     private volatile IStimulusTap? _stimulusTap;
 
+    /// <summary>
+    /// A transfer-loop thread of this device's own, or null to share the library's one.
+    ///
+    /// <para><b>Null is a one-card bench, and it is the default because it is the behaviour every
+    /// measurement in this app was taken with.</b> The loop <i>occupies</i> the thread it is posted
+    /// to for the stream's whole life, so two devices sharing one dispatcher means the second one's
+    /// pump queues behind the first and never runs -- no exception and no log line, just an
+    /// acquisition that produces nothing. That is why a card on both halves of a split used to be
+    /// refused outright.</para>
+    ///
+    /// <para>Given one of these, two cards can stream at once, each paced by its own clock, which
+    /// is the whole point: a single loop blocking on both directions couples the two clocks exactly
+    /// as one duplex stream across two devices does, and accumulates the difference at the ppm rate
+    /// until the ring slips.</para>
+    /// </summary>
+    private readonly StaDispatcher? _ownLoopDispatcher;
+
     public SoundCardDevice(
         SoundCardSettings settings,
         SoundCardCalibration calibration,
-        ILogger<SoundCardDevice> logger)
-        : this(settings, calibration, logger, PortAudioNative.Shared)
+        ILogger<SoundCardDevice> logger,
+        bool ownStreamThread = false)
+        : this(settings, calibration, logger, PortAudioNative.Shared, ownStreamThread)
     {
     }
 
@@ -137,13 +155,28 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         SoundCardSettings settings,
         SoundCardCalibration calibration,
         ILogger<SoundCardDevice> logger,
-        IPortAudio portAudio)
+        IPortAudio portAudio,
+        bool ownStreamThread = false)
     {
         _settings = settings;
         _calibration = calibration;
         _logger = logger;
         _portAudio = portAudio;
+
+        if (ownStreamThread)
+        {
+            // Named after the direction rather than the card: the name reaches a crash dump, and
+            // on a two-card bench "which half was this" is the question being asked of it.
+            _ownLoopDispatcher = new StaDispatcher(
+                $"PortAudio pump ({settings.Direction})");
+        }
     }
+
+    /// <summary>
+    /// The thread this device's transfer loop runs on, and the one its stream's reads and writes
+    /// are issued from. Its own where it was given one, otherwise the library's.
+    /// </summary>
+    private StaDispatcher LoopDispatcher => _ownLoopDispatcher ?? _portAudio.Dispatcher;
 
     public DeviceCapabilities Capabilities => _capabilities;
 
@@ -481,9 +514,11 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         _stimulusLatencyFrames =
             (PrimeTransfersFor(stream.OutputLatencyS, config.SampleRateHz) + 1) * TransferFrames;
 
-        // The loop runs on the dispatcher's own thread -- the apartment ASIO needs, and a dedicated
-        // thread rather than the pool, which is what the DAC-gap rule asks for.
-        _portAudio.Dispatcher.Post(() =>
+        // The loop runs on a dispatcher thread -- the apartment ASIO needs, and a dedicated thread
+        // rather than the pool, which is what the DAC-gap rule asks for. Which dispatcher is
+        // LoopDispatcher's business: the library's on a one-card bench, this device's own when it
+        // is one half of a two-card one.
+        LoopDispatcher.Post(() =>
         {
             try
             {
@@ -530,7 +565,14 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         return Task.CompletedTask;
     }
 
-    public void Dispose() => _stopRequested = true;
+    public void Dispose()
+    {
+        // Asked to stop before the thread is joined, in that order: Dispose on the dispatcher
+        // completes its queue and waits for whatever is on it, and what is on it may be a transfer
+        // loop that only returns once it sees this flag.
+        _stopRequested = true;
+        _ownLoopDispatcher?.Dispose();
+    }
 
     /// <summary>
     /// Read, convert, hand on, synthesize, write — in that order, every iteration.
@@ -1130,7 +1172,12 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
 
         try
         {
-            using (IPortAudioStream warmUp = _portAudio.OpenStream(request, TransferFrames))
+            // On this device's own loop thread like the stream that follows it, although this one
+            // is never read or written: the warm-up is opened, started, stopped and thrown away,
+            // and all four of those run on the control thread regardless. Naming it anyway keeps
+            // "which thread would this stream transfer on" answerable for every open a device
+            // makes, rather than only for the ones that go on to pump.
+            using (IPortAudioStream warmUp = _portAudio.OpenStream(request, TransferFrames, LoopDispatcher))
             {
                 // Started, not merely opened: opening negotiates the rate, starting is what makes
                 // the driver actually run at it, and it is the running that has to settle.
@@ -1210,7 +1257,7 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
             IPortAudioStream? stream = null;
             try
             {
-                stream = _portAudio.OpenStream(request, TransferFrames);
+                stream = _portAudio.OpenStream(request, TransferFrames, LoopDispatcher);
                 stream.Start();
                 if (attempt > 0)
                 {

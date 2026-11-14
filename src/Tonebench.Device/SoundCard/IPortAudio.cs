@@ -153,8 +153,25 @@ internal interface IPortAudio : IDisposable
     /// <summary>Whether the device pair will accept this rate. For WASAPI the answer differs between shared and exclusive, which is why the request carries the flag.</summary>
     bool IsFormatSupported(SoundCardStreamRequest request);
 
-    /// <summary>Opens a duplex stream in PortAudio's blocking read/write mode.</summary>
-    IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer);
+    /// <summary>
+    /// Opens a duplex stream in PortAudio's blocking read/write mode.
+    ///
+    /// <para><paramref name="loopDispatcher"/> is the thread the stream's <see
+    /// cref="IPortAudioStream.Read"/> and <see cref="IPortAudioStream.Write"/> are going to be
+    /// called from, so the stream routes those two there and leaves <see cref="Dispatcher"/> free
+    /// for another card. Null means <see cref="Dispatcher"/> itself, which is a one-card bench and
+    /// is what every caller wanted before two cards had to stream at once.
+    ///
+    /// <para><b>Opening always happens on <see cref="Dispatcher"/> whatever this says</b>, and so
+    /// do starting, stopping and closing. PortAudio is not documented thread-safe for concurrent
+    /// library calls, and under ASIO the driver is a COM object belonging to the apartment that
+    /// created it -- so everything that touches the driver stays on the one thread that enumerated
+    /// it, and only the two hot-path transfers move. Those two are safe to move because they are
+    /// ring-buffer operations: the driver fills the ring from its own callback thread, and
+    /// <c>Pa_ReadStream</c> / <c>Pa_WriteStream</c> only wait on it.</para>
+    /// </summary>
+    IPortAudioStream OpenStream(
+        SoundCardStreamRequest request, int framesPerBuffer, StaDispatcher? loopDispatcher = null);
 
     /// <summary>
     /// Shows an ASIO driver's own control panel and <b>blocks until the user closes it</b> — it is

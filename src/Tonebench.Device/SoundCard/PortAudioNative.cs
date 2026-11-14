@@ -112,10 +112,15 @@ internal sealed class PortAudioNative : IPortAudio
         }
     });
 
-    public IPortAudioStream OpenStream(SoundCardStreamRequest request, int framesPerBuffer)
+    public IPortAudioStream OpenStream(
+        SoundCardStreamRequest request, int framesPerBuffer, StaDispatcher? loopDispatcher = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(framesPerBuffer);
-        return _dispatcher.Invoke<IPortAudioStream>(() => OpenStreamCore(request, framesPerBuffer));
+
+        // The open runs on _dispatcher whatever the loop will use: see IPortAudio.OpenStream for
+        // why every call that touches the driver stays on the thread that enumerated it.
+        return _dispatcher.Invoke<IPortAudioStream>(
+            () => OpenStreamCore(request, framesPerBuffer, loopDispatcher ?? _dispatcher));
     }
 
     public bool ShowControlPanel(int deviceIndex)
@@ -159,7 +164,8 @@ internal sealed class PortAudioNative : IPortAudio
         });
     }
 
-    private IPortAudioStream OpenStreamCore(SoundCardStreamRequest request, int framesPerBuffer)
+    private IPortAudioStream OpenStreamCore(
+        SoundCardStreamRequest request, int framesPerBuffer, StaDispatcher loopDispatcher)
     {
         IntPtr inputExtra = IntPtr.Zero, outputExtra = IntPtr.Zero;
         IntPtr inputBlock = IntPtr.Zero, outputBlock = IntPtr.Zero;
@@ -194,7 +200,7 @@ internal sealed class PortAudioNative : IPortAudio
                     error);
             }
 
-            var stream = new NativeStream(handle, inputExtra, outputExtra, _dispatcher);
+            var stream = new NativeStream(handle, inputExtra, outputExtra, _dispatcher, loopDispatcher);
             handedOver = true;
             return stream;
         }
@@ -350,11 +356,23 @@ internal sealed class PortAudioNative : IPortAudio
     }
 
     /// <summary>
-    /// Every call here runs on the dispatcher thread. Read and Write are the hot path and are
-    /// expected to be called from a loop that is already running there, where
-    /// <see cref="StaDispatcher.Invoke{T}"/> is a direct call and costs nothing.
+    /// Every call here runs on a dispatcher thread, and <b>which one depends on the call</b>.
+    ///
+    /// <para><paramref name="control"/> -- the one that enumerated the driver -- takes starting,
+    /// stopping and closing, because those reach the driver itself and under ASIO it is a COM
+    /// object owned by that apartment. <paramref name="loop"/> takes <see cref="Read"/> and
+    /// <see cref="Write"/>, which are ring-buffer operations the driver fills from its own callback
+    /// thread, and which the transfer loop is already running on -- so
+    /// <see cref="StaDispatcher.Invoke{T}"/> is a direct call there and costs nothing. On a
+    /// one-card bench the two are the same dispatcher and this is exactly the old behaviour.</para>
+    ///
+    /// <para>Nothing here serialises the two against each other, and nothing needs to: the only
+    /// caller joins its transfer loop before it disposes the stream (see
+    /// <c>SoundCardDevice.StreamAsync</c>'s finally, which awaits <c>pumpFinished</c>), so a
+    /// transfer and a teardown are never in flight together.</para>
     /// </summary>
-    private sealed class NativeStream(IntPtr handle, IntPtr inputExtra, IntPtr outputExtra, StaDispatcher dispatcher)
+    private sealed class NativeStream(
+        IntPtr handle, IntPtr inputExtra, IntPtr outputExtra, StaDispatcher control, StaDispatcher loop)
         : IPortAudioStream
     {
         private IntPtr _handle = handle;
@@ -366,13 +384,13 @@ internal sealed class PortAudioNative : IPortAudio
 
         public double SampleRateHz { get; private set; } = ReadInfo(handle).SampleRate;
 
-        public void Start() => dispatcher.Invoke(() =>
+        public void Start() => control.Invoke(() =>
         {
             Check(PortAudioInterop.Pa_StartStream(_handle), "start");
             _started = true;
         });
 
-        public void Stop() => dispatcher.Invoke(() =>
+        public void Stop() => control.Invoke(() =>
         {
             if (!_started)
                 return;
@@ -387,7 +405,7 @@ internal sealed class PortAudioNative : IPortAudio
                 PortAudioInterop.Pa_AbortStream(_handle);
         });
 
-        public bool Read(float[] buffer, int frames) => dispatcher.Invoke(() =>
+        public bool Read(float[] buffer, int frames) => loop.Invoke(() =>
         {
             int error = PortAudioInterop.Pa_ReadStream(_handle, buffer, new CULong((nuint)frames));
             if (error == PaError.InputOverflowed)
@@ -397,7 +415,7 @@ internal sealed class PortAudioNative : IPortAudio
             return false;
         });
 
-        public bool Write(float[] buffer, int frames) => dispatcher.Invoke(() =>
+        public bool Write(float[] buffer, int frames) => loop.Invoke(() =>
         {
             int error = PortAudioInterop.Pa_WriteStream(_handle, buffer, new CULong((nuint)frames));
             if (error == PaError.OutputUnderflowed)
@@ -409,19 +427,19 @@ internal sealed class PortAudioNative : IPortAudio
 
         // A negative return is a PaError rather than a count, and a diagnostic may not throw on a
         // host API that declines to answer: both come back as -1, which the log prints as unknown.
-        public long FramesAvailableToRead() => dispatcher.Invoke(() =>
+        public long FramesAvailableToRead() => loop.Invoke(() =>
         {
             long frames = (long)PortAudioInterop.Pa_GetStreamReadAvailable(_handle).Value;
             return frames < 0 ? -1 : frames;
         });
 
-        public long FramesAvailableToWrite() => dispatcher.Invoke(() =>
+        public long FramesAvailableToWrite() => loop.Invoke(() =>
         {
             long frames = (long)PortAudioInterop.Pa_GetStreamWriteAvailable(_handle).Value;
             return frames < 0 ? -1 : frames;
         });
 
-        public void Dispose() => dispatcher.Invoke(() =>
+        public void Dispose() => control.Invoke(() =>
         {
             if (_handle == IntPtr.Zero)
                 return;

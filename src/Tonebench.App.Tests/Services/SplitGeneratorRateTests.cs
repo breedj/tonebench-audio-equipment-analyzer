@@ -226,4 +226,128 @@ public class SplitGeneratorRateTests
 
         Assert.Equal(96_000.0, single.GeneratorSampleRateHz);
     }
+
+    /// <summary>
+    /// One channel playing <paramref name="kind"/>. <b>Every</b> settings object is filled whatever
+    /// the kind, which is what the FFT screen's staged config really looks like — a chirp setting
+    /// left behind by a previous stimulus does not go away — and which is why
+    /// <c>PlaysAPeriodicStimulus</c> has to read the kind to pick the object that is in play rather
+    /// than asking whether any object carries a period.
+    /// </summary>
+    private static GeneratorConfig Stimulus(GeneratorKind kind, int noisePeriodFrames = 4096) => new(
+        new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(1_000.0, -10.0)])
+        {
+            Kind = kind,
+            Multitone = new MultitoneSettings(),
+            Noise = new WhiteNoiseSettings { PeriodFrames = noisePeriodFrames },
+            Chirp = new EchoChirpSettings { RepeatFrames = 4_096 },
+            Wave = new PeriodicWaveSettings { FrequencyHz = 1_000.0, LevelDbv = -10.0 },
+        },
+        ChannelGeneratorConfig.Off);
+
+    /// <summary>A 48 kHz generator against a 44.1 kHz capture: 160/147, the one pairing that cannot.</summary>
+    private const double MixedFamilyAnalysisRateHz = 44_100.0;
+
+    /// <summary>
+    /// A stimulus carrying its own period, across rate families. Refused, because its period cannot
+    /// be a whole number of frames at both ends — see <c>RequireGeneratorRateUsable</c> for the
+    /// arithmetic.
+    /// </summary>
+    [Theory]
+    [InlineData(GeneratorKind.EchoChirp)]
+    [InlineData(GeneratorKind.PinkNoise)]
+    [InlineData(GeneratorKind.WhiteNoise)]
+    public async Task APeriodicStimulus_AcrossANonIntegerRatePair_IsRefused(GeneratorKind kind)
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.ConfigureGeneratorAsync(
+                Stimulus(kind), CancellationToken.None,
+                new AcquisitionConfig(MixedFamilyAnalysisRateHz, 2, 4096)));
+
+        Assert.Contains("not an integer ratio", ex.Message);
+
+        // And it names the lever, because "cannot line up with the analysis record" on its own
+        // leaves a reader with nothing to do about it.
+        Assert.Contains("stepped sine", ex.Message);
+    }
+
+    /// <summary>
+    /// The regression this correction exists for: a stimulus with no period of its own is coherent
+    /// in the record whatever rate synthesized it, so the same mixed-family bench still plays it.
+    ///
+    /// <para>A tone is the case that mattered — it is the first thing anyone tries on a 44.1 kHz
+    /// DAC, and until 2026-11-14 it was refused by a message saying tones were unaffected.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(GeneratorKind.Tones)]
+    [InlineData(GeneratorKind.Multitone)]
+    [InlineData(GeneratorKind.Square)]
+    [InlineData(GeneratorKind.Triangle)]
+    public async Task AStimulusWithNoPeriodOfItsOwn_AcrossANonIntegerRatePair_StillPlays(GeneratorKind kind)
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(
+            Stimulus(kind), CancellationToken.None,
+            new AcquisitionConfig(MixedFamilyAnalysisRateHz, 2, 4096));
+
+        Assert.True(session.GetStatus().GeneratorLeft.Enabled);
+    }
+
+    /// <summary>
+    /// The continuous noise forms have no period at all (<c>PeriodFrames</c> 0, the documented
+    /// streaming case), so they are decided by that field and not by their kind — which is the
+    /// whole reason the test is structural rather than a list of kinds.
+    /// </summary>
+    [Fact]
+    public async Task ContinuousNoise_AcrossANonIntegerRatePair_StillPlays()
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(
+            Stimulus(GeneratorKind.PinkNoise, noisePeriodFrames: 0), CancellationToken.None,
+            new AcquisitionConfig(MixedFamilyAnalysisRateHz, 2, 4096));
+
+        Assert.True(session.GetStatus().GeneratorLeft.Enabled);
+    }
+
+    /// <summary>
+    /// And the guard must not fire on a bench that is fine. Every rate pairing the app offered
+    /// before the 44.1 kHz family was probed is an integer ratio, so this is what would break on
+    /// every existing bench if the condition were got wrong.
+    /// </summary>
+    [Fact]
+    public async Task APeriodicStimulus_AcrossAnIntegerRatePair_StillPlays()
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(
+            Stimulus(GeneratorKind.EchoChirp), CancellationToken.None,
+            new AcquisitionConfig(192_000.0, 2, 4096));
+
+        Assert.True(session.GetStatus().GeneratorLeft.Enabled);
+    }
+
+    /// <summary>
+    /// Silence is always allowed, whatever the rates — Stop and every measurement switch disable
+    /// both channels unconditionally and that must never fail.
+    /// </summary>
+    [Fact]
+    public async Task Silence_AcrossANonIntegerRatePair_IsAlwaysAllowed()
+    {
+        (DeviceSessionService session, _) = Build(generatorRateHz: 48_000.0);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await session.ConfigureGeneratorAsync(
+            GeneratorConfig.Off, CancellationToken.None,
+            new AcquisitionConfig(MixedFamilyAnalysisRateHz, 2, 4096));
+
+        Assert.False(session.GetStatus().GeneratorLeft.Enabled);
+    }
 }

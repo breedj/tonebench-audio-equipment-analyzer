@@ -801,19 +801,32 @@ public sealed class DeviceSessionService(
                     + "those as the generator rate, or turn the generator off to capture without it.");
         }
 
-        // Two rates have to be an integer ratio or nothing periodic survives: the chirp's period,
-        // the multitone comb and the periodic-noise sequence all have to be a whole number of frames
-        // on *both* sides, and 44.1 kHz against a power-of-two record provably cannot be (a record of
-        // N frames at 192 kHz needs N x 147/640 to be an integer). Every rate the app offers is a
-        // power-of-two multiple of 48 kHz, so this cannot fire today; it exists so that the day one
-        // is added it says this rather than putting a drifting ripple on every trace.
-        if (!IsPeriodicRatePair(sampleRateHz, analysisRateHz))
+        // Two rates have to be an integer ratio for a stimulus carrying its own period to survive:
+        // that period has to be a whole number of frames on *both* sides, and a 44.1 kHz family rate
+        // against a 48 kHz one provably cannot be -- a record of N frames at 192 kHz needs
+        // N x 147/640 to be an integer, and 640 = 2^7 x 5 while 147 = 3 x 7^2 carries no factor 5,
+        // so no power-of-two N ever is. Radix-2 forbids the only N that would, which makes this a
+        // permanent property of a mixed-family pairing rather than a limitation to be lifted later.
+        //
+        // Judged per *stimulus* rather than per voiced generator, which is the correction of
+        // 2026-11-14. This arm was unreachable until the 44.1 kHz family was probed -- every rate
+        // the app offered was a power-of-two multiple of 48 kHz -- and it was gated on "either
+        // channel is enabled", so the first thing anyone would try on a 44.1 kHz DAC, a 1 kHz tone,
+        // would have been refused by a message whose own next sentence says tones are fine. A tone
+        // is snapped to an *analysis* bin by SnapTones, so it is coherent in the record whatever
+        // rate synthesized it; see PlaysAPeriodicStimulus for which kinds are immune and why.
+        if ((PlaysAPeriodicStimulus(config.Left) || PlaysAPeriodicStimulus(config.Right))
+            && !IsPeriodicRatePair(sampleRateHz, analysisRateHz))
         {
             throw new InvalidOperationException(
                 $"A generator at {sampleRateHz / 1000.0:0.###} kHz against a capture at "
-                    + $"{analysisRateHz / 1000.0:0.###} kHz is not an integer ratio, so a periodic stimulus "
-                    + "cannot line up with the analysis record. Tones, IMD and stepped sweeps are unaffected; "
-                    + "the chirp, periodic noise and the multitone comb need a 1:2, 1:4 or 1:8 pairing.");
+                    + $"{analysisRateHz / 1000.0:0.###} kHz is not an integer ratio, so a stimulus with a "
+                    + "period of its own cannot line up with the analysis record — a 44.1 kHz family rate "
+                    + "against a 48 kHz one is that case, at every FFT size. The chirp and periodic "
+                    + "noise need an integer ratio; tones, IMD, the multitone comb, square and triangle "
+                    + "waves and every stepped-sine sweep are unaffected. Measure the frequency response "
+                    + "with the stepped sine instead, or set a generator rate in the same family as the "
+                    + "capture rate.");
         }
 
         double maxHz = _device.MaxGeneratorSampleRateHz;
@@ -843,6 +856,36 @@ public sealed class DeviceSessionService(
 
         return Math.Abs(ratio - Math.Round(ratio)) < 1e-9;
     }
+
+    /// <summary>
+    /// Whether this channel plays a stimulus that carries a period of its own, which is the only
+    /// thing the integer-ratio rule in <see cref="RequireGeneratorRateUsable"/> applies to.
+    ///
+    /// <para>The kind selects which settings object is in play and that object's own period field
+    /// decides, so the chirp and periodic noise are caught while the continuous noise forms --
+    /// <c>PeriodFrames</c> 0, the documented streaming case -- are not. A bare kind list would
+    /// have to restate what those fields already say.</para>
+    ///
+    /// <para><b>The default is true on purpose.</b> A kind added to the enum later is taken to
+    /// carry a period until somebody decides otherwise, so a new periodic stimulus is refused on a
+    /// mixed-family pairing rather than silently putting a drifting ripple on every trace. The arms
+    /// below are the kinds that are immune for a reason that can be stated: <c>Tones</c> and
+    /// <c>Multitone</c> both reduce to summing the configured tones (see
+    /// <c>Qa40xGeneratorWaveform</c>) and are snapped to <i>analysis</i> bins by <c>SnapTones</c>,
+    /// so they are coherent in the record whatever rate synthesized them; <c>Square</c> and
+    /// <c>Triangle</c> were never periodic over the analysis record even on one rate, their
+    /// guarantee being that every harmonic lands on a multiple of the generator's own fs/M, which
+    /// is a property of that clock alone and survives any capture rate.</para>
+    /// </summary>
+    private static bool PlaysAPeriodicStimulus(ChannelGeneratorConfig channel) =>
+        channel.Enabled && channel.Kind switch
+        {
+            GeneratorKind.Off or GeneratorKind.Tones or GeneratorKind.Multitone
+                or GeneratorKind.Square or GeneratorKind.Triangle => false,
+            GeneratorKind.WhiteNoise or GeneratorKind.PinkNoise => (channel.Noise?.PeriodFrames ?? 0) > 0,
+            GeneratorKind.EchoChirp => (channel.Chirp?.RepeatFrames ?? 0) > 0,
+            _ => true,
+        };
 
     /// <summary>
     /// One of the sound card's settings, or null when that is not the analyzer in use — the null

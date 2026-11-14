@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, ProgrammableLoadStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
-import { DEVICE_DOT_CLASS, devicePill, telemetryRows } from '../device/statusReadout'
+import { DEVICE_DOT_CLASS, devicePill, generatorRateReadout, telemetryRows } from '../device/statusReadout'
 import { LOAD_TONE_CLASS, loadReadout } from '../programmableLoad/readout'
 import { DISTORTING_DUTS } from '../simulator/hints'
 import { allSimulatorKnobsVisible, visibleSimulatorKnobs } from '../simulator/knobs'
@@ -538,6 +538,17 @@ const isQa40x = computed(
  */
 const isSplit = computed(() => props.status?.deviceKind === 'Split')
 
+/**
+ * The generating half's own rate, shown only on a split that pins one -- the one thing about the
+ * bench's two clocks that is true on every screen. The capture rate is deliberately not here: it
+ * belongs to the measurement, and this bar is global. See generatorRateReadout.
+ */
+const generatorRate = computed(() =>
+  isSplit.value
+    ? generatorRateReadout(props.ranges?.generatorRateOverrideHz)
+    : null,
+)
+
 const splitTitle = computed(() => {
   const s = props.status
   if (!s) return ''
@@ -690,6 +701,21 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
         <circle cx="20" cy="17" r="1.6" />
       </svg>
     </button>
+    <!--
+      The generator's own rate, beside the button that sets it, and only when it is pinned to one.
+      Without this the figure lived solely inside the split dialog: every other reader of it refuses
+      a run or suppresses a warning, so a correctly configured bench said nothing at all about the
+      setting that decides what is being measured. See generatorRateReadout.
+    -->
+    <span
+      v-if="generatorRate"
+      class="flex items-center gap-1.5"
+      :class="BAR_LABEL"
+      :title="generatorRate.title"
+    >
+      Gen rate
+      <span :class="BAR_READOUT">{{ generatorRate.text }}</span>
+    </span>
     <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
          same reason the simulator's controls are: the card has to be choosable before it is up,
          and when nothing is chosen yet this button is the only way to get anywhere. -->

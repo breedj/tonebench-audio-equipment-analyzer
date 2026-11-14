@@ -201,3 +201,61 @@ export const DEVICE_DOT_CLASS: Record<DeviceTone, string> = {
   offline: 'bg-neutral-400 ring-neutral-200 dark:ring-neutral-700',
   removed: 'bg-red-500 ring-red-100 dark:ring-red-900/60',
 }
+
+export interface GeneratorRateReadout {
+  text: string
+  title: string
+}
+
+/**
+ * The rate the generating half is pinned to, for the status bar — or null when there is nothing to
+ * say.
+ *
+ * <p><b>Why this exists at all</b> (asked 2026-11-14, in those words: "how do I see the selected
+ * rate when the dialog is closed, nothing reminds me about it"). Every other reader of
+ * `generatorRateOverrideHz` uses it to <i>refuse</i> a run or to <i>suppress</i> a warning — the two
+ * chirp panels, the impedance panel, the generator-rate notice. Nothing displayed it, so on a bench
+ * that was working correctly the app was silent about the single setting that decides what is being
+ * measured. The split dialog knows, and closing it took the knowledge with it.</p>
+ *
+ * <p><b>Only when it is pinned</b>, which is the whole point of showing it. A generator following
+ * the capture rate is one clock and one number, and that number is already on the measurement
+ * screen's own Sample rate control; a second readout repeating it would be noise on every bench.
+ * What is worth a line is precisely the case where the two differ.</p>
+ *
+ * <p><b>Neutral, never amber.</b> A 44.1 kHz generator against a 192 kHz capture is not a fault —
+ * it is the configuration a DAC measurement wants, and the screens that cannot run a chirp on it
+ * already say so beside their own Run buttons. Colouring it here would cry wolf over a deliberate
+ * setup.</p>
+ *
+ * <p><b>It does not name the capture rate, and must not.</b> The status bar is global while the
+ * capture rate belongs to the measurement: the FFT screen holds its own (its Sample rate control,
+ * read through <c>SpectrumConfigPanel.getSampleRateHz</c>), and the response screens derive theirs
+ * from the chosen span. A bar that quoted one number would be wrong on most screens and stale on
+ * the rest. It says what is true everywhere — the generator is pinned to this — and points at where
+ * the other half lives.</p>
+ */
+export function generatorRateReadout(
+  generatorRateOverrideHz: number | null | undefined,
+): GeneratorRateReadout | null {
+  if (typeof generatorRateOverrideHz !== 'number'
+    || !Number.isFinite(generatorRateOverrideHz)
+    || generatorRateOverrideHz <= 0) {
+    return null
+  }
+
+  const text = `${formatRateKhz(generatorRateOverrideHz)} kHz`
+
+  return {
+    text,
+    title:
+      `This bench's generating half is pinned to ${text}, whatever the measurement captures at — `
+      + 'they are two clocks. Change it in the split device settings; the capture rate is the '
+      + "measurement screen's own.",
+  }
+}
+
+/** 44100 -> "44.1", 192000 -> "192". Trailing zeros dropped, as every rate label here does. */
+function formatRateKhz(hz: number): string {
+  return Number((hz / 1000).toFixed(3)).toString()
+}

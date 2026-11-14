@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceStatus } from '../api/client'
-import { devicePill, TELEMETRY_DASH, TELEMETRY_WARM_C, telemetryRows, type TelemetryKey } from './statusReadout'
+import { devicePill, generatorRateReadout, TELEMETRY_DASH, TELEMETRY_WARM_C, telemetryRows, type TelemetryKey } from './statusReadout'
 
 function status(over: Partial<DeviceStatus> = {}): DeviceStatus {
   return {
@@ -94,5 +94,50 @@ describe('devicePill', () => {
       state: 'removed',
       tone: 'removed',
     })
+  })
+})
+
+/**
+ * Asked for 2026-11-14 in those words: "how do I see the selected rate when the dialog is closed,
+ * nothing reminds me about it". Every other reader of the pinned generator rate uses it to refuse a
+ * run or to suppress a warning, so a correctly configured split said nothing at all about the one
+ * setting that decides what is being measured.
+ */
+describe('generatorRateReadout', () => {
+  it('names the pinned rate, in the units the rest of the app uses', () => {
+    expect(generatorRateReadout(44100)?.text).toBe('44.1 kHz')
+    expect(generatorRateReadout(48000)?.text).toBe('48 kHz')
+    expect(generatorRateReadout(176400)?.text).toBe('176.4 kHz')
+  })
+
+  /**
+   * The case this must not fire on, which is every bench that is not a split and every split whose
+   * generator follows. One clock is one number, and that number is already on the measurement
+   * screen's Sample rate control — repeating it here would be noise on every bench in the field.
+   */
+  it('says nothing when the generator follows the capture rate', () => {
+    for (const pinned of [0, null, undefined, Number.NaN, -1]) {
+      expect(generatorRateReadout(pinned)).toBeNull()
+    }
+  })
+
+  it('says there are two clocks, and where the other one is set', () => {
+    const r = generatorRateReadout(44100)
+    expect(r?.title).toContain('44.1 kHz')
+    expect(r?.title).toContain('two clocks')
+    expect(r?.title).toContain('split device settings')
+  })
+
+  /**
+   * It must not quote a capture rate. The bar is global and the capture rate belongs to the
+   * measurement — the FFT screen holds its own and the response screens derive theirs from a span —
+   * so a number here would be wrong on most screens and stale on the rest. Pinned at 44.1 kHz it
+   * would be very easy to write "192 kHz" into this sentence and be right on exactly one screen.
+   */
+  it('quotes no capture rate, because the bar cannot know one', () => {
+    const title = generatorRateReadout(44100)!.title
+    for (const rate of ['192 kHz', '96 kHz', '48 kHz', '384 kHz']) {
+      expect(title, `names a capture rate it cannot know: ${rate}`).not.toContain(rate)
+    }
   })
 })

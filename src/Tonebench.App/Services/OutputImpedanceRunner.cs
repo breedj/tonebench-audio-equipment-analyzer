@@ -605,7 +605,7 @@ public sealed class OutputImpedanceRunner(
             var snapshots = await SteppedCaptureSupport.CaptureWithStimulusAsync(
                 session, pipeline,
                 SteppedCaptureSupport.ToneConfig(step.FrequencyHz, generatorAmpDbv, left: true, right: request.RightChannelIsReference),
-                step.FftSize, CaptureTimeout(request, step.FftSize), ct);
+                step.FftSize, CaptureTimeout(request, step.FftSize), ct, logger);
 
             long dropsDuring = session.DroppedRxChunks - dropsBefore;
             if (dropsDuring > 0)

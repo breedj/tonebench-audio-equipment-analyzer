@@ -1,4 +1,5 @@
-﻿using Tonebench.App.Streaming;
+﻿using Microsoft.Extensions.Logging;
+using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Dsp;
 
@@ -184,6 +185,88 @@ internal static class SteppedCaptureSupport
     /// figure the app never measures. It costs one extra record per point.</para>
     /// </summary>
     public static async Task<SpectrumSnapshot[]> CaptureWithStimulusAsync(
+        DeviceSessionService session, SpectrumPipeline pipeline, GeneratorConfig generator, int fftSize,
+        TimeSpan timeout, CancellationToken ct, ILogger? logger = null)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            long before = pipeline.FramesSinceFlush;
+            var capture = await CaptureOnceAsync(session, pipeline, generator, fftSize, timeout, ct);
+
+            if (capture.Honest || attempt > RetakesOfADishonestCapture)
+            {
+                if (!capture.Honest)
+                {
+                    logger?.LogWarning(
+                        "Stepped capture at {FftSize} points was retaken and came back short again "
+                            + "({Delivered} frames delivered against the {Needed} its own flush asked for) - "
+                            + "its level is not trustworthy",
+                        fftSize, capture.Delivered, capture.Needed);
+                }
+
+                return capture.Snapshots;
+            }
+
+            logger?.LogWarning(
+                "Stepped capture at {FftSize} points completed before its own stimulus could reach the window "
+                    + "({Delivered} frames delivered since the flush, {Needed} needed for the discard plus one "
+                    + "record; {Before} stood in the window beforehand) - retaking the point",
+                fftSize, capture.Delivered, capture.Needed, before);
+        }
+    }
+
+    /// <summary>
+    /// How many times a capture that cannot have held its own stimulus is taken again before its
+    /// reading is accepted anyway. One: a retake starts from a fresh flush, so a second failure is
+    /// not the same transient twice but something structural, and looping on it would turn one bad
+    /// point into a sweep that never ends.
+    /// </summary>
+    private const int RetakesOfADishonestCapture = 1;
+
+    /// <summary>
+    /// Whether a capture can have held the stimulus it was taken for: the flush that armed it booked
+    /// <paramref name="discardFrames"/> of pre-change audio to throw away, and the window behind it
+    /// is <paramref name="fftSize"/> frames long, so that much has to have arrived before any record
+    /// can be made of the new stimulus alone.
+    ///
+    /// <para>A count of delivered frames rather than of analysed ones, because the discarded frames
+    /// are exactly the ones no record ever sees and they are the whole of what is being waited for.
+    /// Written out here, away from the <c>async</c> body, so the rule itself can be pinned by a
+    /// test — the interleaving that breaks it cannot be.</para>
+    /// </summary>
+    internal static bool CaptureHeldItsOwnStimulus(long framesDeliveredSinceFlush, long discardFrames, int fftSize) =>
+        framesDeliveredSinceFlush >= discardFrames + (long)fftSize;
+
+    /// <summary>
+    /// One attempt, plus the arithmetic that says whether it can be believed.
+    ///
+    /// <para><b>Why this is checked at all.</b> The two waits below poll
+    /// <see cref="SpectrumPipeline.SingleShotComplete"/>, which means "a record completed" and not
+    /// "a record completed since the flush I just made" - so the sequence is correct only as long as
+    /// nothing can satisfy a wait with a window that predates the stimulus change. Measured on the
+    /// bench on 2026-11-14, a 53-point stepped response on a split analyzer: the point at
+    /// 2085.9375 Hz occupied <b>185 ms</b> of the run where its neighbours took ~490 and the
+    /// configured capture delay alone is 300, so the record it was handed still held the previous
+    /// tone - and reading the new tone's bin out of it returned the noise floor, drawing a -140 dBV
+    /// notch into an otherwise flat curve. The recording of that run shows the DAC playing the tone
+    /// and the analyzer capturing it at full level, so nothing was wrong with either; the point
+    /// simply never waited for it. It happened once in nine sweeps and ~480 points, alongside a
+    /// thread-pool stall in the same millisecond, and no reading of the pipeline has yet explained
+    /// which interleaving produced it - which is the reason this is a check on the invariant rather
+    /// than a repair of a named race.
+    /// </para>
+    ///
+    /// <para><b>Frames, not elapsed time.</b> The honest floor is a count of audio that has to have
+    /// physically arrived - the discard the flush booked, plus one record to fill the window - and
+    /// <see cref="SpectrumPipeline.FramesSinceFlush"/> answers it exactly. A stopwatch would answer
+    /// it only as well as the device paces its blocks, which the simulator and every test double do
+    /// not, so a wall-clock check would fire on all of them and on nothing else.</para>
+    ///
+    /// <para>Deliberately a check on the <i>first</i> wait and not the second: the throwaway is the
+    /// one that has to outlast the discard, and once it genuinely has, the <c>Flush(0)</c> below is
+    /// safe and the measured record cannot predate the change either.</para>
+    /// </summary>
+    private static async Task<(SpectrumSnapshot[] Snapshots, bool Honest, long Delivered, long Needed)> CaptureOnceAsync(
         DeviceSessionService session, SpectrumPipeline pipeline, GeneratorConfig generator, int fftSize, TimeSpan timeout, CancellationToken ct)
     {
         // Strictly before ConfigureGeneratorAsync, which is what flushes. Changing FftSize makes the
@@ -204,7 +287,14 @@ internal static class SteppedCaptureSupport
         // SampleRingBuffer.Reset(0) would clear the pending in-flight discard counter, and the step
         // would land back inside the very record the flush existed to protect.
         await session.ConfigureGeneratorAsync(generator, ct);
+
+        // Read here and not after the throwaway: the Flush(0) below overwrites it.
+        long discardFrames = pipeline.LastFlushDiscardFrames;
+
         await WaitForCaptureAsync(pipeline, timeout, ct);
+
+        // Sampled before the Flush(0) zeroes the counter, for the same reason.
+        long delivered = pipeline.FramesSinceFlush;
 
         // Restored before the flush, which is what resets the averagers — the measured capture has
         // to start its averaging from empty, and from the settings the run asked for.
@@ -216,7 +306,11 @@ internal static class SteppedCaptureSupport
         pipeline.Flush(0);
         await WaitForCaptureAsync(pipeline, timeout, ct);
 
-        return pipeline.LatestSnapshots();
+        return (
+            pipeline.LatestSnapshots(),
+            CaptureHeldItsOwnStimulus(delivered, discardFrames, fftSize),
+            delivered,
+            discardFrames + (long)fftSize);
     }
 
     /// <summary>Polls for the single-shot capture; <see cref="SweepCaptureSupport.WaitForSingleShotAsync"/> with this measurement's message.</summary>

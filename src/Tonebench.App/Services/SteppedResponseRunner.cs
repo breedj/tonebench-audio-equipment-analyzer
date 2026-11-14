@@ -563,7 +563,8 @@ public sealed class SteppedResponseRunner(
                 double inputRangeBefore = session.InputRangeDbv;
 
                 var snapshots = await SteppedCaptureSupport.CaptureWithStimulusAsync(
-                    session, pipeline, ToneConfig(step.FrequencyHz, generatorAmpDbv, request), step.FftSize, CaptureTimeout(request, step.FftSize), ct);
+                    session, pipeline, ToneConfig(step.FrequencyHz, generatorAmpDbv, request), step.FftSize,
+                    CaptureTimeout(request, step.FftSize), ct, logger);
 
                 long dropsDuring = session.DroppedRxChunks - dropsBefore;
                 if (dropsDuring > 0)

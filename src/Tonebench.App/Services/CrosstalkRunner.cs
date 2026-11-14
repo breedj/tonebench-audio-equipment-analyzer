@@ -434,7 +434,7 @@ public sealed class CrosstalkRunner(
                     var snapshots = await SteppedCaptureSupport.CaptureWithStimulusAsync(
                         session, pipeline,
                         SteppedCaptureSupport.ToneConfig(step.FrequencyHz, generatorAmpDbv, pass.GenerateLeft, pass.GenerateRight),
-                        step.FftSize, CaptureTimeout(request, step.FftSize), ct);
+                        step.FftSize, CaptureTimeout(request, step.FftSize), ct, logger);
 
                     long dropsDuring = session.DroppedRxChunks - dropsBefore;
                     if (dropsDuring > 0)

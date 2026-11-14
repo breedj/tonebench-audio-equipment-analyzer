@@ -107,6 +107,29 @@ public sealed class SpectrumPipeline(
     /// </summary>
     private long _flushGeneration;
 
+    // Frames handed to Enqueue since the last flush, discarded ones included -- see FramesSinceFlush.
+    private long _framesSinceFlush;
+
+    /// <summary>
+    /// Frames delivered to <see cref="Enqueue"/> since the last flush, counting the ones a booked
+    /// discard then threw away — so it answers "how much audio has physically arrived since the
+    /// stimulus changed", which is what a capture's honesty rests on.
+    ///
+    /// <para><b>Frames and not wall-clock time</b>, deliberately. A caller wanting to know whether
+    /// the record it was just handed was built from post-change audio can compare this against
+    /// <c>discard + FftSize</c> and get an exact answer; the same question asked of a
+    /// <c>Stopwatch</c> is only as good as the device's pacing, which the simulator and every test
+    /// double do not honour. See <c>SteppedCaptureSupport.CaptureWithStimulusAsync</c>.</para>
+    ///
+    /// <para>Counted per pipeline rather than per channel because delivery is: one
+    /// <c>PcmBlock</c> carries every channel's frames, and a resize replaces the buffers without
+    /// interrupting the stream.</para>
+    /// </summary>
+    internal long FramesSinceFlush => Interlocked.Read(ref _framesSinceFlush);
+
+    /// <summary>The acquisition's rate, for callers converting a frame count into a record length.</summary>
+    internal double SampleRateHz => _sampleRateHz;
+
     private SampleRingBuffer?[] _ringBuffers = new SampleRingBuffer?[MaxChannels];
     private int _ringBufferFftSize;
     private double _sampleRateHz;
@@ -283,6 +306,10 @@ public sealed class SpectrumPipeline(
         {
             for (int ch = 0; ch < MaxChannels; ch++)
                 ringBuffers[ch]?.Reset(discardFrames, keepPendingDiscard);
+
+            // Inside the same lock as the resets, so a block cannot be counted against the epoch it
+            // was not appended to: Enqueue takes this lock for its own append loop.
+            Interlocked.Exchange(ref _framesSinceFlush, 0);
         }
 
         for (int ch = 0; ch < MaxChannels; ch++)
@@ -699,6 +726,10 @@ public sealed class SpectrumPipeline(
                     double scale = externalGain?.LinearScale(ch) ?? 1.0;
                     ringBuffers[ch]?.AppendInterleaved(block.Samples, ch, block.ChannelCount, scale);
                 }
+
+                // Counted whether or not a discard swallowed them, and whether or not any channel is
+                // being processed: this is delivery, not analysis.
+                Interlocked.Add(ref _framesSinceFlush, block.FrameCount);
             }
         }
     }

@@ -49,7 +49,8 @@ import {
 } from '../measurements/clockDriftCorrection'
 import { referenceChannelNote, referenceChannelWarning } from '../measurements/referenceChannel'
 import { useLoadOhms } from '../composables/useLoadOhms'
-import { spanFallback, supportedSpans } from '../supportedSpans'
+import { sampleRateForSpan, spanFallback, supportedSpans } from '../supportedSpans'
+import { STEPPED_SINE_ALTERNATIVE, mixedRatePairNotice } from '../measurements/ratePairing'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { MAX_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
@@ -86,6 +87,12 @@ const props = defineProps<{
   reference?: ReferenceChannelJson | null
   /** The connected analyzer's analysis rates, which is what decides the spans below. */
   sampleRatesHz?: number[]
+  /**
+   * The rate the generating half is pinned to, or 0 where it follows the capture rate. Only a split
+   * has one, and only a split can therefore be in two rate families at once — see
+   * measurements/ratePairing.ts.
+   */
+  generatorRateOverrideHz?: number | null
 }>()
 const emit = defineEmits<{ (e: 'capture-reference'): void }>()
 
@@ -379,7 +386,21 @@ const referenceRateMismatch = computed(
  * Keeping a message inside a conditional section is the mistake; each of these lives in a section
  * that is always rendered.</p>
  */
+/**
+ * Why this bench's two clocks cannot carry a periodic stimulus, or null when they can. Every
+ * stimulus this screen offers has a period, so a mixed-family rate pairing refuses the whole
+ * measurement. See measurements/ratePairing.ts.
+ */
+const ratePairProblem = computed(() =>
+  mixedRatePairNotice({
+    generatorRateHz: props.generatorRateOverrideHz,
+    captureRateHz: sampleRateForSpan(form.frequencySpanHz),
+    alternative: STEPPED_SINE_ALTERNATIVE,
+  }),
+)
+
 const measurementProblem = computed<string | null>(() => {
+  if (ratePairProblem.value) return ratePairProblem.value
   const levelProblem = levelInvalid(form.level, loadOhms.value)
   if (levelProblem) return levelProblem
   const averages = averageCountError(form.averageCount)

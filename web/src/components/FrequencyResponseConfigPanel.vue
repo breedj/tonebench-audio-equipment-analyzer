@@ -45,7 +45,8 @@ import {
 } from '../measurements/clockDriftCorrection'
 import { referenceChannelNote, referenceChannelWarning } from '../measurements/referenceChannel'
 import { stimulusFloorNotice } from '../stimulusFloor'
-import { spanFallback, supportedSpans } from '../supportedSpans'
+import { sampleRateForSpan, spanFallback, supportedSpans } from '../supportedSpans'
+import { STEPPED_SINE_ALTERNATIVE, mixedRatePairNotice } from '../measurements/ratePairing'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { MAX_AVERAGE_COUNT, MIN_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
 import EstimateBadge from './EstimateBadge.vue'
@@ -56,6 +57,12 @@ const props = defineProps<{
   minStimulusFrequencyHz?: number
   /** The rates the connected analyzer accepts. A span implies a rate, so this decides which spans are offered. */
   sampleRatesHz?: number[]
+  /**
+   * The rate the generating half is pinned to, or 0 where it follows the capture rate. Only a split
+   * has one, and only a split can therefore be in two rate families at once — see
+   * measurements/ratePairing.ts.
+   */
+  generatorRateOverrideHz?: number | null
   /**
    * The bench's measured clock drift in ppm, or null when no measurement here can be corrected for
    * it. The server decides that — see measurements/clockDriftCorrection.ts — and it arrives on
@@ -355,7 +362,23 @@ const targetVolt = computed(() => levelTargetVolt(form.level, loadOhms.value))
 
 const targetDbv = computed(() => (targetVolt.value > 0 ? 20 * Math.log10(targetVolt.value) : Number.NaN))
 
+/**
+ * Why this bench's two clocks cannot carry a periodic stimulus, or null when they can.
+ *
+ * <p>Every stimulus this screen offers has a period — the sweep and all five noise shapes — so a
+ * mixed-family rate pairing refuses the whole measurement rather than narrowing the dropdown, and
+ * the way out it names is the stepped-sine kind. See measurements/ratePairing.ts.</p>
+ */
+const ratePairProblem = computed(() =>
+  mixedRatePairNotice({
+    generatorRateHz: props.generatorRateOverrideHz,
+    captureRateHz: sampleRateForSpan(form.frequencySpanHz),
+    alternative: STEPPED_SINE_ALTERNATIVE,
+  }),
+)
+
 const invalid = computed<string | null>(() => {
+  if (ratePairProblem.value) return ratePairProblem.value
   const levelProblem = levelInvalid(form.level, loadOhms.value)
   if (levelProblem) return levelProblem
   const averages = averageCountError(form.averageCount)

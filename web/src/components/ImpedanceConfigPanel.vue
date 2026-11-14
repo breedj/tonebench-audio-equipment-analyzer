@@ -35,7 +35,8 @@ import { isPowerUnit } from '../measurements/levelMode'
 import { formatHz } from '../response/format'
 import { formatOhms } from '../impedance/equivalent'
 import { matchesStoredFixture } from '../impedance/fixture'
-import { spanFallback, supportedSpans } from '../supportedSpans'
+import { sampleRateForSpan, spanFallback, supportedSpans } from '../supportedSpans'
+import { IMPEDANCE_STEPPED_ALTERNATIVE, mixedRatePairNotice } from '../measurements/ratePairing'
 import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
 
@@ -43,6 +44,12 @@ const props = defineProps<{
   running: boolean
   /** The connected analyzer's analysis rates, which is what decides the spans below. */
   sampleRatesHz?: number[]
+  /**
+   * The rate the generating half is pinned to, or 0 where it follows the capture rate. Only a split
+   * has one, and only a split can therefore be in two rate families at once — see
+   * measurements/ratePairing.ts.
+   */
+  generatorRateOverrideHz?: number | null
 }>()
 
 /**
@@ -515,7 +522,49 @@ const dividerHintDb = computed(() => {
 const hasOpenCal = computed(() => (form.openCal?.freqHz?.length ?? 0) > 1)
 const hasShortCal = computed(() => (form.shortCal?.freqHz?.length ?? 0) > 1)
 
+/**
+ * Why this bench's two clocks cannot carry a periodic stimulus, or null when they can.
+ *
+ * <p>Unlike the two chirp screens this one has a way out <i>on the screen</i>: a stepped sine
+ * measures one tone at a time and is unaffected, so the message names it.</p>
+ *
+ * <p><b>Read from the measurement selector alone</b>, deliberately, because <c>invalid</c> gates
+ * RUN and RUN plays <c>form.stimulus</c>. Testing both selectors was the first cut and made the
+ * advice a dead end: the calibration stimulus defaults to Chirp, so setting Stimulus to Stepped
+ * sine left the message on screen and RUN disabled, telling the user to do the thing they had just
+ * done. The calibration captures have their own line below and their own refusal server-side.</p>
+ */
+const ratePairProblem = computed(() =>
+  form.stimulus === 'SteppedSine'
+    ? null
+    : mixedRatePairNotice({
+        generatorRateHz: props.generatorRateOverrideHz,
+        captureRateHz: sampleRateForSpan(form.frequencySpanHz),
+        alternative: IMPEDANCE_STEPPED_ALTERNATIVE,
+      }),
+)
+
+/**
+ * The same thing for a <i>calibration</i> capture, which is a separate button reading the separate
+ * calibration selector. Said rather than enforced: the capture is refused server-side with a
+ * message of its own, and these buttons are gated only on <c>running</c>.
+ */
+const calibrationRatePairProblem = computed(() =>
+  form.calibrationStimulus === 'SteppedSine'
+    ? null
+    : mixedRatePairNotice({
+        generatorRateHz: props.generatorRateOverrideHz,
+        // A broadband standard is captured at the widest span this analyzer has, not at the
+        // measurement's -- ImpedanceRequest.EffectiveSpanHz. Which rate that is does not change the
+        // answer here (no 44.1 kHz rate is an integer ratio with any 48 kHz family rate), so the
+        // measurement's span stands in rather than fetching the analyzer's widest.
+        captureRateHz: sampleRateForSpan(form.frequencySpanHz),
+        alternative: 'Set Calibration stimulus to Stepped sine, or set a generator rate in the same family as the capture rate.',
+      }),
+)
+
 const invalid = computed<string | null>(() => {
+  if (ratePairProblem.value) return ratePairProblem.value
   if (!Number.isFinite(form.referenceOhms) || form.referenceOhms < 0.1 || form.referenceOhms > 1e7)
     return 'The reference resistor must be between 0.1 Ω and 10 MΩ.'
   if (!Number.isFinite(form.levelValue)) return 'The drive level must be a number.'
@@ -1237,4 +1286,10 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
   </CollapsibleSection>
 
   <p v-if="invalid" class="text-xs text-amber-600 dark:text-amber-400">{{ invalid }}</p>
+
+  <!-- The calibration captures' own rate-pair problem. Separate from `invalid` because it refuses a
+       different button: this one does not block RUN, which plays the measurement stimulus. -->
+  <p v-if="calibrationRatePairProblem" class="text-xs text-amber-600 dark:text-amber-400">
+    {{ calibrationRatePairProblem }}
+  </p>
 </template>

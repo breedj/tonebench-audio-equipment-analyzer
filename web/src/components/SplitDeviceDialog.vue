@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { BenchClockDrift, DeviceRanges, DeviceStatus, SplitDeviceConfig, SplitHalfKindName } from '../api/client'
 import { api } from '../api/client'
+import { isPeriodicRatePair } from '../measurements/ratePairing'
 import ClockDriftDialog from './ClockDriftDialog.vue'
 import Modal from './Modal.vue'
 
@@ -172,6 +173,38 @@ const summary = computed(() => {
  * dead band however fast the capture is; and a *faster* generator hides nothing — whatever it does
  * above the capture's Nyquist aliases into the measurement.
  */
+/**
+ * What a generator in the <i>other rate family</i> costs, which is a bigger thing than the dead band
+ * below and is said first.
+ *
+ * <p>A stimulus carrying its own period needs the two rates to be an integer ratio, which holds
+ * within a family and never across one — so a 44.1 kHz generator against a 48 kHz family capture
+ * cannot run a chirp or periodic noise at <b>any</b> span, and the three screens that only have
+ * those stimuli refuse the run. Everything tone-based is unaffected, which is most of what a
+ * converter is judged by. See measurements/ratePairing.ts for the arithmetic.</p>
+ *
+ * <p>Checked against every capture rate this analyzer offers rather than one, because the capture
+ * rate is a property of the measurement rather than of the bench: this dialog cannot know which
+ * span a screen will be set to, and "none of them" is the honest answer to give here.</p>
+ */
+const familyNote = computed(() => {
+  const generatorRateHz = form.generatorSampleRateHz
+  if (!(generatorRateHz > 0)) return null
+
+  const captureRates = props.ranges?.sampleRatesHz ?? []
+  if (captureRates.length === 0) return null
+  if (captureRates.some((rate) => isPeriodicRatePair(generatorRateHz, rate))) return null
+
+  return (
+    `A generator at ${(generatorRateHz / 1000).toFixed(generatorRateHz % 1000 === 0 ? 0 : 1)} kHz is in a ` +
+    'different rate family from every rate this analyzer captures at, so no stimulus with a period ' +
+    'of its own can line up with the analysis record — the chirp, periodic noise and so the ' +
+    'frequency-response, impulse-response and broadband impedance measurements are refused. Tones, ' +
+    'IMD, the multitone comb and every stepped-sine sweep are unaffected, which is most of what a ' +
+    'converter is measured by.'
+  )
+})
+
 const rateNote = computed(() => {
   if (form.generatorSampleRateHz <= 0) return null
   const captureRates = props.ranges?.sampleRatesHz ?? []
@@ -250,6 +283,10 @@ async function save() {
 
       <p v-if="problem" class="m-0 rounded-md bg-red-50 px-3 py-2 text-[12.5px] leading-relaxed text-red-800 dark:bg-red-950/40 dark:text-red-300">
         {{ problem }}
+      </p>
+
+      <p v-if="familyNote" class="m-0 rounded-md bg-amber-50 px-3 py-2 text-[12.5px] leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+        {{ familyNote }}
       </p>
 
       <p v-if="rateNote" class="m-0 rounded-md bg-amber-50 px-3 py-2 text-[12.5px] leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">

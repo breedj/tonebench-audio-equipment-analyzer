@@ -4696,6 +4696,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :drift-residual="impulseDriftResidual"
                   :reference="impulseReference"
                   :sample-rates-hz="ranges?.sampleRatesHz"
+                  :generator-rate-override-hz="ranges?.generatorRateOverrideHz ?? 0"
                   @capture-reference="loopbackDialogOpen = true"
                 />
               </template>
@@ -5081,6 +5082,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="responseRunning"
                   :min-stimulus-frequency-hz="ranges?.minStimulusFrequencyHz ?? 0"
                   :sample-rates-hz="ranges?.sampleRatesHz"
+                  :generator-rate-override-hz="ranges?.generatorRateOverrideHz ?? 0"
                   :clock-drift-ppm="ranges?.clockDriftPpm ?? null"
                   :clock-drift-measured-utc="ranges?.clockDriftMeasuredUtc ?? null"
                   :bench-has-two-clocks="ranges?.benchHasTwoClocks ?? false"
@@ -5681,6 +5683,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   ref="impedanceConfigPanel"
                   :running="impedanceRunning"
                   :sample-rates-hz="ranges?.sampleRatesHz"
+                  :generator-rate-override-hz="ranges?.generatorRateOverrideHz ?? 0"
                   @calibrate="calibrateImpedance"
                 />
               </template>

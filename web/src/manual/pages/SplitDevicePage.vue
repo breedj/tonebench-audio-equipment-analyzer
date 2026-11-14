@@ -276,6 +276,14 @@ const { showPage } = useManual()
       rows, because they are its own. The sound-card settings and the QA40x settings are both
       reachable while a split is selected, whichever half each belongs to.
     </p>
+    <p>
+      <strong>Gen rate</strong> appears beside the split settings button whenever the generator is
+      pinned to a rate of its own, so the figure is on screen once the dialog is closed. It is the
+      <em>generating</em> half's rate and nothing else: the capture rate belongs to the measurement
+      — the FFT screen has its own <strong>Sample rate</strong>, the response screens derive theirs
+      from the span — which is why the bar does not quote one. With the generator set to
+      <em>Follow the capture rate</em> there is one clock and one number, so nothing is shown.
+    </p>
 
     <h2>What is not supported</h2>
     <ul>

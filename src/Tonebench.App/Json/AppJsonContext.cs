@@ -110,6 +110,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(SoundCardConfig))]
 [JsonSerializable(typeof(AnalyzerKindConfig))]
 [JsonSerializable(typeof(SplitDeviceConfig))]
+[JsonSerializable(typeof(Services.ClockDriftRequest))]
 [JsonSerializable(typeof(ClockDriftConfig))]
 [JsonSerializable(typeof(Endpoints.BenchClockDriftResponse))]
 [JsonSerializable(typeof(Tonebench.Device.SoundCard.SoundCardInventory))]

@@ -1628,6 +1628,49 @@ public class FrequencyResponseRunnerTests
     /// straight reference, which is the wiring the "right channel is reference" mode assumes.
     /// </summary>
     /// <summary>
+    /// A span the analyzer cannot reach is refused <b>on the start request</b>, not later on the
+    /// task the run is about to be spawned on.
+    ///
+    /// <para>Found 2026-11-14: <c>POST /api/frequency-response/start</c> at a 22.05 kHz span
+    /// answered <b>200 OK</b> with a plausible plan on an analyzer with no 44.1 kHz rate, and the
+    /// run then died inside <c>RunAsync</c> where nothing was awaiting it — the symptom being a
+    /// measurement that simply never produces a point. The rate check lived only in
+    /// <c>StartAcquisitionCoreAsync</c>, which is synchronous with the <i>acquisition</i> and not
+    /// with the <i>request</i>.</para>
+    ///
+    /// <para>A card that stops at 48 kHz stands in for it here, because that is the same gap from
+    /// the ordinary direction and needs no 44.1 kHz rate to exercise.</para>
+    /// </summary>
+    [Fact]
+    public async Task AStartAtARateTheAnalyzerDoesNotHave_IsRefusedOnTheRequest()
+    {
+        Harness harness = await CreateAsync(new FakeAnalyzerDevice { Rates = [48_000.0] });
+
+        // 96 kHz of span implies 192 kHz, which this analyzer does not have.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => harness.Runner.StartAsync(Request(spanHz: 96_000.0), CancellationToken.None));
+
+        Assert.Contains("192", ex.Message);
+        Assert.Contains("48", ex.Message);
+
+        // And it is refused rather than half-started: nothing is left running to clean up.
+        Assert.False(harness.Runner.Running);
+        Assert.False(harness.Session.Acquiring);
+    }
+
+    /// <summary>And a span it does have still starts, which is what would break if the check were wrong.</summary>
+    [Fact]
+    public async Task AStartAtARateTheAnalyzerDoesHave_IsNotRefused()
+    {
+        Harness harness = await CreateAsync(new FakeAnalyzerDevice { Rates = [48_000.0] });
+
+        await harness.Runner.StartAsync(Request(spanHz: 24_000.0), CancellationToken.None);
+
+        Assert.True(harness.Runner.Running);
+        await harness.Runner.CancelAsync();
+    }
+
+    /// <summary>
     /// A device whose left channel is wrong for a while after every generator change — standing in
     /// for the pre-change audio that is still in the round trip when
     /// <c>ConfigureGeneratorAsync</c> returns. The discard that call performs covers the audio

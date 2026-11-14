@@ -111,6 +111,12 @@ public sealed class CrosstalkRunner(
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
 
+        // Synchronously with the caller, so a rate this analyzer does not have is a 409 on this
+        // request rather than an exception on the task RunAsync is about to be spawned on. After the
+        // Connected check, because Capabilities is only valid once the device has connected. See
+        // DeviceSessionService.RequireSupportedSampleRate for why the call there is not enough.
+        session.RequireSupportedSampleRate(request.EffectiveSampleRateHz);
+
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

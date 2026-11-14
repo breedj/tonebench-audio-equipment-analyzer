@@ -72,7 +72,14 @@ internal class FakeAnalyzerDevice : IAnalyzerDevice
         set => _inner.SignalProfile = value;
     }
 
-    public DeviceCapabilities Capabilities => _inner.Capabilities;
+    /// <summary>
+    /// The rates this device reports, for a test that needs a ladder the QA403 does not have — a
+    /// sound card that stops at 48 kHz, say. Null leaves the simulator's own.
+    /// </summary>
+    public double[]? Rates { get; init; }
+
+    public DeviceCapabilities Capabilities =>
+        Rates is null ? _inner.Capabilities : _inner.Capabilities with { SampleRatesHz = Rates };
 
     public double InputRangeDbv => _inner.InputRangeDbv;
 

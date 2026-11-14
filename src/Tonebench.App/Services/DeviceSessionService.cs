@@ -785,18 +785,33 @@ public sealed class DeviceSessionService(
     /// <summary>
     /// Refuses a rate the analyzer in use does not have, here rather than at the device.
     ///
-    /// <para>This is the one place every measurement passes through, which is why the check lives
-    /// here instead of in eight runners. And it has to be <b>synchronous with the caller</b>: the
+    /// <para>The refusal has to be <b>synchronous with whoever asked for the measurement</b>: the
     /// stream is started on a pump task, so a rate the device rejects surfaces as an
     /// <c>ArgumentOutOfRangeException</c> on a task nobody awaits — the run simply never produces a
-    /// point, with nothing to say why. Thrown here it is an ordinary refusal the endpoints turn into
-    /// a 409 carrying this message.</para>
+    /// point, with nothing to say why. Thrown where the caller can see it, it is an ordinary refusal
+    /// the endpoints turn into a 409 carrying this message.</para>
     ///
-    /// <para>It only bites on an analyzer whose rates are not the QA403's three, which today means a
-    /// sound card: its rates are probed from the hardware, so a card that cannot do 192 kHz does not
-    /// offer it and a span that implies 192 kHz is refused rather than half-measured.</para>
+    /// <para><b>This method used to be private, and its own remark that
+    /// <see cref="StartAcquisitionCoreAsync"/> is "the one place every measurement passes through"
+    /// was the bug</b> (corrected 2026-11-14). That is true of the <i>acquisition</i> and false of
+    /// the <i>request</i>: a runner's <c>StartAsync</c> validates, spawns <c>RunAsync</c> on a task
+    /// and returns, so by the time the acquisition starts the endpoint has already answered 200.
+    /// Measured: <c>POST /api/frequency-response/start</c> at a span the analyzer could not reach
+    /// answered <c>200 OK</c> with a plausible plan, and the run then died on its own task. So the
+    /// eight runners that stream at a rate derived from their request call this in <c>StartAsync</c>,
+    /// where the caller is still listening, and the call in <c>StartAcquisitionCoreAsync</c> stays as
+    /// the backstop for everything else — the live FFT screen, which is genuinely synchronous there,
+    /// and any future caller that forgets.</para>
+    ///
+    /// <para><c>ClockDriftRunner</c> is the one runner that does not call it and does not need to:
+    /// it takes its rate from <see cref="Capabilities"/> rather than from a request, so it cannot
+    /// name one the analyzer does not have.</para>
+    ///
+    /// <para>It only bites on an analyzer whose rates are not the QA403's, which today means a sound
+    /// card: its rates are probed from the hardware, so a card that cannot do 192 kHz does not offer
+    /// it and a span that implies 192 kHz is refused rather than half-measured.</para>
     /// </summary>
-    private void RequireSupportedSampleRate(double sampleRateHz)
+    public void RequireSupportedSampleRate(double sampleRateHz)
     {
         IReadOnlyList<double> supported = Capabilities.SampleRatesHz;
         foreach (double rate in supported)

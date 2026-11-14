@@ -311,6 +311,12 @@ public sealed class ImpulseResponseRunner(
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
 
+        // Synchronously with the caller, so a rate this analyzer does not have is a 409 on this
+        // request rather than an exception on the task RunAsync is about to be spawned on. After the
+        // Connected check, because Capabilities is only valid once the device has connected. See
+        // DeviceSessionService.RequireSupportedSampleRate for why the call there is not enough.
+        session.RequireSupportedSampleRate(request.SampleRateHz);
+
         // Raised to the analyzer's own floor if it has one -- see StimulusFloor. Before anything
         // derives from the start frequency, so the gate, the stimulus and the saved parameters all
         // describe the sweep that was actually played.

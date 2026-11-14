@@ -4695,6 +4695,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :bench-has-two-clocks="ranges?.benchHasTwoClocks ?? false"
                   :drift-residual="impulseDriftResidual"
                   :reference="impulseReference"
+                  :sample-rates-hz="ranges?.sampleRatesHz"
                   @capture-reference="loopbackDialogOpen = true"
                 />
               </template>
@@ -5002,6 +5003,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
             <LoopbackReferenceDialog
               :open="loopbackDialogOpen"
               :defaults="impulseConfigPanel?.referenceCaptureDefaults() ?? { frequencySpanHz: 96000, resolutionMultiplier: 1, chirpStartHz: 2 }"
+              :sample-rates-hz="ranges?.sampleRatesHz"
               @close="loopbackDialogOpen = false"
               @captured="onLoopbackCaptured"
             />
@@ -5678,6 +5680,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <ImpedanceConfigPanel
                   ref="impedanceConfigPanel"
                   :running="impedanceRunning"
+                  :sample-rates-hz="ranges?.sampleRatesHz"
                   @calibrate="calibrateImpedance"
                 />
               </template>

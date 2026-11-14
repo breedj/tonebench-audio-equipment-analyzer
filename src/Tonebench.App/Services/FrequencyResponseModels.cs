@@ -367,6 +367,22 @@ public sealed record FrequencyResponseRequest(
     /// Spans the UI offers, in Hz. These are <b>Nyquist</b> values — the label the old app showed —
     /// so the sample rate is twice each one, which is also why they are exactly the QA403's three
     /// supported rates halved.
+    ///
+    /// <para><b>The 44.1 kHz family is deliberately not here, and the reason is arithmetic rather
+    /// than preference</b> (tried and reverted 2026-11-14). <see cref="FftSize"/> is
+    /// <c>round(SampleRateHz / BaseBinHz)</c>, and <see cref="BaseBinHz"/> is 48000/32768 — which is
+    /// exactly what makes 48, 96 and 192 kHz land on 32768, 65536 and 131072. The 44.1 kHz family
+    /// lands on <b>30106, 60211 and 120422</b>, none of them a power of two, and
+    /// <c>FftBackendValidation</c> throws on those: a 22.05 kHz span would fail mid-run with
+    /// "Input length must be a power of two", naming nothing the user chose. Giving that family its
+    /// own base size would give it its own bin width too, and the one resolution list this app
+    /// offers at every span (see <see cref="BaseBinHz"/>) is built on there being only one.</para>
+    ///
+    /// <para><b>Nothing needs it.</b> 44.1 kHz is a rate a <i>DAC under test</i> plays, and such a
+    /// DAC is the generating half of a split whose capture half runs at 192 kHz — which is the
+    /// better measurement anyway, being the only one that sees the reconstruction images above
+    /// 22 kHz. 44.1 kHz as an <i>analysis</i> rate is reachable on the FFT screen, which picks its
+    /// own power-of-two transform length and so is unaffected by any of this.</para>
     /// </summary>
     public static readonly double[] SupportedSpansHz = [24_000.0, 48_000.0, 96_000.0];
 

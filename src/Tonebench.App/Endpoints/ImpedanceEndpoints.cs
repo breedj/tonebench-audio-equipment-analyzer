@@ -37,8 +37,11 @@ public static class ImpedanceEndpoints
 
             var measurement = request.ToMeasurement(
                 method, stimulus, levelUnit, calTarget, cableMode, calibrationStimulus,
-                // The bench's own, not the client's -- see the frequency-response endpoint.
-                session.GeneratorRateOverrideHz);
+                // Both the bench's own, not the client's -- see the frequency-response endpoint.
+                // The widest span is what a broadband calibration is captured at, and only the
+                // server knows what the analyzer in use can reach.
+                session.GeneratorRateOverrideHz,
+                session.WidestAnalysisSpanHz);
 
             try
             {
@@ -187,7 +190,8 @@ public sealed record ImpedanceStartRequest(
         ImpedanceCalTarget calTarget,
         ImpedanceCableMode cableMode,
         ImpedanceStimulus calibrationStimulus,
-        double generatorSampleRateHz = 0.0) =>
+        double generatorSampleRateHz = 0.0,
+        double maxCalibrationSpanHz = 0.0) =>
         new(method,
             stimulus,
             ReferenceOhms,
@@ -217,7 +221,8 @@ public sealed record ImpedanceStartRequest(
             SteppedSampleRateHz,
             CalibrationLevelValue,
             NoiseCutoffHz,
-            generatorSampleRateHz);
+            generatorSampleRateHz,
+            maxCalibrationSpanHz);
 }
 
 /// <param name="ChartAnnotations">

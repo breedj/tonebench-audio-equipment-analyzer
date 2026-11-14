@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { RESPONSE_RESOLUTIONS, RESPONSE_SPANS_HZ } from '../api/client'
 import { useImpulseResponse } from '../composables/useImpulseResponse'
+import { supportedSpans } from '../supportedSpans'
 import Modal from './Modal.vue'
 
 /**
@@ -18,7 +19,20 @@ const props = defineProps<{
   open: boolean
   /** The run this calibration is being captured for, so its rate and band match. */
   defaults: { frequencySpanHz: number; resolutionMultiplier: number; chirpStartHz: number }
+  /** The connected analyzer's analysis rates, which is what decides the spans below. */
+  sampleRatesHz?: number[]
 }>()
+
+/**
+ * Only the spans this analyzer can actually run — a span implies a sample rate. See
+ * supportedSpans.ts, and the note there about this dialog having iterated the full list until
+ * 2026-11-14.
+ *
+ * <p>No fallback watcher here, unlike the two config panels: the form is seeded from
+ * <c>props.defaults</c> every time the dialog opens, and those come from the impulse panel's own
+ * already-filtered span.</p>
+ */
+const availableSpans = computed(() => supportedSpans(RESPONSE_SPANS_HZ, props.sampleRatesHz))
 
 const emit = defineEmits<{ close: []; captured: [id: number] }>()
 
@@ -106,7 +120,7 @@ async function remove(id: number) {
             :disabled="capturingReference"
             class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
           >
-            <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
+            <option v-for="span in availableSpans" :key="span" :value="span">{{ span }}</option>
           </select>
         </label>
         <label class="flex flex-col gap-1">

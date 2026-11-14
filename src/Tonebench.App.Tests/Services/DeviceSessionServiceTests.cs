@@ -17,6 +17,63 @@ public class DeviceSessionServiceTests
         NullLogger<DeviceSessionService>.Instance);
 
     /// <summary>
+    /// The widest span this analyzer can analyse, read by the impedance endpoint so a broadband
+    /// calibration standard is captured once and serves every span it is later measured at.
+    ///
+    /// <para>The simulator reports 48/96/192 kHz, so the answer is 96 kHz — and note it is
+    /// <b>not</b> simply half the fastest rate: with the experimental 384 kHz input enabled that
+    /// would be 192 kHz, which is not a span this app offers at all.</para>
+    /// </summary>
+    [Fact]
+    public async Task WidestAnalysisSpan_IsTheWidestOfferedSpanThisAnalyzerCanReach()
+    {
+        var session = CreateService();
+        await session.ConnectAsync(CancellationToken.None);
+
+        Assert.Equal(96_000.0, session.WidestAnalysisSpanHz);
+        Assert.Contains(session.WidestAnalysisSpanHz, FrequencyResponseRequest.SupportedSpansHz);
+    }
+
+    /// <summary>
+    /// And it must never answer with half a rate that is not an offered span. The transform length
+    /// is derived from the span and only the 48 kHz family lands on a power of two, so a 176.4 kHz
+    /// card halved to 88.2 kHz would fail the run with "Input length must be a power of two" —
+    /// which is why this intersects with the span list rather than dividing by two.
+    /// </summary>
+    [Fact]
+    public async Task WidestAnalysisSpan_IsAlwaysAnOfferedSpanOrNothing()
+    {
+        foreach (double[] rates in new[]
+        {
+            new[] { 44_100.0, 88_200.0, 176_400.0 },   // a 44.1 kHz family card: no offered span at all
+            new[] { 48_000.0 },                        // a card that stops at 48 kHz
+            new[] { 44_100.0, 48_000.0, 96_000.0 },    // both families
+        })
+        {
+            var device = new StubDevice { Rates = rates };
+            var session = new DeviceSessionService(
+                device,
+                new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+                NullLogger<DeviceSessionService>.Instance);
+
+            double widest = session.WidestAnalysisSpanHz;
+            Assert.True(
+                widest == 0.0 || FrequencyResponseRequest.SupportedSpansHz.Contains(widest),
+                $"{widest} Hz is not a span this app offers.");
+        }
+
+        // Spelled out, so the three cases above cannot all be vacuously zero.
+        Assert.Equal(0.0, Widest([44_100.0, 88_200.0, 176_400.0]));
+        Assert.Equal(24_000.0, Widest([48_000.0]));
+        Assert.Equal(48_000.0, Widest([44_100.0, 48_000.0, 96_000.0]));
+
+        static double Widest(double[] rates) => new DeviceSessionService(
+            new StubDevice { Rates = rates },
+            new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+            NullLogger<DeviceSessionService>.Instance).WidestAnalysisSpanHz;
+    }
+
+    /// <summary>
     /// Both drop counters have to reach the status response. Only <c>DroppedRxChunks</c> did, and
     /// because the counters are deliberately separate (they name different halves of the pipeline)
     /// that meant the API and the UI reported a clean stream through runs that dropped 14, 74 and
@@ -1025,7 +1082,11 @@ public class DeviceSessionServiceTests
     {
         public event EventHandler? DeviceLost { add { } remove { } }
 
-        public DeviceCapabilities Capabilities => DeviceCapabilities.Qa403;
+        /// <summary>The rates this stub reports, for a test that needs a ladder the QA403 does not have.</summary>
+        public double[]? Rates { get; init; }
+
+        public DeviceCapabilities Capabilities =>
+            Rates is null ? DeviceCapabilities.Qa403 : DeviceCapabilities.Qa403 with { SampleRatesHz = Rates };
 
         /// <summary>Non-zero, like real hardware — this stub stands in for a device that commits audio to the DAC ahead of time.</summary>
         public int StimulusLatencyFrames(double sampleRateHz) => 3584;

@@ -191,7 +191,17 @@ public sealed record ImpedanceRequest(
     /// record, so whatever the stimulus was cancels out of it -- which is also why the chirp's
     /// arbitrary rotation never has to be removed.</para>
     /// </summary>
-    double GeneratorSampleRateHz = 0.0)
+    double GeneratorSampleRateHz = 0.0,
+    /// <summary>
+    /// The widest span this analyzer can analyse, which is what a broadband calibration is captured
+    /// at. Zero -- the default -- means the caller did not say, and <see cref="MaxSpanHz"/> stands in.
+    ///
+    /// <para>The bench's own figure, filled by the endpoint from
+    /// <c>DeviceSessionService.WidestAnalysisSpanHz</c>, the same way
+    /// <see cref="GeneratorSampleRateHz"/> is: a client cannot be trusted to know what the analyzer
+    /// in use can do, and on a 44.1 kHz family card the answer is 88.2 kHz rather than 96.</para>
+    /// </summary>
+    double MaxCalibrationSpanHz = 0.0)
 {
     /// <summary>The rate the generator runs at: its own where it has one, the analysis rate otherwise.</summary>
     public double GeneratorRateHz => GeneratorSampleRateHz > 0 ? GeneratorSampleRateHz : SampleRateHz;
@@ -298,10 +308,26 @@ public sealed record ImpedanceRequest(
     ///
     /// <para>Only for a chirp or noise capture. A stepped standard walks its own grid and takes its
     /// rate from <see cref="EndFreqHz"/>, where this has no meaning.</para>
+    ///
+    /// <para><b>"The widest" is the widest <i>this analyzer</i> has, not a constant</b> (2026-11-14).
+    /// A 44.1 kHz family card tops out at an 88.2 kHz span, and asking it for 96 implies a 192 kHz
+    /// rate it does not have — so a literal ceiling here did not merely over-reach, it made that
+    /// bench's calibration impossible to capture at all. Falling back to <see cref="MaxSpanHz"/>
+    /// when nobody said keeps every existing caller, and every test, reading as it did.</para>
     /// </summary>
-    public double EffectiveSpanHz => IsCalibration && !IsStepped ? MaxSpanHz : FrequencySpanHz;
+    public double EffectiveSpanHz => IsCalibration && !IsStepped ? CalibrationSpanHz : FrequencySpanHz;
 
-    /// <summary>The widest span the UI offers, and what every broadband calibration is captured at.</summary>
+    /// <summary>
+    /// The span a broadband calibration is captured at: the analyzer's own widest where the caller
+    /// supplied one, <see cref="MaxSpanHz"/> otherwise.
+    /// </summary>
+    public double CalibrationSpanHz => MaxCalibrationSpanHz > 0 ? MaxCalibrationSpanHz : MaxSpanHz;
+
+    /// <summary>
+    /// The widest span the UI offers on a 48 kHz family bench, and the fallback for a caller that
+    /// did not say what the analyzer can do. Not a hardware limit — see
+    /// <see cref="MaxCalibrationSpanHz"/>.
+    /// </summary>
     public const double MaxSpanHz = 96_000.0;
 
     /// <summary>

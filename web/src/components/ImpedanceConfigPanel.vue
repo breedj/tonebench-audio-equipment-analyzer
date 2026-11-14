@@ -35,10 +35,26 @@ import { isPowerUnit } from '../measurements/levelMode'
 import { formatHz } from '../response/format'
 import { formatOhms } from '../impedance/equivalent'
 import { matchesStoredFixture } from '../impedance/fixture'
+import { spanFallback, supportedSpans } from '../supportedSpans'
 import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
 
-defineProps<{ running: boolean }>()
+const props = defineProps<{
+  running: boolean
+  /** The connected analyzer's analysis rates, which is what decides the spans below. */
+  sampleRatesHz?: number[]
+}>()
+
+/**
+ * Only the spans this analyzer can actually run — a span implies a sample rate, so a card that
+ * cannot do 192 kHz must not be offered the 96 kHz span. See supportedSpans.ts.
+ *
+ * <p>This panel iterated the full list until 2026-11-14, as the impulse and loopback-reference
+ * panels did, so three of the four span dropdowns offered choices the server then refused with a
+ * 409. That was latent while every analyzer had the QA403's three rates and became reachable the
+ * moment the 44.1 kHz family was probed.</p>
+ */
+const availableSpans = computed(() => supportedSpans(RESPONSE_SPANS_HZ, props.sampleRatesHz))
 
 const emit = defineEmits<{ (e: 'calibrate', target: ImpedanceCalTargetName): void }>()
 
@@ -153,6 +169,13 @@ const form = reactive({
    * its resistor too.</p>
    */
   useGlobalFixture: false,
+})
+
+// A span the analyzer cannot run must not be left sitting in the form: the server refuses that run,
+// and a panel holding a value it will be refused for is a worse way to find out.
+watch(availableSpans, (spans) => {
+  const fallback = spanFallback(form.frequencySpanHz, spans)
+  if (fallback !== null) form.frequencySpanHz = fallback
 })
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
@@ -776,7 +799,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson })
         :disabled="running"
         class="tb-input"
       >
-        <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span / 1000 }} kHz</option>
+        <option v-for="span in availableSpans" :key="span" :value="span">{{ span / 1000 }} kHz</option>
       </select>
     </label>
 

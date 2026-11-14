@@ -93,12 +93,26 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// transfer is 1.33 ms at 768 kHz against 5.3 ms at 192 — which is the same figure the QA403's
     /// 512-frame chunks already run at 384 kHz, so it is a precedent rather than a new risk.</para>
     ///
-    /// <para><b>What it does not reach.</b> The response screens derive their rate from the chosen
-    /// <i>span</i> (<c>FrequencyResponseRequest.SampleRateHz</c> is the span doubled) and those spans
-    /// are a client-side list, so a card offering 768 kHz widens the FFT screen's rate dropdown and
-    /// not the chirp's span choices. <c>ImpedanceRequest.MaxSpanHz</c> stays at 96 kHz deliberately:
-    /// it is the width a stored calibration standard is captured at, chosen so one standard covers
-    /// every measurement, and it was never meant as "the maximum the hardware can do".</para>
+    /// <para><b>What it does not reach, and why that is the 44.1 kHz family's whole story.</b> The
+    /// response screens — chirp, impulse response, impedance — derive their rate from the chosen
+    /// <i>span</i> (<c>FrequencyResponseRequest.SampleRateHz</c> is the span doubled) and their
+    /// transform length from that rate over <c>BaseBinHz</c>, which is 48000/32768. That is exactly
+    /// what makes 48, 96 and 192 kHz land on 32768, 65536 and 131072 — and the 44.1 kHz family land
+    /// on <b>30106, 60211 and 120422</b>, none of them a power of two, which
+    /// <c>FftBackendValidation</c> throws on. So <c>SupportedSpansHz</c> has no 44.1 kHz entry and
+    /// is not going to get one: a span there would fail a run with "Input length must be a power of
+    /// two", naming nothing anybody chose. <b>Nothing needs one</b> — 44.1 kHz is what a DAC under
+    /// test <i>plays</i>, and such a DAC is the generating half of a split captured at 192 kHz,
+    /// which is the better measurement anyway. The <b>FFT screen</b> is unaffected throughout: it
+    /// takes its transform length from the request and validates it as a power of two
+    /// (<c>AcquisitionEndpoints</c>), with no reference to the rate at all.</para>
+    ///
+    /// <para>A card offering 768 kHz likewise widens the FFT screen's rate dropdown and not the
+    /// chirp's span choices. <c>ImpedanceRequest.MaxCalibrationSpanHz</c> — which is what a stored
+    /// calibration standard is captured at, chosen so one standard covers every measurement — is
+    /// filled per analyzer from <c>DeviceSessionService.WidestAnalysisSpanHz</c> rather than being
+    /// the flat 96 kHz it was until 2026-11-14, and that property intersects with the span list for
+    /// this same reason.</para>
     /// </summary>
     public static readonly double[] CandidateRatesHz =
         [44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0, 384_000.0, 768_000.0];

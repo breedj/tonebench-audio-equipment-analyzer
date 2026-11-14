@@ -49,6 +49,7 @@ import {
 } from '../measurements/clockDriftCorrection'
 import { referenceChannelNote, referenceChannelWarning } from '../measurements/referenceChannel'
 import { useLoadOhms } from '../composables/useLoadOhms'
+import { spanFallback, supportedSpans } from '../supportedSpans'
 import { useProjects } from '../composables/useProjects'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { MAX_AVERAGE_COUNT, averageCountError } from '../measurements/averaging'
@@ -83,8 +84,17 @@ const props = defineProps<{
    * measurements/referenceChannel.ts.
    */
   reference?: ReferenceChannelJson | null
+  /** The connected analyzer's analysis rates, which is what decides the spans below. */
+  sampleRatesHz?: number[]
 }>()
 const emit = defineEmits<{ (e: 'capture-reference'): void }>()
+
+/**
+ * Only the spans this analyzer can actually run — a span implies a sample rate. See
+ * supportedSpans.ts, and the note there about this panel having iterated the full list until
+ * 2026-11-14.
+ */
+const availableSpans = computed(() => supportedSpans(RESPONSE_SPANS_HZ, props.sampleRatesHz))
 
 const { types, currentTypeId, markDirty } = useProjects()
 const { references } = useImpulseResponse()
@@ -145,6 +155,13 @@ const form = reactive({
 
 /** The one line under the stimulus dropdown, naming what the choice costs. See responseStimulus.ts. */
 const stimulusHint = computed(() => stimulusNotice(form.stimulus))
+
+// A span the analyzer cannot run must not be left sitting in the form: the server refuses that run,
+// and a panel holding a value it will be refused for is a worse way to find out.
+watch(availableSpans, (spans) => {
+  const fallback = spanFallback(form.frequencySpanHz, spans)
+  if (fallback !== null) form.frequencySpanHz = fallback
+})
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
@@ -556,7 +573,7 @@ defineExpose({ buildRequest, invalid, buildParamsJson, referenceCaptureDefaults,
         :disabled="running"
         class="tb-input"
       >
-        <option v-for="span in RESPONSE_SPANS_HZ" :key="span" :value="span">{{ span }}</option>
+        <option v-for="span in availableSpans" :key="span" :value="span">{{ span }}</option>
       </select>
     </label>
 

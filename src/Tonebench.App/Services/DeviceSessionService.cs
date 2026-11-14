@@ -218,6 +218,47 @@ public sealed class DeviceSessionService(
     public double GeneratorRateOverrideHz => _device.GeneratorSampleRateHz ?? 0.0;
 
     /// <summary>
+    /// The widest frequency span this analyzer can actually analyse: the largest entry of
+    /// <see cref="FrequencyResponseRequest.SupportedSpansHz"/> whose implied rate — twice it, since
+    /// a span is analysed to Nyquist — is one this analyzer has.
+    ///
+    /// <para>Read by the impedance endpoint, because a broadband calibration standard is captured
+    /// at the widest span available rather than at the measurement's own, so one capture serves
+    /// every span it is later measured at. That was the literal 96 kHz of
+    /// <c>ImpedanceRequest.MaxSpanHz</c> until 2026-11-14, which is wrong for any analyzer that
+    /// does not reach 192 kHz: the capture is then refused outright by
+    /// <see cref="RequireSupportedSampleRate"/> rather than merely being wider than asked for.</para>
+    ///
+    /// <para><b>It intersects with the span list rather than halving the fastest rate</b>, and that
+    /// is the whole of the correctness here. A card reporting 176.4 kHz would give 88.2 kHz by
+    /// simple halving, which is not a span this app has: the transform length is derived from the
+    /// span through <see cref="FrequencyResponseRequest.BaseBinHz"/> and only the 48 kHz family
+    /// lands on a power of two, so that figure would fail the run with
+    /// "Input length must be a power of two" and name nothing anybody chose.</para>
+    ///
+    /// <para><b>Zero where no offered span is reachable</b> — a device that has not connected
+    /// (<see cref="DeviceCapabilities"/> is only valid after <c>ConnectAsync</c>), or one whose
+    /// rates are all outside the 48 kHz family. The caller reads zero as "not known" and keeps its
+    /// own default rather than computing a span out of nothing.</para>
+    /// </summary>
+    public double WidestAnalysisSpanHz
+    {
+        get
+        {
+            IReadOnlyList<double> rates = Capabilities.SampleRatesHz;
+            double widest = 0.0;
+
+            foreach (double span in FrequencyResponseRequest.SupportedSpansHz)
+            {
+                if (span > widest && rates.Any(rate => Math.Abs(rate - (span * 2.0)) < 1e-6))
+                    widest = span;
+            }
+
+            return widest;
+        }
+    }
+
+    /// <summary>
     /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
     /// the app builds a session this way, and the shape of that call is what this overload exists to
     /// keep — the real app goes through the factory.

@@ -586,7 +586,19 @@ export type ResponsePhaseName =
   /** An output-impedance run waiting for the user to change the load between its two passes. */
   | 'WaitingForLoadChange'
 
-/** The three spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each. */
+/**
+ * The three spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each.
+ *
+ * <p>Offering a span is not the same as an analyzer having it: `supportedSpans` filters this list
+ * by the rates the connected analyzer reports, and every panel carrying a span dropdown must go
+ * through that filter — a dropdown offering a choice the server will refuse is a worse way to find
+ * out than not offering it.</p>
+ *
+ * <p><b>The 44.1 kHz family has no span here</b>, which is arithmetic rather than an omission: the
+ * response measurements derive their transform length from the span, and only the 48 kHz family
+ * lands on a power of two. See `FrequencyResponseRequest.SupportedSpansHz` for the figures. A
+ * 44.1 kHz DAC is measured as the generating half of a split, captured at 192 kHz.</p>
+ */
 export const RESPONSE_SPANS_HZ = [24000, 48000, 96000] as const
 
 /**

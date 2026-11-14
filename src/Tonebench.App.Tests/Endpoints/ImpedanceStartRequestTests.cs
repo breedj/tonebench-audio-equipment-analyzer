@@ -98,12 +98,14 @@ public class ImpedanceStartRequestTests
     [Fact]
     public void BothRecordsStillHaveTheFieldsTheMappingTestChecks()
     {
-        // One apart for the reason the response measurements' are: GeneratorSampleRateHz is filled
-        // from the session rather than sent. Here it reaches only the stimulus's period -- an
+        // Two apart, and both of the extras are filled from the session rather than sent, for the
+        // reason the response measurements' one is: a client cannot be trusted to know what the
+        // analyzer in use can do. GeneratorSampleRateHz reaches only the stimulus's period -- an
         // impedance is a ratio of two channels of one record, so the stimulus cancels out of it and
-        // there is no reference spectrum to rebuild.
+        // there is no reference spectrum to rebuild -- and MaxCalibrationSpanHz is the widest span
+        // this analyzer can analyse, which is what a broadband standard is captured at.
         Assert.Equal(29, ConstructorParameterCount(typeof(ImpedanceStartRequest)));
-        Assert.Equal(30, ConstructorParameterCount(typeof(ImpedanceRequest)));
+        Assert.Equal(31, ConstructorParameterCount(typeof(ImpedanceRequest)));
     }
 
     /// <summary>
@@ -230,6 +232,85 @@ public class ImpedanceStartRequestTests
             };
             Assert.Equal(48_000.0, stepped.SampleRateHz);
         }
+    }
+
+    /// <summary>
+    /// Every offered span must imply a <b>power-of-two</b> transform length, and that is the hard
+    /// rule the span list exists under rather than a tidiness.
+    ///
+    /// <para><see cref="FrequencyResponseRequest.FftSize"/> is
+    /// <c>round(SampleRateHz / BaseBinHz)</c> with <c>BaseBinHz</c> = 48000/32768, which is exactly
+    /// what makes 48, 96 and 192 kHz land on 32768, 65536 and 131072. Any rate outside that family
+    /// does not: the 44.1 kHz family gives 30106, 60211 and 120422, and
+    /// <c>FftBackendValidation</c> throws "Input length must be a power of two" on all three — a
+    /// run that fails naming nothing anybody chose.</para>
+    ///
+    /// <para>Written after exactly that was tried and reverted on 2026-11-14, when the 44.1 kHz
+    /// family was added to the rate probe and its spans were added here with it. It typechecked and
+    /// passed every test there was; the app answering <c>fftSize: 30106</c> to a 22.05 kHz span is
+    /// what caught it. <c>web/src/supportedSpans.test.ts</c> asserts the same rule over the
+    /// client's copy of the list.</para>
+    /// </summary>
+    [Fact]
+    public void EveryOfferedSpan_ImpliesAPowerOfTwoTransformLength()
+    {
+        foreach (double span in FrequencyResponseRequest.SupportedSpansHz)
+        {
+            foreach (int multiplier in FrequencyResponseRequest.SupportedResolutionMultipliers)
+            {
+                var request = Measurement() with
+                {
+                    FrequencySpanHz = span,
+                    ResolutionMultiplier = multiplier,
+                };
+
+                int size = request.FftSize;
+                Assert.True(
+                    size > 0 && (size & (size - 1)) == 0,
+                    $"a {span} Hz span at x{multiplier} implies a transform length of {size}, which is not a power of two.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// "The widest span" is the widest <i>this analyzer</i> has, which the endpoint fills from
+    /// <c>DeviceSessionService.WidestAnalysisSpanHz</c>.
+    ///
+    /// <para>A 44.1 kHz family card tops out at an 88.2 kHz span, so the literal 96 kHz this used to
+    /// be implied a 192 kHz rate that analyzer does not have — and <c>RequireSupportedSampleRate</c>
+    /// rightly refuses it, which made the bench's calibration impossible to capture rather than
+    /// merely over-wide.</para>
+    /// </summary>
+    [Fact]
+    public void ABroadbandCalibration_TakesTheWidestSpanThisAnalyzerHas()
+    {
+        var measurement = Measurement() with
+        {
+            FrequencySpanHz = 22_050.0,
+            CalTarget = ImpedanceCalTarget.Open,
+            CalibrationStimulus = ImpedanceStimulus.Chirp,
+            MaxCalibrationSpanHz = 88_200.0,
+        };
+
+        Assert.Equal(88_200.0, measurement.EffectiveSpanHz);
+        Assert.Equal(176_400.0, measurement.SampleRateHz);
+    }
+
+    /// <summary>
+    /// And a caller that did not say keeps the old constant, which is what leaves every existing
+    /// bench — and every test above — reading exactly as it did.
+    /// </summary>
+    [Fact]
+    public void ABroadbandCalibration_WithNoAnalyzerWidthSupplied_FallsBackToTheConstant()
+    {
+        var measurement = Measurement() with
+        {
+            CalTarget = ImpedanceCalTarget.Open,
+            CalibrationStimulus = ImpedanceStimulus.Chirp,
+        };
+
+        Assert.Equal(0.0, measurement.MaxCalibrationSpanHz);
+        Assert.Equal(ImpedanceRequest.MaxSpanHz, measurement.EffectiveSpanHz);
     }
 
     /// <summary>

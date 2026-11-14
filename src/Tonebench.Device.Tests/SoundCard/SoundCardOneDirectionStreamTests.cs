@@ -206,6 +206,17 @@ public class SoundCardOneDirectionStreamTests
         {
             InputHostApi = "WASAPI",
             InputDeviceName = "Cosmos ADC",
+
+            // No settle, for the reason SoundCardDeviceTests' own helper defaults it to 0: the
+            // withheld frames are still *read*, and FakePortAudioStream paces a read at the rate it
+            // claims -- so the default 2 s costs 94 sleeps of 21 ms at 48 kHz before the first block
+            // can reach the consumer. That is ~2 s of a 10 s budget spent on a discard none of these
+            // tests is about, and it is what made ACaptureOnlyStream_HandsOutBlocksAndNeverWrites
+            // fail on the macos-15-intel runner and nowhere else: a machine three times slower than
+            // this one runs out the clock. The settle has its own test
+            // (SoundCardDeviceTests.StreamAsync_AfterAReClock_WithholdsTheSettleAndThenMeasures),
+            // so nothing here is paying for coverage it provides.
+            StreamStartSettleMs = 0,
         };
 
         return (new SoundCardDevice(
@@ -223,6 +234,11 @@ public class SoundCardOneDirectionStreamTests
         {
             OutputHostApi = "WASAPI",
             OutputDeviceName = "D50 III",
+
+            // The same, for the same reason -- a playback-only stream withholds nothing, but it
+            // still opens through the re-clock path, and the two builders disagreeing about it
+            // would be the next person's puzzle.
+            StreamStartSettleMs = 0,
         };
 
         return (new SoundCardDevice(

@@ -166,7 +166,12 @@ public class SoundCardDeviceTests
         var pa = new FakePortAudio();
         var api = pa.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
         pa.AddDevice(api, "In 1-2 (Test Card)", inputs: 2, outputs: 0);
-        pa.AddDevice(api, "Luidsprekers (Test DAC)", inputs: 0, outputs: 2);
+
+        // One interface on both sides, which is what DeviceKind.SoundCard narrowed to on
+        // 2026-11-15. This read "Luidsprekers (Test DAC)" until then -- two cards, which is now a
+        // Split and is refused here -- and the two names were only ever incidental to the point:
+        // that a render endpoint is an ordinary output.
+        pa.AddDevice(api, "Luidsprekers (Test Card)", inputs: 0, outputs: 2);
 
         var device = new SoundCardDevice(
             new SoundCardSettings
@@ -174,7 +179,7 @@ public class SoundCardDeviceTests
                 InputHostApi = "Windows WASAPI",
                 InputDeviceName = "In 1-2 (Test Card)",
                 OutputHostApi = "Windows WASAPI",
-                OutputDeviceName = "Luidsprekers (Test DAC)",
+                OutputDeviceName = "Luidsprekers (Test Card)",
             },
             SoundCardCalibration.Uncalibrated,
             NullLogger<SoundCardDevice>.Instance,

@@ -106,13 +106,106 @@ public class SoundCardEnumeratorTests
         Assert.Equal(SoundCardPairing.Unknown, SoundCardEnumerator.Pairing(input, output));
     }
 
+    /// <summary>
+    /// <b>This asserted <c>Unknown</c> until 2026-11-15</b>, and the change is the point rather
+    /// than a correction: two names that each say which card they belong to, and say different
+    /// ones, are positive evidence of two interfaces, where <c>Unknown</c> is the absence of
+    /// evidence either way. Telling those apart is what lets a sound-card bench be narrowed to one
+    /// interface without making every WDM-KS pairing unopenable — see
+    /// <see cref="Pairing_UnderWdmKs_IsUnknownRatherThanRefused"/>, which still passes unchanged.
+    ///
+    /// <para>Note the Realtek name is also the <c>InterfaceStem</c> nesting case
+    /// (<c>Speaker (Realtek(R) Audio)</c>), so a stem taken from the <i>last</i> <c>(</c> would
+    /// read the trademark as the interface and this test would not notice.</para>
+    /// </summary>
     [Fact]
-    public void Pairing_OfTwoDifferentCards_IsUnknown()
+    public void Pairing_OfTwoDifferentCards_IsDifferentInterfaces()
     {
         var input = Device("In 1-2 (MOTU M Series)", inputs: 2, outputs: 0, index: 0);
         var output = Device("Speaker (Realtek(R) Audio)", inputs: 0, outputs: 2, index: 1);
 
-        Assert.Equal(SoundCardPairing.Unknown, SoundCardEnumerator.Pairing(input, output));
+        Assert.Equal(SoundCardPairing.DifferentInterfaces, SoundCardEnumerator.Pairing(input, output));
+    }
+
+    /// <summary>
+    /// Two cards enumerated under <i>different</i> host APIs are still two cards, which is the
+    /// pairing that matters most here: a two-card bench is exactly where the better converter keeps
+    /// ASIO and the other takes WASAPI. Answering Unknown merely because the APIs differ would
+    /// throw the evidence away in the one case it is needed, which is why the stem comparison runs
+    /// before the host-API test.
+    /// </summary>
+    [Fact]
+    public void Pairing_OfTwoDifferentCardsAcrossHostApis_StillSeesTwoCards()
+    {
+        var input = Device("In 1-2 (MOTU M Series)", inputs: 2, outputs: 0, hostApi: 0, index: 0);
+        var output = Device(
+            "Luidsprekers (TOPPING USB DAC)", inputs: 0, outputs: 2,
+            hostApi: 1, kind: SoundCardHostApiKind.WdmKs, index: 1);
+
+        Assert.Equal(SoundCardPairing.DifferentInterfaces, SoundCardEnumerator.Pairing(input, output));
+    }
+
+    // ---- one interface -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The narrowing: a sound-card bench is one physical interface, and two named cards are turned
+    /// away with the analyzer kind that does measure them named in the message.
+    /// </summary>
+    [Fact]
+    public void OneInterfaceProblem_OfTwoNamedCards_RefusesAndNamesSplit()
+    {
+        var input = Device("In 1-2 (MOTU M Series)", inputs: 2, outputs: 0, index: 0);
+        var output = Device("Luidsprekers (TOPPING USB DAC)", inputs: 0, outputs: 2, index: 1);
+
+        string problem = Assert.IsType<string>(SoundCardEnumerator.OneInterfaceProblem(input, output));
+
+        Assert.Contains("MOTU M Series", problem);
+        Assert.Contains("TOPPING USB DAC", problem);
+        Assert.Contains("Split", problem);
+    }
+
+    /// <summary>
+    /// The regression that would hurt most: the ordinary one-card bench, whose two endpoint names
+    /// <i>differ</i> (<c>In 1-2</c> against <c>Out 1-2</c>) while naming one interface. A rule
+    /// written on whole names rather than on the interface inside them refuses this — which is
+    /// every MOTU, Focusrite and Scarlett bench there is.
+    /// </summary>
+    [Fact]
+    public void OneInterfaceProblem_OfOneCardsTwoEndpoints_IsNothing()
+    {
+        var input = Device("In 1-2 (MOTU M Series)", inputs: 2, outputs: 0, index: 0);
+        var output = Device("Out 1-2 (MOTU M Series)", inputs: 0, outputs: 2, index: 1);
+
+        Assert.Null(SoundCardEnumerator.OneInterfaceProblem(input, output));
+    }
+
+    /// <summary>
+    /// Positive evidence only. A WDM-KS pairing says nothing about which card either end is, and it
+    /// opens exactly as it did — it keeps the drift warning it always had, which is the honest
+    /// answer to "we cannot tell".
+    /// </summary>
+    [Fact]
+    public void OneInterfaceProblem_WhenTheNamesSayNothing_IsNothing()
+    {
+        var input = Device("In 1-2 (In 1-2)", inputs: 2, outputs: 0, hostApi: 1, kind: SoundCardHostApiKind.WdmKs, index: 0);
+        var output = Device("Out 1-2 (Out 1-2)", inputs: 0, outputs: 2, hostApi: 1, kind: SoundCardHostApiKind.WdmKs, index: 1);
+
+        Assert.Null(SoundCardEnumerator.OneInterfaceProblem(input, output));
+    }
+
+    /// <summary>
+    /// A one-direction bench has no pairing to doubt, and this is also every half of a split, whose
+    /// settings are masked to a single direction — so the narrowing must say nothing about it or it
+    /// would refuse the two-card bench it is meant to send there.
+    /// </summary>
+    [Fact]
+    public void OneInterfaceProblem_OfOneDirectionAlone_IsNothing()
+    {
+        var input = Device("In 1-2 (MOTU M Series)", inputs: 2, outputs: 0, index: 0);
+        var output = Device("Luidsprekers (TOPPING USB DAC)", inputs: 0, outputs: 2, index: 1);
+
+        Assert.Null(SoundCardEnumerator.OneInterfaceProblem(input, output: null));
+        Assert.Null(SoundCardEnumerator.OneInterfaceProblem(input: null, output));
     }
 
     // ---- rates ---------------------------------------------------------------------------------

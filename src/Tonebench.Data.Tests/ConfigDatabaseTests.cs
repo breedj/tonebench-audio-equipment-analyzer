@@ -252,6 +252,147 @@ public class ConfigDatabaseTests
     }
 
     /// <summary>
+    /// Migration 006: a sound-card bench naming two physical interfaces becomes a Split, and every
+    /// other bench is left exactly as it was.
+    ///
+    /// <para><b>The second row is the one that matters most.</b> An ordinary one-card bench stores
+    /// two <i>different</i> device names — <c>In 1-2 (MOTU M Series)</c> against
+    /// <c>Out 1-2 (MOTU M Series)</c> — so a migration written on "the two names differ", which is
+    /// the obvious reading and the one the plan for this work proposed, would convert every MOTU,
+    /// Focusrite and Scarlett bench there is into a split of one card against itself. What is
+    /// compared is the interface inside the name, not the name.</para>
+    /// </summary>
+    [Theory]
+    // The bench this migration exists for.
+    [InlineData("SoundCard", "WASAPI", "In 1-2 (MOTU M Series)", "WASAPI", "Luidsprekers (TOPPING USB DAC)", "Split")]
+    // One card, two endpoints, two names. Not a split.
+    [InlineData("SoundCard", "WASAPI", "In 1-2 (MOTU M Series)", "WASAPI", "Out 1-2 (MOTU M Series)", "SoundCard")]
+    // ASIO names the interface and nothing else, and one full-duplex device is stored both sides.
+    [InlineData("SoundCard", "ASIO", "MOTU M Series", "ASIO", "MOTU M Series", "SoundCard")]
+    // A capture-only bench has no pairing to judge.
+    [InlineData("SoundCard", "WASAPI", "In 1-2 (MOTU M Series)", "", "", "SoundCard")]
+    // Not a sound-card bench at all: untouched, whatever the card document happens to hold.
+    [InlineData("Hardware", "WASAPI", "In 1-2 (MOTU M Series)", "WASAPI", "Luidsprekers (TOPPING USB DAC)", "Hardware")]
+    // Already converted: the guard, which is also what makes the file idempotent.
+    [InlineData("Split", "WASAPI", "In 1-2 (MOTU M Series)", "WASAPI", "Luidsprekers (TOPPING USB DAC)", "Split")]
+    // Two cards on two host APIs, which no duplex stream could ever have opened. Left for
+    // ConnectAsync to refuse by name rather than rewritten on a guess about what was meant.
+    [InlineData("SoundCard", "ASIO", "MOTU M Series (MOTU)", "WASAPI", "Luidsprekers (TOPPING USB DAC)", "SoundCard")]
+    public async Task Migration006_TurnsATwoCardBenchIntoASplit_AndLeavesEveryOtherBenchAlone(
+        string storedKind,
+        string inputHostApi,
+        string inputDeviceName,
+        string outputHostApi,
+        string outputDeviceName,
+        string expectedKind)
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new TonebenchConfigDatabaseOptions { Path = path });
+
+        await SeedBenchAsync(factory, storedKind, inputHostApi, inputDeviceName, outputHostApi, outputDeviceName, split: null);
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        var repository = new ConfigRepository(factory);
+        string? analyzer = await repository.GetAsync("device.analyzer", CancellationToken.None);
+        Assert.NotNull(analyzer);
+        Assert.Equal(expectedKind, Read<AnalyzerKindConfig>(analyzer).Kind);
+
+        // The card document is never touched: its two names and the calibration beside them are
+        // what the new Split's two halves are built from.
+        string? cards = await repository.GetAsync("soundcard.settings", CancellationToken.None);
+        Assert.NotNull(cards);
+        Assert.Equal(inputDeviceName, Read<SoundCardConfig>(cards).InputDeviceName);
+        Assert.Equal(outputDeviceName, Read<SoundCardConfig>(cards).OutputDeviceName);
+    }
+
+    /// <summary>
+    /// The split document the migration writes, in both states a bench can be in: one that has
+    /// never configured a split needs it created, and one that has keeps the generator rate it
+    /// chose — a figure nothing else records, and a measurement decision rather than a default.
+    /// </summary>
+    [Theory]
+    [InlineData(null, 0.0)]
+    [InlineData("{\"inputKind\":\"Hardware\",\"outputKind\":\"SoundCard\",\"generatorSampleRateHz\":96000.0}", 96000.0)]
+    public async Task Migration006_WritesACardOnBothHalves_KeepingAnyGeneratorRateAlreadyChosen(
+        string? storedSplit, double expectedRateHz)
+    {
+        string path = TestDb.CreateTempPath();
+        var factory = new ConfigConnectionFactory(new TonebenchConfigDatabaseOptions { Path = path });
+
+        await SeedBenchAsync(
+            factory, "SoundCard",
+            "WASAPI", "In 1-2 (MOTU M Series)",
+            "WASAPI", "Luidsprekers (TOPPING USB DAC)",
+            storedSplit);
+
+        await using (var connection = await factory.OpenAsync(CancellationToken.None))
+            await new MigrationRunner(MigrationRunner.ConfigResourcePrefix).RunAsync(connection, CancellationToken.None);
+
+        string? after = await new ConfigRepository(factory).GetAsync("device.split", CancellationToken.None);
+        Assert.NotNull(after);
+
+        SplitDeviceConfig split = Read<SplitDeviceConfig>(after);
+        Assert.Equal("SoundCard", split.InputKind);
+        Assert.Equal("SoundCard", split.OutputKind);
+        Assert.Equal(expectedRateHz, split.GeneratorSampleRateHz);
+    }
+
+    private static T Read<T>(string json) =>
+        System.Text.Json.JsonSerializer.Deserialize<T>(
+            json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+        ?? throw new InvalidOperationException($"{typeof(T).Name} did not deserialize.");
+
+    /// <summary>
+    /// A configuration database holding the three documents migration 006 reasons about, at schema
+    /// version 1 so the runner applies everything from 002 on.
+    /// </summary>
+    private static async Task SeedBenchAsync(
+        ConfigConnectionFactory factory,
+        string analyzerKind,
+        string inputHostApi,
+        string inputDeviceName,
+        string outputHostApi,
+        string outputDeviceName,
+        string? split)
+    {
+        string cards = System.Text.Json.JsonSerializer.Serialize(
+            new SoundCardConfig
+            {
+                InputHostApi = inputHostApi,
+                InputDeviceName = inputDeviceName,
+                OutputHostApi = outputHostApi,
+                OutputDeviceName = outputDeviceName,
+            },
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        await using var connection = await factory.OpenAsync(CancellationToken.None);
+        await using var create = connection.CreateCommand();
+        create.CommandText =
+            "CREATE TABLE app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_utc TEXT NOT NULL);"
+                + "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_utc TEXT NOT NULL);"
+                + "INSERT INTO schema_version (version, name, applied_utc) "
+                + "VALUES (1, '001_app_setting.sql', '2026-01-01T00:00:00Z');"
+                + "INSERT INTO app_setting (key, value, updated_utc) "
+                + "VALUES ('soundcard.settings', $cards, '2026-01-01T00:00:00Z');"
+                + "INSERT INTO app_setting (key, value, updated_utc) "
+                + "VALUES ('device.analyzer', $analyzer, '2026-01-01T00:00:00Z');";
+        create.Parameters.AddWithValue("$cards", cards);
+        create.Parameters.AddWithValue("$analyzer", $"{{\"kind\":\"{analyzerKind}\"}}");
+
+        if (split is not null)
+        {
+            create.CommandText +=
+                "INSERT INTO app_setting (key, value, updated_utc) "
+                    + "VALUES ('device.split', $split, '2026-01-01T00:00:00Z');";
+            create.Parameters.AddWithValue("$split", split);
+        }
+
+        await create.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
     /// The load-bearing property: configuration written here leaves no trace in the measurement
     /// database. If <c>app_setting</c> ever appeared over there, a copied measurement file would
     /// carry this machine's calibration with it.
@@ -339,7 +480,8 @@ public class ConfigDatabaseTests
             Assert.Equal(
                 [(1L, "001_app_setting.sql"), (2L, "002_impulse_reference.sql"),
                  (3L, "003_detailed_logging_default.sql"), (4L, "004_soundcard_settle_default.sql"),
-                 (5L, "005_screenshot_captions.sql")],
+                 (5L, "005_screenshot_captions.sql"),
+                 (6L, "006_two_card_bench_becomes_a_split.sql")],
                 rows);
         }
         finally

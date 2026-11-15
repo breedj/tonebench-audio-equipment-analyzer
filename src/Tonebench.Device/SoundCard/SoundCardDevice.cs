@@ -271,6 +271,14 @@ public sealed class SoundCardDevice : IAnalyzerDevice, IDisposable
         if (SoundCardEnumerator.DuplexCombinationProblem(input, output) is { } combinationProblem)
             throw new SoundCardNotFoundException(combinationProblem);
 
+        // A sound card is one interface. Refused here rather than where the bench is chosen,
+        // because this is the one place every path reaches -- the picker, a restored document and a
+        // split half alike -- and because a split half has one direction masked off, so it carries
+        // a null side and this says nothing about it. The migration (config 006) is what stops an
+        // existing two-card bench ever arriving here; this is the backstop under it.
+        if (SoundCardEnumerator.OneInterfaceProblem(input, output) is { } narrowing)
+            throw new SoundCardNotFoundException(narrowing);
+
         var rates = enumerator.SupportedRatesHz(
             input, output, exclusive: true, InputChannelCount, OutputChannelCount);
 

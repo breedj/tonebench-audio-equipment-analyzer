@@ -202,6 +202,32 @@ public class SplitDeviceTests
         },
     };
 
+    /// <summary>
+    /// <b>Migration 006's open risk, closed.</b> A bench migrated from a two-card sound card to a
+    /// split has to keep finding the clock difference it measured, rather than silently reading
+    /// zero and correcting nothing — and the figure is stored per <i>pairing</i>, so what matters
+    /// is that both routes resolve to the same two keys.
+    ///
+    /// <para>Asserted as the two being equal rather than against a spelled-out key, which would
+    /// pin the format instead of the property: the format may change, and this must not care.</para>
+    /// </summary>
+    [Fact]
+    public void AMigratedTwoCardBench_KeepsTheClockPairingItHadAsASoundCard()
+    {
+        SoundCardConfig cards = TwoCards().Config;
+
+        BenchClocks? asACard = BenchClocks.For(DeviceKind.SoundCard, cards, new SplitDeviceSetting());
+        BenchClocks? asASplit = BenchClocks.For(
+            DeviceKind.Split,
+            cards,
+            new SplitDeviceSetting { Config = new SplitDeviceConfig("SoundCard", "SoundCard") });
+
+        Assert.NotNull(asACard);
+        Assert.NotNull(asASplit);
+        Assert.Equal(asACard.OutputKey, asASplit.OutputKey);
+        Assert.Equal(asACard.InputKey, asASplit.InputKey);
+    }
+
     private static SoundCardSetting DuplexCard() => new()
     {
         Config = SoundCardConfig.Default with

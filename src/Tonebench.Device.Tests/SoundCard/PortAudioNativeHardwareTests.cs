@@ -112,7 +112,11 @@ public class PortAudioNativeHardwareTests(ITestOutputHelper output)
 
         var pair = (from i in enumerator.InputDevices
                     from o in enumerator.OutputDevices
-                    where SoundCardEnumerator.Pairing(i, o) != SoundCardPairing.Unknown
+                    // Named verdicts, not "anything but Unknown": this test wants a pair it has
+                    // reason to believe is ONE interface, and DifferentInterfaces satisfies
+                    // "!= Unknown" while being the opposite of what is wanted.
+                    where SoundCardEnumerator.Pairing(i, o)
+                        is SoundCardPairing.FullDuplexDevice or SoundCardPairing.NamesMatch
                        && SoundCardEnumerator.Trust(i.HostApiKind) != SoundCardHostApiTrust.Resamples
                     select (Input: i, Output: o)).FirstOrDefault();
 

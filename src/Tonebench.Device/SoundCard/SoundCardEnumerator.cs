@@ -10,6 +10,25 @@ public enum SoundCardPairing
     NamesMatch,
 
     /// <summary>
+    /// Two devices whose names reveal <b>different</b> interfaces, e.g.
+    /// <c>In 1-2 (MOTU M Series)</c> against <c>Luidsprekers (TOPPING USB DAC)</c>: two physical
+    /// cards, and therefore two clocks.
+    ///
+    /// <para><b>This is the one verdict here that is refused rather than warned about, and it
+    /// exists because <see cref="Unknown"/> cannot be.</b> A sound-card bench means one interface,
+    /// so a bench naming two has to be turned away — but <c>Unknown</c> is the answer for every
+    /// WDM-KS pairing, correct ones included, so refusing that would make a whole host API
+    /// unusable. The two cases had to be told apart before either could be acted on: this one is
+    /// <i>positive</i> evidence of two interfaces, where <c>Unknown</c> is the absence of
+    /// evidence either way.</para>
+    ///
+    /// <para>A bench that really has two cards is not refused the measurement, only this spelling
+    /// of it: two cards are what <c>DeviceKind.Split</c> is for, and it opens a stream per card so
+    /// the two clocks never share a ring.</para>
+    /// </summary>
+    DifferentInterfaces,
+
+    /// <summary>
     /// Two devices we cannot tie together. Warned about, never refused: WDM-KS names carry no
     /// interface at all (<c>In 1-2 (In 1-2)</c> against <c>Out 1-2 (Out 1-2)</c>), so blocking on
     /// names would make that host API unusable on hardware where it is the best choice.
@@ -378,21 +397,81 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
         deviceName is not null
         && deviceName.EndsWith(RenderLoopbackSuffix, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Whether the two devices look like one physical interface. Advisory — see <see cref="SoundCardPairing.Unknown"/>.</summary>
+    /// <summary>
+    /// Whether the two devices look like one physical interface. Advisory in three of its four
+    /// answers — see <see cref="SoundCardPairing.Unknown"/> for why, and
+    /// <see cref="SoundCardPairing.DifferentInterfaces"/> for the one that is not.
+    /// </summary>
     public static SoundCardPairing Pairing(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {
         if (input.Index == output.Index && input.IsFullDuplex)
             return SoundCardPairing.FullDuplexDevice;
 
-        if (input.HostApiIndex != output.HostApiIndex)
-            return SoundCardPairing.Unknown;
-
         string inStem = InterfaceStem(input.Name);
         string outStem = InterfaceStem(output.Name);
+
+        // **Tested before the host-API check, and that order is the whole of what makes the verdict
+        // usable.** Two names that each reveal an interface, and reveal different ones, are two
+        // cards whichever host APIs they were enumerated under -- so answering Unknown merely
+        // because the APIs differ would throw away the evidence in exactly the pairing a two-card
+        // bench has. Both stems have to be non-empty: one of them empty is the WDM-KS case, where a
+        // name carries no interface and there is nothing to compare.
+        if (inStem.Length > 0 && outStem.Length > 0
+            && !string.Equals(inStem, outStem, StringComparison.OrdinalIgnoreCase))
+        {
+            return SoundCardPairing.DifferentInterfaces;
+        }
+
+        // Same interface across two host APIs is left as Unknown rather than claimed as a match:
+        // one card's WASAPI input against its own ASIO output is two driver instances of one
+        // converter, which this code has never opened and has no measurement to say is sound.
+        if (input.HostApiIndex != output.HostApiIndex)
+            return SoundCardPairing.Unknown;
 
         return inStem.Length > 0 && string.Equals(inStem, outStem, StringComparison.OrdinalIgnoreCase)
             ? SoundCardPairing.NamesMatch
             : SoundCardPairing.Unknown;
+    }
+
+    /// <summary>
+    /// Why these two devices cannot be one <c>DeviceKind.SoundCard</c> bench, or null — the
+    /// narrowing of a sound card to a single physical interface.
+    ///
+    /// <para><b>Positive evidence only.</b> It fires on
+    /// <see cref="SoundCardPairing.DifferentInterfaces"/> and on nothing else, so a WDM-KS pairing
+    /// whose names say nothing (<see cref="SoundCardPairing.Unknown"/>) still opens exactly as it
+    /// did. That asymmetry is deliberate: refusing a working bench is worse than letting an odd one
+    /// through, and the odd one still gets the drift warning it always got.</para>
+    ///
+    /// <para>The message names Split rather than merely refusing, because the bench the user has
+    /// built is a real one and this build does measure it — just under the other analyzer kind,
+    /// which opens a stream per card so the two clocks never share a ring.</para>
+    ///
+    /// <para><b>Deliberately narrower than <c>ClockDriftCorrection.UsesTwoCards</c>, which asks the
+    /// same question of a stored configuration and must not be reused here.</b> That one compares
+    /// <see cref="SoundCardCatalog.CardOf"/>, which falls back to the <i>whole device name</i> where
+    /// a name carries no interface — so under WDM-KS it compares <c>In 1-2 (In 1-2)</c> against
+    /// <c>Out 1-2 (Out 1-2)</c> and calls one card two. That is the right trade where it lives: the
+    /// cost of a false positive there is offering a drift correction for a bench that needs none.
+    /// Here the cost is refusing a bench that works, on the one host API where refusing leaves
+    /// nothing — so this requires both names to say which card they are, and answers nothing
+    /// otherwise. Two rules because the two have different costs of being wrong, not because
+    /// nobody noticed.</para>
+    /// </summary>
+    public static string? OneInterfaceProblem(
+        SoundCardDeviceDescriptor? input, SoundCardDeviceDescriptor? output)
+    {
+        // One direction is one device and therefore one clock: there is no pairing to doubt, and
+        // this is also every half of a split, whose settings are masked to a single direction.
+        if (input is null || output is null)
+            return null;
+
+        if (Pairing(input, output) != SoundCardPairing.DifferentInterfaces)
+            return null;
+
+        return $"'{input.Name}' and '{output.Name}' are different interfaces, so they are two "
+            + "clocks. A sound card bench is one interface; for two, choose Split as the analyzer "
+            + "and give it a card on each half, which opens a stream per card.";
     }
 
     /// <summary>

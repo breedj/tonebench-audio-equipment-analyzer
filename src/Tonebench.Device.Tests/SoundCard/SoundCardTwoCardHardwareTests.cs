@@ -363,9 +363,15 @@ public class SoundCardTwoCardHardwareTests(ITestOutputHelper output)
     /// </summary>
     private static bool SameInterface(SoundCardDeviceDescriptor input, SoundCardDeviceDescriptor output)
     {
-        if (SoundCardEnumerator.Pairing(input, output)
-            is SoundCardPairing.FullDuplexDevice or SoundCardPairing.NamesMatch)
-            return true;
+        switch (SoundCardEnumerator.Pairing(input, output))
+        {
+            case SoundCardPairing.FullDuplexDevice or SoundCardPairing.NamesMatch:
+                return true;
+
+            // Positive evidence of two cards, which is what this is looking for.
+            case SoundCardPairing.DifferentInterfaces:
+                return false;
+        }
 
         return string.Equals(InterfaceOf(input), InterfaceOf(output), StringComparison.OrdinalIgnoreCase);
 

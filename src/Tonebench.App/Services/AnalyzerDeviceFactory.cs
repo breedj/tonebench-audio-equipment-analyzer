@@ -146,7 +146,7 @@ public class AnalyzerDeviceFactory
     private IAnalyzerDevice Build(DeviceKind kind) =>
         kind switch
         {
-            DeviceKind.Simulated => CreateSimulator(),
+            DeviceKind.Simulated => CreateSimulator(StoredAllow384kHz),
 
             // Built from the settings as they stand right now rather than from a captured copy: a
             // card chosen or calibrated since the last switch must be the one that opens, and the
@@ -155,14 +155,30 @@ public class AnalyzerDeviceFactory
 
             DeviceKind.Split => BuildSplit(),
 
-            // Allow384kHz is a Func, so unlike the sound card's settings it is NOT captured here:
-            // the checkbox takes effect on this already-built device, and a device built before the
-            // configuration document was read still reports the right rates. See
-            // Qa40xUsbDevice.Allow384kHz.
-            _ => new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>())
-            {
-                Allow384kHz = () => _experimental384k.Enabled,
-            },
+            _ => CreateQa40x(StoredAllow384kHz),
+        };
+
+    /// <summary>
+    /// The experimental 384 kHz opt-in, as the configuration document holds it.
+    ///
+    /// <para>A <c>Func</c> and not a captured value, so unlike the sound card's settings it is NOT
+    /// read here: the checkbox takes effect on an already-built device, and a device built before
+    /// the configuration database was read still reports the right rates. See
+    /// <c>Qa40xUsbDevice.Allow384kHz</c>.</para>
+    /// </summary>
+    private Func<bool> StoredAllow384kHz => () => _experimental384k.Enabled;
+
+    /// <summary>
+    /// A QA40x, with the rate gate the caller decides.
+    ///
+    /// <para>One constructor for both callers so the gate is the only thing that differs between a
+    /// standalone analyzer and a split's half — the duplicate it replaced is how one of them comes
+    /// to be built differently from the other without anyone deciding it should.</para>
+    /// </summary>
+    private IAnalyzerDevice CreateQa40x(Func<bool> allow384kHz) =>
+        new Qa40xUsbDevice(_loggerFactory.CreateLogger<Qa40xUsbDevice>())
+        {
+            Allow384kHz = allow384kHz,
         };
 
     /// <summary>
@@ -216,10 +232,38 @@ public class AnalyzerDeviceFactory
             input, output, settings, _loggerFactory.CreateLogger<SplitAnalyzerDevice>());
     }
 
+    /// <summary>
+    /// One half of a composite analyzer.
+    ///
+    /// <para><b>A QA40x or simulated half always offers 384 kHz</b>, whatever the experimental
+    /// opt-in says, and that is safe by construction rather than by permission. The restriction
+    /// exists to protect the QA403's <i>output</i> protection relay, which that rate's DAC drives
+    /// into near-DC mangling — and what protects it is not this gate but
+    /// <see cref="Qa40xModel.MaxGeneratorSampleRateHz"/> (192 kHz, hardcoded) together with
+    /// <c>DeviceSessionService.RequireGeneratorRateUsable</c>. On a split the generator is the
+    /// <em>other</em> device: <see cref="SplitAnalyzerDevice.Capabilities"/> takes its output ladder
+    /// from the output half's <c>OutputSampleRatesHz</c> filtered by that half's own
+    /// <c>MaxGeneratorSampleRateHz</c>, so a capture-side 384 kHz cannot raise it by one rung.
+    /// </para>
+    ///
+    /// <para>And it is the one bench the rate exists for — a QA403 capturing to about 180 kHz while
+    /// something else plays — so meeting it behind a checkbox in a dialog a split no longer opens
+    /// was a setting standing between the user and the reason they paired two devices. A standalone
+    /// QA403 keeps the opt-in, where the rate really should not arrive unasked: its own DAC reads
+    /// 12 dB low with about 44 % distortion there. <c>ConfigRepository</c>'s
+    /// <c>Experimental384kConfig</c> records that measurement.</para>
+    /// </summary>
     private IAnalyzerDevice BuildHalf(DeviceKind kind, SoundCardStreamDirection direction, bool ownStreamThread) =>
-        ApplyStoredSettings(kind == DeviceKind.SoundCard
-            ? CreateSoundCard(_soundCard.DeviceSettings.ForDirection(direction), ownStreamThread)
-            : Build(kind));
+        ApplyStoredSettings(kind switch
+        {
+            DeviceKind.SoundCard => CreateSoundCard(
+                _soundCard.DeviceSettings.ForDirection(direction), ownStreamThread),
+            DeviceKind.Simulated => CreateSimulator(SplitAllows384kHz),
+            _ => CreateQa40x(SplitAllows384kHz),
+        });
+
+    /// <summary>Always, on a split — see <see cref="BuildHalf"/> for why that is safe.</summary>
+    private static Func<bool> SplitAllows384kHz => static () => true;
 
     /// <summary>
     /// A sound card from the settings given, which for one half of a split are masked to one
@@ -281,9 +325,9 @@ public class AnalyzerDeviceFactory
     /// <para><see cref="SimulatedDevice"/>'s own defaults keep all three on — a large number of tests
     /// are written against that bench, and a device built directly still gets it.</para>
     /// </summary>
-    private SimulatedDevice CreateSimulator()
+    private SimulatedDevice CreateSimulator(Func<bool> allow384kHz)
     {
-        var device = new SimulatedDevice { Allow384kHz = () => _experimental384k.Enabled };
+        var device = new SimulatedDevice { Allow384kHz = allow384kHz };
         device.SignalProfile = device.SignalProfile with { HumEnabled = false };
         return device;
     }

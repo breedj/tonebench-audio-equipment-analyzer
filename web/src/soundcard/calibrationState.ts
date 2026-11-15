@@ -9,7 +9,7 @@ import type { SoundCardConfig } from '../api/client'
  * calibrated card from a mis-calibrated one. Until 2026-11-11 only <c>calibratedUtc</c> was
  * recorded, which says <i>when</i> and not <i>what</i>.</p>
  *
- * <p>Separate from <c>SoundCardDialog.vue</c> because nothing in a <c>.vue</c> is testable under
+ * <p>Separate from <c>DeviceSettingsDialog.vue</c> because nothing in a <c>.vue</c> is testable under
  * the node environment vitest runs in, and because the one rule that matters here is easy to get
  * backwards — see {@link calibrationState}'s third bullet.</p>
  */

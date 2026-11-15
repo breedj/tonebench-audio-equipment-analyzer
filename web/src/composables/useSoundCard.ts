@@ -277,6 +277,26 @@ export function useSoundCard() {
    * calibration. Both together because a stereo loopback makes it possible: one press, both figures
    * measured under identical conditions, and the difference between them available immediately.
    */
+  /**
+   * The output step measured by the analyzer rather than read off a voltmeter — the mirror of
+   * {@link measureInputViaLoopback}, and the same shape.
+   */
+  async function measureOutputViaAnalyzer(dbFs: number) {
+    busy.value = true
+    try {
+      calibrationResult.value = await api.measureSoundCardOutputViaAnalyzer(dbFs)
+      error.value = calibrationResult.value.warning
+      await load(true)
+      return true
+    } catch (e) {
+      error.value = (e as Error).message
+      return false
+    } finally {
+      await syncCalibrationState()
+      busy.value = false
+    }
+  }
+
   async function measureInputViaLoopback(dbFs: number) {
     busy.value = true
     try {
@@ -401,5 +421,6 @@ export function useSoundCard() {
     applyOutput,
     measureInput,
     measureInputViaLoopback,
+    measureOutputViaAnalyzer,
   }
 }

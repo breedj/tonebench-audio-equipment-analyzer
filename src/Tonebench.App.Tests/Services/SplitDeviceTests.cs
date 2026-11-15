@@ -168,6 +168,80 @@ public class SplitDeviceTests
         Assert.Equal(48_000.0, setting.GeneratorSampleRateHz);
     }
 
+    // ---- the experimental 384 kHz rate on a split ----
+
+    /// <summary>
+    /// <b>A split's halves always offer 384 kHz, whatever the experimental opt-in says.</b>
+    ///
+    /// <para>It is the one bench the rate exists for — a QA403 capturing to about 180 kHz while a
+    /// different device plays — and meeting it behind a checkbox in a dialog a split no longer
+    /// opens was a setting standing between the user and the reason they paired two devices.</para>
+    ///
+    /// <para>Asserted on the <i>simulator</i>, which mirrors the QA403's ladder and its generator
+    /// ceiling, so the whole rule is testable with nothing attached.</para>
+    /// </summary>
+    [Fact]
+    public void ASplitsHalves_Offer384kHz_WithTheExperimentalSettingOff()
+    {
+        var experimental = new Experimental384kSetting { Enabled = false };
+        var factory = new AnalyzerDeviceFactory(
+            NullLoggerFactory.Instance,
+            DeviceKind.Split,
+            experimental384k: experimental,
+            split: new SplitDeviceSetting { Config = new SplitDeviceConfig("Simulated", "Simulated") });
+
+        IAnalyzerDevice split = factory.Create(DeviceKind.Split);
+        using var _ = split as IDisposable;
+
+        Assert.Contains(384_000.0, split.Capabilities.SampleRatesHz);
+    }
+
+    /// <summary>
+    /// And the restriction the rate exists under is untouched, which is why the above is safe.
+    ///
+    /// <para>What 384 kHz damages is the QA403's <i>output</i>: the DAC returns a tone about 12 dB
+    /// low at roughly 44 % distortion, with enough near-DC content to cycle the device's own
+    /// protection relay. What protects it is <c>Qa40xModel.MaxGeneratorSampleRateHz</c> and
+    /// <c>RequireGeneratorRateUsable</c>, not the opt-in — and on a split the generating half's own
+    /// ceiling is what filters the composite's output ladder. So the capture side gains the rate and
+    /// the generator cannot reach it by a single rung.</para>
+    /// </summary>
+    [Fact]
+    public void ASplitsGeneratorLadder_StillStopsAtTheGeneratingHalfsOwnCeiling()
+    {
+        var factory = new AnalyzerDeviceFactory(
+            NullLoggerFactory.Instance,
+            DeviceKind.Split,
+            experimental384k: new Experimental384kSetting { Enabled = false },
+            split: new SplitDeviceSetting { Config = new SplitDeviceConfig("Simulated", "Simulated") });
+
+        IAnalyzerDevice split = factory.Create(DeviceKind.Split);
+        using var _ = split as IDisposable;
+        DeviceCapabilities capabilities = split.Capabilities;
+
+        Assert.DoesNotContain(384_000.0, capabilities.OutputSampleRatesHz);
+        Assert.Equal(192_000.0, capabilities.OutputSampleRatesHz.Max());
+    }
+
+    /// <summary>
+    /// A standalone analyzer is unchanged: the rate still has to be asked for there, because its
+    /// own DAC is what a sweep would be played through.
+    /// </summary>
+    [Fact]
+    public void AStandaloneAnalyzer_StillNeedsTheOptIn()
+    {
+        var experimental = new Experimental384kSetting { Enabled = false };
+        var factory = new AnalyzerDeviceFactory(
+            NullLoggerFactory.Instance, DeviceKind.Simulated, experimental384k: experimental);
+
+        IAnalyzerDevice device = factory.Create(DeviceKind.Simulated);
+        Assert.DoesNotContain(384_000.0, device.Capabilities.SampleRatesHz);
+
+        // And the gate is still live rather than captured, so the checkbox reaches a built device.
+        experimental.Enabled = true;
+        Assert.Contains(384_000.0, device.Capabilities.SampleRatesHz);
+    }
+
     // ---- the factory ----
 
     /// <summary>

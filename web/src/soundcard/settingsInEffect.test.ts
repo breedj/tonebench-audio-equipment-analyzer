@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 // `slice(0, -1)`, which is almost the whole file and contains whatever was being looked for. The
 // test passes and guards nothing. That is the same line-ending trap `numberField.test.ts` records.
 const source = readFileSync(
-  fileURLToPath(new URL('../components/SoundCardDialog.vue', import.meta.url)),
+  fileURLToPath(new URL('../components/DeviceSettingsDialog.vue', import.meta.url)),
   'utf8',
 )
   .replace(/^﻿/, '')

@@ -102,8 +102,8 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
     /// moves to the stepped sine. Capturing a 44.1 kHz DAC at 192 kHz is also the better measurement
     /// than matching its rate would be: it is the only way to see the reconstruction images and
     /// shaped noise above 22 kHz, which is the half of a 44.1 kHz converter worth looking at. The
-    /// dead band that creates is the point rather than a cost — <c>SplitDeviceDialog</c>'s own rate
-    /// note already says so.</para>
+    /// dead band that creates is the point rather than a cost — the device dialog's own rate note
+    /// already says so.</para>
     ///
     /// <para><b>What raising the ceiling did and did not cost.</b> Nothing downstream is sized in
     /// frames: <c>SoundCardDevice.TargetBufferedSeconds</c> asks PortAudio for its rings as a time,

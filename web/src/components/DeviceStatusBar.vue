@@ -255,9 +255,8 @@ const emit = defineEmits<{
   setDeviceKind: [kind: DeviceKindName]
   setRangingMode: [mode: RangingModeName]
   setInputRange: [dbv: number]
-  openSoundCard: []
+  openDevices: []
   openQa40x: []
-  openSplit: []
   openLoad: []
   setExternalGain: [gain: { leftDb: number; rightDb: number; unit: GainUnit }]
   setOutputRange: [dbv: number]
@@ -537,6 +536,20 @@ const telemetryStaleTitle =
 const isSoundCard = computed(() => splitHalves.value.includes('SoundCard'))
 
 /**
+ * Whether this bench has devices to choose, which is the one gear that replaced three.
+ *
+ * <p>A plain sound card and a split both do: one picks the card and calibrates it, the other picks
+ * both halves by name, their cards, the generator's rate and the clock drift. A QA40x or the
+ * simulator has nothing to pick — the analyzer <em>is</em> the device — so it keeps only the gear
+ * beside this one.</p>
+ *
+ * <p>Three gears stood here until the merge, keyed on the <i>halves</i> so that every setting in
+ * the path had one: a card+QA40x split showed all three at once, which is what made configuring
+ * such a bench a tour of three dialogs with a prose link between two of them.</p>
+ */
+const hasDeviceSettings = computed(() => isSoundCard.value || isSplit.value)
+
+/**
  * Whose gear button is the QA40x's.
  *
  * <p>The simulator is included deliberately: it models a QA403 and mirrors its generator rate
@@ -566,7 +579,13 @@ const splitHalves = computed<DeviceKindName[]>(() =>
 )
 
 const isQa40x = computed(
-  () => splitHalves.value.includes('Hardware') || splitHalves.value.includes('Simulated'),
+  () =>
+    // Not on a split, where the one device dialog carries the ranging delay itself and the 384 kHz
+    // opt-in does not apply: a split's QA40x half always has the rate, the generator being another
+    // device. A second gear there would open a dialog whose one applicable row is duplicated and
+    // whose other decides nothing about this bench.
+    !isSplit.value
+    && (splitHalves.value.includes('Hardware') || splitHalves.value.includes('Simulated')),
 )
 
 /**
@@ -724,20 +743,31 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
         <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
       </svg>
     </button>
-    <!-- The split's own settings: which two devices, and the generator's rate. -->
+    <!-- The devices this bench is made of: the card and its calibration, and on a split both
+         halves by name, the generator's rate and the clock drift. Keyed on the selected analyzer
+         rather than on a connection, like the gear beside it: the devices have to be choosable
+         before either half is up, and when nothing is chosen yet this button is the only way to
+         get anywhere.
+
+         The braid on a split and the cog on a plain card — the two glyphs the two gears had, since
+         what the dialog opens on really is two different pictures. -->
     <button
-      v-if="isSplit"
+      v-if="hasDeviceSettings"
       type="button"
       class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-      aria-label="Split device settings"
-      :title="splitTitle"
-      @click="emit('openSplit')"
+      :aria-label="isSplit ? 'Split device settings' : 'Sound card settings'"
+      :title="isSplit ? splitTitle : soundCardTitle"
+      @click="emit('openDevices')"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg v-if="isSplit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 7h5l4 5 4-5h5" />
         <path d="M3 17h5l4-5" />
         <circle cx="20" cy="7" r="1.6" />
         <circle cx="20" cy="17" r="1.6" />
+      </svg>
+      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
       </svg>
     </button>
     <!--
@@ -755,22 +785,10 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       Gen rate
       <span :class="BAR_READOUT">{{ generatorRate.text }}</span>
     </span>
-    <!-- Sound-card settings. Keyed on the selected analyzer rather than on a connection, for the
-         same reason the simulator's controls are: the card has to be choosable before it is up,
-         and when nothing is chosen yet this button is the only way to get anywhere. -->
-    <button
-      v-if="isSoundCard"
-      type="button"
-      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-      aria-label="Sound card settings"
-      :title="soundCardTitle"
-      @click="emit('openSoundCard')"
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
-      </svg>
-    </button>
+    <!-- NOTE: the sound card's own gear stood here until the merge, beside the split's and the
+         QA40x's. One gear opens all of it now -- see hasDeviceSettings, above the Analyzer
+         picker -- and it is placed there rather than here because on a split it is the pairing's
+         button and belongs next to the thing that selected the split. -->
     <!-- Said out loud rather than left to be discovered: every ratio is still exact, but nothing
          on screen is a voltage until both calibration steps have run. -->
     <span

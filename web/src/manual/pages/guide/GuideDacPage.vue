@@ -34,15 +34,17 @@ const { showPage } = useManual()
       and set:
     </p>
     <ul>
-      <li><strong>Generates</strong> — Sound card. That is the DAC being tested.</li>
-      <li><strong>Captures</strong> — QA40x. That is the analyzer.</li>
+      <li><strong>Output card</strong> — your DAC, by name. That is the thing being tested.</li>
+      <li><strong>Input card</strong> — QA40x. That is the analyzer.</li>
       <li><strong>Generator rate</strong> — leave it on <em>Follow the capture rate</em> for now.</li>
     </ul>
     <p>
-      Press <strong>Save</strong>. Which DAC it is still has to be chosen in the sound-card
-      settings, the same place a sound-card bench picks its card —
+      There is no Save button: each pick applies itself. The two lists hold the
+      <strong>QA40x</strong> first, then every sound card the machine has, then the
+      <strong>Simulator</strong> — so choosing the DAC here is the whole job, and the rows that
+      appear underneath it are the ones that DAC needs. If you want to know what they mean,
       <button type="button" class="manual-link" @click="showPage('guide-sound-card')">Using a sound
-      card instead</button> covers that, and you only need the <em>output</em> side of it.
+      card instead</button> covers them, and you only need the <em>output</em> side of it.
     </p>
 
     <h2>What works straight away</h2>
@@ -64,7 +66,7 @@ const { showPage } = useManual()
     </p>
     <ul>
       <li>
-        <strong>Measure the drift once.</strong> In the split settings there is a <strong>Clock
+        <strong>Measure the drift once.</strong> In the same dialog there is a <strong>Clock
         drift</strong> panel with a button. It takes about a minute, needs no re-plugging, and
         afterwards the chirp screens offer to correct for it. See
         <button type="button" class="manual-link" @click="showPage('clock-drift')">Clock
@@ -86,7 +88,7 @@ const { showPage } = useManual()
 
     <h2>Playing at one rate and listening at another</h2>
     <p>
-      There is a <strong>Generator rate</strong> setting in the split settings, and it is worth
+      There is a <strong>Generator rate</strong> setting in that same dialog, and it is worth
       knowing what it is for. A DAC is usually most interesting when it is fed the rate it was built
       for while you listen much wider — that way the extra noise and the images a DAC puts
       <em>above</em> the music are in the picture instead of off the edge of it.

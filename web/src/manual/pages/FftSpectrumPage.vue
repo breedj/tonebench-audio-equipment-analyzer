@@ -281,9 +281,10 @@ const { showPage } = useManual()
             Sets the top of the analysed band to half of it — 48 kHz reaches 24 kHz, 192 kHz reaches
             96 kHz. Take the higher rates when you need to see high-order harmonics of a high
             fundamental; take a lower one when you do not, since the record covers more time for the
-            same number of points. The experimental 384 kHz appears here only once it is enabled in
-            Configuration ▸ Acquisition, and it is capture-only: picking it takes the Generator panel
-            out of service for as long as it is selected.
+            same number of points. The experimental 384 kHz appears here once it is enabled in
+            Configuration ▸ Acquisition, and always on a split whose capturing half is a QA40x or
+            the simulator. It is capture-only on a single device: picking it takes the Generator
+            panel out of service for as long as it is selected.
           </td>
         </tr>
         <tr>
@@ -662,8 +663,8 @@ const { showPage } = useManual()
       the window, so the other end moves instead: a From at or above the current To pushes To up to
       the next entry above it, and a To at or below the current From pulls From down to the next
       entry below. The <strong>To</strong> list ends at 100 kHz,
-      which covers a 192 kHz capture whole; enabling the experimental 384 kHz rate adds a 200 kHz
-      entry to it, so the wider band can be chosen by hand and not only reached with Autofit. <strong>Units</strong> picks what the level axis reads:
+      which covers a 192 kHz capture whole; a bench that can reach 384 kHz gets a 200 kHz entry as
+      well, so the wider band can be chosen by hand and not only reached with Autofit. <strong>Units</strong> picks what the level axis reads:
       <strong>dBV</strong> per bin; <strong>dBV/√Hz</strong>, a noise density, which is the bin's
       power spread over the window's equivalent noise bandwidth (dBV − 10·log₁₀ ENBW, about
       −6.4 dB for Hann at 65536 points and 192 kHz) so a noise floor sits at the same height

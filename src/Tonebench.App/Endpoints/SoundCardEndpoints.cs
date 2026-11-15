@@ -254,6 +254,30 @@ public static class SoundCardEndpoints
             }
         });
 
+        // The output step's other route: the analyzer reads the card instead of a voltmeter. Only
+        // reachable where the capturing half is not a card -- the runner refuses it otherwise, and
+        // the dialog does not offer it.
+        calibration.MapPost("/output/measure", async (
+            SoundCardLoopbackRequest request, SoundCardCalibrationRunner runner,
+            DeviceSessionService session, IEnumerable<IMeasurementRun> runs, CancellationToken ct) =>
+        {
+            if (MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            try
+            {
+                return Results.Ok(await runner.MeasureOutputViaAnalyzerAsync(request.DbFs, ct));
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // Also reached from the client's own teardown, so a dialog closed mid-step never leaves a
         // tone playing.
         calibration.MapPost("/cancel", async (SoundCardCalibrationRunner runner, CancellationToken ct) =>

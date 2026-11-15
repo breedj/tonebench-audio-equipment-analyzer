@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import type { DeviceRanges } from '../api/client'
 import { useChartDisplay } from '../composables/useChartDisplay'
-import { useExperimental384k } from '../composables/useExperimental384k'
 import { useSpectrumConfig } from '../composables/useSpectrumConfig'
 import {
   FREQ_FROM_PRESETS,
@@ -21,6 +21,13 @@ import type { AnnotationStyle } from '../measurements/chartAnnotations'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedToggle from './SegmentedToggle.vue'
+
+/**
+ * The bench's rate ladders, for the one preset that depends on them. Handed down from the app's own
+ * range read rather than fetched here: a panel that polls is the fault ConfigDialog's draft-string
+ * bug was, and `useDevice` is not a singleton -- calling it would start a second poll.
+ */
+const props = defineProps<{ ranges?: DeviceRanges | null }>()
 
 const {
   yTop,
@@ -78,22 +85,25 @@ watch(processLeft, (enabled) => { visibleL.value = enabled }, { immediate: true 
 watch(processRight, (enabled) => { visibleR.value = enabled }, { immediate: true })
 
 /**
- * Nyquist's own bucket for the experimental 384 kHz rate (the top of Autofit's ladder — see
- * autofitFreqToFor in SpectrumChart.vue), offered only while that rate is: the list otherwise ends
- * at 100 kHz, which is the whole of a 192 kHz capture and all any other rate can show.
+ * Nyquist's own bucket for the 384 kHz rate (the top of Autofit's ladder — see autofitFreqToFor in
+ * SpectrumChart.vue), offered only on a bench that can reach it: the list otherwise ends at
+ * 100 kHz, which is the whole of a 192 kHz capture and all any other rate can show.
  *
  * It has to be a *preset* rather than something Autofit leaves behind. withCurrentValue below folds
  * whatever is selected into the list, so pressing Autofit at 384 kHz did put 200000 in the dropdown
  * — and picking any other entry dropped it again, with no way back to the band short of another
- * Autofit. Keyed on the setting and not on the staged sample rate, so the entry does not appear and
- * vanish as the rate is changed; a window wider than Nyquist just shows empty spectrum above it,
- * which 100 kHz already does at 48 and 96 kHz.
+ * Autofit. A window wider than Nyquist just shows empty spectrum above it, which 100 kHz already
+ * does at 48 and 96 kHz.
+ *
+ * <p><b>Keyed on the rates the bench reports, not on the experimental checkbox.</b> It was that
+ * checkbox until a split's halves started offering the rate unasked — see
+ * <c>AnalyzerDeviceFactory.BuildHalf</c> — which left the rate reachable on exactly the bench it
+ * exists for and no window in which to see it. The reported ladder is a property of the bench
+ * rather than of the staged rate, so the original reasoning survives: the entry does not appear and
+ * vanish as the rate is changed.</p>
  */
 const EXPERIMENTAL_384K_FREQ_TO_HZ = 200000
-const { experimental384kEnabled, load: loadExperimental384k } = useExperimental384k()
-// Idempotent (the composable keeps one in-flight promise). ConfigDialog is the only other caller
-// and it is mounted on demand, so this screen cannot rely on its having run.
-void loadExperimental384k()
+const canReach384k = computed(() => (props.ranges?.sampleRatesHz ?? []).includes(384000))
 
 // Dropdowns, like Stimulus — but Autofit can land on a value outside the preset list (e.g. 25000,
 // from the sample-rate-derived target), so the current value is folded into its own list rather
@@ -104,7 +114,7 @@ function withCurrentValue(presets: number[], current: number): number[] {
 const fromOptions = computed(() => withCurrentValue([...FREQ_FROM_PRESETS], xFrom.value))
 const toOptions = computed(() =>
   withCurrentValue(
-    experimental384kEnabled.value ? [...FREQ_TO_PRESETS, EXPERIMENTAL_384K_FREQ_TO_HZ] : [...FREQ_TO_PRESETS],
+    canReach384k.value ? [...FREQ_TO_PRESETS, EXPERIMENTAL_384K_FREQ_TO_HZ] : [...FREQ_TO_PRESETS],
     xTo.value,
   ),
 )

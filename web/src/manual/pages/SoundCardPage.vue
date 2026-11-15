@@ -362,8 +362,10 @@ const { showPage } = useManual()
       <strong>Two interfaces is a different analyzer, not a mode of this one.</strong> A
       playback-only DAC against a capture-only ADC, or any two cards, is
       <strong>Split (two devices)</strong> with a card on each half: it opens a stream per card, so
-      the two clocks never share a buffer and each may even run at its own sample rate. Both cards
-      are still picked on this dialog — see
+      the two clocks never share a buffer and each may even run at its own sample rate. On that
+      bench this same dialog is titled <strong>Split devices</strong> and its two card dropdowns
+      name the <em>devices</em> — the QA40x and the simulator beside the cards — so both halves are
+      chosen in one place; everything below them works exactly as it does here. See
       <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
     </p>
 
@@ -386,9 +388,9 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
     </p>
     <p>
-      Both halves of that are in the dialog, so neither has to be worked out. The card dropdowns
-      offer each ASIO card's WASAPI entry beside its ASIO one whenever the bench is a split with a
-      card on each half, so the move is one pick and does not need <strong>Advanced</strong>. And a
+      Both halves of that are in the dialog, so neither has to be worked out. The two device
+      dropdowns offer each ASIO card's WASAPI entry beside its ASIO one whenever the bench is a
+      split with a card on each half, so the move is one pick and does not need <strong>Advanced</strong>. And a
       pair that is still two ASIO cards says so in red, naming both and what to do — it has to,
       because nothing else on that screen can tell: each card is probed on its own, both answer with
       a healthy list of rates, and without the message the first sign that the bench cannot be opened
@@ -522,6 +524,18 @@ const { showPage } = useManual()
 
     <h3>Step 1 — Full scale output</h3>
     <p>This one needs a voltmeter, and it must be done first: step 2 can depend on it.</p>
+    <p class="manual-callout">
+      <strong>On a split, there may be a second route.</strong> Where the card is the half that
+      <em>plays</em> and the half that <em>captures</em> is a QA40x, the dialog offers
+      <strong>Measured by</strong> above the output level: a voltmeter, or the analyzer's own input.
+      The QA40x's input level is a factory figure, so it reads volts — which is the same trick step
+      2 uses in the other direction, and it means this step needs no meter at all. Connect the
+      card's output straight to the analyzer's input, both channels, and press
+      <strong>Measure peak output</strong>: it plays the tone, reads it back and stores the figure
+      in one press. Nothing in between — an attenuator would be measured as if it were the card,
+      unless it is declared as the external input gain. On a plain sound-card bench the route does
+      not exist, because the only other end is the same uncalibrated card.
+    </p>
     <ol>
       <li>
         Connect a voltmeter (or a scope) across the <strong>output</strong> channel. An AC

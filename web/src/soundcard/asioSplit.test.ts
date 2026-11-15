@@ -229,7 +229,7 @@ describe('asioSplitProblem', () => {
  */
 describe('the card dialog', () => {
   const source = readFileSync(
-    fileURLToPath(new URL('../components/SoundCardDialog.vue', import.meta.url)),
+    fileURLToPath(new URL('../components/DeviceSettingsDialog.vue', import.meta.url)),
     'utf8',
   )
 

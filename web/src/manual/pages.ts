@@ -415,7 +415,7 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     id: 'split-device',
     title: 'Two devices, one analyzer',
     summary:
-      'One device plays and another captures: measuring a USB DAC with the QA403, what two clocks cost, and running the two halves at different rates.',
+      'One device plays and another captures: choosing both halves in the Split devices dialog, measuring a USB DAC with the QA403, what two clocks cost, and running the halves at different rates.',
     group: 'Basics',
     component: manualPage(() => import('./pages/SplitDevicePage.vue')),
   },

@@ -67,8 +67,7 @@ import MetricPickerDialog from './components/MetricPickerDialog.vue'
 import ConfigDialog from './components/ConfigDialog.vue'
 import ProgrammableLoadDialog from './components/ProgrammableLoadDialog.vue'
 import Qa40xDialog from './components/Qa40xDialog.vue'
-import SoundCardDialog from './components/SoundCardDialog.vue'
-import SplitDeviceDialog from './components/SplitDeviceDialog.vue'
+import DeviceSettingsDialog from './components/DeviceSettingsDialog.vue'
 import { useProgrammableLoad } from './composables/useProgrammableLoad'
 import { useSoundCard } from './composables/useSoundCard'
 import AboutDialog from './components/AboutDialog.vue'
@@ -632,9 +631,12 @@ const metricPickerOpen = ref(false)
 // The FFT screen's metrics block, handed to SpectrumChart so its height fit leaves room for it.
 const fftAbove = ref<HTMLDivElement | null>(null)
 const configDialogOpen = ref(false)
-const soundCardDialogOpen = ref(false)
+// One dialog for the devices a bench is made of: the cards and their calibrations on a plain sound
+// card, and on a split the pairing, the generator's rate and the clock drift as well. It was three
+// dialogs behind three gears until the merge, which put "which device captures" and "which card
+// that is" in two different places with a prose link between them.
+const deviceDialogOpen = ref(false)
 const qa40xDialogOpen = ref(false)
-const splitDialogOpen = ref(false)
 const loadDialogOpen = ref(false)
 const aboutDialogOpen = ref(false)
 const issueReportDialogOpen = ref(false)
@@ -2373,11 +2375,14 @@ function setDeviceKind(kind: import('./api/client').DeviceKindName) {
 }
 
 /**
- * Closing the sound-card dialog re-reads the range ladder: a calibration accepted in there moves the
- * card's single input rung, and the ladder is otherwise only fetched at mount.
+ * Closing the device dialog re-reads the range ladder, for three variations on one reason: a
+ * calibration accepted in there moves the card's single input rung, the pairing decides both rate
+ * ladders and the generator's own rate, and either write reopens the device — and `ranges` is
+ * otherwise only fetched at mount, so without this the panels keep the previous bench's rates for
+ * the rest of the session.
  */
-function closeSoundCardDialog() {
-  soundCardDialogOpen.value = false
+function closeDeviceDialog() {
+  deviceDialogOpen.value = false
   void refreshRanges()
 }
 
@@ -2392,25 +2397,6 @@ function closeSoundCardDialog() {
 function closeQa40xDialog() {
   qa40xDialogOpen.value = false
   void refreshRanges()
-}
-
-/**
- * And so does closing the split's, for a third variation on the same reason: the pairing decides
- * both rate ladders and the generator's own rate, and a Save in there reopens the device. Without
- * this the panels would keep the previous bench's rates for the rest of the session.
- */
-function closeSplitDialog() {
-  splitDialogOpen.value = false
-  void refreshRanges()
-}
-
-/**
- * The split dialog's link to the sound-card one: which card each half is, and its calibration, live
- * in that document rather than in the pairing. One dialog at a time, so this closes on the way.
- */
-function openSoundCardFromSplit() {
-  closeSplitDialog()
-  soundCardDialogOpen.value = true
 }
 
 /**
@@ -6134,7 +6120,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
             </div>
 
             <template #aside>
-              <ChartDisplayPanel>
+              <ChartDisplayPanel :ranges="ranges">
                 <MeasurementChecklist @error="reportError" />
               </ChartDisplayPanel>
             </template>
@@ -6197,9 +6183,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
       @set-simulated-profile="setSimulatedProfile"
       @set-ranging-mode="setRangingMode"
       @set-input-range="setInputRangeManually"
-      @open-sound-card="soundCardDialogOpen = true"
+      @open-devices="deviceDialogOpen = true"
       @open-qa40x="qa40xDialogOpen = true"
-      @open-split="splitDialogOpen = true"
       @open-load="loadDialogOpen = true"
       @set-external-gain="setExternalGain"
       @set-output-range="setOutputRangeManually"
@@ -6305,7 +6290,16 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :client-state="issueReportClientState"
       @close="issueReportDialogOpen = false"
     />
-    <SoundCardDialog :open="soundCardDialogOpen" :status="status" @close="closeSoundCardDialog" />
+    <!-- Fed by the app's own status poll and range read rather than a second one of its own: the
+         generator's rate ladder is the *generating half's* and comes from /ranges, not from a list
+         in the client. The same reasoning as the QA40x dialog beside it, and ConfigDialog's
+         draft-string bug was a dialog that polled. -->
+    <DeviceSettingsDialog
+      :open="deviceDialogOpen"
+      :status="status"
+      :ranges="ranges"
+      @close="closeDeviceDialog"
+    />
     <!-- The status's own poll feeds this rather than a second one of its own: the step-down delay is
          read back off the device, and ConfigDialog's draft-string bug was a dialog that polled. -->
     <Qa40xDialog
@@ -6313,15 +6307,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
       :status="status"
       @close="closeQa40xDialog"
       @configuration="openConfigurationFromQa40x"
-    />
-    <!-- Fed by the app's own status poll and range read, like the QA40x's: the generator's rate
-         ladder is the *generating half's* and comes from /ranges, not from a list in the client. -->
-    <SplitDeviceDialog
-      :open="splitDialogOpen"
-      :status="status"
-      :ranges="ranges"
-      @close="closeSplitDialog"
-      @sound-card="openSoundCardFromSplit"
     />
     <!-- Always mounted, like the others, and fed by the app's own load poll — never one of its own.
          Harmless on a bench with no load: the box that opens it does not exist there. -->

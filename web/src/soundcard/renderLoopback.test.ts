@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 // Normalised: this component is CRLF with a BOM where most of `web/src` is LF. See
 // settingsInEffect.test.ts for what a pattern written with "\n" costs here.
 const source = readFileSync(
-  fileURLToPath(new URL('../components/SoundCardDialog.vue', import.meta.url)),
+  fileURLToPath(new URL('../components/DeviceSettingsDialog.vue', import.meta.url)),
   'utf8',
 )
   .replace(/^\ufeff/, '')

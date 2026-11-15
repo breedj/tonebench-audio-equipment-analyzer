@@ -3,7 +3,7 @@ import type { SoundCardHostApiOption, SoundCardOption } from '../api/client'
 /**
  * Which cards the picker offers, and under which host API.
  *
- * <p>Separate from <c>SoundCardDialog.vue</c> because nothing in a <c>.vue</c> is testable under
+ * <p>Separate from <c>DeviceSettingsDialog.vue</c> because nothing in a <c>.vue</c> is testable under
  * the node environment vitest runs in, and the filtering below is the kind of rule that is wrong
  * in ways no one notices — a card quietly missing from a list looks exactly like a card that is
  * not plugged in.</p>

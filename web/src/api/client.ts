@@ -3893,6 +3893,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ dbFs }),
     }),
+  /**
+   * The output step's other route: the analyzer's own input reads the card, instead of a voltmeter.
+   *
+   * Only on a bench whose capturing half is not a card — a QA40x's input is calibrated and a
+   * card's is the very thing that is not known yet. The server refuses it otherwise.
+   */
+  measureSoundCardOutputViaAnalyzer: (dbFs: number) =>
+    request<SoundCardCalibrationResult>('/soundcard/calibration/output/measure', {
+      method: 'POST',
+      body: JSON.stringify({ dbFs }),
+    }),
   /** What the inputs are hearing right now, for the level bars. */
   getSoundCardLevels: () => request<SoundCardLevels>('/soundcard/levels'),
   /**

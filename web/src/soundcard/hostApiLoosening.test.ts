@@ -22,13 +22,19 @@ import { describe, expect, it } from 'vitest'
  * **It is a narrowing, not a removal, and the case it keeps is the reason.** A stored document
  * whose two endpoints name one interface under two *different* host APIs is still one duplex
  * stream, and still has to be repaired; `separateDevices` is true there (the two keys differ) while
- * `twoCardBench` is false, which is exactly the pair of conditions below.
+ * `isSplitBench` is false, which is exactly the pair of conditions below.
+ *
+ * **Widened from `twoCardBench` to `isSplitBench` when the three device dialogs became one.** The
+ * premise was always "one stream across two host APIs", and *no* split opens one — so a split with
+ * a card on one half and a QA40x on the other was being matched too, which on that bench drags the
+ * *stored* card of a direction the bench does not even open. Unreachable while the halves could
+ * only be changed in another dialog, and reachable from the dropdowns here.
  *
  * Read as text because it lives in a `.vue`, which is not mountable under this suite's node
  * environment — the technique `splitNarrowing.test.ts` and `settingsInEffect.test.ts` use.
  */
 const source = readFileSync(
-  fileURLToPath(new URL('../components/SoundCardDialog.vue', import.meta.url)),
+  fileURLToPath(new URL('../components/DeviceSettingsDialog.vue', import.meta.url)),
   'utf8',
 )
   .replace(/^﻿/, '')
@@ -39,24 +45,24 @@ describe('host APIs are matched only where one stream carries both directions', 
     // Both lists, because giving one side the loosening and not the other produces a pair the
     // dropdowns disagree about.
     const matches = source.match(
-      /separateDevices\.value && !twoCardBench\.value \? form\.(output|input)CardKey : ''/g,
+      /separateDevices\.value && !isSplitBench\.value \? form\.(output|input)CardKey : ''/g,
     )
     expect(matches, 'both card lists gate the cross-collapse').toHaveLength(2)
   })
 
-  it('leaves a two-card bench alone instead of repairing it', () => {
+  it('leaves a split alone instead of repairing it', () => {
     const at = source.indexOf('const matched = matchHostApis(')
     expect(at, 'the repair exists').toBeGreaterThan(-1)
 
     const guard = source.slice(source.lastIndexOf('() => {', at), at)
-    expect(guard).toContain('if (!separateDevices.value || twoCardBench.value) return')
+    expect(guard).toContain('if (!separateDevices.value || isSplitBench.value) return')
   })
 
   it('still repairs the one-stream pair, which is why this is a narrowing', () => {
-    // The guard reads "not separate, OR two cards" -- so a document whose two endpoints are one
-    // interface under two host APIs (separate, not two cards) still falls through to the repair.
-    // A guard written on twoCardBench alone would pass the test above and lose this.
-    expect(source).toContain('if (!separateDevices.value || twoCardBench.value) return')
-    expect(source).not.toContain('if (twoCardBench.value) return\n    const matched')
+    // The guard reads "not separate, OR a split" -- so a document whose two endpoints are one
+    // interface under two host APIs (separate, not a split) still falls through to the repair.
+    // A guard written on isSplitBench alone would pass the test above and lose this.
+    expect(source).toContain('if (!separateDevices.value || isSplitBench.value) return')
+    expect(source).not.toContain('if (isSplitBench.value) return\n    const matched')
   })
 })

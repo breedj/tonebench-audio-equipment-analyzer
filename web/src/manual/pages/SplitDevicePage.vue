@@ -25,8 +25,8 @@ const { showPage } = useManual()
     <p>
       The <strong>Analyzer</strong> dropdown in the status bar offers <strong>Split (two
       devices)</strong> beside the QA40x, the sound card and the simulator. Selecting it puts a
-      <strong>cogwheel</strong> next to the dropdown that opens the split's own settings, where
-      there are three choices:
+      <strong>cogwheel</strong> next to the dropdown that opens <strong>Split devices</strong> —
+      everything this bench is made of, in one dialog. Its first section names the two devices:
     </p>
     <table>
       <thead>
@@ -34,14 +34,19 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>Generates</td>
-          <td>The device the stimulus is played from. Its output range and its generator ceiling are the bench's.</td>
+          <td>Input card</td>
+          <td>
+            The device the measurement is taken with. The list is the <strong>QA40x</strong> first,
+            then every sound card that has an input, then the <strong>Simulator</strong> — so one
+            pick chooses the half <em>and</em>, where it is a card, which card. Its input range, its
+            ranging, its drop counters and — if it has any — its telemetry are the bench's.
+          </td>
         </tr>
         <tr>
-          <td>Captures</td>
+          <td>Output card</td>
           <td>
-            The device the measurement is taken with. Its input range, its ranging, its drop
-            counters and — if it has any — its telemetry are the bench's.
+            The device the stimulus is played from, from the same kind of list. Its output range and
+            its generator ceiling are the bench's.
           </td>
         </tr>
         <tr>
@@ -55,12 +60,19 @@ const { showPage } = useManual()
       </tbody>
     </table>
     <p>
-      <em>Which</em> card each half is, its channel pair and its calibration stay in
-      <button type="button" class="manual-link" @click="showPage('sound-card')">the sound-card
-      settings</button>. There is one card document, and a split simply uses one direction of it —
-      so that dialog shows only the side this bench opens, and says which half the other device is.
-      The unused side's stored settings are left alone, so switching back to the
-      <strong>Sound card</strong> analyzer finds its own bench as it was.
+      Underneath each dropdown are the rows that half needs and no others. Pick a card and you get
+      its channel pair and, further down, its calibration step; pick the QA40x or the simulator and
+      both disappear, because there is nothing there to choose or to calibrate. A half that is not a
+      card <strong>leaves that direction's stored card alone</strong>, so switching back to the
+      <button type="button" class="manual-link" @click="showPage('sound-card')">Sound card</button>
+      analyzer finds its own bench as it was — there is one card document, and a split simply uses
+      one direction of it.
+    </p>
+    <p class="manual-callout">
+      <strong>There is no Save button.</strong> Every change applies itself, which is what the
+      calibration steps need: they drive the device that is actually open. A pairing the app would
+      refuse — a QA40x on both sides, or two cards with ASIO drivers — is simply not written, and
+      says why in red instead.
     </p>
 
     <h3>Calibrating a capture-only converter</h3>
@@ -77,6 +89,29 @@ const { showPage } = useManual()
       whatever error the output calibration carries, and here there is no such figure to inherit from.
       Patch both QA40x outputs to the card's two inputs and press
       <strong>Estimate peak input mV</strong>.
+    </p>
+    <h3>Calibrating a DAC's output without a voltmeter</h3>
+    <p>
+      The same trick runs the other way, and it is the one most people will meet: with the
+      <strong>card generating</strong> and the QA40x capturing, the analyzer's own input is the
+      known quantity, so <strong>Full scale output</strong> needs no meter. Pick
+      <strong>Measured by → The QA40x's input</strong>, connect the card's output straight to the
+      analyzer's input — both channels — and press <strong>Measure peak output</strong>. It plays
+      the tone, reads it back and stores the figure in one press.
+    </p>
+    <p>
+      Both channels are read and their <em>mean</em> is stored, because a card has one output full
+      scale rather than one per channel; a pair that disagrees by more than a decibel is reported
+      rather than averaged quietly, since on one interface that is a cable or a channel pair rather
+      than the card. Put nothing in between: an attenuator is measured as if it were the card,
+      unless it is declared as the external input gain, in which case it is divided back out and
+      the figure is the card's own output either way.
+    </p>
+    <p class="manual-callout">
+      <strong>Neither route exists on a plain sound-card bench</strong>, and that is the point of
+      both. There the only other end of the cable is the same uncalibrated card, so one unknown
+      would be measuring another — which is exactly what the voltmeter is for. A split is what puts
+      a known device on the other half.
     </p>
     <p>
       The dialog narrows to match. A bench that plays through the card shows <strong>Full scale
@@ -95,13 +130,12 @@ const { showPage } = useManual()
       card may be on ASIO while the other is on WASAPI.
     </p>
     <p>
-      Both cards are chosen on the <strong>Sound card</strong> dialog, which is still the one place
-      a card is picked: with a card on each half it offers an <em>Input card</em> and an
-      <em>Output card</em> rather than one.
+      Both cards are chosen in <strong>Split devices</strong>, one per direction, in the same two
+      dropdowns that choose the halves.
     </p>
     <p>
       <strong>And its own sample rates.</strong> Each card is asked on its own for the rates it
-      accepts, so the Sound card dialog shows <em>Input rates</em> and <em>Output rates</em>
+      accepts, so the dialog shows <em>Input rates</em> and <em>Output rates</em>
       separately — they are not intersected, because the analysis rate is the capturing card's and
       the generating card keeps a declared list of its own. Measured on this bench: a MOTU M Series
       under ASIO reports 44.1 to 192 kHz and a Topping D50 III under WASAPI 44.1 to 768 kHz, and
@@ -144,11 +178,11 @@ const { showPage } = useManual()
       latency, which no measurement here depends on.
     </p>
     <p>
-      Both cards are picked in <strong>Sound card settings</strong>, and on a split it offers each
-      ASIO card under WASAPI as well so that move is one pick rather than a hunt through
-      <strong>Advanced</strong>. A pair that is still two ASIO cards is refused there, in red, naming
-      both cards — worth knowing because every other reading on that screen looks healthy: each card
-      is probed on a stream of its own, and both answer.
+      With a card on both halves the two dropdowns offer each ASIO card under WASAPI as well, so
+      that move is one pick rather than a hunt through <strong>Advanced</strong>. A pair that is
+      still two ASIO cards is refused in red, naming both cards — worth knowing because every other
+      reading on the dialog looks healthy: each card is probed on a stream of its own, and both
+      answer.
     </p>
 
     <h2>Two devices are two clocks</h2>
@@ -193,8 +227,8 @@ const { showPage } = useManual()
       There are two ways round the bottom half of that table, and the second is the better one.
     </p>
     <p>
-      <strong>Measure the drift and correct for it.</strong> The split settings carry the same
-      <strong>Clock drift</strong> panel the sound card's does — see
+      <strong>Measure the drift and correct for it.</strong> <strong>Split devices</strong> carries
+      a <strong>Clock drift</strong> panel, below the calibration steps — see
       <button type="button" class="manual-link" @click="showPage('clock-drift')">Clock drift</button>
       for what the figure means and how to read the verdict. The test measures through whatever is
       connected, because a DUT changes a tone's level and phase but not its frequency, so the bench
@@ -203,11 +237,12 @@ const { showPage } = useManual()
     </p>
     <p>
       <strong>The panel follows the two dropdowns</strong>, not the bench the app currently has
-      open: turn Generates and Captures round and it reads the figure for <em>that</em> pairing, or
-      says there is none. The two directions really are two pairings — a drift figure's sign is a
-      property of which clock is the reference, so a reading taken one way round is not offered the
-      other. <strong>Measure the drift</strong> is held until you press Save, because the test
-      itself cannot follow: it measures the bench the app has open.
+      open: turn the two devices round and it reads the figure for <em>that</em> pairing, or says
+      there is none. It follows a change of <em>card</em> too, because with a card on each half the
+      figure is stored per card. The two directions really are two pairings — a drift figure's sign
+      is a property of which clock is the reference, so a reading taken one way round is not offered
+      the other. <strong>Measure the drift</strong> is held for the moment it takes a change to
+      apply, because the test itself cannot follow: it measures the bench the app has open.
     </p>
     <p>
       <strong>Or use the right input as a reference</strong>, which escapes the problem rather than
@@ -243,7 +278,9 @@ const { showPage } = useManual()
       <li>
         <strong>It makes the QA403's 384 kHz input usable.</strong> That rate is capture-only — the
         QA403's own DAC produces garbage there — so a stimulus from somewhere else is the only route
-        by which it becomes a real measurement.
+        by which it becomes a real measurement. A QA40x half of a split therefore offers 384 kHz
+        <strong>without being asked</strong>: the opt-in a standalone QA403 has for it exists
+        because that DAC is what a sweep would be played through, which on a split it is not.
       </li>
     </ul>
     <h3>The two rate families</h3>
@@ -331,7 +368,7 @@ const { showPage } = useManual()
       reachable while a split is selected, whichever half each belongs to.
     </p>
     <p>
-      <strong>Gen rate</strong> appears beside the split settings button whenever the generator is
+      <strong>Gen rate</strong> appears beside the Split devices button whenever the generator is
       pinned to a rate of its own, so the figure is on screen once the dialog is closed. It is the
       <em>generating</em> half's rate and nothing else: the capture rate belongs to the measurement
       — the FFT screen has its own <strong>Sample rate</strong>, the response screens derive theirs
@@ -359,8 +396,8 @@ const { showPage } = useManual()
       <li>
         <strong>Nothing else about the rates.</strong> A card is asked about 44.1, 48, 88.2, 96,
         176.4, 192, 384 and 768 kHz and offers whichever its driver accepts, so a fast DAC can be
-        driven at its own rate; a QA40x reaches 384 kHz for capture, and only with the experimental
-        setting on. Verified on this bench: a Topping D50 III accepts the 48 kHz family's five in
+        driven at its own rate; a QA40x reaches 384 kHz for capture, always on a split and
+        otherwise only with the experimental setting on. Verified on this bench: a Topping D50 III accepts the 48 kHz family's five in
         exclusive mode, and a split with it generating at 384 kHz into a QA403 capturing at 384 kHz
         runs with no dropped chunks or blocks.
       </li>

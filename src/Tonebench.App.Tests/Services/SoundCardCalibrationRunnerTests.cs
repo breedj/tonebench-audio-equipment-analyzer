@@ -174,6 +174,99 @@ public class SoundCardCalibrationRunnerTests : IDisposable
         Assert.Contains("does not capture with a sound card", ex.Message);
     }
 
+    // ---- the output step measured by the analyzer instead of a voltmeter ----
+
+    /// <summary>
+    /// The mirror of the loopback input step, and it is offered under the mirror condition: the
+    /// half doing the reading must not be a card, because a card's own input full scale is the
+    /// thing that is not known yet.
+    /// </summary>
+    [Fact]
+    public async Task MeasuringTheOutputWithTheAnalyzer_WhenACardIsCapturing_IsRefused()
+    {
+        // A plain sound-card bench is the case that matters: both halves are the same uncalibrated
+        // device, so there is nothing to measure it against and the voltmeter is the only way in.
+        var (runner, _, session, _) = Build(outputFullScaleMv: null);
+        await session.ConnectAsync(CancellationToken.None);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.MeasureOutputViaAnalyzerAsync(-6.0, CancellationToken.None));
+
+        Assert.Contains("whose own full scale is not known yet", ex.Message);
+    }
+
+    [Fact]
+    public async Task MeasuringTheOutputWithTheAnalyzer_WhenNoCardIsPlaying_IsRefused()
+    {
+        var (runner, _, session, _) = Build(
+            DeviceKind.Split,
+            split: new SplitDeviceConfig(InputKind: "SoundCard", OutputKind: "Hardware"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runner.MeasureOutputViaAnalyzerAsync(-6.0, CancellationToken.None));
+
+        Assert.Contains("does not play through a sound card", ex.Message);
+    }
+
+    [Fact]
+    public async Task MeasuringTheOutputWithTheAnalyzer_AtALevelTheDialogDoesNotOffer_IsRefused()
+    {
+        var (runner, _, session, _) = Build(
+            DeviceKind.Split,
+            split: new SplitDeviceConfig(InputKind: "Hardware", OutputKind: "SoundCard"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => runner.MeasureOutputViaAnalyzerAsync(-7.0, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// <b>The figure must not depend on the level it was measured at.</b>
+    ///
+    /// <para>That is the whole arithmetic of the step — the card plays <c>dbFs</c> below its own
+    /// full scale, so dividing the measured peak by <c>10^(dbFs/20)</c> recovers the full scale —
+    /// and it is the one way to check it without asserting a magic number the simulator's noise
+    /// floor would make brittle. A sign error or a missing root two would move both readings
+    /// together, so the absolute value is pinned too, against the generating half's own top
+    /// rung.</para>
+    /// </summary>
+    [Fact]
+    public async Task MeasuringTheOutputWithTheAnalyzer_GivesTheSameFullScaleAtEveryLevel()
+    {
+        var (runner, card, session, _) = Build(
+            DeviceKind.Split,
+            split: new SplitDeviceConfig(InputKind: "Hardware", OutputKind: "SoundCard"));
+        await session.ConnectAsync(CancellationToken.None);
+
+        SoundCardCalibrationResult loud = await runner.MeasureOutputViaAnalyzerAsync(
+            -6.0, CancellationToken.None);
+        double atMinusSix = Assert.IsType<double>(loud.OutputFullScalePeakMv);
+
+        SoundCardCalibrationResult quiet = await runner.MeasureOutputViaAnalyzerAsync(
+            -20.0, CancellationToken.None);
+        double atMinusTwenty = Assert.IsType<double>(quiet.OutputFullScalePeakMv);
+
+        // Within a quarter of a dB of each other: what is left is the simulator's own noise and its
+        // harmonic stack adding to a broadband peak, which is level-dependent in the third digit.
+        double difference = 20.0 * Math.Log10(atMinusTwenty / atMinusSix);
+        Assert.InRange(difference, -0.25, 0.25);
+
+        // And the absolute figure is the top rung taken back to peak volts, which is what the card
+        // was asked to play at full scale.
+        double expectedMv = Math.Sqrt(2.0)
+            * Math.Pow(10.0, session.Capabilities.OutputRangesDbv.Max() / 20.0) * 1000.0;
+        Assert.InRange(atMinusSix, expectedMv * 0.9, expectedMv * 1.1);
+
+        // It is stored, not merely reported -- the dialog reads the document back.
+        Assert.Equal(atMinusTwenty, card.Config.OutputFullScalePeakMv);
+        Assert.NotNull(card.Config.CalibratedUtc);
+
+        // And stamped, so a later change of card is reported as drift rather than silently kept.
+        Assert.Equal("ASIO", card.Config.OutputCalibratedHostApi);
+        Assert.Equal("Card", card.Config.OutputCalibratedDeviceName);
+    }
+
     /// <summary>
     /// The loopback step's "calibrate the output first" refusal belongs to an uncalibrated
     /// <b>card</b>, not to every bench.

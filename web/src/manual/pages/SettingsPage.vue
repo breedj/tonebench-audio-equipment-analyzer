@@ -141,7 +141,11 @@ const { showPage } = useManual()
           <td>
             Adds <strong>384 kHz</strong> to the FFT screen's <strong>Sample rate</strong> list, and
             with it a 200 kHz entry in that screen's frequency <strong>To</strong> list, since the
-            spectrum now reaches 192 kHz. Off by default.
+            spectrum now reaches 192 kHz. Off by default — and <strong>only for an analyzer that is
+            also the generator</strong>: a QA40x used as half of a
+            <strong>Split (two devices)</strong> bench offers 384 kHz whether or not this is
+            ticked, because there the stimulus comes from the other device and the DAC this setting
+            protects is not in the path.
             <strong>What it is for:</strong> capturing a signal something <em>else</em> is driving —
             an ultrasonic source, a switching supply's residue, a transmitter, anything whose content
             runs past the 96 kHz a 192 kHz capture can show. Everything the FFT screen measures from

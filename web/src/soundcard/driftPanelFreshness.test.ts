@@ -11,9 +11,10 @@ import { describe, expect, it } from 'vitest'
  * new run actually measured. Reported from the bench 2026-11-12, against a run reading 83.18 ppm
  * over a panel still saying 84.59.
  *
- * It was the *sound card* dialog's panel until 2026-11-15, and the rule outlived the move: a sound
- * card is one interface now, so the only bench with two clocks is a split, and the panel lives
- * there alone. What it has to do is unchanged.
+ * It was the *sound card* dialog's panel until 2026-11-15, and the split dialog's until the two
+ * device dialogs were merged; the rule outlived both moves. A sound card is one interface now, so
+ * the only bench with two clocks is a split, and the panel is a component of its own that any
+ * dialog showing such a bench renders. What it has to do is unchanged.
  *
  * It is asserted by reading the component as text because the fault lives in a `.vue` template and
  * this suite runs on `environment: 'node'` with no DOM — the same technique as
@@ -22,7 +23,7 @@ import { describe, expect, it } from 'vitest'
  * putting the bare assignment back, which fails the third case.
  */
 const source = readFileSync(
-  new URL('../components/SplitDeviceDialog.vue', import.meta.url),
+  new URL('../components/BenchClockDriftPanel.vue', import.meta.url),
   'utf8',
 )
 
@@ -38,8 +39,8 @@ describe('the Clock drift panel is refreshed after a run', () => {
     )
     expect(body).toContain('clockDriftOpen.value = false')
 
-    // The split dialog re-reads the *figure* rather than a card document, which it does not have:
-    // the pairing is its own two dropdowns, and loadBenchDrift is what asks about them.
+    // It re-reads the *figure* rather than a card document, which it does not have: the pairing is
+    // what it was handed, and loadBenchDrift is what asks about that.
     expect(body).toContain('loadBenchDrift()')
   })
 

@@ -210,7 +210,7 @@ describe('the dialog asks about what it will open', () => {
   ).replace(/\r\n/g, '\n')
 
   const dialog = readFileSync(
-    fileURLToPath(new URL('../components/SoundCardDialog.vue', import.meta.url)),
+    fileURLToPath(new URL('../components/DeviceSettingsDialog.vue', import.meta.url)),
     'utf8',
   )
     .replace(/^﻿/, '')

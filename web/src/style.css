@@ -500,7 +500,7 @@
     background-color: var(--surface-track);
   }
 
-  /* THE SOUND-CARD DIALOG'S form language (SoundCardDialog.vue, the 2026-10-12 mockup): a stack of
+  /* THE DEVICE DIALOG'S form language (DeviceSettingsDialog.vue, the 2026-10-12 mockup): a stack of
      panels, each a label column against a control column with a hairline between rows. Classes
      rather than the utilities repeated down the file, because that dialog has thirty-odd of these
      rows and they were already drifting — some `justify-between`, some not, half the controls at
@@ -521,6 +521,19 @@
   }
   .sc-label {
     @apply text-neutral-600 dark:text-neutral-300;
+  }
+
+  /*
+   * A sentence between rows: the row's hairline and rhythm, and none of its grid.
+   *
+   * Prose was written as `.sc-row`, which is a two-column grid — so a paragraph landed in the
+   * 190px *label* column and wrapped to a sliver, and any inline element inside it (an <em>, a
+   * <strong>) became a second grid item that floated off to the right in the control column.
+   * Reported from the Split devices dialog, where the "Two devices are two clocks" paragraph read
+   * as a narrow column with "Right channel is reference" stranded beside it.
+   */
+  .sc-note {
+    @apply border-t border-neutral-100 py-1.5 leading-relaxed text-neutral-600 dark:border-neutral-800 dark:text-neutral-300;
   }
 
   /*

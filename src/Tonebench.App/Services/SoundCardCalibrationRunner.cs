@@ -233,6 +233,123 @@ public sealed class SoundCardCalibrationRunner(
     /// rather than cancelling — any error in the output figure lands directly in both input figures
     /// — which is why the external-source step stays, and stays the more trustworthy of the two.</para>
     /// </summary>
+    /// <summary>
+    /// The card's output full scale, measured with the <b>analyzer's own input</b> instead of a
+    /// voltmeter: play a tone out of the card and read what arrives, in volts.
+    ///
+    /// <para><b>The mirror of <see cref="MeasureInputViaLoopbackAsync"/>, and it works for the same
+    /// reason.</b> That step calibrates a card's input against a QA40x whose output level is a
+    /// factory figure; this one calibrates a card's output against a QA40x whose <i>input</i> is
+    /// one. Either way the known quantity is on the half that is not the card, which is what a
+    /// split has and a single card never does — on a plain sound-card bench both ends are the same
+    /// uncalibrated device, and the voltmeter is the only way in. That is why this is offered
+    /// rather than made the default: it is reachable only on a bench whose capturing half is not a
+    /// card.</para>
+    ///
+    /// <para><b>Wire the card's output straight to the analyzer's input.</b> Anything in between is
+    /// measured as if it were the card, so the stored full scale would carry the attenuator's
+    /// ratio — unless that divider is <i>declared</i>, which is the one case this handles: the
+    /// reading is <c>PeakDbv</c>, the DUT-referred level, so a declared external gain is already
+    /// divided back out and the figure is the card's own output either way.</para>
+    ///
+    /// <para>Both channels are read and the <b>mean</b> is stored, because a card has one output
+    /// full scale and not one per channel. A pair that disagrees is reported rather than averaged
+    /// silently: on one interface the two outputs should match within a few hundredths of a dB, so
+    /// a real difference is a cable or a channel pair rather than the card.</para>
+    /// </summary>
+    public async Task<SoundCardCalibrationResult> MeasureOutputViaAnalyzerAsync(
+        double dbFs, CancellationToken ct)
+    {
+        RequireCardOn(capturing: false);
+
+        if (!OutputLevelsDbFs.Contains(dbFs))
+            throw new ArgumentOutOfRangeException(nameof(dbFs), dbFs, $"Pick one of {string.Join(", ", OutputLevelsDbFs)} dB.");
+
+        // The capturing half has to be something whose readings are already volts. A card's input
+        // is exactly what is not known yet -- calibrating an output against it would be measuring
+        // one unknown with another -- and on a plain sound-card bench both halves are that card.
+        if (session.InputDeviceKind == DeviceKind.SoundCard)
+        {
+            throw new InvalidOperationException(
+                "This measures the card's output with the analyzer's input, and on this bench the thing capturing is a sound card — whose own full scale is not known yet. Use a voltmeter, or put a QA40x on the capturing half.");
+        }
+
+        lock (_gate)
+        {
+            _running = true;
+        }
+
+        SpectrumPipelineOptions savedOptions = pipeline.Options;
+
+        try
+        {
+            pipeline.Options = savedOptions with
+            {
+                ProcessLeft = true,
+                ProcessRight = true,
+                FftSize = CalibrationFftSize,
+            };
+
+            double toneDbv = ToneDbvFor(dbFs);
+            var tone = new ChannelGeneratorConfig(Enabled: true, Tones: [new GeneratorTone(ToneHz, toneDbv)])
+            {
+                Kind = GeneratorKind.Tones,
+            };
+
+            await StartAcquisitionIfNeededAsync(ct);
+            await session.ConfigureGeneratorAsync(new GeneratorConfig(tone, tone), ct);
+
+            TimeSpan budget = ReadBudget();
+            double leftPeakV = await ReadPeakVoltsAsync(StreamChannel.Left, AnalyzerSourceAdvice, budget, ct);
+            double rightPeakV = await ReadPeakVoltsAsync(StreamChannel.Right, AnalyzerSourceAdvice, budget, ct);
+            await SilenceAsync(ct);
+
+            RequireUsableVolts(leftPeakV, StreamChannel.Left);
+            RequireUsableVolts(rightPeakV, StreamChannel.Right);
+
+            // The card played dbFs below its own full scale, so what arrived is FS x 10^(dbFs/20).
+            double scale = Math.Pow(10.0, dbFs / 20.0);
+            double leftFullScaleV = leftPeakV / scale;
+            double rightFullScaleV = rightPeakV / scale;
+            double fullScaleMv = (leftFullScaleV + rightFullScaleV) / 2.0 * 1000.0;
+
+            double difference = 20.0 * Math.Log10(rightFullScaleV / leftFullScaleV);
+
+            SoundCardConfig updated = (soundCard.Config with
+            {
+                OutputFullScalePeakMv = fullScaleMv,
+                CalibratedUtc = DateTimeOffset.UtcNow,
+            }).StampOutputCalibration();
+
+            if (!updated.IsValid)
+            {
+                throw new InvalidOperationException(
+                    $"That gives a full scale of {fullScaleMv:0.0} mV peak, which is outside the range this app stores. Check the cable and the output level, and that nothing is attenuating between the card and the analyzer.");
+            }
+
+            await SaveAndReopenAsync(updated, ct);
+
+            logger.LogInformation(
+                "Sound card calibration: output full scale {FullScale:0.0} mV peak, measured by {Source} at {Left:0.000} / {Right:0.000} V peak while playing {DbFs:0.0} dBFS",
+                fullScaleMv, session.InputDeviceKind, leftPeakV, rightPeakV, dbFs);
+
+            return new SoundCardCalibrationResult(
+                fullScaleMv,
+                updated.InputFullScalePeakMvLeft,
+                updated.InputFullScalePeakMvRight,
+                null,
+                difference,
+                Math.Abs(difference) > 1.0
+                    ? $"The two outputs differ by {difference:0.00} dB, which is more than two channels of one card usually do — check the cables and the channel pair. The stored figure is their mean."
+                    : null);
+        }
+        finally
+        {
+            pipeline.Options = savedOptions;
+            await SilenceAsync(CancellationToken.None);
+        }
+    }
+
     public async Task<SoundCardCalibrationResult> MeasureInputViaLoopbackAsync(
         double dbFs, CancellationToken ct)
     {
@@ -582,6 +699,17 @@ public sealed class SoundCardCalibrationRunner(
     private const string ExternalSourceAdvice =
         "Nothing is arriving on the {0} input. This step measures the voltage your generator is producing, so it needs that generator connected to the {0} input and switched on — check the cable and the level, then try again.";
 
+    /// <summary>
+    /// Below this, nothing is connected. Ten microvolts is far under any card's output at the
+    /// quietest level offered (-20 dBFS of a 1 V card is 100 mV) and far over the analyzer's own
+    /// noise floor on its most sensitive range, so it separates "no cable" from "a quiet card"
+    /// without having to know which range the analyzer picked.
+    /// </summary>
+    private const double SilenceGuardVolts = 1e-5;
+
+    private const string AnalyzerSourceAdvice =
+        "Nothing is arriving on the {0} input. Connect the card's output to the analyzer's input and try again.";
+
     private const string LoopbackAdvice =
         "Nothing is arriving on the {0} input. Both inputs are measured together, so both need a patch cable from their own output — check the cable on the {0} channel, then try again.";
 
@@ -651,6 +779,82 @@ public sealed class SoundCardCalibrationRunner(
             throw new InvalidOperationException(string.Format(advice, channel.ToString().ToLowerInvariant()));
 
         return best;
+    }
+
+    /// <summary>
+    /// The loudest peak seen on a channel, in <b>volts</b> rather than in the card's own dBFS.
+    ///
+    /// <para>The sibling of <see cref="ReadPeakDbFsAsync"/> and deliberately not a wrapper round
+    /// it: that one divides by the <i>card's</i> stored input full scale, which is the right
+    /// question when the card is capturing and a meaningless one when a QA40x is — there the
+    /// pipeline already reports volts and the card's figure describes other hardware entirely.</para>
+    ///
+    /// <para><c>PeakDbv</c> rather than <c>AnalyzerPeakDbv</c>: a declared external gain is a claim
+    /// about a divider between the DUT and the jack, so the DUT-referred figure is the card's own
+    /// output. With nothing declared the two are the same number, which is the documented wiring
+    /// for this step.</para>
+    /// </summary>
+    private async Task<double> ReadPeakVoltsAsync(
+        StreamChannel channel, string advice, TimeSpan budget, CancellationToken ct)
+    {
+        double bestDbv = double.NegativeInfinity;
+        DateTime deadline = DateTime.UtcNow + budget;
+        int any = 0;
+        int withSignal = 0;
+
+        // **Stops early only once it has read a *level*, not merely a record.** The settle on this
+        // step belongs to the half that is NOT doing the reading: a card re-clocks when a stream
+        // asks for a rate it is not already running at, and plays nothing while it does -- but
+        // here the capturing half is a QA40x, which withholds nothing and hands out records
+        // throughout. Counting records, eight of them can be consumed inside that silence and the
+        // step then reports the analyzer's own noise floor with seconds of its budget unspent.
+        //
+        // The dBFS reader opposite does count records, and is right to: there the *card* captures,
+        // and SoundCardDevice withholds its settle frames rather than handing out silence, so a
+        // record existing already means the card is past it.
+        while (DateTime.UtcNow < deadline && withSignal < 8)
+        {
+            await Task.Delay(120, ct);
+
+            foreach (SpectrumSnapshot snapshot in pipeline.LatestSnapshots())
+            {
+                if (snapshot.Channel != channel || snapshot.Meters is not { } meters)
+                    continue;
+
+                any++;
+                bestDbv = Math.Max(bestDbv, meters.PeakDbv);
+
+                if (PeakVolts(meters.PeakDbv) >= SilenceGuardVolts)
+                    withSignal++;
+            }
+        }
+
+        if (any == 0)
+            throw new InvalidOperationException(string.Format(advice, channel.ToString().ToLowerInvariant()));
+
+        return PeakVolts(bestDbv);
+    }
+
+    /// <summary>
+    /// An RMS-referenced peak dBV as peak volts, which is the unit a full scale is stored in.
+    /// </summary>
+    private static double PeakVolts(double peakDbv) =>
+        double.IsNegativeInfinity(peakDbv) ? 0.0 : Math.Pow(10.0, peakDbv / 20.0) * Math.Sqrt(2.0);
+
+    /// <summary>
+    /// Refuses a reading that cannot be the card playing a tone.
+    ///
+    /// <para>Only a floor, and no ceiling: the analyzer ranges itself, so a loud card is measured
+    /// rather than clipped — which is the opposite of the dBFS guard, where the ceiling is the
+    /// whole point because a card's input has one fixed range.</para>
+    /// </summary>
+    private static void RequireUsableVolts(double peakVolts, StreamChannel channel)
+    {
+        if (peakVolts < SilenceGuardVolts)
+        {
+            throw new InvalidOperationException(
+                $"The {channel} channel read {peakVolts * 1000.0:0.000} mV while the card was playing — that is nothing. Connect the card's output straight to the analyzer's input: both channels are measured together, so both need a cable.");
+        }
     }
 
     private async Task SaveAndReopenAsync(SoundCardConfig updated, CancellationToken ct)

@@ -19,7 +19,9 @@ import {
   reselectCardKey,
   savedCardNeedsAdvanced,
   splitKey,
+  type SoundCard,
 } from '../soundcard/cardList'
+import { asioSplitProblem, withAsioAlternatives } from '../soundcard/asioSplit'
 import { calibrationState } from '../soundcard/calibrationState'
 import {
   openedSides,
@@ -280,7 +282,12 @@ const hiddenCardCount = computed(() =>
   Math.max(
     0,
     buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], true).length -
-      buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], false).length,
+      // The default list as the dropdowns offer it, which on a two-card bench already carries each
+      // ASIO card's alternative: counting the bare collapse would promise entries Advanced no
+      // longer adds.
+      offerAsioAlternatives(
+        buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], false),
+      ).length,
   ),
 )
 
@@ -336,7 +343,26 @@ function cardsFor(
   const list = prefer
     ? buildCards(inventory.value?.inputs ?? [], inventory.value?.outputs ?? [], advanced.value, prefer)
     : cards.value
-  return cardsOffering(list, devices)
+  return cardsOffering(offerAsioAlternatives(list), devices)
+}
+
+/**
+ * The best non-ASIO entry for every ASIO card, on a two-card bench and nowhere else — the rule and
+ * the reasoning are in <c>withAsioAlternatives</c>.
+ *
+ * <p>Here because a split may have at most one ASIO card, and the ordinary one-entry-per-interface
+ * collapse hides the alternative it would have to be moved to. Reported 2026-11-15 on a bench whose
+ * two cards both carry ASIO drivers: the pair the picker offered could not be opened, and the only
+ * route to the pair that could was the Advanced checkbox and thirty further entries.</p>
+ */
+function offerAsioAlternatives(list: readonly SoundCard[]): SoundCard[] {
+  if (!twoCardBench.value) return [...list]
+  return withAsioAlternatives(
+    list,
+    inventory.value?.inputs ?? [],
+    inventory.value?.outputs ?? [],
+    advanced.value,
+  )
 }
 
 /**
@@ -586,6 +612,19 @@ const trustWarning = computed(() => {
 })
 
 /**
+ * Why the two cards chosen cannot be the two halves of a split — the ASIO rule, said here because
+ * this is where the pair is chosen and because nothing else on this dialog can say it.
+ *
+ * <p>Each card is probed on a stream of its own and <i>both answer</i>, so the rate rows read
+ * healthy and nothing else here has any reason to object: without this the only sign that the
+ * bench cannot be opened at all arrives later, at Connect. <c>asioSplitProblem</c> holds the rule
+ * and <c>SoundCardSettings.SplitCombinationProblem</c> is the refusal it mirrors.</p>
+ */
+const asioRefusal = computed(() =>
+  twoCardBench.value ? asioSplitProblem(inputCardKey.value, outputCardKey.value) : null,
+)
+
+/**
  * Either side is enough, which mirrors <c>SoundCardSettings.IsUsable</c>: one direction opens a
  * stream, and a capture-only ADC or a playback-only DAC is the whole reason that is true.
  *
@@ -602,6 +641,11 @@ const canSave = computed(() => {
   if (!usesInput && !usesOutput) return false
   if (usesInput && inputRates.value.length === 0) return false
   if (usesOutput && outputRates.value.length === 0) return false
+
+  // A pair of ASIO cards probes perfectly one card at a time and cannot be opened together, so
+  // this is the one refusal the rate lists above cannot reach. Without it the dialog saved the
+  // pair, said the card was open and ready to calibrate, and left the analyzer unopenable.
+  if (asioRefusal.value) return false
   return true
 })
 
@@ -650,7 +694,8 @@ const settingsInEffect = computed(() => {
  * on screen alone.</p>
  */
 const settingsRefused = computed(
-  () => !!config.value && !busy.value && !canSave.value && !!rateRefusal.value,
+  () =>
+    !!config.value && !busy.value && !canSave.value && (!!rateRefusal.value || !!asioRefusal.value),
 )
 
 /** Whether this card carries the direction at all, which is what each calibration step needs. */
@@ -1401,6 +1446,16 @@ function mvRms(value: number | null | undefined) {
             <span class="text-neutral-500">ms</span>
           </span>
         </label>
+
+        <!-- Above the rates on purpose: this is a refusal the rate rows cannot show. Both cards
+             are probed on streams of their own and both answer, so a reader with two healthy rate
+             lists in front of them has no reason to suspect the pair. -->
+        <p
+          v-if="asioRefusal"
+          class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
+        >
+          {{ asioRefusal }}
+        </p>
 
         <!-- Gated on the message rather than on both device keys being set: the old condition
              could not fire for a one-direction bench, which is exactly the bench that most needed

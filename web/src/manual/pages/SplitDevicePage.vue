@@ -143,6 +143,13 @@ const { showPage } = useManual()
       so nothing is mixed or resampled — and leave the better converter on ASIO. What you give up is
       latency, which no measurement here depends on.
     </p>
+    <p>
+      Both cards are picked in <strong>Sound card settings</strong>, and on a split it offers each
+      ASIO card under WASAPI as well so that move is one pick rather than a hunt through
+      <strong>Advanced</strong>. A pair that is still two ASIO cards is refused there, in red, naming
+      both cards — worth knowing because every other reading on that screen looks healthy: each card
+      is probed on a stream of its own, and both answer.
+    </p>
 
     <h2>Two devices are two clocks</h2>
     <p>

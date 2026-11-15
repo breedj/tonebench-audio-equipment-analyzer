@@ -76,6 +76,15 @@ const { showPage } = useManual()
       internal mix bus, say — is a real input and is still listed.
     </p>
     <p>
+      <strong>On a split with a card on each half there is one exception, and it is the only one:</strong>
+      a card that has an ASIO driver is listed <em>twice</em>, once under ASIO and once under
+      WASAPI. That is because <a href="#two-asio">at most one half of a split may be ASIO</a>, so
+      one of the two cards has to be moved — and the entry it has to be moved to is exactly the one
+      the single-entry rule above would hide. It is not a reason to prefer the WASAPI entry: pick it
+      for whichever of the two cards you mind least, and leave the better converter on ASIO. A card
+      with no ASIO driver is unaffected, and so is a bench built from one card.
+    </p>
+    <p>
       <strong>Advanced</strong>, beside <strong>Refresh</strong>, shows the unfiltered list: every
       host API, one entry per interface within each, with the count it adds in brackets. It is there
       for the case the table below describes — a card with no ASIO driver whose WASAPI exclusive mode
@@ -375,6 +384,16 @@ const { showPage } = useManual()
       The way out is to move one card to <strong>WASAPI</strong>, which this app always opens in
       exclusive mode, and leave the better converter on ASIO. It is explained on
       <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
+    </p>
+    <p>
+      Both halves of that are in the dialog, so neither has to be worked out. The card dropdowns
+      offer each ASIO card's WASAPI entry beside its ASIO one whenever the bench is a split with a
+      card on each half, so the move is one pick and does not need <strong>Advanced</strong>. And a
+      pair that is still two ASIO cards says so in red, naming both and what to do — it has to,
+      because nothing else on that screen can tell: each card is probed on its own, both answer with
+      a healthy list of rates, and without the message the first sign that the bench cannot be opened
+      is <strong>Connect</strong> failing. While it is on screen the settings are not applied and the
+      calibration steps are turned off, since the analyzer they would measure cannot be opened.
     </p>
 
     <h3>Channel pairs</h3>

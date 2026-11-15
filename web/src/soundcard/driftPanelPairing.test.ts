@@ -24,7 +24,6 @@ const read = (name: string) =>
     .replace(/\r\n/g, '\n')
 
 const source = read('SplitDeviceDialog.vue')
-const cardSource = read('SoundCardDialog.vue')
 
 describe('the drift panel follows the dropdowns', () => {
   it('asks about the staged pairing rather than the bench in use', () => {
@@ -69,60 +68,10 @@ describe('the drift panel follows the dropdowns', () => {
   })
 })
 
-/**
- * The same rule in the sound-card dialog, where the pairing is the two <em>cards</em> selected.
- *
- * That dialog applies its selection 250 ms after it changes rather than behind a button, so the form
- * and the server normally agree — but not while the write is in flight, and not at all when it
- * cannot be applied (no common sample rate), where the form says one pairing and the server holds
- * another. Answered for the session's bench the panel then quotes a figure measured between two
- * other devices under a heading that reads as this one's.
- */
-describe('the card dialog follows its selection', () => {
-  const loadFn = cardSource.slice(
-    cardSource.indexOf('async function loadBenchDrift'),
-    cardSource.indexOf('async function loadBenchDrift') + 900,
-  )
-
-  it('asks about the two cards the form names', () => {
-    expect(loadFn).toContain('api.getBenchClockDrift(')
-    for (const field of ['inputHostApi', 'inputDevice', 'outputHostApi', 'outputDevice']) {
-      expect(loadFn, field).toContain(field)
-    }
-
-    // Both host APIs, not the device names alone: one card appears under several, and a pairing is
-    // keyed by host API as well as by the interface.
-    expect(loadFn).toContain('next.inputHostApi')
-    expect(loadFn).toContain('next.outputHostApi')
-  })
-
-  it('falls back to the bench in use before a config has loaded', () => {
-    // toConfig() is null until the stored document arrives, and a query of four empty strings is a
-    // pairing between nothing and nothing rather than "whatever the app has open".
-    expect(loadFn).toMatch(/next === null\s*\?\s*undefined/)
-  })
-
-  it('re-reads it when the cards change', () => {
-    const at = cardSource.indexOf("[form.cardKey, form.inputKey, form.outputKey].join('|')")
-    expect(at, 'a watcher over the three card fields').toBeGreaterThan(-1)
-    expect(cardSource.slice(at, at + 260)).toContain('loadBenchDrift()')
-  })
-
-  it('does not re-read it for a channel-pair change', () => {
-    // BenchClockKey keys a card by its interface stem rather than its endpoint, precisely so a
-    // figure survives a channel-pair change. Re-reading on one would ask the same question again,
-    // and listing it here would assert the opposite.
-    const at = cardSource.indexOf("[form.cardKey, form.inputKey, form.outputKey].join('|')")
-    expect(cardSource.slice(at, at + 260)).not.toContain('ChannelOffset')
-  })
-
-  /** The run is held the same way, and this dialog already had that half. */
-  it('holds its Measure button while the settings are not in effect', () => {
-    const at = cardSource.indexOf('clockDriftOpen = true')
-    const button = cardSource.slice(cardSource.lastIndexOf('<button', at), cardSource.indexOf('>', at))
-    expect(button).toContain(':disabled="!settingsInEffect"')
-  })
-})
+// NOTE: the same rule was asserted here for the sound-card dialog's own Clock drift panel
+// until 2026-11-15. That panel is gone: drift is a property of a bench with two clocks, and
+// after that day's narrowing a sound card is one interface -- so every bench with a drift
+// figure to measure is a split, and the split dialog above is the only place that shows one.
 
 /** The body of a computed, up to the next top-level `const`. */
 function computedBody(text: string, name: string): string {

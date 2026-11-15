@@ -1,13 +1,11 @@
 ﻿<script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import type {
-  BenchClockDrift,
   DeviceStatus,
   SoundCardConfig,
   SoundCardOption,
   VoltageEntryUnitName,
 } from '../api/client'
-import { api } from '../api/client'
 import { useSoundCard } from '../composables/useSoundCard'
 import { useManual } from '../manual/useManual'
 import {
@@ -23,7 +21,6 @@ import {
   splitKey,
 } from '../soundcard/cardList'
 import { calibrationState } from '../soundcard/calibrationState'
-import ClockDriftDialog from './ClockDriftDialog.vue'
 import Modal from './Modal.vue'
 import PanelIcon from './PanelIcon.vue'
 import HeaderIcon from './HeaderIcon.vue'
@@ -75,21 +72,6 @@ const OUTPUT_LEVELS = [-3, -6, -9, -12, -20]
 const form = reactive({
   /** Which physical card, as "host API\u0000interface". Both device lists are filtered to it. */
   cardKey: '',
-
-  /**
-   * Whether the two directions may sit on different cards — off by default, and that default is
-   * the protection rather than a preference.
-   *
-   * <p>One card is one clock. Two are two, and the drift between them is reported as DUT response
-   * rather than as a fault, so the one-card picker is what guarantees the common case is right.
-   * The escape exists because some benches have no choice: a capture-only ADC (an E1DA Cosmos has
-   * only a USB-C out) or a playback-only USB DAC cannot be half of one card, and before the
-   * one-direction streams of 2026-11-11 they could not be chosen at all.</p>
-   *
-   * <p>Not persisted: it is derived on open from whether the two saved devices are in fact on one
-   * card, so a saved configuration cannot contradict its own checkbox.</p>
-   */
-  separateDevices: false,
 
   /** Only read while {@link separateDevices}; otherwise both sides use <c>cardKey</c>. */
   inputCardKey: '',
@@ -179,60 +161,13 @@ function cardKeyFor(hostApi: string, deviceName: string) {
  */
 const advanced = ref(false)
 
-/**
- * The clock-drift test, opened from the Clock drift panel. Its own dialog rather than another
- * section: it is a measurement with a chart, and this dialog is already the longest in the app.
- */
-const clockDriftOpen = ref(false)
-
-/**
- * What the last drift run left on this card, for the Clock drift panel to show.
- *
- * <p>Null until the test has been run. <b>Provenance, not a decision</b> — whether a chirp
- * measurement may actually be corrected is the server's answer on <c>/api/device/ranges</c>
- * (<c>ClockDriftCorrection.ForBench</c> weighs four separate conditions), and nothing here
- * re-derives it. This exists because the four figures lived only inside the drift dialog and were
- * gone the moment it closed: a week later the bench had a stored ppm number and no way to judge
- * it.</p>
- */
-/**
- * The figure measured on the bench as it stands, read from the server rather than from the card's
- * own document.
- *
- * A drift figure is keyed by the *pairing* it was measured between — which since 2026-11-13 may be
- * a QA40x against a card, and so cannot live on the card's settings at all. Only the session knows
- * what the bench is, so it is the session that answers.
- */
-const benchDrift = ref<BenchClockDrift | null>(null)
-
-/**
- * Read for the pairing <em>this form</em> names, not the one the session has open.
- *
- * <p>The selection is applied 250 ms after it changes rather than behind a button, so the two are
- * normally the same — but not while the write is in flight, and not at all when it cannot be
- * applied (no common sample rate, say), where the form says one pairing and the server still holds
- * another. Answered for the session's bench the panel then quotes a figure measured between two
- * other devices under a heading that reads as this one's. It is the split dialog's fault one
- * dialog along — see that one's own note — and the server resolves it either way, so
- * <c>BenchClockKey</c> stays the single thing that decides what a pairing is keyed by.</p>
- */
-async function loadBenchDrift() {
-  const next = toConfig()
-  try {
-    benchDrift.value = await api.getBenchClockDrift(
-      next === null
-        ? undefined
-        : {
-            inputHostApi: next.inputHostApi,
-            inputDevice: next.inputDeviceName,
-            outputHostApi: next.outputHostApi,
-            outputDevice: next.outputDeviceName,
-          },
-    )
-  } catch {
-    benchDrift.value = null
-  }
-}
+// NOTE: the Clock drift panel stood in this dialog until 2026-11-15, and it now lives in the
+// Split dialog alone. Drift is a property of a bench with two clocks, and after the narrowing of
+// 2026-11-15 a sound card is ONE physical interface -- so every bench that has a drift figure to
+// measure is a split: a card against a QA40x, or a card on each half. The split dialog's own panel
+// is gated on `benchDrift?.twoClocks`, which covers both. Keeping a second copy here meant one
+// reading could be refreshed while the other went stale, and the panel was already carrying a note
+// (see that dialog's) about answering for the form's pairing rather than the session's.
 
 /**
  * Which direction of this document the bench in use actually opens.
@@ -250,10 +185,45 @@ const cardDirection = computed<'both' | 'input' | 'output' | null>(() => {
   if (!s) return 'both'
   if (s.deviceKind === 'SoundCard') return 'both'
   if (s.deviceKind !== 'Split') return null
+
+  // **Both halves first, and the order is the bug this had.** A card on both sides of a split was
+  // refused until 2026-11-15; now it is the point of the feature, and the input test below matches
+  // it -- so without this the dialog would call a two-card bench 'input', hide the output picker
+  // and print a note saying the output is set in the split settings, where there is nothing to set.
+  if (s.splitInputKind === 'SoundCard' && s.splitOutputKind === 'SoundCard') return 'both'
+
   if (s.splitInputKind === 'SoundCard') return 'input'
   if (s.splitOutputKind === 'SoundCard') return 'output'
   return null
 })
+
+/**
+ * Whether this dialog offers a card per direction rather than one for both.
+ *
+ * <p><b>Derived, never chosen.</b> It was a "Separate devices" checkbox until 2026-11-15, which is
+ * the duplicate this work removed: <c>DeviceKind.SoundCard</c> now means one physical interface, so
+ * a bench of two cards is a <c>Split</c> with a card on each half and there is nothing for a
+ * checkbox here to decide. Two dropdowns therefore appear in exactly two cases, and both are facts
+ * about the bench rather than preferences:</p>
+ *
+ * <ul>
+ *   <li><b>The live analyzer is a card+card split</b> — two cards, each chosen here, because the
+ *   card document is still the one place a card is picked and a split needs both of its halves
+ *   from it.</li>
+ *   <li><b>The stored selections already differ</b>, which is how a one-direction bench comes back:
+ *   a capture-only ADC saves an input name and no output, so the two keys are not equal and the
+ *   single picker cannot express it. It is also what an unmigrated two-card document looks like for
+ *   the moment before config migration 006 moves it, and showing what is stored is the honest
+ *   answer there.</li>
+ * </ul>
+ */
+const separateDevices = computed(
+  () =>
+    (props.status?.deviceKind === 'Split'
+      && props.status.splitInputKind === 'SoundCard'
+      && props.status.splitOutputKind === 'SoundCard')
+    || form.inputCardKey !== form.outputCardKey,
+)
 
 /** What the half this bench does *not* use the card for is, for the line that says so. */
 const otherHalfName = computed(() => {
@@ -274,49 +244,6 @@ const splitNote = computed(() => {
   }
   return null
 })
-
-const storedDrift = computed(() => {
-  const d = benchDrift.value
-  if (!d || d.ppm === null || d.ppm === undefined) return null
-
-  const input = d.inputLabel ?? ''
-  const output = d.outputLabel ?? ''
-  return {
-    ppm: d.ppm,
-    spreadPpm: d.spreadPpm ?? null,
-    sigmaPpm: d.sigmaPpm ?? null,
-    toneMarginDb: d.toneMarginDb ?? null,
-    when: d.measuredUtc ? new Date(d.measuredUtc).toLocaleString() : 'date not recorded',
-    // Both names or neither: half a pairing says less than nothing about which bench it describes.
-    between: input && output ? `${output} → ${input}` : '',
-  }
-})
-
-/**
- * Closing the drift dialog re-reads the card's settings, because the run it just finished wrote
- * them.
- *
- * <p><c>ClockDriftRunner.RememberAsync</c> stores the figure the moment a run ends — there is no
- * Keep button, by design — so by the time this dialog closes the server holds a newer
- * configuration than the one <c>config</c> was loaded with when the <i>Sound card</i> dialog
- * opened. Without this the Clock drift panel behind it goes on showing the previous run: the old
- * ppm, the old timestamp, and dashes for the two figures the new run actually measured. Reported
- * 2026-11-12, against a run reading 83.18 ppm over a panel still saying 84.59.</p>
- *
- * <p>A plain reload rather than <c>reconcileWithDevices</c>: no device has moved, only the stored
- * drift, and re-running the reconcile would rewrite the whole form for a change that cannot have
- * touched it.</p>
- */
-async function onClockDriftClosed() {
-  clockDriftOpen.value = false
-  await loadBenchDrift()
-  await load(true)
-}
-
-/** A stored figure, or a dash. Matches the drift dialog's own `fmt`, so the two cannot disagree. */
-function driftFigure(value: number | null, digits: number, unit: string) {
-  return value === null || !Number.isFinite(value) ? '—' : `${value.toFixed(digits)}${unit}`
-}
 
 /**
  * The cards the machine has, each a host API and an interface within it.
@@ -366,8 +293,8 @@ const RENDER_LOOPBACK_SUFFIX = ' [loopback]'
  * Which card each direction is filtered to. The same key both ways in the ordinary mode, which is
  * what makes that path behave exactly as it did before separate devices existed.
  */
-const inputCardKey = computed(() => (form.separateDevices ? form.inputCardKey : form.cardKey))
-const outputCardKey = computed(() => (form.separateDevices ? form.outputCardKey : form.cardKey))
+const inputCardKey = computed(() => (separateDevices.value ? form.inputCardKey : form.cardKey))
+const outputCardKey = computed(() => (separateDevices.value ? form.outputCardKey : form.cardKey))
 
 /** What the two chosen cards amount to — one clock, two clocks, or half a bench. */
 const pairing = computed(() => devicePairing(inputCardKey.value, outputCardKey.value))
@@ -394,10 +321,10 @@ function cardsFor(
 }
 
 const inputCards = computed(() =>
-  cardsFor(inventory.value?.inputs ?? [], form.separateDevices ? form.outputCardKey : ''),
+  cardsFor(inventory.value?.inputs ?? [], separateDevices.value ? form.outputCardKey : ''),
 )
 const outputCards = computed(() =>
-  cardsFor(inventory.value?.outputs ?? [], form.separateDevices ? form.inputCardKey : ''),
+  cardsFor(inventory.value?.outputs ?? [], separateDevices.value ? form.inputCardKey : ''),
 )
 
 /**
@@ -413,9 +340,9 @@ const outputCards = computed(() =>
  * with the lists collapsed as they are, a mismatched pair is unreachable from the dropdowns.</p>
  */
 watch(
-  () => [form.separateDevices, form.inputCardKey, form.outputCardKey, advanced.value].join('|'),
+  () => [separateDevices.value, form.inputCardKey, form.outputCardKey, advanced.value].join('|'),
   () => {
-    if (!form.separateDevices) return
+    if (!separateDevices.value) return
     const matched = matchHostApis(
       form.inputCardKey,
       form.outputCardKey,
@@ -459,50 +386,14 @@ watch(
   },
 )
 
-/**
- * Carries the selection across the checkbox, in both directions, so toggling it never empties a
- * dialog that was correctly filled in.
- *
- * <p>On: both sides start from the single card, so the first thing the user sees is the bench they
- * already had, with two dropdowns instead of one. Off: the input's card becomes the single card —
- * the input is the measuring side, so it is the one worth keeping — and the output follows it
- * through the watcher above.</p>
- *
- * <p>A <c>@change</c> handler rather than a watcher on the flag, and that is load-bearing: the
- * open path below derives this flag from the saved devices and sets the two card keys itself, so
- * a watcher — which fires on a programmatic change as readily as a typed one — would overwrite the
- * restored pair with whatever the single card happened to be.</p>
- */
-/**
- * The output card that unticking Separate devices threw away, or null.
- *
- * <p>Collapsing two cards to one must discard a side, and this is the half that goes. That is
- * defensible; doing it in silence is not. Reported 2026-11-11: with the G6 as the input and the
- * MOTU as the output, unticking moved the <i>output</i> to the G6, and the output calibration run
- * minutes later measured the G6 rather than the MOTU — a 3874 mV full scale belonging to the wrong
- * interface, which the bench then used for every level. The calibration-drift notice did catch it
- * afterwards, which is what that notice is for; what was missing was anything saying the output
- * had moved at the moment it moved.</p>
- */
-const collapsedOutputCard = ref<string | null>(null)
-
-function onSeparateDevicesChanged() {
-  if (form.separateDevices) {
-    form.inputCardKey = form.cardKey
-    form.outputCardKey = form.cardKey
-    collapsedOutputCard.value = null
-    return
-  }
-
-  // The input wins: it is the measuring side, and the output follows it through the watcher above.
-  const dropped = form.outputCardKey
-  form.cardKey = form.inputCardKey || form.outputCardKey
-  collapsedOutputCard.value =
-    dropped && form.inputCardKey && dropped !== form.inputCardKey ? splitKey(dropped).name : null
-}
-
-// Once the single card is chosen deliberately, the note has said what it had to say.
-watch(() => form.cardKey, () => (collapsedOutputCard.value = null))
+// NOTE: `collapsedOutputCard` and `onSeparateDevicesChanged` stood here until 2026-11-15. Both
+// existed only to carry the selection across the Separate devices checkbox and to say out loud
+// which output card unticking it had thrown away (reported 2026-11-11, after an output calibration
+// measured the wrong interface in silence). With the checkbox gone -- a sound card is one interface
+// now, and two cards are a Split -- nothing in this dialog collapses two cards into one, so there
+// is no discarded side to announce. The analyzer picker can still move a bench from a card+card
+// split to a plain sound card, and that path keeps both stored names and is refused at connect by
+// name, which is a better answer than a silent discard ever was.
 
 /** Channel pairs the chosen device can actually offer, as offsets. */
 const inputPairs = computed(() => pairsFor(selectedInput.value?.maxInputChannels ?? 0))
@@ -573,13 +464,6 @@ const rateSummaryHint = computed(() => {
 const pairingWarning = computed(() => {
   if (!probe.value || !selectedInput.value || !selectedOutput.value) return null
   if (probe.value.pairing !== 'Unknown') return null
-
-  // Two cards chosen deliberately are already explained by modeNote, in more useful words — it
-  // names which measurements survive and what to do instead. This one is for the case the user
-  // did *not* ask for: one card whose two endpoints the host API cannot be shown to share, which
-  // is every WDM-KS pairing. Both firing at once put two amber paragraphs about clocks on screen
-  // saying the same thing, which was reported from a MOTU-in / Realtek-out bench.
-  if (pairing.value === 'separate') return null
 
   return 'These may not be the same interface. Two cards run on two clocks, and the drift between them is reported as DUT response — nothing downstream can tell the difference.'
 })
@@ -726,12 +610,20 @@ const calibrationNotices = computed<CalibrationNotice[]>(() => {
  *
  * <p>Advisory, never a refusal — the precedent is <c>SoundCardEnumerator.Pairing</c>, which warns
  * about two clocks rather than blocking, because the alternative is making a bench that has no
- * other option unusable. The three cases each say the one thing a reader can act on.</p>
+ * other option unusable.</p>
+ *
+ * <p><b>The two-clock sentence left on 2026-11-15</b> along with this dialog's ability to express a
+ * two-card bench: that is a split now, and the split dialog says what its own pairing costs. What
+ * is left is the half a bench is <i>missing</i>, which a one-interface card can still be.</p>
+ *
+ * <p>Both remaining cases were unreachable until that day, and not because they were wrong — the
+ * only thing rendering this was a paragraph inside the Clock drift panel, whose own
+ * <c>v-if</c> was <c>pairing === 'separate'</c>, so the two sentences about a half-finished bench
+ * could never be the pairing that showed them. They are rendered beside the dropdowns now, which
+ * is where this comment always said they were.</p>
  */
 const modeNote = computed(() => {
   switch (pairing.value) {
-    case 'separate':
-      return 'Two cards run on two clocks. Tone measurements — THD, IMD, stepped sweeps — are unaffected, but the chirp’s phase, group delay and impulse response are not: the clock ratio reads as a frequency-dependent delay. Use the right input as a reference, or the stepped sine, where phase matters.'
     case 'inputOnly':
       return 'Capture only: there is no generator, so this bench measures whatever arrives and cannot drive a sweep. Choose an output as well to run one.'
     case 'outputOnly':
@@ -773,10 +665,6 @@ async function reconcileWithDevices() {
     const savedInputCard = cardKeyFor(config.value.inputHostApi, config.value.inputDeviceName)
     const savedOutputCard = cardKeyFor(config.value.outputHostApi, config.value.outputDeviceName)
 
-    // Derived, never stored, so a saved configuration cannot contradict its own checkbox. Two
-    // different cards is separate mode; so is a bench with only one direction saved, which is
-    // exactly how a capture-only ADC or a playback-only DAC comes back.
-    form.separateDevices = savedInputCard !== savedOutputCard
     form.cardKey = savedInputCard || savedOutputCard
     form.inputCardKey = savedInputCard
     form.outputCardKey = savedOutputCard
@@ -803,7 +691,7 @@ watch(
     saved.value = false
     // The tone state comes from the server, not from what this tab last did: another tab, or this
     // one before a reload, may have left one playing.
-    await Promise.all([load(true), loadDevices(), syncCalibrationState(), loadBenchDrift()])
+    await Promise.all([load(true), loadDevices(), syncCalibrationState()])
     stopLevels?.()
     stopLevels = watchLevels()
     // Captured *before* the reconcile, which is the thing that drops it: a stored device that is
@@ -816,12 +704,6 @@ watch(
 
     await reconcileWithDevices()
 
-    // On a split the two sides are never one card -- a card on both halves is refused outright --
-    // so the per-direction pickers are the only ones that mean anything. Set after the reconcile,
-    // which derives this flag from what was saved, and without going through
-    // onSeparateDevicesChanged: the other direction's stored values are left exactly as they are,
-    // so switching back to the Sound card analyzer finds its bench intact.
-    if (cardDirection.value !== 'both') form.separateDevices = true
   },
   { immediate: true },
 )
@@ -958,20 +840,6 @@ watch(
   () => applyDeviceSoon(),
 )
 
-// The Clock drift panel is the *pairing's*, so it follows the three fields that can change which
-// two devices that is. Not debounced with the write: it is one cheap GET and the panel should
-// track the dropdown rather than the reopening.
-//
-// The channel offsets are deliberately absent. BenchClockKey keys a card by its interface stem
-// rather than its endpoint, precisely so a figure survives a channel-pair change -- re-reading on
-// one would ask the same question again, and including it here would say the opposite.
-watch(
-  () => [form.cardKey, form.inputKey, form.outputKey].join('|'),
-  async () => {
-    if (props.open) await loadBenchDrift()
-  },
-)
-
 async function toggleTone() {
   if (playingDbFs.value !== null) await stopTone()
   else await startTone(outputStep.dbFs)
@@ -1075,23 +943,6 @@ function mvRms(value: number | null | undefined) {
           <PanelIcon icon="soundcard" tone="blue" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Device</h3>
           <span class="flex items-center gap-3">
-            <!-- A mode switch for this whole section, so it sits with Advanced rather than among
-                 the controls it rearranges. Off by default: one card is one clock, and that is
-                 the guarantee the single picker exists to make. -->
-            <label
-              v-if="cardDirection === 'both'"
-              class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
-              title="Lets the input and the output sit on different cards, or on only one of them — which is what a capture-only ADC or a playback-only DAC needs. Two cards run on two clocks, so the chirp's phase and impulse response stop being trustworthy; tone measurements are unaffected."
-            >
-              <input
-                v-model="form.separateDevices"
-                type="checkbox"
-                class="h-3.5 w-3.5"
-                @change="onSeparateDevicesChanged"
-              />
-              Separate devices
-            </label>
-
             <!-- TEMPORARY, removed once the filtered list has been checked against real cards. -->
             <label
               class="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300"
@@ -1126,6 +977,13 @@ function mvRms(value: number | null | undefined) {
           {{ splitNote }}
         </p>
 
+        <p
+          v-if="modeNote"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ modeNote }}
+        </p>
+
         <!-- Grouped by direction. The card, the device on it and the channel pair within
              that device are three answers about one side of the bench, and on a two-card bench
              they are checked one side at a time -- which the old order made impossible, since the
@@ -1146,7 +1004,7 @@ function mvRms(value: number | null | undefined) {
              directions are one piece of hardware, and therefore one clock: two cards run on two,
              and the drift between them is reported as DUT response rather than as a fault. -->
         <div class="sc-row">
-          <span class="sc-label">{{ form.separateDevices ? 'Input card' : 'Sound card' }}</span>
+          <span class="sc-label">{{ separateDevices ? 'Input card' : 'Sound card' }}</span>
           <span class="flex items-center gap-2">
             <!-- **v-memo, and it is not an optimisation.** This dialog polls the input levels
                  every 120 ms for the calibration bars, so it re-renders about eight times a second
@@ -1167,7 +1025,7 @@ function mvRms(value: number | null | undefined) {
                  One select per mode rather than one with a ternary list, so each gets a v-model
                  and a memo key that names exactly what it draws. -->
             <select
-              v-if="!form.separateDevices"
+              v-if="!separateDevices"
               v-model="form.cardKey"
               v-memo="[cards, form.cardKey]"
               class="tb-input min-w-0 flex-1"
@@ -1215,8 +1073,8 @@ function mvRms(value: number | null | undefined) {
              nowhere on screen. Asked on 2026-11-11, with a G6 selected whose single WASAPI output
              endpoint made the row vanish while the Input row stayed: the only thing naming the
              output was the calibration-drift warning above it. That matters more than usual here,
-             because the output can move between cards without being touched -- see
-             collapsedOutputCard. Shown read-only instead. -->
+             because an output calibration names an interface and a reader has to be able to see
+             which one. Shown read-only instead. -->
         <div v-if="cardInputs.length === 1" class="sc-row">
           <span class="sc-label">Input</span>
           <span class="text-neutral-600 dark:text-neutral-300">{{ cardInputs[0]!.name }}</span>
@@ -1258,7 +1116,7 @@ function mvRms(value: number | null | undefined) {
 
         <!-- Only in separate mode: in the ordinary one the output's card is the input's, and a
              second dropdown that can only ever agree with the first is a control with no state. -->
-        <label v-if="form.separateDevices" class="sc-row">
+        <label v-if="separateDevices" class="sc-row">
           <span class="sc-label">Output card</span>
           <!-- Memoised for the reason the input's is — see the comment there. -->
           <select
@@ -1426,20 +1284,6 @@ function mvRms(value: number | null | undefined) {
           would measure <em>that</em> card while this dialog describes a different one.
         </p>
 
-        <!-- Said at the moment the output moves, not minutes later when a calibration has already
-             been taken through the wrong interface. See collapsedOutputCard. -->
-        <p
-          v-if="collapsedOutputCard"
-          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
-        >
-          Both directions are now on <strong>{{ splitKey(form.cardKey).name }}</strong>. The output
-          was on <strong>{{ collapsedOutputCard }}</strong> — one card carries both directions, so
-          unticking Separate devices keeps the input's card and the output follows it. If the output
-          should still be the other card, tick Separate devices again. <strong>Re-run the output
-          calibration either way</strong>: a full scale measured on one interface does not describe
-          the other.
-        </p>
-
         <p
           v-if="pairingWarning"
           class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
@@ -1464,90 +1308,6 @@ function mvRms(value: number | null | undefined) {
         <p v-if="saved" class="text-[11px] text-emerald-700 dark:text-emerald-400">
           Selected — the card is open and ready to calibrate.
         </p>
-        </div>
-      </section>
-
-      <!-- 1b. Clock drift ------------------------------------------------------------- -->
-      <!-- Its own panel since 2026-11-12, where it used to be a callout inside Device. Two
-           reasons, and the second is what asked for it. It is not a property of the *picker* --
-           nothing above it changes what it says except which two cards are chosen -- and it now
-           carries four stored figures, which is a readout rather than a notice. A paragraph that
-           grows a four-column grid has stopped being a paragraph.
-
-           Rendered only where there are two cards. On one card there is one clock, there is
-           nothing to measure, and the test would read zero by construction; an empty panel saying
-           so would be a section about a problem this bench does not have. -->
-      <section v-if="pairing === 'separate'" class="sc-section">
-        <div class="sc-head">
-          <PanelIcon icon="stopwatch" tone="violet" />
-          <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Clock drift</h3>
-          <button
-            type="button"
-            class="btn-chip"
-            :style="{ backgroundColor: 'var(--kind-violet-chip-bg)', color: 'var(--kind-violet-chip-fg)' }"
-            :disabled="!settingsInEffect"
-            :title="
-              settingsInEffect
-                ? 'Plays a tone on the output card and reads it back on the input card.'
-                : 'These settings are not in effect yet, so there is nothing to measure.'
-            "
-            @click="clockDriftOpen = true"
-          >
-            {{ storedDrift ? 'Measure again' : 'Measure the drift' }}
-          </button>
-        </div>
-
-        <div class="sc-body">
-          <!-- What two cards cost, in the words the Device section used to carry. Kept verbatim:
-               it is the sentence the two chirp screens' correction checkbox refers back to. -->
-          <p v-if="modeNote" class="pt-1 text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
-            {{ modeNote }}
-          </p>
-
-          <!-- The last run's own figures, which until now existed only inside the drift dialog and
-               so were gone the moment it closed. All four together, because no one of them can be
-               read alone: the drift is the answer, the spread is the only thing that reveals an
-               outlier, sigma says whether an ordinary reading is scattered, and the tone margin
-               says whether any of it was measured on a signal worth believing. Asked for
-               2026-11-12. -->
-          <div v-if="storedDrift" class="sc-row">
-            <span class="sc-label">Last measured</span>
-            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] sm:grid-cols-4">
-              <div>
-                <span class="text-neutral-500 dark:text-neutral-400">Drift</span><br />
-                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.ppm, 2, ' ppm') }}</span>
-              </div>
-              <div>
-                <span class="text-neutral-500 dark:text-neutral-400">Spread</span><br />
-                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.spreadPpm, 2, ' ppm') }}</span>
-              </div>
-              <div>
-                <span class="text-neutral-500 dark:text-neutral-400">&#963;</span><br />
-                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.sigmaPpm, 3, ' ppm') }}</span>
-              </div>
-              <div>
-                <span class="text-neutral-500 dark:text-neutral-400">Tone margin</span><br />
-                <span class="font-mono tabular-nums">{{ driftFigure(storedDrift.toneMarginDb, 1, ' dB') }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Provenance, not a decision: whether a chirp may actually be corrected is the
-               server's answer on /api/device/ranges, and nothing here re-derives it. Naming the
-               two devices is what lets a reader see for themselves that a figure describes a
-               pairing they have since changed. -->
-          <div v-if="storedDrift" class="sc-row">
-            <span class="sc-label">Measured</span>
-            <span class="text-[12px] text-neutral-600 dark:text-neutral-300">
-              {{ storedDrift.when }}<template v-if="storedDrift.between"> &#183; {{ storedDrift.between }}</template>
-            </span>
-          </div>
-
-          <p v-else class="pt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-            Not measured on this bench yet. Until it is, the two chirp screens offer no correction
-            and a sweep's phase, group delay and impulse response carry whatever the two clocks
-            differ by.
-          </p>
         </div>
       </section>
 
@@ -1949,8 +1709,4 @@ function mvRms(value: number | null | undefined) {
       </button>
     </template>
   </Modal>
-  <!-- @close re-reads the config as well as hiding this: the run stored its figure as it ended.
-       See onClockDriftClosed — a bare `clockDriftOpen = false` leaves the panel behind showing the
-       previous run. -->
-  <ClockDriftDialog :open="clockDriftOpen" :pairing-note="modeNote" @close="onClockDriftClosed" />
 </template>

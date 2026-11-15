@@ -358,6 +358,14 @@ export function cardsOffering(
  *   <li><b>none</b> — nothing chosen, which is the one case that cannot be opened at all. Mirrors
  *   <c>SoundCardSettings.IsUsable</c> being false.</li>
  * </ul>
+ *
+ * <p><b>Nothing branches on `separate` any more, and it is still returned on purpose.</b> Since
+ * 2026-11-15 a sound card is one physical interface, so two different cards are a `Split` with a
+ * card on each half rather than a mode of this dialog -- and the two sentences that used to answer
+ * `separate` (what two clocks cost, and the Clock drift panel) both live in the split dialog now.
+ * The value is kept because it still describes the selection truthfully: the card dialog edits both
+ * halves of a card+card split, so two different cards is a state it genuinely holds, and a function
+ * that answered `duplex` for it would be wrong rather than merely quiet.</p>
  */
 export type DevicePairing = 'duplex' | 'separate' | 'inputOnly' | 'outputOnly' | 'none'
 

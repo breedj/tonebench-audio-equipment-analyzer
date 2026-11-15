@@ -11,6 +11,13 @@ import { describe, expect, it } from 'vitest'
  * is the server's refusal. Both were offered, which is how "should split allow Separate devices?"
  * came to be asked (2026-11-13); the answer was no, and the narrowing is this.
  *
+ * <b>Asked again on 2026-11-15 and answered the other way round</b>: the two features were merged
+ * rather than kept apart. `DeviceKind.SoundCard` now means ONE physical interface, two cards are a
+ * split with a card on each half, and "Separate devices" is gone as a control -- so what used to be
+ * a checkbox the narrowing had to hide is now a value derived from the bench itself. The cases
+ * below moved with it rather than being deleted: they still pin which direction the dialog offers,
+ * which is the question that outlived both answers.
+ *
  * All of it lives in a `.vue`, which is not mountable under this suite's node environment, so this
  * reads the component as text the way `settingsInEffect.test.ts`, `annotationNumbersDefault.test.ts`
  * and `panelIcons.test.ts` do. What it catches is the one change that puts the fault back: a gate
@@ -48,14 +55,6 @@ function groupWrapper(caption: 'Input' | 'Output'): string {
   return source.slice(start, source.indexOf('>', start) + 1)
 }
 
-/** The opening tag of the element whose attributes contain `marker`. */
-function openingTagContaining(marker: string): string {
-  const at = source.indexOf(marker)
-  expect(at, `${marker} appears`).toBeGreaterThan(-1)
-  const open = source.lastIndexOf('<', at)
-  return source.slice(open, source.indexOf('>', at) + 1)
-}
-
 describe('which direction the dialog offers', () => {
   it('derives it from the analyzer kind and both halves of a split', () => {
     const body = computedBody('cardDirection')
@@ -77,21 +76,42 @@ describe('which direction the dialog offers', () => {
 })
 
 describe('the pickers a split does not use', () => {
-  it('hides the Separate devices switch, which a split has already decided', () => {
-    expect(openingTagContaining('v-model="form.separateDevices"')).toBeTruthy()
-    const label = source.slice(
-      source.lastIndexOf('<label', source.indexOf('v-model="form.separateDevices"')),
-      source.indexOf('v-model="form.separateDevices"'),
-    )
-    expect(label).toContain("v-if=\"cardDirection === 'both'\"")
+  it('offers no Separate devices control at all', () => {
+    // The merge, stated as an absence. A sound card is one interface, so there is nothing here for
+    // a user to decide: two cards is a different analyzer kind, not a checkbox on this one.
+    // The control and its handler, not the bare words: a NOTE in the component names what was
+    // removed and why, which is worth keeping and must not read as the feature still being there.
+    expect(source).not.toContain('separateDevices: false')
+    expect(source).not.toContain('v-model="form.separateDevices"')
+    expect(source).not.toContain('@change="onSeparateDevicesChanged"')
+    expect(source).not.toContain('function onSeparateDevicesChanged')
   })
 
-  it('forces the per-direction pickers on a split, since the two sides are never one card', () => {
-    // Without this a document whose two sides happen to name one card derives separateDevices
-    // false, and the direction the split *does* use has no picker rendered at all.
-    expect(source).toMatch(
-      /if \(cardDirection\.value !== 'both'\) form\.separateDevices = true/,
-    )
+  it('derives two pickers from the bench rather than from a control', () => {
+    const body = computedBody('separateDevices')
+
+    // A card on each half of a split: both cards are chosen here, because the card document is
+    // still the one place a card is picked.
+    expect(body).toContain("deviceKind === 'Split'")
+    expect(body).toContain("splitInputKind === 'SoundCard'")
+    expect(body).toContain("splitOutputKind === 'SoundCard'")
+
+    // And a one-direction bench, which is how a capture-only ADC comes back: one name stored, so
+    // the two keys differ and a single picker cannot express it.
+    expect(body).toContain('form.inputCardKey !== form.outputCardKey')
+  })
+
+  it('reads a card on both halves as both directions, not as the input one', () => {
+    const body = computedBody('cardDirection')
+
+    // Order, not presence: the single-half tests below match a two-card split too, so testing
+    // either of them first would call it 'input' and hide the output picker behind a note saying
+    // the output is set in the split settings -- where there would be nothing to set.
+    const both = body.indexOf("splitInputKind === 'SoundCard' && s.splitOutputKind === 'SoundCard'")
+    const inputOnly = body.indexOf("if (s.splitInputKind === 'SoundCard') return 'input'")
+    expect(both, 'both halves are tested').toBeGreaterThan(-1)
+    expect(inputOnly, 'one half is tested').toBeGreaterThan(-1)
+    expect(both).toBeLessThan(inputOnly)
   })
 
   it('hides the input group where the bench captures with something else', () => {

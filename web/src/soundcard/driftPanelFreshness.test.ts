@@ -11,6 +11,10 @@ import { describe, expect, it } from 'vitest'
  * new run actually measured. Reported from the bench 2026-11-12, against a run reading 83.18 ppm
  * over a panel still saying 84.59.
  *
+ * It was the *sound card* dialog's panel until 2026-11-15, and the rule outlived the move: a sound
+ * card is one interface now, so the only bench with two clocks is a split, and the panel lives
+ * there alone. What it has to do is unchanged.
+ *
  * It is asserted by reading the component as text because the fault lives in a `.vue` template and
  * this suite runs on `environment: 'node'` with no DOM — the same technique as
  * `annotationNumbersDefault.test.ts`. What it pins is narrow and exact: the handler exists, it
@@ -18,7 +22,7 @@ import { describe, expect, it } from 'vitest'
  * putting the bare assignment back, which fails the third case.
  */
 const source = readFileSync(
-  new URL('../components/SoundCardDialog.vue', import.meta.url),
+  new URL('../components/SplitDeviceDialog.vue', import.meta.url),
   'utf8',
 )
 
@@ -33,7 +37,10 @@ describe('the Clock drift panel is refreshed after a run', () => {
       source.indexOf('async function onClockDriftClosed()') + 200,
     )
     expect(body).toContain('clockDriftOpen.value = false')
-    expect(body).toContain('load(true)')
+
+    // The split dialog re-reads the *figure* rather than a card document, which it does not have:
+    // the pairing is its own two dropdowns, and loadBenchDrift is what asks about them.
+    expect(body).toContain('loadBenchDrift()')
   })
 
   it('and the drift dialog closes through it rather than inline', () => {

@@ -99,6 +99,23 @@ const { showPage } = useManual()
       a card is picked: with a card on each half it offers an <em>Input card</em> and an
       <em>Output card</em> rather than one.
     </p>
+    <p>
+      <strong>Each keeps its own best host API.</strong> On a one-interface bench the picker quietly
+      moves one side to match the other, because a single stream cannot span two host APIs; on a
+      two-card split it does not, because there are two streams. So a MOTU with an ASIO driver stays
+      on ASIO while a DAC that has none sits on WASAPI — which is the point, since the better
+      converter keeps the better driver. Measured on this bench: an ASIO capture against a WASAPI
+      generator, and the reverse, both stream with nothing dropped.
+    </p>
+    <p class="manual-callout">
+      <strong>If your bench used to be two cards under <em>Sound card</em>, it is a split now.</strong>
+      Earlier versions let a two-card pairing be set up as the sound-card analyzer, which opened both
+      directions in one stream across both cards — the arrangement whose clocks drift into one
+      another. Such a bench is moved here once, automatically, the first time this version starts:
+      the analyzer becomes <strong>Split (two devices)</strong> with a card on each half, and the two
+      cards, their channel pairs, both calibrations and any measured clock drift come with it. A
+      one-card bench is left exactly as it was.
+    </p>
 
     <h3>Two pairings are refused</h3>
     <p>

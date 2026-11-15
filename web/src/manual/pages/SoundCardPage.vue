@@ -730,10 +730,15 @@ const { showPage } = useManual()
         <tr>
           <td>“This pairing accepts none of …, which are the rates this analyzer asks a card about”</td>
           <td>
-            The two chosen devices cannot agree on a rate the app measures at. On a single card,
-            try its ASIO entry instead. On <strong>two</strong> cards, do the opposite: ASIO cannot
-            take its input from one driver and its output from another, whatever the rate, so pick
-            both sides under WASAPI. The app says so by name when that is the cause.
+            The two chosen devices cannot agree on a rate the app measures at — try the card's
+            <strong>ASIO</strong> entry instead, which reports what the converter really does rather
+            than what the mixer will accept. The app says by name when the cause is an ASIO pairing
+            rather than a rate.
+            <br /><br />
+            This is a <em>one-interface</em> bench, so both sides are the same card. Two cards are
+            a <button type="button" class="manual-link" @click="showPage('split-device')">split</button>,
+            where each is opened on a stream of its own and they need not share a host API at all —
+            the only rule there is that at most one of them may be ASIO.
           </td>
         </tr>
         <tr>

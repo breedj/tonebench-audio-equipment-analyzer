@@ -75,23 +75,19 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
 
-        // **A sound card on both sides cannot be pumped, so it is refused rather than hung.**
-        // PortAudio is initialised once per process and everything native runs on StaDispatcher's
-        // single thread — the apartment ASIO requires — and SoundCardDevice.StreamAsync *posts its
-        // whole transfer loop* to that thread for the stream's life. A second card's pump would
-        // queue behind the first and never run: no exception, no log line, just an acquisition that
-        // never produces a block. A two-card bench already has a home — DeviceKind.SoundCard opens
-        // both directions in one duplex stream — so the honest answer is to name it here.
-        if (input is SoundCardDevice && output is SoundCardDevice)
-        {
-            throw new ArgumentException(
-                "A split analyzer cannot have a sound card on both sides: everything PortAudio does "
-                    + "runs on one thread, and the second card's transfer loop would never be scheduled. "
-                    + "Choose Sound card instead, which opens both directions of a two-card bench in one "
-                    + "stream, or pair the card with the QA403.",
-                nameof(output));
-        }
-
+        // **A sound card on both sides used to be refused here, and is not any more.**
+        // The refusal was real while every PortAudio call ran on one StaDispatcher thread that
+        // SoundCardDevice.StreamAsync *occupies* for a stream's whole life: the second card's pump
+        // queued behind the first and never ran — no exception, no log line, just an acquisition
+        // that produced nothing, which is worth refusing rather than hanging. A card built as half
+        // of a two-card bench now takes a transfer thread of its own (SoundCardDevice's
+        // ownStreamThread), so the two free-run on their own clocks, which is the whole point: one
+        // loop blocking on both directions would couple them exactly as one duplex stream spanning
+        // two devices does, and slip a ring on the same schedule.
+        //
+        // What survives is narrower and cannot be judged from here — two ASIO cards, which the SDK
+        // refuses one process-wide — so it arrives as SplitDeviceSettings.CombinationProblem and is
+        // reported at connect. See that property for why not here.
         _input = input;
         _output = output;
         _settings = settings;
@@ -108,6 +104,13 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
 
     /// <summary>The generating half.</summary>
     public IAnalyzerDevice Output => _output;
+
+    /// <summary>
+    /// Why this pairing cannot be opened, or null — see
+    /// <see cref="SplitDeviceSettings.CombinationProblem"/>. Public so the App layer can report it
+    /// without opening anything, and so a test can say the ordinary case carries nothing.
+    /// </summary>
+    public string? CombinationProblem => _settings.CombinationProblem;
 
     /// <summary>What the capturing half called itself, or null before <see cref="ConnectAsync"/>.</summary>
     public DeviceInfo? InputInfo { get; private set; }
@@ -324,6 +327,11 @@ public sealed class SplitAnalyzerDevice : IAnalyzerDevice, IDisposable
     {
         Interlocked.Exchange(ref _deviceLostRaised, 0);
         _outputFaulted = false;
+
+        // Before either half is opened, so a pairing that cannot work says why instead of failing
+        // halfway through with whatever the native layer called it.
+        if (_settings.CombinationProblem is { Length: > 0 } problem)
+            throw new InvalidOperationException(problem);
 
         DeviceInfo output;
         try

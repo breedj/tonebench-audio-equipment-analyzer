@@ -41,6 +41,64 @@ public sealed record SoundCardSettings
     /// <summary>Nothing chosen yet — what a fresh install has.</summary>
     public static SoundCardSettings Empty { get; } = new();
 
+    /// <summary>
+    /// PortAudio's own name for the ASIO host API, which is what a stored card document holds.
+    ///
+    /// <para>A literal rather than a lookup because a document names its host API in text and is
+    /// read long before anything enumerates: the factory decides whether a two-card bench is
+    /// buildable while constructing it, where a native call is exactly what must not happen.</para>
+    /// </summary>
+    public const string AsioHostApiName = "ASIO";
+
+    /// <summary>Whether a stored host API name is ASIO's.</summary>
+    public static bool IsAsio(string? hostApiName) =>
+        string.Equals(hostApiName, AsioHostApiName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Why these two stored card selections cannot be the two halves of a split, or null.
+    ///
+    /// <para><b>The sibling of <c>SoundCardEnumerator.DuplexCombinationProblem</c>, and here rather
+    /// than beside it for a reason that is not tidiness.</b> That one judges two live
+    /// <c>SoundCardDeviceDescriptor</c>s — enumerated hardware — and the enumerator is internal to
+    /// this assembly. This one judges two <i>stored</i> selections, which is a question about a
+    /// document rather than about hardware, and it is asked from the App layer while a composite is
+    /// being constructed: before anything has enumerated, and where a native call is exactly what
+    /// must not happen. A settings record is where a rule about what a document can express
+    /// belongs.</para>
+    ///
+    /// <para>The two refusals share a predicate and nothing else. There, one duplex stream cannot
+    /// reach across two ASIO drivers. Here there are two streams and the limit is harder: <b>the
+    /// ASIO SDK has no notion of more than one driver open per process at all</b>, and PortAudio's
+    /// backend carries that as a singleton whose callbacks take no context pointer, so a callback
+    /// could not say which driver called it. No threading arrangement reaches it — which is why a
+    /// split gives each card a transfer thread of its own and still cannot have two ASIO
+    /// cards.</para>
+    ///
+    /// <para>So the advice differs too, and that is the point of the separate message: the duplex
+    /// one says move <i>both</i> cards to one other host API, where a split only needs <i>one</i>
+    /// of them moved and the better converter keeps ASIO.</para>
+    /// </summary>
+    public static string? SplitCombinationProblem(
+        string? inputHostApi, string inputDeviceName, string? outputHostApi, string outputDeviceName)
+    {
+        if (!IsAsio(inputHostApi) || !IsAsio(outputHostApi))
+            return null;
+
+        // One ASIO card used for both halves is one interface and one clock, which is a Sound card
+        // bench rather than a split -- and two streams on one driver is refused just the same.
+        if (string.Equals(inputDeviceName, outputDeviceName, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"'{inputDeviceName}' is one interface, so it is a sound card rather than a split: "
+                + "choose Sound card, which opens both of its directions in one stream.";
+        }
+
+        return $"A split cannot have two ASIO cards: ASIO allows one driver open per process, so "
+            + $"'{inputDeviceName}' and '{outputDeviceName}' cannot both be opened whatever the "
+            + "sample rate. Move one of them to WASAPI — which this analyzer opens in exclusive mode "
+            + "and trusts — and the other keeps ASIO.";
+    }
+
+
     public string InputHostApi { get; init; } = string.Empty;
 
     public string InputDeviceName { get; init; } = string.Empty;

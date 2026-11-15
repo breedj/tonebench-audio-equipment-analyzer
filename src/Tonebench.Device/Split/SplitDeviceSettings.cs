@@ -36,6 +36,21 @@ public sealed record SplitDeviceSettings
     /// </summary>
     public double GeneratorSampleRateHz { get; init; }
 
+    /// <summary>
+    /// Why this pairing cannot be opened, decided before anything was built, or null for the
+    /// ordinary case.
+    ///
+    /// <para><b>Carried rather than detected, and reported at connect rather than thrown at
+    /// construction</b> — both halves of that are load bearing. A composite holds two
+    /// <see cref="IAnalyzerDevice"/>s and cannot see what host API a card was chosen under, so only
+    /// the layer that read the two documents can judge it; and a <c>SplitAnalyzerDevice</c> is
+    /// built inside the session's field initializer, where a throw is a crash at startup instead of
+    /// a message on the status bar. The one refusal that used to be made in the constructor — a
+    /// card on both sides — is gone, because a card now gets a transfer thread of its own and that
+    /// bench works.</para>
+    /// </summary>
+    public string? CombinationProblem { get; init; }
+
     /// <summary>What to call the capturing half in a message or a log line, e.g. <c>QA403</c>.</summary>
     public string InputLabel { get; init; } = "input device";
 

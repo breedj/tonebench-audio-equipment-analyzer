@@ -17,14 +17,18 @@ public sealed record SplitPairing(DeviceKind Input, DeviceKind Output)
     /// <summary>
     /// The pairing a document names, or null with <paramref name="problem"/> set.
     ///
-    /// <para>Three pairings are refused and the reasons are unrelated. A <b>composite inside a
-    /// composite</b> is meaningless. <b>Two sound cards</b> cannot both be pumped: everything
-    /// PortAudio does runs on one thread, which <c>SoundCardDevice</c> occupies for a stream's
-    /// whole life, so the second card's transfer loop would never be scheduled — and that bench
-    /// already has a home under Sound card, which opens both directions in one stream. <b>Two
-    /// QA40x analyzers</b> are one device opened twice: the transport claims the first match by
-    /// product id, so the second would fail at claim time, which reads as hardware that needs a
-    /// power cycle.</para>
+    /// <para>Two pairings are refused and the reasons are unrelated. A <b>composite inside a
+    /// composite</b> is meaningless. <b>Two QA40x analyzers</b> are one device opened twice: the
+    /// transport claims the first match by product id, so the second would fail at claim time,
+    /// which reads as hardware that needs a power cycle.</para>
+    ///
+    /// <para><b>Two sound cards used to be the third, and are now the point of the feature.</b>
+    /// They were refused because every PortAudio call ran on one thread that a stream's transfer
+    /// loop occupies, so the second card's pump never ran; a card half now takes a thread of its
+    /// own. Which two <i>cards</i> they are is not judged here and cannot be — this sees a document
+    /// naming two kinds, where the cards live in <c>soundcard.settings</c> — so the one remaining
+    /// card-level refusal, two ASIO drivers, belongs to
+    /// <c>SoundCardSettings.SplitCombinationProblem</c> and is reported at connect.</para>
     ///
     /// <para>Two simulators are deliberately allowed. It is the one pairing that exercises the whole
     /// composite — both stream lifecycles, the rate conversion, the withheld settle — at a desk with
@@ -55,15 +59,6 @@ public sealed record SplitPairing(DeviceKind Input, DeviceKind Output)
         if (input == DeviceKind.Split || output == DeviceKind.Split)
         {
             problem = "A split analyzer's halves have to be a QA40x, a sound card or the simulator.";
-            return null;
-        }
-
-        if (input == DeviceKind.SoundCard && output == DeviceKind.SoundCard)
-        {
-            problem =
-                "A split cannot have a sound card on both sides: everything PortAudio does runs on one "
-                    + "thread, and the second card's transfer loop would never be scheduled. Choose Sound "
-                    + "card instead, which opens both directions of a two-card bench in one stream.";
             return null;
         }
 

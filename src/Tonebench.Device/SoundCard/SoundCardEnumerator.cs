@@ -336,6 +336,8 @@ internal sealed class SoundCardEnumerator(IPortAudio portAudio)
         if (input.HostApiKind != SoundCardHostApiKind.Asio || output.HostApiKind != SoundCardHostApiKind.Asio)
             return null;
 
+        // The split's counterpart is SoundCardSettings.SplitCombinationProblem: same predicate,
+        // harder limit, different advice. See its remarks for why it lives there.
         return $"ASIO cannot take its input from one driver and its output from another: a duplex "
             + $"stream belongs to a single ASIO driver, so '{input.Name}' and '{output.Name}' "
             + "cannot be combined whatever the sample rate. Pick both sides under one of the other "

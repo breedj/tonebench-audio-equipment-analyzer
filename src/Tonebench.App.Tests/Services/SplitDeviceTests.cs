@@ -13,8 +13,9 @@ namespace Tonebench.App.Tests.Services;
 /// and why, and that the factory builds each half the way it has to be built.
 ///
 /// <para>The composite's own routing is <c>SplitAnalyzerDeviceTests</c> in the device project. What
-/// is here is the App layer's half: the stored document, the three refusals, and the one rule that
-/// is invisible from the outside — a sound-card half must be built for <i>one direction</i>.</para>
+/// is here is the App layer's half: the stored document, the two refusals, and the two rules that
+/// are invisible from the outside — a sound-card half must be built for <i>one direction</i>, and
+/// a card against another card must be given a transfer thread of its own.</para>
 /// </summary>
 public class SplitDeviceTests
 {
@@ -34,16 +35,57 @@ public class SplitDeviceTests
     }
 
     [Fact]
-    public void ASoundCardOnBothSides_IsRefused_AndNamesTheAlternative()
+    public void ASoundCardOnBothSides_IsAllowed_BecauseEachHalfTakesATransferThreadOfItsOwn()
     {
-        // Everything PortAudio does runs on one thread, which SoundCardDevice occupies for a
-        // stream's whole life, so the second card's pump would never be scheduled: no exception, no
-        // log line, just an acquisition that never produces a block. That bench already has a home.
-        Assert.Null(SplitPairing.Resolve(new SplitDeviceConfig("SoundCard", "SoundCard"), out string? problem));
+        // This was refused until a card half could be given a thread of its own: a transfer loop
+        // occupies the thread it is posted to, so two cards on the library's one thread meant the
+        // second pump never ran -- no exception and no log line, just an acquisition producing
+        // nothing. It is now the pairing the whole feature exists for.
+        SplitPairing pairing = Assert.IsType<SplitPairing>(
+            SplitPairing.Resolve(new SplitDeviceConfig("SoundCard", "SoundCard"), out string? problem));
 
-        Assert.NotNull(problem);
-        Assert.Contains("one thread", problem);
-        Assert.Contains("Sound card", problem);
+        Assert.Null(problem);
+        Assert.Equal(DeviceKind.SoundCard, pairing.Input);
+        Assert.Equal(DeviceKind.SoundCard, pairing.Output);
+    }
+
+    /// <summary>
+    /// Every pairing of every kind, so a fifth <see cref="DeviceKind"/> cannot be added without a
+    /// verdict for it. A matrix rather than a case each because the interesting property is that
+    /// the refusals are <i>exactly</i> these: a kind that quietly became unbuildable would
+    /// otherwise show up as a bench that falls back to the default with nothing said.
+    /// </summary>
+    [Theory]
+    [InlineData(DeviceKind.Hardware, DeviceKind.Hardware, false)]
+    [InlineData(DeviceKind.Hardware, DeviceKind.Simulated, true)]
+    [InlineData(DeviceKind.Hardware, DeviceKind.SoundCard, true)]
+    [InlineData(DeviceKind.Hardware, DeviceKind.Split, false)]
+    [InlineData(DeviceKind.Simulated, DeviceKind.Hardware, true)]
+    [InlineData(DeviceKind.Simulated, DeviceKind.Simulated, true)]
+    [InlineData(DeviceKind.Simulated, DeviceKind.SoundCard, true)]
+    [InlineData(DeviceKind.Simulated, DeviceKind.Split, false)]
+    [InlineData(DeviceKind.SoundCard, DeviceKind.Hardware, true)]
+    [InlineData(DeviceKind.SoundCard, DeviceKind.Simulated, true)]
+    [InlineData(DeviceKind.SoundCard, DeviceKind.SoundCard, true)]
+    [InlineData(DeviceKind.SoundCard, DeviceKind.Split, false)]
+    [InlineData(DeviceKind.Split, DeviceKind.Hardware, false)]
+    [InlineData(DeviceKind.Split, DeviceKind.Simulated, false)]
+    [InlineData(DeviceKind.Split, DeviceKind.SoundCard, false)]
+    [InlineData(DeviceKind.Split, DeviceKind.Split, false)]
+    public void ThePairingMatrix_IsExactlyTheseRefusals(DeviceKind input, DeviceKind output, bool allowed)
+    {
+        SplitPairing? pairing = SplitPairing.Resolve(
+            new SplitDeviceConfig(input.ToString(), output.ToString()), out string? problem);
+
+        Assert.Equal(allowed, pairing is not null);
+        Assert.Equal(allowed, problem is null);
+    }
+
+    [Fact]
+    public void EveryKind_HasARowInThePairingMatrix()
+    {
+        // The matrix above is written out, so it goes stale silently. This is what fails instead.
+        Assert.Equal(4, Enum.GetValues<DeviceKind>().Length);
     }
 
     [Fact]
@@ -104,7 +146,7 @@ public class SplitDeviceTests
         // refusal here would be a crash at startup rather than a message on the status bar.
         var setting = new SplitDeviceSetting
         {
-            Config = new SplitDeviceConfig("SoundCard", "SoundCard", 96_000.0),
+            Config = new SplitDeviceConfig("Hardware", "Hardware", 96_000.0),
         };
 
         Assert.Equal(SplitDeviceConfig.Default, setting.Config);
@@ -138,12 +180,27 @@ public class SplitDeviceTests
     {
         public List<SoundCardSettings> CardsBuilt { get; } = [];
 
-        protected override IAnalyzerDevice CreateSoundCard(SoundCardSettings settings)
+        /// <summary>Whether each card, in the order built, was given a transfer thread of its own.</summary>
+        public List<bool> OwnStreamThreads { get; } = [];
+
+        protected override IAnalyzerDevice CreateSoundCard(SoundCardSettings settings, bool ownStreamThread = false)
         {
             CardsBuilt.Add(settings);
+            OwnStreamThreads.Add(ownStreamThread);
             return new SimulatedDevice();
         }
     }
+
+    private static SoundCardSetting TwoCards(string inputHostApi = "WASAPI", string outputHostApi = "WASAPI") => new()
+    {
+        Config = SoundCardConfig.Default with
+        {
+            InputHostApi = inputHostApi,
+            InputDeviceName = "In 1-2 (MOTU M Series)",
+            OutputHostApi = outputHostApi,
+            OutputDeviceName = "Luidsprekers (TOPPING USB DAC)",
+        },
+    };
 
     private static SoundCardSetting DuplexCard() => new()
     {
@@ -187,6 +244,93 @@ public class SplitDeviceTests
         Assert.Equal(SoundCardStreamDirection.OutputOnly, card.Direction);
         Assert.Equal("Out 1-2 (Topping D50 III)", card.OutputDeviceName);
         Assert.Equal(string.Empty, card.InputDeviceName);
+    }
+
+    [Fact]
+    public void TwoCardHalves_AreEachGivenATransferThreadOfTheirOwn()
+    {
+        // The join to the device layer, and the thing that makes a two-card split work at all: a
+        // transfer loop occupies the thread it is posted to for its stream's whole life, so two
+        // cards sharing the library's thread means the second pump never runs.
+        var factory = new RecordingFactory(
+            TwoCards(),
+            new SplitDeviceSetting { Config = new SplitDeviceConfig("SoundCard", "SoundCard") });
+
+        factory.Create(DeviceKind.Split);
+
+        Assert.Equal(2, factory.CardsBuilt.Count);
+        Assert.All(factory.OwnStreamThreads, own => Assert.True(own));
+    }
+
+    [Fact]
+    public void ALoneCardHalf_KeepsTheLibrarysThread()
+    {
+        // One PortAudio stream is the arrangement every measurement this app has taken was
+        // measured with, and a card against a QA40x or the simulator keeps it. Giving a thread of
+        // its own to every card half would move that path too, for nothing.
+        var factory = new RecordingFactory(
+            TwoCards(),
+            new SplitDeviceSetting { Config = new SplitDeviceConfig("Hardware", "SoundCard") });
+
+        factory.Create(DeviceKind.Split);
+
+        Assert.False(Assert.Single(factory.OwnStreamThreads));
+    }
+
+    [Fact]
+    public void APlainSoundCardBench_KeepsTheLibrarysThread()
+    {
+        var factory = new RecordingFactory(TwoCards(), new SplitDeviceSetting());
+
+        factory.Create(DeviceKind.SoundCard);
+
+        Assert.False(Assert.Single(factory.OwnStreamThreads));
+    }
+
+    [Fact]
+    public async Task TwoAsioCards_AreRefusedAtConnect_RatherThanAtConstruction()
+    {
+        // Construction happens in the session's field initializer, where a throw is a crash at
+        // startup instead of a message on the status bar -- so the refusal rides along as a
+        // problem the composite reports when something tries to open it.
+        var factory = new RecordingFactory(
+            TwoCards(inputHostApi: "ASIO", outputHostApi: "ASIO"),
+            new SplitDeviceSetting { Config = new SplitDeviceConfig("SoundCard", "SoundCard") });
+
+        var split = Assert.IsType<SplitAnalyzerDevice>(factory.Create(DeviceKind.Split));
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => split.ConnectAsync(CancellationToken.None));
+
+        Assert.Contains("one driver open per process", ex.Message);
+        Assert.Contains("WASAPI", ex.Message);
+    }
+
+    [Fact]
+    public void OneAsioCardAgainstAWasapiOne_IsBuiltWithNothingToReport()
+    {
+        // The pairing a single duplex stream cannot express at all, and the reason two streams are
+        // worth having: the better converter keeps the better driver.
+        var factory = new RecordingFactory(
+            TwoCards(inputHostApi: "ASIO", outputHostApi: "WASAPI"),
+            new SplitDeviceSetting { Config = new SplitDeviceConfig("SoundCard", "SoundCard") });
+
+        var split = Assert.IsType<SplitAnalyzerDevice>(factory.Create(DeviceKind.Split));
+
+        Assert.Null(split.CombinationProblem);
+    }
+
+    [Fact]
+    public void APinnedComposite_ReportsItselfAsASplit()
+    {
+        // A four-way type test, and this is the arm a two-card bench depends on: a composite is
+        // neither a SimulatedDevice nor a SoundCardDevice, so without its own arm it falls through
+        // to Hardware and the status bar describes a two-card bench as one QA403.
+        var split = new SplitAnalyzerDevice(
+            new SimulatedDevice(), new SimulatedDevice(),
+            SplitDeviceSettings.Default, NullLogger<SplitAnalyzerDevice>.Instance);
+
+        Assert.Equal(DeviceKind.Split, AnalyzerDeviceFactory.Pinned(split).InitialKind);
     }
 
     [Fact]

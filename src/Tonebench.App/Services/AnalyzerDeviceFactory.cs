@@ -151,7 +151,7 @@ public class AnalyzerDeviceFactory
             // Built from the settings as they stand right now rather than from a captured copy: a
             // card chosen or calibrated since the last switch must be the one that opens, and the
             // session reconnects through this factory after every change for exactly that reason.
-            DeviceKind.SoundCard => CreateSoundCard(_soundCard.DeviceSettings),
+            DeviceKind.SoundCard => CreateSoundCard(_soundCard.DeviceSettings, ownStreamThread: false),
 
             DeviceKind.Split => BuildSplit(),
 
@@ -182,21 +182,43 @@ public class AnalyzerDeviceFactory
     /// </summary>
     private IAnalyzerDevice BuildSplit()
     {
-        IAnalyzerDevice input = BuildHalf(_split.InputKind, SoundCardStreamDirection.InputOnly);
-        IAnalyzerDevice output = BuildHalf(_split.OutputKind, SoundCardStreamDirection.OutputOnly);
+        // **Only a card against another card needs a transfer thread of its own, and giving one to
+        // every card half would be the wrong default.** A transfer loop occupies the thread it is
+        // posted to for its stream's whole life, so two cards sharing the library's one thread
+        // means the second pump never runs. One card against a QA40x or the simulator is a single
+        // PortAudio stream, which is the arrangement every measurement this app has taken was
+        // measured with, and it keeps it.
+        bool twoCards = _split.InputKind == DeviceKind.SoundCard && _split.OutputKind == DeviceKind.SoundCard;
+
+        IAnalyzerDevice input = BuildHalf(_split.InputKind, SoundCardStreamDirection.InputOnly, twoCards);
+        IAnalyzerDevice output = BuildHalf(_split.OutputKind, SoundCardStreamDirection.OutputOnly, twoCards);
+
+        SplitDeviceSettings settings = _split.DeviceSettings(
+            LabelFor(_split.InputKind, asInput: true),
+            LabelFor(_split.OutputKind, asInput: false));
+
+        // Decided here because this is the only layer that can: the composite holds two
+        // IAnalyzerDevices and cannot see which host API a card was picked under, and judging it
+        // needs no native call, which matters because this runs in the session's field initializer.
+        if (twoCards)
+        {
+            settings = settings with
+            {
+                CombinationProblem = SoundCardSettings.SplitCombinationProblem(
+                    _soundCard.Config.InputHostApi,
+                    _soundCard.Config.InputDeviceName,
+                    _soundCard.Config.OutputHostApi,
+                    _soundCard.Config.OutputDeviceName),
+            };
+        }
 
         return new SplitAnalyzerDevice(
-            input,
-            output,
-            _split.DeviceSettings(
-                LabelFor(_split.InputKind, asInput: true),
-                LabelFor(_split.OutputKind, asInput: false)),
-            _loggerFactory.CreateLogger<SplitAnalyzerDevice>());
+            input, output, settings, _loggerFactory.CreateLogger<SplitAnalyzerDevice>());
     }
 
-    private IAnalyzerDevice BuildHalf(DeviceKind kind, SoundCardStreamDirection direction) =>
+    private IAnalyzerDevice BuildHalf(DeviceKind kind, SoundCardStreamDirection direction, bool ownStreamThread) =>
         ApplyStoredSettings(kind == DeviceKind.SoundCard
-            ? CreateSoundCard(_soundCard.DeviceSettings.ForDirection(direction))
+            ? CreateSoundCard(_soundCard.DeviceSettings.ForDirection(direction), ownStreamThread)
             : Build(kind));
 
     /// <summary>
@@ -210,8 +232,9 @@ public class AnalyzerDeviceFactory
     /// built from — the direction masking being a rule that is invisible on a card chosen for only
     /// one direction and wrong on a fully-configured duplex one.</para>
     /// </summary>
-    protected virtual IAnalyzerDevice CreateSoundCard(SoundCardSettings settings) =>
-        new SoundCardDevice(settings, _soundCard.Calibration, _loggerFactory.CreateLogger<SoundCardDevice>());
+    protected virtual IAnalyzerDevice CreateSoundCard(SoundCardSettings settings, bool ownStreamThread = false) =>
+        new SoundCardDevice(
+            settings, _soundCard.Calibration, _loggerFactory.CreateLogger<SoundCardDevice>(), ownStreamThread);
 
     /// <summary>
     /// What to call a half in a log line or a connect failure, before anything has connected and so

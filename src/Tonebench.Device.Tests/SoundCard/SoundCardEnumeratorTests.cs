@@ -164,6 +164,53 @@ public class SoundCardEnumeratorTests
     }
 
     /// <summary>
+    /// A one-direction card is probed <b>in that direction alone</b>, and passing it as both sides
+    /// answers nothing instead — which is the shape every two-card bench uses, and the one the
+    /// duplex probes above never covered.
+    ///
+    /// <para><b>Written after it bit.</b> A two-card hardware harness probed each output candidate
+    /// as <c>SupportedRatesHz(card, card, exclusive: true)</c>, and this method reads two non-null
+    /// sides as a duplex request — so a DAC with no capture channels reported no usable rate at
+    /// all. On Windows only ASIO exposes a genuinely full-duplex device, so every WASAPI and WDM-KS
+    /// output was excluded and the one thing that could still pass was an ASIO card. The symptom
+    /// was not an error but a plausible one: <i>"no pair of cards at 192000 Hz"</i> on a bench that
+    /// plainly had two, about a converter that in fact offered 44.1 kHz through 768 kHz in
+    /// exclusive mode. It cost a hardware reboot before the probe itself was suspected.</para>
+    ///
+    /// <para>Both directions are asserted here rather than only the output one, because the two
+    /// halves of a split are an input-only card and an output-only card and the mistake is
+    /// available on either.</para>
+    /// </summary>
+    [Fact]
+    public void SupportedRates_ForAOneDirectionCard_AreProbedInThatDirectionAlone()
+    {
+        var fake = new FakePortAudio();
+        var api = fake.AddHostApi("Windows WASAPI", SoundCardHostApiKind.Wasapi);
+        var adc = fake.AddDevice(api, "In 1-2 (MOTU M Series)", inputs: 2, outputs: 0);
+        var dac = fake.AddDevice(api, "Luidsprekers (TOPPING USB DAC)", inputs: 0, outputs: 2);
+
+        // What a driver really does: refuse a request asking for channels the device does not have,
+        // whatever the rate. Neither card here carries both directions, so a duplex request fails
+        // and a one-direction one succeeds -- keyed on the direction, which is what an absent side
+        // decides.
+        fake.FormatSupported = r => r.Direction != SoundCardStreamDirection.Duplex;
+
+        var enumerator = new SoundCardEnumerator(fake);
+
+        Assert.Equal(
+            SoundCardEnumerator.CandidateRatesHz,
+            enumerator.SupportedRatesHz(adc, null, exclusive: true));
+        Assert.Equal(
+            SoundCardEnumerator.CandidateRatesHz,
+            enumerator.SupportedRatesHz(null, dac, exclusive: true));
+
+        // The mistake, pinned from both ends: a card asked about itself is a duplex probe, and a
+        // one-direction card answers it with nothing.
+        Assert.Empty(enumerator.SupportedRatesHz(adc, adc, exclusive: true));
+        Assert.Empty(enumerator.SupportedRatesHz(dac, dac, exclusive: true));
+    }
+
+    /// <summary>
     /// Every candidate belongs to one of the two families — a power-of-two multiple of 48 kHz or of
     /// 44.1 kHz — which is the rule and not a tidiness. A split refuses a generator/capture pair
     /// whose ratio is not a whole number, because a stimulus carrying its own period cannot line up
@@ -665,5 +712,45 @@ public class SoundCardEnumeratorTests
         Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(only, null));
         Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(null, only));
         Assert.Null(SoundCardEnumerator.DuplexCombinationProblem(null, null));
+    }
+
+    [Fact]
+    public void TwoAsioCards_CannotBeTheTwoHalvesOfASplit_AndOnlyOneHasToMove()
+    {
+        // A harder limit than the duplex one and a different fix: the ASIO SDK has no notion of
+        // more than one driver open per process, so no threading arrangement reaches it -- but a
+        // split only needs *one* of the two moved, where a duplex stream needs both.
+        string? problem = SoundCardSettings.SplitCombinationProblem(
+            "ASIO", "MOTU M Series", "ASIO", "Topping USB Audio Device");
+
+        Assert.NotNull(problem);
+        Assert.Contains("one driver open per process", problem);
+        Assert.Contains("MOTU M Series", problem);
+        Assert.Contains("Topping USB Audio Device", problem);
+        Assert.Contains("WASAPI", problem);
+    }
+
+    [Fact]
+    public void OneAsioCardAgainstAnotherHostApi_IsTheWholePointAndIsAllowed()
+    {
+        // The pairing one duplex stream cannot express at all, in either order.
+        Assert.Null(SoundCardSettings.SplitCombinationProblem(
+            "ASIO", "MOTU M Series", "Windows WASAPI", "Luidsprekers (TOPPING USB DAC)"));
+        Assert.Null(SoundCardSettings.SplitCombinationProblem(
+            "Windows WASAPI", "In 1-2 (MOTU M Series)", "ASIO", "Topping USB Audio Device"));
+        Assert.Null(SoundCardSettings.SplitCombinationProblem(
+            "Windows WASAPI", "In 1-2 (A)", "Windows WASAPI", "Out 1-2 (B)"));
+    }
+
+    [Fact]
+    public void OneAsioCardOnBothHalves_IsNamedAsASoundCardBenchRatherThanASplit()
+    {
+        // One interface is one clock, which is the thing a split is not for.
+        string? problem = SoundCardSettings.SplitCombinationProblem(
+            "ASIO", "MOTU M Series", "ASIO", "MOTU M Series");
+
+        Assert.NotNull(problem);
+        Assert.Contains("one interface", problem);
+        Assert.Contains("Sound card", problem);
     }
 }

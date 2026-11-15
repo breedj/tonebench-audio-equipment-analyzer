@@ -583,7 +583,7 @@ public class SplitAnalyzerDeviceTests
     }
 
     [Fact]
-    public void ASoundCardOnBothSides_IsRefusedRatherThanHung()
+    public void ASoundCardOnBothSides_IsAcceptedNow()
     {
         var settings = new SoundCardSettings
         {
@@ -591,18 +591,46 @@ public class SplitAnalyzerDeviceTests
             OutputHostApi = "WASAPI", OutputDeviceName = "Out 1-2 (B)",
         };
 
+        var pa = new Tonebench.Device.Tests.SoundCard.FakePortAudio();
+
         SoundCardDevice Card() => new(
             settings, SoundCardCalibration.Uncalibrated,
-            NullLogger<SoundCardDevice>.Instance, new Tonebench.Device.Tests.SoundCard.FakePortAudio());
+            NullLogger<SoundCardDevice>.Instance, pa, ownStreamThread: true);
 
-        // Everything PortAudio does runs on one thread, and SoundCardDevice posts its whole transfer
-        // loop to it for the stream's life -- so the second card's pump would queue behind the first
-        // and never run. No exception, no log line, just an acquisition that never produces a block.
-        ArgumentException ex = Assert.Throws<ArgumentException>(
-            () => new SplitAnalyzerDevice(
-                Card(), Card(), SplitDeviceSettings.Default, NullLogger<SplitAnalyzerDevice>.Instance));
+        // Refused outright until a card half could be given a transfer thread of its own: a loop
+        // occupies the thread it is posted to for its stream's life, so on the library's one thread
+        // the second card's pump queued behind the first and never ran. Whether the native library
+        // tolerates the second thread is SoundCardTwoCardHardwareTests; what is asserted here is
+        // that the composite no longer stands in the way.
+        var split = new SplitAnalyzerDevice(
+            Card(), Card(), SplitDeviceSettings.Default, NullLogger<SplitAnalyzerDevice>.Instance);
 
-        Assert.Contains("one thread", ex.Message);
-        Assert.Contains("Sound card", ex.Message);
+        Assert.IsType<SoundCardDevice>(split.Input);
+        Assert.IsType<SoundCardDevice>(split.Output);
+        Assert.Null(split.CombinationProblem);
+    }
+
+    [Fact]
+    public async Task APairingThatCannotBeOpened_SaysSoAtConnect_AndOpensNeitherHalf()
+    {
+        // Carried rather than detected: a composite holds two IAnalyzerDevices and cannot see what
+        // host API a card was picked under. Reported at connect rather than thrown at construction
+        // because construction happens in the session's field initializer, where a throw is a crash
+        // at startup instead of a message on the status bar.
+        var input = new FakeAnalyzerDevice("the analyzer");
+        var output = new FakeAnalyzerDevice("the DAC");
+
+        var split = new SplitAnalyzerDevice(
+            input,
+            output,
+            SplitDeviceSettings.Default with { CombinationProblem = "Two ASIO cards is one too many." },
+            NullLogger<SplitAnalyzerDevice>.Instance);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => split.ConnectAsync(CancellationToken.None));
+
+        Assert.Equal("Two ASIO cards is one too many.", ex.Message);
+        Assert.Equal(0, input.Connects);
+        Assert.Equal(0, output.Connects);
     }
 }

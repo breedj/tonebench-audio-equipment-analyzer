@@ -327,57 +327,46 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
-    <h3 id="duplex">Why input and output must be one interface</h3>
+    <h3 id="duplex">Input and output are one interface</h3>
     <p>
-      The analyzer plays and records at the same time, and the two must run on <em>one clock</em>.
-      Two separate cards run on two, and the drift between them is not reported as a fault — it is
-      reported as DUT response. The frequency-response measurement is especially exposed, because it
-      rests on the played sweep being exactly one period of the analysis record; a drifting clock
-      breaks that silently.
+      <strong>A sound card bench is a single physical interface</strong> — both directions of one
+      card, or just its input, or just its output. That is the rule rather than a recommendation,
+      and the reason is the clock: the analyzer plays and records at the same time, and the two must
+      run on <em>one</em>. Two separate cards run on two, and the drift between them is not reported
+      as a fault — it is reported as DUT response. The frequency-response measurement is especially
+      exposed, because it rests on the played sweep being exactly one period of the analysis record;
+      a drifting clock breaks that silently.
     </p>
     <p>
       Under ASIO the whole card is one device and the question does not arise. Under the other host
-      APIs Windows splits a card into a separate input device and output device, so you pick both —
-      and the dialog warns when the two do not look like the same interface. That warning is
-      advisory rather than a refusal, because WDM-KS names genuinely cannot be matched up.
+      APIs Windows splits a card into a separate input device and output device, so you pick both.
+      Choose two that name <em>different</em> interfaces and the bench is refused when you try to
+      open it, with a message naming the analyzer that does measure it.
+    </p>
+    <p>
+      Where the names cannot settle it the bench opens and you get a warning instead. That is
+      WDM-KS, whose device names carry no interface name at all — <em>In 1-2 (In 1-2)</em> against
+      <em>Out 1-2 (Out 1-2)</em> — so a correct pairing there is indistinguishable from a wrong one,
+      and refusing would make the whole host API unusable on hardware where it is the best choice.
+    </p>
+    <p class="manual-callout">
+      <strong>Two interfaces is a different analyzer, not a mode of this one.</strong> A
+      playback-only DAC against a capture-only ADC, or any two cards, is
+      <strong>Split (two devices)</strong> with a card on each half: it opens a stream per card, so
+      the two clocks never share a buffer and each may even run at its own sample rate. Both cards
+      are still picked on this dialog — see
+      <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
     </p>
 
     <h3 id="two-asio">Two cards cannot both be ASIO</h3>
     <p>
-      If you deliberately want two separate interfaces — a playback-only DAC and a capture-only ADC,
-      say — then <strong>ASIO is the one host API that cannot do it</strong>, and the reason is worth
-      knowing because it looks like a rate problem.
-    </p>
-    <p>
-      ASIO is a single host API containing many <em>drivers</em>, and a stream belongs to one driver.
-      The driver owns the interface: it calls the application back once per buffer, and that one
-      callback delivers the input and collects the output together, because they came off the same
-      converter on the same clock edge. There is no seam to splice two drivers into. The audio
-      library refuses such a pair outright, before it ever considers a sample rate, and it allows
-      only one ASIO device open at a time in any case.
-    </p>
-    <p>
-      So <em>all</em> rates are refused, and the dialog used to report that as “this pairing accepts
-      none of the rates this analyzer asks a card about”. It now names the real cause and the way out, which is to pick
-      <strong>both</strong> sides under <strong>WASAPI</strong>: there each endpoint is its own
-      device, the application does the pumping, and two can be combined. The app always opens WASAPI
-      in exclusive mode, so nothing is mixed or resampled — what you give up relative to ASIO is
-      latency, which no measurement here depends on.
-    </p>
-    <p class="manual-callout">
-      Note that WASAPI does not <em>solve</em> the clock problem, it merely permits it. Two cards
-      still run on two clocks, and a chirp still reads the difference as DUT phase. Measure it with
-      the <strong>Clock drift</strong> panel and let the two chirp screens take it off — see
-      <button type="button" class="manual-link" @click="showPage('clock-drift')">Clock drift</button>.
-    </p>
-    <p>
-      <strong>That panel follows the two cards selected above</strong>, not whichever pair the app
-      currently has open: change one and it reads the figure for the new pair, or says there is
-      none. A figure is kept per <em>pair</em>, and per direction within it — a drift figure's sign
-      is a property of which clock is the reference — but <em>not</em> per channel pair, so moving
-      from channels 1/2 to 3/4 on the same interface keeps it. <strong>Measure again</strong> is
-      held while the selection has not reached the app, for the same reason the two calibration
-      buttons are: there would be nothing to measure.
+      This used to be a rule about a two-card bench set up here, and that bench is now a
+      <strong>Split</strong>. The limit itself has not gone anywhere: <strong>at most one half
+      of a split may be an ASIO card</strong>, because ASIO allows one driver open per process
+      whatever the sample rate, so a pair of them is refused before a rate is ever considered.
+      The way out is to move one card to <strong>WASAPI</strong>, which this app always opens in
+      exclusive mode, and leave the better converter on ASIO. It is explained on
+      <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
     </p>
 
     <h3>Channel pairs</h3>

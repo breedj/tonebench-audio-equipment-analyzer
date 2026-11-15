@@ -10,13 +10,12 @@
     </p>
 
     <p>
-      It is reached from whichever dialog describes the bench. On the <strong>Sound card</strong>
-      dialog: pick two different cards and a <strong>Clock drift</strong> panel appears between
-      <em>Device</em> and <em>Full scale output</em>, with a <strong>Measure the drift</strong>
-      button. On the <strong>Split (two devices)</strong> dialog the same panel is at the foot —
-      a QA40x capturing while a USB DAC plays is two crystals exactly as much as two cards are. Where
-      one device both plays and captures there is one clock and nothing to compare, so no panel is
-      shown at all.
+      It lives in one place: the <strong>Split (two devices)</strong> dialog, where a
+      <strong>Clock drift</strong> panel sits at the foot with a <strong>Measure the drift</strong>
+      button. Every bench that has two clocks is a split — a QA40x capturing while a USB DAC plays,
+      or a card on each half — because a <strong>Sound card</strong> bench is a single interface and
+      therefore a single clock. Where one device both plays and captures there is nothing to
+      compare, so no panel is shown at all.
     </p>
     <p>
       A figure is kept <strong>against the two devices it was measured between</strong>, so a bench
@@ -242,10 +241,11 @@
     </p>
 
     <p>
-      <strong>It applies only to a bench built from two cards.</strong> One interface has one clock,
-      so there is no difference to measure and nothing to correct; the checkbox does not appear
-      there. The app works out which case you are in from the two devices selected, not from their
-      endpoint names — <em>In 3-4</em> and <em>Out 3-4</em> of one interface are one card.
+      <strong>It applies only to a bench of two devices</strong> — a split. One interface has one
+      clock, so there is no difference to measure and nothing to correct, and the checkbox does not
+      appear on a <strong>Sound card</strong> bench at all. The app works out which case you are in
+      from the two devices selected, not from their endpoint names: <em>In 3-4</em> and
+      <em>Out 3-4</em> of one interface are one card.
     </p>
 
     <p>

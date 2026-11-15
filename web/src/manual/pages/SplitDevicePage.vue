@@ -84,17 +84,39 @@ const { showPage } = useManual()
       the output one, and does not complain about an output calibration it is not using.
     </p>
 
-    <h3>Two pairings are refused</h3>
+    <h3>A card on each half</h3>
     <p>
-      A <strong>sound card on both sides</strong> is refused, with a message. Everything PortAudio
-      does runs on one thread, which a card's transfer loop occupies for as long as a stream is
-      open, so the second card would never be serviced — and that bench already has a home: the
-      <strong>Sound card</strong> analyzer opens both directions of a two-card pairing in one
-      stream.
+      <strong>A sound card on both sides is what this feature is for.</strong> Each card gets a
+      stream of its own on a transfer thread of its own, so the two clocks never share a buffer —
+      which is the whole difference from the way a two-card bench used to be opened, as a single
+      duplex stream spanning both. That shape accumulated the difference between the two clocks
+      until it ate the buffer, glitching on a schedule no buffer size could push out; two streams do
+      not. It also means <strong>each card may run at its own sample rate</strong>, and that one
+      card may be on ASIO while the other is on WASAPI.
     </p>
     <p>
-      A <strong>QA40x on both sides</strong> is refused too. That is one device opened twice, and a
+      Both cards are chosen on the <strong>Sound card</strong> dialog, which is still the one place
+      a card is picked: with a card on each half it offers an <em>Input card</em> and an
+      <em>Output card</em> rather than one.
+    </p>
+
+    <h3>Two pairings are refused</h3>
+    <p>
+      A <strong>QA40x on both sides</strong> is refused. That is one device opened twice, and a
       QA40x already generates and captures on its own clock.
+    </p>
+    <p>
+      A <strong>split inside a split</strong> is refused for the obvious reason. Two
+      <em>simulators</em> are deliberately allowed, which is how the two-device paths are exercised
+      with no hardware at all.
+    </p>
+    <p>
+      And <strong>at most one half may be an ASIO card</strong>. This is not a rate problem although
+      it looks like one: the ASIO SDK has no notion of more than one driver open per process, and the
+      audio library carries that as a single global driver, so the second card cannot be opened at
+      any rate. Move one of them to <strong>WASAPI</strong> — always opened here in exclusive mode,
+      so nothing is mixed or resampled — and leave the better converter on ASIO. What you give up is
+      latency, which no measurement here depends on.
     </p>
 
     <h2>Two devices are two clocks</h2>
@@ -288,8 +310,8 @@ const { showPage } = useManual()
     <h2>What is not supported</h2>
     <ul>
       <li>
-        <strong>A sound card on both sides</strong>, for the reason above. Use the
-        <strong>Sound card</strong> analyzer, which handles that bench in one stream.
+        <strong>Two ASIO cards</strong>, for the reason above — one driver per process. Put one of
+        them on WASAPI.
       </li>
       <li>
         <strong>A chirp or noise run across the two rate families</strong> — see

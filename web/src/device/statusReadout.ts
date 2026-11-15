@@ -259,3 +259,52 @@ export function generatorRateReadout(
 function formatRateKhz(hz: number): string {
   return Number((hz / 1000).toFixed(3)).toString()
 }
+
+/**
+ * Who the "Database damaged" line is about, and what the reader can do about it.
+ *
+ * <p><b>The message used to end "see the log", which is not an action.</b> The log's own advice is
+ * addressed to whoever is working on the code: rebuild the file row by row, see a document that is
+ * not shipped. Reported from a real bench on 2026-11-15 as, in the user's words, "how do I actually
+ * deal with this message as a user" — and the honest answer was that there was no way to.</p>
+ *
+ * <p>Two cases, two sets of words, because they are not the same trouble. The <b>configuration</b>
+ * file holds settings, the recent-projects list and the loopback and impedance-fixture
+ * calibrations — the last of which cannot be recreated without putting the fixture back on the
+ * bench — and it can be rebuilt from here. A damaged <b>project</b> file holds measurements, has no
+ * repair in this app, and the one thing worth saying is to stop writing to it.</p>
+ *
+ * <p>Which it is comes from <c>configDatabaseRepairable</c> on the status rather than from reading
+ * the sentence, since a parser over prose is no way to decide what to offer.</p>
+ */
+export interface DatabaseProblemAdvice {
+  /** SQLite's own words, as the status carries them. */
+  problem: string
+  /** What is at stake and what to do, in a sentence. */
+  advice: string
+  /** Whether to offer the rebuild. */
+  canRepair: boolean
+}
+
+export function databaseProblemAdvice(status: DeviceStatus | null): DatabaseProblemAdvice | null {
+  const problem = status?.databaseProblem
+  if (!problem) return null
+
+  return status?.configDatabaseRepairable
+    ? {
+        problem,
+        advice:
+          'This file holds your settings, the recent-projects list and the loopback and '
+          + 'impedance-fixture calibrations. Your projects are separate files and are not affected. '
+          + 'Repair rebuilds it from whatever still reads and keeps the damaged one beside it.',
+        canRepair: true,
+      }
+    : {
+        problem,
+        advice:
+          'This is the open project file, so it holds measurements. Close it rather than carrying '
+          + 'on — every save writes into a file that is already wrong — and keep a copy before '
+          + 'anything else.',
+        canRepair: false,
+      }
+}

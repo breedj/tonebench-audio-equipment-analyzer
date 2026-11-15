@@ -241,6 +241,18 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>The status bar says <strong>Database damaged</strong></td>
+          <td>
+            One of the app's two kinds of file failed its check. If it is the
+            <em>configuration</em> database — settings, the recent list, your calibrations — press
+            <strong>Repair</strong> on that line: it rebuilds the file from whatever still reads,
+            keeps the damaged one beside it, and tells you what it recovered. Restart Tonebench
+            afterwards. Your projects are separate files and are untouched. If it is a
+            <em>project</em> file instead, there is no Repair button: close the project rather than
+            carrying on measuring into it, and keep a copy of the file.
+          </td>
+        </tr>
+        <tr>
           <td>Two browser windows open on the app and they disagree</td>
           <td>
             Some settings are staged in the window you are typing in and pushed to the analyzer from there.

@@ -28,6 +28,7 @@ public static class DeviceEndpoints
             return Results.Ok((await session.GetStatusAsync(ct)) with
             {
                 DatabaseProblem = health.Problem,
+                ConfigDatabaseRepairable = health.ConfigProblem is not null,
                 DroppedStreamFramesMax = droppedMax,
                 DroppedStreamFramesTotal = droppedTotal,
             });
@@ -353,6 +354,18 @@ public sealed record DeviceStatusResponse(
     /// knows nothing about storage.
     /// </summary>
     string? DatabaseProblem = null,
+    /// <summary>
+    /// Whether <see cref="DatabaseProblem"/> is the <i>configuration</i> file's, and can therefore
+    /// be offered a rebuild — <c>POST /api/config/repair-database</c>.
+    ///
+    /// <para>Its own flag rather than something the client infers from the message, because the two
+    /// halves of <see cref="Tonebench.App.Services.DatabaseHealth"/> want different words and
+    /// different offers: a damaged <i>project</i> file holds measurements and has no repair here,
+    /// while the configuration file holds settings, the recent list and the two calibrations, and
+    /// the user's projects are untouched by it. Telling them apart by reading the sentence would be
+    /// a parser over prose.</para>
+    /// </summary>
+    bool ConfigDatabaseRepairable = false,
     /// <summary>
     /// Stream frames the worst-off connected client has had evicted from its WebSocket queue since
     /// this acquisition started, and the sum over every connected client — see

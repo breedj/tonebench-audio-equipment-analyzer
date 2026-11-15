@@ -925,6 +925,72 @@ public static class ConfigEndpoints
         // 500 with its message, and the path is still on screen beside the button.
         group.MapPost("/diagnostic-logging/open-folder", () => OpenInFileManager(TonebenchAppData.LogsDirectory));
 
+        // **The only recovery action this app offers, and the reason it exists is that there was
+        // none.** The startup check has reported a damaged configuration database since it was
+        // written, and what it told the user to do was "see the log" -- where the log's own advice
+        // is addressed to whoever is working on the code, cites a file that is not shipped, and
+        // amounts to "rebuild it by hand". Asked for 2026-11-15, after that message appeared on a
+        // real bench and the honest answer to "what do I do about this" was "nothing, from in here".
+        //
+        // Refused while anything is measuring: the rebuild closes every pooled handle on the file
+        // (SqliteConnectionFactory.CloseAllPools is process-wide) and then moves it, and a run that
+        // writes a setting mid-move is the one way this can make things worse.
+        group.MapPost("/repair-database", async (
+            TonebenchConfigDatabaseOptions options, DatabaseHealth health, DeviceSessionService session,
+            IEnumerable<IMeasurementRun> runs, ILoggerFactory loggers, CancellationToken ct) =>
+        {
+            if (session.Acquiring || MeasurementRunGuard.AnotherRunIsActive(session, runs))
+                return Results.Conflict(MeasurementRunGuard.Message);
+
+            var logger = loggers.CreateLogger("Tonebench.App.Database");
+            DatabaseRepairResult result;
+            try
+            {
+                result = await DatabaseRepair.RebuildAsync(options.Path, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Nothing moved -- the rebuild happens in a staging file and the original is only
+                // set aside once a complete one exists -- so the user is exactly where they were.
+                logger.LogError(ex, "Rebuilding the configuration database at {Path} failed", options.Path);
+                return Results.Conflict(
+                    $"The configuration database could not be rebuilt ({ex.Message}). It has not been touched.");
+            }
+
+            bool repaired = result.RemainingProblem is null;
+            string kept = Path.GetFileName(result.DamagedCopyPath);
+            bool exact = result.Tables.All(t => !t.MayBeIncomplete);
+
+            string summary = repaired
+                ? result.AnythingLost
+                    ? $"Rebuilt. {result.RowsCopied} rows recovered; {(exact ? string.Empty : "at least ")}"
+                        + $"{result.RowsLost} could not be read and are gone. The damaged file is kept as {kept}. "
+                        + "Restart Tonebench to load the recovered settings."
+                    : $"Rebuilt, with all {result.RowsCopied} rows recovered. The damaged file is kept as {kept}. "
+                        + "Restart Tonebench to load them."
+                : $"The rebuilt file still fails its check ({result.RemainingProblem}). "
+                    + $"The damaged original is kept as {kept} — send both in with a report.";
+
+            if (repaired)
+            {
+                logger.LogInformation(
+                    "Configuration database rebuilt: {Rows} rows recovered, {Lost} lost, damaged original kept at {Kept}",
+                    result.RowsCopied, result.RowsLost, result.DamagedCopyPath);
+                health.ConfigProblem = null;
+            }
+            else
+            {
+                logger.LogError(
+                    "Configuration database rebuilt and is still damaged: {Problem}. Damaged original kept at {Kept}",
+                    result.RemainingProblem, result.DamagedCopyPath);
+                health.ConfigProblem =
+                    $"configuration database is still damaged after a repair ({result.RemainingProblem}) — see the log.";
+            }
+
+            return Results.Ok(new DatabaseRepairResponse(
+                repaired, result.DamagedCopyPath, result.RowsCopied, result.RowsLost, exact, summary));
+        });
+
         // The stream recorder: one switch and one cap, applied live and persisted. The GET answers
         // with the recorder's own state as well as the setting -- what it is doing now, and what the
         // last recording came to -- because the panel's only other way of knowing is the log.

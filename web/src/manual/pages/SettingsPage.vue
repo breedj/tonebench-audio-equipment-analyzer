@@ -497,14 +497,26 @@ const { showPage } = useManual()
         <tr>
           <td>Database damaged</td>
           <td>
-            The project file failed its integrity check when it was opened, or the app's
-            configuration database failed it at startup; the message says which. The app keeps
-            running — every stored result outside the damaged pages still opens, and new saves usually
-            still work — but a result whose data sits on a damaged page fails to open, and the message
-            stays until the file is repaired (for a project, until it is closed). Close it, keep a copy
-            of the file before anything else, then rebuild it: every readable row can be copied into a
-            fresh database, and only the damaged rows are lost. The configuration database is
-            <code>tonebench-config.db</code> in the app's data folder (see above).
+            A database file failed its integrity check — the project file when it was opened, or the
+            configuration database at startup. The app keeps running, and the line underneath says
+            which file it is and what is in it.
+            <br /><br />
+            <strong>The configuration database</strong> —
+            <code>tonebench-config.db</code> in the app's data folder (see above) — holds your
+            settings, the recent-projects list and the loopback and impedance-fixture calibrations.
+            Your projects are separate files and are not affected. The line carries a
+            <strong>Repair</strong> button: it copies everything that still reads into a fresh file,
+            keeps the damaged one beside it as <code>corrupt-&lt;date&gt;-tonebench-config.db</code>,
+            and checks the result. Nothing is deleted. It reports how many rows it recovered and how
+            many could not be read, and you then <strong>restart Tonebench</strong>, because the
+            settings in use were loaded from the damaged file when the app started.
+            <br /><br />
+            <strong>A project file</strong> holds measurements and has no repair here. Every result
+            outside the damaged pages still opens and new saves usually still work, but a result
+            whose data sits on a damaged page does not — so close the project rather than carrying
+            on, and keep a copy of the file before anything else. Rebuilding it is the same
+            procedure by hand: every readable row copied into a fresh database, only the damaged
+            rows lost.
           </td>
         </tr>
         <tr>

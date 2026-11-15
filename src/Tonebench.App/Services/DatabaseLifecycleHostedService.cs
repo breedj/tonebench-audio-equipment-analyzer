@@ -35,6 +35,29 @@ public sealed class DatabaseHealth
 }
 
 /// <summary>
+/// What a repair did, in the terms the status bar has to report it in.
+/// </summary>
+/// <param name="Repaired">
+/// The rebuilt file passed its check. False means the file was rebuilt and is <i>still</i> damaged,
+/// which has to be said rather than dressed up -- the status bar keeps its red line in that case.
+/// </param>
+/// <param name="DamagedCopyPath">Where the damaged original was kept. It is never deleted.</param>
+/// <param name="RowsRecovered">Rows that read cleanly and are in the new file.</param>
+/// <param name="RowsLost">Rows whose own read threw. A floor, where <paramref name="CountIsExact"/> is false.</param>
+/// <param name="CountIsExact">
+/// Whether <paramref name="RowsLost"/> is a count or a lower bound: a damaged b-tree can die part
+/// way through being walked, and there is then no way to ask how many entries it should have had.
+/// </param>
+/// <param name="Summary">One sentence for the user, built here so the wording lives with the facts.</param>
+public sealed record DatabaseRepairResponse(
+    bool Repaired,
+    string DamagedCopyPath,
+    int RowsRecovered,
+    int RowsLost,
+    bool CountIsExact,
+    string Summary);
+
+/// <summary>
 /// Checks the configuration database at startup and closes every database properly at shutdown.
 ///
 /// <para><b>Registered before <see cref="DeviceLifecycleHostedService"/></b>, and that ordering is

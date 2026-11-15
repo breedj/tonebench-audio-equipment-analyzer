@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceStatus } from '../api/client'
-import { devicePill, generatorRateReadout, TELEMETRY_DASH, TELEMETRY_WARM_C, telemetryRows, type TelemetryKey } from './statusReadout'
+import { databaseProblemAdvice, devicePill, generatorRateReadout, TELEMETRY_DASH, TELEMETRY_WARM_C, telemetryRows, type TelemetryKey } from './statusReadout'
 
 function status(over: Partial<DeviceStatus> = {}): DeviceStatus {
   return {
@@ -139,5 +139,51 @@ describe('generatorRateReadout', () => {
     for (const rate of ['192 kHz', '96 kHz', '48 kHz', '384 kHz']) {
       expect(title, `names a capture rate it cannot know: ${rate}`).not.toContain(rate)
     }
+  })
+})
+
+/**
+ * The "Database damaged" line, which until 2026-11-15 ended "see the log" and offered nothing a
+ * user could do -- reported from a bench in exactly those terms. Two files, two sets of words, and
+ * only one of them has a repair in this app.
+ */
+describe('databaseProblemAdvice', () => {
+  it('says nothing while both files are sound', () => {
+    expect(databaseProblemAdvice(status())).toBeNull()
+    expect(databaseProblemAdvice(null)).toBeNull()
+  })
+
+  it('offers the rebuild on the configuration file, and says what is in it', () => {
+    const advice = databaseProblemAdvice(status({
+      databaseProblem: 'configuration database is damaged (Rowid 17 out of order)',
+      configDatabaseRepairable: true,
+    }))!
+
+    expect(advice.canRepair).toBe(true)
+    expect(advice.problem).toContain('Rowid 17 out of order')
+    expect(advice.advice).toContain('calibrations')
+    // The first thing anyone wants to know, and it is the half the old message never said.
+    expect(advice.advice).toContain('projects are separate files')
+  })
+
+  it('offers no rebuild on a project file, and says to stop writing to it', () => {
+    const advice = databaseProblemAdvice(status({
+      databaseProblem: 'project file is damaged (page 9 never used)',
+      configDatabaseRepairable: false,
+    }))!
+
+    expect(advice.canRepair).toBe(false)
+    expect(advice.advice).toContain('Close it')
+    expect(advice.advice).not.toContain('Repair')
+  })
+
+  /**
+   * Which file it is comes from the flag, never from reading the sentence: the two messages are
+   * prose, and a parser over prose is no way to decide what to offer.
+   */
+  it('reads the flag rather than the message', () => {
+    const worded = 'configuration database is damaged (something)'
+    expect(databaseProblemAdvice(status({ databaseProblem: worded, configDatabaseRepairable: false }))!.canRepair)
+      .toBe(false)
   })
 })

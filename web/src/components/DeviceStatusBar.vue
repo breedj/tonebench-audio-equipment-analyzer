@@ -2,7 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DeviceKindName, DeviceRanges, DeviceStatus, ProgrammableLoadStatus, RangingModeName, SimulatedDutModel, SimulatedLoad, SimulatedOutputStageModel, SimulatedProfileRequest } from '../api/client'
 import { useProjects } from '../composables/useProjects'
-import { DEVICE_DOT_CLASS, devicePill, generatorRateReadout, telemetryRows } from '../device/statusReadout'
+import { api, type DatabaseRepairResult } from '../api/client'
+import {
+  DEVICE_DOT_CLASS,
+  databaseProblemAdvice,
+  devicePill,
+  generatorRateReadout,
+  telemetryRows,
+} from '../device/statusReadout'
 import { LOAD_TONE_CLASS, loadReadout } from '../programmableLoad/readout'
 import { DISTORTING_DUTS } from '../simulator/hints'
 import { allSimulatorKnobsVisible, visibleSimulatorKnobs } from '../simulator/knobs'
@@ -467,6 +474,38 @@ function onSimulatedDutChange(e: Event) {
  * than a formatting choice.
  */
 const telemetry = computed(() => telemetryRows(props.status))
+
+const databaseAdvice = computed(() => databaseProblemAdvice(props.status))
+
+/**
+ * Rebuilding the configuration database, which is the only recovery action this app has.
+ *
+ * <p>In the status bar rather than in Configuration, because the status bar is where the trouble is
+ * announced and a repair offered anywhere else is a repair nobody finds. The outcome is shown here
+ * too: the server builds the sentence, so the wording lives with the facts rather than being
+ * assembled from three numbers by whichever screen happens to show it.</p>
+ *
+ * <p><b>The red line does not clear itself.</b> `DatabaseHealth.ConfigProblem` is set once at
+ * startup and never re-read, so the endpoint clears it on a successful rebuild and the next poll
+ * drops the message — without that a working repair looks like a button that did nothing.</p>
+ */
+const repairing = ref(false)
+const repairResult = ref<DatabaseRepairResult | null>(null)
+const repairError = ref<string | null>(null)
+
+async function repairDatabase() {
+  if (repairing.value) return
+  repairing.value = true
+  repairError.value = null
+  try {
+    repairResult.value = await api.repairConfigDatabase()
+  } catch (e) {
+    repairResult.value = null
+    repairError.value = (e as Error).message
+  } finally {
+    repairing.value = false
+  }
+}
 
 /** The dot, the name and the one word at the left-hand end. */
 const pill = computed(() => devicePill(props.status, selectedKindLabel.value))
@@ -1201,14 +1240,45 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       <span v-if="status?.outputRangeClipping" class="font-medium">clipping</span>
     </span>
 
-    <!-- Persistent, unlike the request error above: the startup check found the file damaged, and
-         nothing the user does in this session changes that. -->
+    <!-- Persistent, unlike the request error above: a check found the file damaged, and nothing
+         the user does in this session changes that -- except Repair, which clears it server-side.
+         <p>It used to be one line ending "see the log", which is not an action: the log's own
+         advice is addressed to whoever is working on the code and cites a file that is not
+         shipped. Reported from a bench on 2026-11-15 as "how do I actually deal with this message
+         as a user", to which the honest answer was that there was no way to. So the line now says
+         what is at stake, which differs between the two files, and offers the rebuild on the one
+         that has one -- see `databaseProblemAdvice`. -->
+    <div v-if="databaseAdvice" class="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1">
+      <p class="text-red-600 dark:text-red-400">
+        Database damaged: {{ databaseAdvice.problem }}
+      </p>
+      <p class="basis-full text-neutral-600 dark:text-neutral-400">
+        {{ databaseAdvice.advice }}
+      </p>
+
+      <button
+        v-if="databaseAdvice.canRepair"
+        type="button"
+        :disabled="repairing"
+        class="rounded border border-red-300 px-2 py-0.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-700/60 dark:text-red-300 dark:hover:bg-red-950/40"
+        title="Copies everything that still reads into a fresh file, keeps the damaged one beside it, and checks the result. Nothing is deleted."
+        @click="repairDatabase"
+      >
+        {{ repairing ? 'Repairing…' : 'Repair' }}
+      </button>
+    </div>
+
+    <!-- Kept after the message goes: a successful repair clears `databaseProblem` on the next
+         poll, and an outcome that vanished with it would leave the user unsure it had happened. -->
     <p
-      v-if="status?.databaseProblem"
-      class="w-full text-red-600 dark:text-red-400"
-      title="The measurement database failed its integrity check when the app started. Rows outside the damaged pages still work; a damaged result fails to open. Keep a copy of the file before repairing it."
+      v-if="repairResult"
+      class="w-full"
+      :class="repairResult.repaired
+        ? 'text-emerald-700 dark:text-emerald-400'
+        : 'text-red-600 dark:text-red-400'"
     >
-      Database damaged: {{ status.databaseProblem }}
+      {{ repairResult.summary }}
     </p>
+    <p v-if="repairError" class="w-full text-red-600 dark:text-red-400">{{ repairError }}</p>
   </footer>
 </template>

@@ -106,6 +106,8 @@ export interface DeviceStatus {
    * discovered as a 500 on one history entry days later.
    */
   databaseProblem: string | null
+  /** Whether `databaseProblem` is the configuration file's, which `repairConfigDatabase` can rebuild. */
+  configDatabaseRepairable: boolean
   /**
    * The gain of whatever sits between the DUT and the left input, in dB (a 10:1 divider is −20),
    * undone on every sample so every level the app reports is the DUT's. 0 with nothing in the
@@ -341,6 +343,19 @@ export interface SoundCardInventory {
    * library would not start, where a list of candidates is no use.
    */
   candidateRatesHz: number[] | null
+}
+
+/** Mirrors Tonebench.App.Services.DatabaseRepairResponse. */
+export interface DatabaseRepairResult {
+  /** The rebuilt file passed its check. False means it was rebuilt and is still damaged. */
+  repaired: boolean
+  damagedCopyPath: string
+  rowsRecovered: number
+  /** A floor rather than a count where `countIsExact` is false. */
+  rowsLost: number
+  countIsExact: boolean
+  /** One sentence for the user, built on the server so the wording lives with the facts. */
+  summary: string
 }
 
 export interface SoundCardProbe {
@@ -3845,6 +3860,14 @@ export const api = {
   getSoundCardConfig: () => request<SoundCardConfig>('/config/soundcard'),
   setSoundCardConfig: (config: SoundCardConfig) =>
     request<SoundCardConfig>('/config/soundcard', { method: 'PUT', body: JSON.stringify(config) }),
+  /**
+   * Rebuilds the configuration database, keeping the damaged original beside it.
+   *
+   * Refused with 409 while anything is measuring: the rebuild closes every pooled handle on the
+   * file and then moves it.
+   */
+  repairConfigDatabase: () =>
+    request<DatabaseRepairResult>('/config/repair-database', { method: 'POST' }),
   getSoundCardCalibration: () => request<SoundCardCalibrationState>('/soundcard/calibration'),
   startSoundCardTone: (dbFs: number) =>
     request<SoundCardCalibrationState>('/soundcard/calibration/output/start', {

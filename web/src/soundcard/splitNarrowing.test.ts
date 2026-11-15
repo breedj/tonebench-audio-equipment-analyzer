@@ -88,16 +88,18 @@ describe('the pickers a split does not use', () => {
   })
 
   it('derives two pickers from the bench rather than from a control', () => {
-    const body = computedBody('separateDevices')
-
     // A card on each half of a split: both cards are chosen here, because the card document is
-    // still the one place a card is picked.
-    expect(body).toContain("deviceKind === 'Split'")
-    expect(body).toContain("splitInputKind === 'SoundCard'")
-    expect(body).toContain("splitOutputKind === 'SoundCard'")
+    // still the one place a card is picked. It is its own computed because the host-API rules turn
+    // on it too -- two streams have none of one stream's restrictions.
+    const bench = computedBody('twoCardBench')
+    expect(bench).toContain("deviceKind === 'Split'")
+    expect(bench).toContain("splitInputKind === 'SoundCard'")
+    expect(bench).toContain("splitOutputKind === 'SoundCard'")
 
     // And a one-direction bench, which is how a capture-only ADC comes back: one name stored, so
     // the two keys differ and a single picker cannot express it.
+    const body = computedBody('separateDevices')
+    expect(body).toContain('twoCardBench.value')
     expect(body).toContain('form.inputCardKey !== form.outputCardKey')
   })
 

@@ -217,12 +217,22 @@ const cardDirection = computed<'both' | 'input' | 'output' | null>(() => {
  *   answer there.</li>
  * </ul>
  */
-const separateDevices = computed(
+/**
+ * Whether the bench in use opens a <b>stream per card</b> rather than one across both.
+ *
+ * <p>Named for the mechanism and not for the pairing, because that is what every rule below turns
+ * on: a card+card split gives each card its own stream on its own transfer thread, and two streams
+ * have none of the restrictions one has.</p>
+ */
+const twoCardBench = computed(
   () =>
-    (props.status?.deviceKind === 'Split'
-      && props.status.splitInputKind === 'SoundCard'
-      && props.status.splitOutputKind === 'SoundCard')
-    || form.inputCardKey !== form.outputCardKey,
+    props.status?.deviceKind === 'Split'
+    && props.status.splitInputKind === 'SoundCard'
+    && props.status.splitOutputKind === 'SoundCard',
+)
+
+const separateDevices = computed(
+  () => twoCardBench.value || form.inputCardKey !== form.outputCardKey,
 )
 
 /** What the half this bench does *not* use the card for is, for the line that says so. */
@@ -320,11 +330,33 @@ function cardsFor(
   return cardsOffering(list, devices)
 }
 
+/**
+ * <b>The other side's host API is only worth matching when one stream has to carry both
+ * directions.</b>
+ *
+ * <p>Collapsing each list towards the other side exists because PortAudio cannot open a single
+ * stream across two host APIs — measured 2026-11-11, a MOTU under ASIO against a G6 under WASAPI
+ * refused at every rate — so the picker's natural selection was the one combination that could not
+ * work. On a <see cref="twoCardBench"/> that premise is gone: each card is opened on a stream of
+ * its own, and the pair above was connected on this bench on 2026-11-15 as
+ * <i>ASIO MOTU -> WASAPI Topping D50 III</i>.</p>
+ *
+ * <p>So a two-card bench collapses each side to <i>its own</i> best host API, which is the point
+ * of the whole feature: the better converter keeps its better driver. Matching it to the other
+ * card would quietly give that up — seen doing exactly that, dragging the MOTU off ASIO onto
+ * WASAPI to follow a DAC that has no ASIO entry worth having.</p>
+ */
 const inputCards = computed(() =>
-  cardsFor(inventory.value?.inputs ?? [], separateDevices.value ? form.outputCardKey : ''),
+  cardsFor(
+    inventory.value?.inputs ?? [],
+    separateDevices.value && !twoCardBench.value ? form.outputCardKey : '',
+  ),
 )
 const outputCards = computed(() =>
-  cardsFor(inventory.value?.outputs ?? [], separateDevices.value ? form.inputCardKey : ''),
+  cardsFor(
+    inventory.value?.outputs ?? [],
+    separateDevices.value && !twoCardBench.value ? form.inputCardKey : '',
+  ),
 )
 
 /**
@@ -342,7 +374,12 @@ const outputCards = computed(() =>
 watch(
   () => [separateDevices.value, form.inputCardKey, form.outputCardKey, advanced.value].join('|'),
   () => {
-    if (!separateDevices.value) return
+    // Same rule as the two lists above, and kept for the same one case they keep it for: a stored
+    // document whose two endpoints name one interface under *different* host APIs still opens as a
+    // single duplex stream, and that is the pair this repairs. A two-card bench opens two streams
+    // and must be left alone -- matching there is not a safety net, it is the loss of ASIO on
+    // whichever card had it.
+    if (!separateDevices.value || twoCardBench.value) return
     const matched = matchHostApis(
       form.inputCardKey,
       form.outputCardKey,

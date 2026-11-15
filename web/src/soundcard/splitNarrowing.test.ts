@@ -155,20 +155,38 @@ describe('the calibration steps a split does not use', () => {
   })
 
 
-  it('offers the output step only where this card plays', () => {
+  /**
+   * Both steps are gated through `playsThroughCard` / `capturesWithCard` rather than on
+   * `cardDirection` directly, and the extra half of each is the 2026-11-15 report: `cardDirection`
+   * answers which half of the *bench* the card serves, which on a plain sound card is always
+   * 'both' -- so a playback-only DAC was offered an input calibration whose source dropdown opens
+   * on "this card's output, through a patch cable" over a card that has no input to loop back
+   * into. The split rule is still the one being asserted; it is now the first clause of it.
+   */
+  it('offers the output step only where this card plays, and has an output to play through', () => {
     const heading = source.indexOf('Full scale output')
     const section = source.lastIndexOf('<section', heading)
-    expect(source.slice(section, source.indexOf('>', section))).toContain(
-      "cardDirection !== 'input'",
-    )
+    expect(source.slice(section, source.indexOf('>', section))).toContain('playsThroughCard')
+
+    const body = computedBody('playsThroughCard')
+    expect(body).toContain('opens.value.output')
+    expect(body).toContain('selectedOutput.value')
   })
 
-  it('offers the input steps only where this card captures', () => {
+  it('offers the input steps only where this card captures, and has an input to capture with', () => {
     const heading = source.indexOf('Full scale input')
     const section = source.lastIndexOf('<section', heading)
-    expect(source.slice(section, source.indexOf('>', section))).toContain(
-      "cardDirection !== 'output'",
-    )
+    expect(source.slice(section, source.indexOf('>', section))).toContain('capturesWithCard')
+
+    const body = computedBody('capturesWithCard')
+    expect(body).toContain('opens.value.input')
+    expect(body).toContain('selectedInput.value')
+  })
+
+  // And `opens` is still the split's own rule, so the two above carry it: openedSides() maps
+  // 'input'/'output'/'both' onto the sides, and probeSides.test.ts pins that mapping.
+  it('derives the sides it opens from the split pairing', () => {
+    expect(computedBody('opens')).toContain('openedSides(cardDirection.value, twoCardBench.value)')
   })
 
   /**

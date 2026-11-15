@@ -64,6 +64,27 @@ describe('the calibration steps are gated on the settings being in effect', () =
     const start = source.indexOf('v-if="', notice) + 'v-if="'.length
     expect(source.slice(start, source.indexOf('"', start))).toBe('settingsRefused')
   })
+
+  /**
+   * The notice ends "for the reason just above", so it may not appear without one. It did: the
+   * refusal above it was rendered only when *both* device keys were set, which a playback-only
+   * DAC never satisfies -- so on that bench (reported 2026-11-15) the consequence stood alone at
+   * the top of the dialog, pointing at nothing. Keyed on the message itself, the two cannot come
+   * apart again.
+   */
+  it('never points at a reason that is not on screen', () => {
+    expect(source).toContain('for the reason just above')
+
+    const declaration = source.indexOf('const settingsRefused = computed')
+    const block = source.slice(declaration, source.indexOf('\n)', declaration))
+    expect(block).toContain('!!rateRefusal.value')
+
+    // And the reason itself is gated on having something to say, not on the shape of the bench.
+    const reason = source.indexOf('{{ rateRefusal }}')
+    expect(reason, 'the refusal is rendered').toBeGreaterThan(-1)
+    const start = source.indexOf('v-if="', source.lastIndexOf('<p', reason)) + 'v-if="'.length
+    expect(source.slice(start, source.indexOf('"', start))).toBe('rateRefusal')
+  })
 })
 
 /** The `:disabled` expression of the button whose @click calls `handler`. */

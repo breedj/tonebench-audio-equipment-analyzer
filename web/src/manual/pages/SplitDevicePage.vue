@@ -100,6 +100,14 @@ const { showPage } = useManual()
       <em>Output card</em> rather than one.
     </p>
     <p>
+      <strong>And its own sample rates.</strong> Each card is asked on its own for the rates it
+      accepts, so the Sound card dialog shows <em>Input rates</em> and <em>Output rates</em>
+      separately — they are not intersected, because the analysis rate is the capturing card's and
+      the generating card keeps a declared list of its own. Measured on this bench: a MOTU M Series
+      under ASIO reports 44.1 to 192 kHz and a Topping D50 III under WASAPI 44.1 to 768 kHz, and
+      both are usable at once.
+    </p>
+    <p>
       <strong>Each keeps its own best host API.</strong> On a one-interface bench the picker quietly
       moves one side to match the other, because a single stream cannot span two host APIs; on a
       two-card split it does not, because there are two streams. So a MOTU with an ASIO driver stays

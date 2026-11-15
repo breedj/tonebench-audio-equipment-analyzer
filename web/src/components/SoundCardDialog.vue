@@ -21,6 +21,13 @@ import {
   splitKey,
 } from '../soundcard/cardList'
 import { calibrationState } from '../soundcard/calibrationState'
+import {
+  openedSides,
+  rateProblem,
+  rateRows,
+  sharedRateNote,
+  type ProbedBench,
+} from '../soundcard/probeSides'
 import Modal from './Modal.vue'
 import PanelIcon from './PanelIcon.vue'
 import HeaderIcon from './HeaderIcon.vue'
@@ -41,6 +48,8 @@ const {
   config,
   inventory,
   probe,
+  inputProbe,
+  outputProbe,
   calibrationResult,
   playingDbFs,
   calibrationToneHz,
@@ -443,7 +452,51 @@ function pairsFor(channels: number) {
   return pairs
 }
 
-const rates = computed(() => probe.value?.sampleRatesHz ?? [])
+/**
+ * Which streams this bench opens, which is what decides every rate question below.
+ *
+ * <p>Read from the bench rather than from what is selected, because a split leaves the half it
+ * does not use <b>stored</b>: see `openedSides`, and `probeSides.ts` for what asking the wrong
+ * question cost.</p>
+ */
+const opens = computed(() => openedSides(cardDirection.value, twoCardBench.value))
+
+/**
+ * The probe's answers, arranged as the bench opens them: one pairing, or one card at a time.
+ *
+ * <p>A side is <c>null</c> where this bench does not open it at all — which is not the same thing
+ * as a side that was asked and refused, and the difference is what keeps a stale stored input from
+ * blocking a bench that only plays.</p>
+ */
+const probedBench = computed<ProbedBench>(() => {
+  if (probe.value) {
+    const pairing = { name: '', rates: probe.value.sampleRatesHz, problem: probe.value.problem }
+    return { input: pairing, output: null, oneStream: true }
+  }
+
+  const side = (
+    answer: typeof inputProbe.value,
+    device: SoundCardOption | null,
+    carried: boolean,
+  ) =>
+    carried && device
+      ? { name: device.name, rates: answer?.sampleRatesHz ?? [], problem: answer?.problem ?? null }
+      : null
+
+  return {
+    input: side(inputProbe.value, selectedInput.value, opens.value.input),
+    output: side(outputProbe.value, selectedOutput.value, opens.value.output),
+    oneStream: false,
+  }
+})
+
+/** The rates each side accepted, for the readout and for {@link canSave}. */
+const inputRates = computed(() =>
+  probe.value ? probe.value.sampleRatesHz : (probedBench.value.input?.rates ?? []),
+)
+const outputRates = computed(() =>
+  probe.value ? probe.value.sampleRatesHz : (probedBench.value.output?.rates ?? []),
+)
 
 /**
  * The rates a pairing is <em>asked</em> about, from the server, which is the app's list and not a
@@ -471,7 +524,9 @@ function ratesInKhz(values: number[]): string {
  * pass or fail, and a pair that offers 48 kHz alone is a materially worse bench than one offering
  * all three, discovered later and somewhere else. Asked for from the bench 2026-11-12.
  */
-const rateSummary = computed(() => ratesInKhz(rates.value))
+const rateSummary = computed(() =>
+  rateRows(probedBench.value).map((row) => ({ label: row.label, text: ratesInKhz(row.rates) })),
+)
 
 /**
  * What the Sample rates row says on hover, and the correction to what that row used to imply.
@@ -484,7 +539,10 @@ const rateSummary = computed(() => ratesInKhz(rates.value))
 const rateSummaryHint = computed(() => {
   const asked = candidateRates.value
   if (asked.length === 0) return ''
-  const accepted = rates.value.length
+  const rows = rateRows(probedBench.value)
+  const accepted = rows.length > 0 && rows.every((row) => row.rates.length === asked.length)
+    ? asked.length
+    : -1
   return accepted === asked.length
     ? `Every rate this analyzer asks about — ${ratesInKhz(asked)} — opened on this pairing.`
     : `Of ${ratesInKhz(asked)}, which is what this analyzer asks a card about, these are the ones `
@@ -499,6 +557,9 @@ const rateSummaryHint = computed(() => {
  * from a wrong one.
  */
 const pairingWarning = computed(() => {
+  // `probe` is the pairing's, so this is already silent on a two-card split and on a one-direction
+  // bench -- which is right: there the two cards are the bench the user asked for, said so by the
+  // split dialog, rather than a pairing they may have made by accident.
   if (!probe.value || !selectedInput.value || !selectedOutput.value) return null
   if (probe.value.pairing !== 'Unknown') return null
 
@@ -524,11 +585,31 @@ const trustWarning = computed(() => {
     : 'This host API resamples in software: it will accept any rate, but what the converter ran at is the Windows mixer’s, not what is asked for. Prefer ASIO where the card has a driver.'
 })
 
-// Either side is enough, which mirrors SoundCardSettings.IsUsable: one direction opens a stream,
-// and a capture-only ADC or a playback-only DAC is the whole reason that is true.
-const canSave = computed(
-  () => (!!selectedInput.value || !!selectedOutput.value) && rates.value.length > 0 && !busy.value,
-)
+/**
+ * Either side is enough, which mirrors <c>SoundCardSettings.IsUsable</c>: one direction opens a
+ * stream, and a capture-only ADC or a playback-only DAC is the whole reason that is true.
+ *
+ * <p><b>Per side, and only the sides this bench opens.</b> A single `rates.length > 0` was the
+ * other half of the probe fault: it asked for a rate list that a one-direction bench never
+ * produced and that a two-card bench produced only by accident, and `applyDevice` returns without
+ * a word when this is false — so a perfectly openable DAC could not be saved, and a split whose
+ * other half is a stale stored device could be blocked by a device it does not use.</p>
+ */
+const canSave = computed(() => {
+  if (busy.value) return false
+  const usesInput = !!probedBench.value.input
+  const usesOutput = !!probedBench.value.output
+  if (!usesInput && !usesOutput) return false
+  if (usesInput && inputRates.value.length === 0) return false
+  if (usesOutput && outputRates.value.length === 0) return false
+  return true
+})
+
+/** Why nothing here can open, named for the question that was actually asked. */
+const rateRefusal = computed(() => rateProblem(probedBench.value, ratesInKhz(candidateRates.value)))
+
+/** The one thing two separately probed cards can still get wrong between them. */
+const noSharedRate = computed(() => sharedRateNote(probedBench.value))
 
 /**
  * Whether what this dialog shows is what the connected card is actually running.
@@ -562,17 +643,19 @@ const settingsInEffect = computed(() => {
  * that is about to be fine. Disabling two buttons for that long costs nothing, so the buttons use
  * the stricter test and the notice uses this one.</p>
  *
- * <p>With a side selected and nothing in flight, <c>canSave</c> can only be false because no
- * sample rate survived the probe — so the red refusal above is always on screen when this is, and
- * the notice may refer to it.</p>
+ * <p><b>Gated on the refusal itself</b>, not merely on a side being selected. This notice ends
+ * "for the reason just above", and the reason above is {@link rateRefusal} — which used to be
+ * rendered only when both device keys were set, so a playback-only DAC printed the consequence
+ * with nothing above it saying what the cause was. Keyed on the message, the sentence cannot be
+ * on screen alone.</p>
  */
 const settingsRefused = computed(
-  () =>
-    !!config.value &&
-    !busy.value &&
-    !canSave.value &&
-    (!!selectedInput.value || !!selectedOutput.value),
+  () => !!config.value && !busy.value && !canSave.value && !!rateRefusal.value,
 )
+
+/** Whether this card carries the direction at all, which is what each calibration step needs. */
+const capturesWithCard = computed(() => opens.value.input && !!selectedInput.value)
+const playsThroughCard = computed(() => opens.value.output && !!selectedOutput.value)
 
 /**
  * What to say about the stored full scales, beside the dropdowns that change them.
@@ -601,8 +684,15 @@ const calibrationNotices = computed<CalibrationNotice[]>(() => {
   // through a different DAC months ago read "Run the output step again" beside a dialog with
   // no output step in it. The figure is left alone, because the Sound card analyzer still
   // needs it and will complain about it there.
+  //
+  // Read through the very computeds that render the two steps, rather than through
+  // `cardDirection` again, so the notice and the step it names cannot come apart. They did: on a
+  // playback-only DAC `cardDirection` is 'both' -- it answers which half of the *bench* the card
+  // serves, and a plain sound card serves both -- so a stale input calibration printed "Run the
+  // input step again ... the input is now nothing" over a dialog with no input step and a card
+  // that has no input to run it on (2026-11-15).
   const inUse = (direction: 'input' | 'output') =>
-    cardDirection.value === 'both' || cardDirection.value === direction
+    direction === 'input' ? capturesWithCard.value : playsThroughCard.value
 
   // Drift first: it is about a figure that exists and is wrong, which is worse than one that is
   // honestly absent, and it is the one the user has just caused.
@@ -809,7 +899,7 @@ async function reprobe() {
     return
   }
 
-  await probePairing(draft)
+  await probePairing(draft, opens.value)
 }
 
 function toConfig(): SoundCardConfig | null {
@@ -905,6 +995,10 @@ const generatorIsCard = computed(() => cardDirection.value !== 'input')
 
 /** What plays the loopback tone, for the wording of the step that uses it. */
 const generatorName = computed(() => {
+  // On two cards it is a card, but it is not *this* one -- the input being calibrated is on the
+  // other, which is the whole shape of that bench. Naming it "this card's output" beside an Input
+  // card dropdown reads as a loopback within one interface, which is the one thing it is not.
+  if (twoCardBench.value) return "the output card's output"
   if (generatorIsCard.value) return "this card's output"
   return props.status?.splitOutputKind === 'Simulated' ? "the simulator's output" : "the QA40x's output"
 })
@@ -1112,6 +1206,14 @@ function mvRms(value: number | null | undefined) {
              output was the calibration-drift warning above it. That matters more than usual here,
              because an output calibration names an interface and a reader has to be able to see
              which one. Shown read-only instead. -->
+        <!-- A card with no device in this direction is a statement about the hardware, not an
+             empty row: a playback-only DAC has no input and never will, and before this said so
+             the Input group simply stopped after the card dropdown. The reader is then left to
+             infer from an absence, which is the one thing an absence cannot support. -->
+        <p v-if="cardInputs.length === 0 && inputCardKey" class="sc-row text-[11px] text-neutral-500 dark:text-neutral-400">
+          This card has no input — it plays only, so there is no capture and no input calibration.
+        </p>
+
         <div v-if="cardInputs.length === 1" class="sc-row">
           <span class="sc-label">Input</span>
           <span class="text-neutral-600 dark:text-neutral-300">{{ cardInputs[0]!.name }}</span>
@@ -1167,6 +1269,11 @@ function mvRms(value: number | null | undefined) {
             </option>
           </select>
         </label>
+
+        <p v-if="cardOutputs.length === 0 && outputCardKey" class="sc-row text-[11px] text-neutral-500 dark:text-neutral-400">
+          This card has no output — it captures only, so it generates nothing and has no output
+          calibration.
+        </p>
 
         <div v-if="cardOutputs.length === 1" class="sc-row">
           <span class="sc-label">Output</span>
@@ -1246,12 +1353,17 @@ function mvRms(value: number | null | undefined) {
           <span v-if="note.hint" class="opacity-80">{{ note.hint }}</span>
         </p>
 
-<!-- The probed rates, which are the pairing's and not either card's -- see rateSummary for
-             why this row came back. It sits here, immediately above the refusal that replaces it
-             when the list is empty, so one place always says what the pairing can do. -->
-        <div v-if="rates.length > 0 && form.inputKey && form.outputKey" class="sc-row">
-          <span class="sc-label">Sample rates</span>
-          <span class="text-neutral-600 dark:text-neutral-300" :title="rateSummaryHint">{{ rateSummary }}</span>
+<!-- The probed rates -- see rateSummary for why this row came back. It sits here, immediately
+             above the refusal that replaces it when a list is empty, so one place always says what
+             can be opened.
+             <p>One row per stream the bench opens, which on two cards is two: their rates are
+             merged and not intersected (SplitAnalyzerDevice.Capabilities says so in its own
+             remarks), so a single row would have to invent a shared list the bench does not
+             require. A lone row is labelled "Sample rates" however it was probed, because with one
+             stream there is nothing for it to be distinguished from.</p> -->
+        <div v-for="row in rateSummary" :key="row.label" class="sc-row">
+          <span class="sc-label">{{ row.label }}</span>
+          <span class="text-neutral-600 dark:text-neutral-300" :title="rateSummaryHint">{{ row.text }}</span>
         </div>
 
         <label
@@ -1290,11 +1402,25 @@ function mvRms(value: number | null | undefined) {
           </span>
         </label>
 
+        <!-- Gated on the message rather than on both device keys being set: the old condition
+             could not fire for a one-direction bench, which is exactly the bench that most needed
+             an explanation -- a playback-only DAC showed the consequence below with nothing above
+             it saying what the cause was. -->
         <p
-          v-if="probe && rates.length === 0 && form.inputKey && form.outputKey"
+          v-if="rateRefusal"
           class="rounded border border-red-300 px-3 py-2 text-[11px] text-red-800 dark:border-red-700/60 dark:text-red-300"
         >
-          {{ probe.problem ?? `This pairing accepts none of ${ratesInKhz(candidateRates)}, which are the rates this analyzer asks a card about.` }}
+          {{ rateRefusal }}
+        </p>
+
+        <!-- Not a refusal: two cards each open at their own rate, so neither list rules the other
+             out. What it rules out is the split's own default, and that setting is in the other
+             dialog. -->
+        <p
+          v-if="noSharedRate"
+          class="rounded border border-amber-300 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700/60 dark:text-amber-200"
+        >
+          {{ noSharedRate }}
         </p>
 
         <!-- The consequence of the refusal above, stated separately because it is what the user
@@ -1351,8 +1477,11 @@ function mvRms(value: number | null | undefined) {
       <!-- 2. Output full scale ---------------------------------------------------------- -->
       <!-- Only where this card is what plays. A split that captures with the card has no output
            calibration to take, and the server refuses the step by direction — so offering it would
-           be offering a button whose only answer is a refusal. -->
-      <section v-if="cardDirection !== 'input'" class="sc-section">
+           be offering a button whose only answer is a refusal.
+           <p>And only where the card has an output at all: `cardDirection` answers which half of
+           the bench the card serves, which on a plain sound card is always "both" — so a
+           capture-only ADC was offered a Generate sine button with nothing to generate from.</p> -->
+      <section v-if="playsThroughCard" class="sc-section">
         <div class="sc-head">
           <PanelIcon icon="signalOut" tone="orange" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -1477,8 +1606,9 @@ function mvRms(value: number | null | undefined) {
       </section>
 
       <!-- 3. Input full scale ----------------------------------------------------------- -->
-      <!-- Only where this card is what captures, for the reason above. -->
-      <section v-if="cardDirection !== 'output'" class="sc-section">
+      <!-- Only where this card is what captures, and only where it has an input to capture
+           with, for the two reasons above. -->
+      <section v-if="capturesWithCard" class="sc-section">
         <div class="sc-head">
           <PanelIcon icon="signalIn" tone="green" />
           <h3 class="m-0 flex-1 text-sm font-semibold text-neutral-900 dark:text-neutral-100">

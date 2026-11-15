@@ -9,6 +9,7 @@ import {
   type VoltageEntryUnitName,
 } from '../api/client'
 import type { GainUnit } from '../soundcard/gainUnits'
+import type { OpenedSides } from '../soundcard/probeSides'
 
 /**
  * The sound card the analyzer is, and its calibration.
@@ -23,7 +24,17 @@ import type { GainUnit } from '../soundcard/gainUnits'
  */
 const config = ref<SoundCardConfig | null>(null)
 const inventory = ref<SoundCardInventory | null>(null)
+/**
+ * The pairing's probe, and <b>null whenever the bench does not open one stream across both
+ * sides</b> — see `probeSides.ts` for the three shapes and what asking the wrong one costs.
+ * The two refs below are its counterparts: one side, probed as that side will be opened.
+ *
+ * At most one of these arrangements is populated at a time, which is what lets a reader tell
+ * "the pairing was asked" from "each card was asked" without a flag beside them.
+ */
 const probe = ref<SoundCardProbe | null>(null)
+const inputProbe = ref<SoundCardProbe | null>(null)
+const outputProbe = ref<SoundCardProbe | null>(null)
 const calibrationResult = ref<SoundCardCalibrationResult | null>(null)
 const playingDbFs = ref<number | null>(null)
 
@@ -93,24 +104,79 @@ export function useSoundCard() {
     }
   }
 
-  /** Asks whether the chosen pairing works, and at which rates. */
-  async function probePairing(next: SoundCardConfig) {
-    if (!next.inputDeviceName || !next.outputDeviceName) {
+  /**
+   * Asks whether the chosen devices open, and at which rates — <b>probing the streams this bench
+   * will actually open</b> rather than always asking about a pairing.
+   *
+   * <p>`opens` says which sides are carried and whether one stream carries both; `openedSides`
+   * derives it, and `probeSides.ts` holds the reasoning and the two faults that came of not having
+   * it. The server has taken a one-direction probe since 2026-11-11 — a blank name there means
+   * "this bench does not carry that direction", not a device that is missing — so the whole
+   * change is which questions are asked.</p>
+   *
+   * <p>The default is a duplex pairing, which is what every caller wanted while a sound-card bench
+   * was necessarily one card carrying both directions.</p>
+   */
+  async function probePairing(
+    next: SoundCardConfig,
+    opens: OpenedSides = { input: true, output: true, oneStream: true },
+  ) {
+    const wantsInput = opens.input && !!next.inputDeviceName
+    const wantsOutput = opens.output && !!next.outputDeviceName
+
+    if (!wantsInput && !wantsOutput) {
       probe.value = null
+      inputProbe.value = null
+      outputProbe.value = null
       return
     }
 
+    // Every field spelled on both calls, empty where the direction is not carried: `toQuery` drops
+    // only `undefined`, and the server binds these as required strings — so an omitted one is a
+    // 400 rather than a blank.
+    const blank = { inputHostApi: '', inputDevice: '', outputHostApi: '', outputDevice: '' }
+    const inputSide = {
+      ...blank,
+      inputHostApi: next.inputHostApi,
+      inputDevice: next.inputDeviceName,
+      inputChannelOffset: next.inputChannelOffset,
+    }
+    const outputSide = {
+      ...blank,
+      outputHostApi: next.outputHostApi,
+      outputDevice: next.outputDeviceName,
+      outputChannelOffset: next.outputChannelOffset,
+    }
+
     try {
-      probe.value = await api.probeSoundCard({
-        inputHostApi: next.inputHostApi,
-        inputDevice: next.inputDeviceName,
-        outputHostApi: next.outputHostApi,
-        outputDevice: next.outputDeviceName,
-        inputChannelOffset: next.inputChannelOffset,
-        outputChannelOffset: next.outputChannelOffset,
-      })
+      if (wantsInput && wantsOutput && opens.oneStream) {
+        probe.value = await api.probeSoundCard({
+          inputHostApi: next.inputHostApi,
+          inputDevice: next.inputDeviceName,
+          outputHostApi: next.outputHostApi,
+          outputDevice: next.outputDeviceName,
+          inputChannelOffset: next.inputChannelOffset,
+          outputChannelOffset: next.outputChannelOffset,
+        })
+        inputProbe.value = null
+        outputProbe.value = null
+        return
+      }
+
+      // Both at once rather than one after the other: each is a native call on the one STA thread
+      // PortAudio is driven from, so they serialize there anyway, and awaiting them in sequence
+      // only adds a round trip to every change of a dropdown.
+      const [asInput, asOutput] = await Promise.all([
+        wantsInput ? api.probeSoundCard(inputSide) : Promise.resolve(null),
+        wantsOutput ? api.probeSoundCard(outputSide) : Promise.resolve(null),
+      ])
+      probe.value = null
+      inputProbe.value = asInput
+      outputProbe.value = asOutput
     } catch (e) {
       probe.value = null
+      inputProbe.value = null
+      outputProbe.value = null
       error.value = (e as Error).message
     }
   }
@@ -315,6 +381,8 @@ export function useSoundCard() {
     config,
     inventory,
     probe,
+    inputProbe,
+    outputProbe,
     calibrationResult,
     playingDbFs,
     calibrationToneHz,

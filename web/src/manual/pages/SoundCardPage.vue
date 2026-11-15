@@ -358,6 +358,14 @@ const { showPage } = useManual()
       <button type="button" class="manual-link" @click="showPage('split-device')">Split (two devices)</button>.
     </p>
 
+    <p>
+      <strong>A card that carries one direction gets one calibration step.</strong> A playback-only
+      DAC has <em>Full scale output</em> and nothing else; a capture-only ADC has
+      <em>Full scale input</em> and nothing else. The dialog says so where the card has no device on
+      a side, rather than leaving the row blank — and the rates it reports are that one device's,
+      probed as the one stream it will be opened on.
+    </p>
+
     <h3 id="two-asio">Two cards cannot both be ASIO</h3>
     <p>
       This used to be a rule about a two-card bench set up here, and that bench is now a
@@ -382,6 +390,15 @@ const { showPage } = useManual()
       app probes the hardware — in the mode it actually opens it in — for the rates it measures at,
       <strong>44.1, 48, 88.2, 96, 176.4, 192, 384 and 768 kHz</strong>, and keeps whichever of them
       the card accepts.
+    </p>
+    <p>
+      <strong>One row per stream the bench opens.</strong> One card carrying both directions opens
+      one stream, so the two devices have to agree and there is a single
+      <em>Sample rates</em> row — the pairing's. A split with a card on each half opens a stream per
+      card, so there are two rows, <em>Input rates</em> and <em>Output rates</em>, and they need not
+      overlap: the analysis rate is the capturing card's and the generator keeps a list of its own.
+      Where they share nothing at all the dialog says so, because the split's own
+      <em>Follow the capture rate</em> then has no rate to follow.
     </p>
     <p class="manual-callout">
       <strong>The row shows what was <em>accepted</em>, not what the card can do.</strong> A rate

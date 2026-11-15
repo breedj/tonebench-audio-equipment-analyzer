@@ -141,13 +141,22 @@ watch(
 const generatorRates = computed(() => props.ranges?.outputSampleRatesHz ?? props.ranges?.sampleRatesHz ?? [])
 
 /**
- * The three pairings the server refuses, checked here so the reason is on screen before Save rather
- * than after it. The server refuses them again regardless — this is the message, not the guard.
+ * The pairings the server refuses, checked here so the reason is on screen before Save rather than
+ * after it. The server refuses them again regardless — this is the message, not the guard.
+ *
+ * <p><b>A card on both sides left this list on 2026-11-15</b>, and it is worth saying why the
+ * string went rather than being softened: it claimed the second card "would never be serviced",
+ * which was true of one shared PortAudio thread and is not true now that a two-card half gets a
+ * transfer thread of its own. It also sent the reader to the Sound card analyzer, which has since
+ * been narrowed to a single interface and would refuse the very bench it recommended. Verified in
+ * the running app against a MOTU on ASIO and a Topping D50 III on WASAPI: the pairing connects, and
+ * this paragraph was being printed underneath it.</p>
+ *
+ * <p>The at-most-one-ASIO rule is deliberately <i>not</i> mirrored here. It depends on which host
+ * API each card was picked under, which is the card document's business rather than this dialog's,
+ * and the server reports it at connect with both device names in the message.</p>
  */
 const problem = computed(() => {
-  if (form.inputKind === 'SoundCard' && form.outputKind === 'SoundCard') {
-    return 'A sound card cannot be on both sides: everything PortAudio does runs on one thread, so the second card would never be serviced. Choose Sound card as the analyzer instead — it opens both directions of a two-card bench in one stream.'
-  }
   if (form.inputKind === 'Hardware' && form.outputKind === 'Hardware') {
     return 'A QA40x cannot be on both sides: that is one device opened twice. A QA40x already generates and captures on its own clock.'
   }
@@ -300,18 +309,19 @@ async function save() {
           <span class="font-semibold text-neutral-800 dark:text-neutral-200">Two devices are two clocks.</span>
           Tone measurements — level, THD, IMD, SNR, the stepped sweeps — are unaffected, because every
           one of them finds its tone by searching for it. A chirp's phase, group delay and impulse
-          response are not: the clock ratio reads as a frequency-dependent delay. Measure the drift in
-          the sound-card settings and the two chirp screens will offer to correct it, or use
-          <em>Right channel is reference</em>, where the ratio of two channels of one capture cancels
-          it exactly.
+          response are not: the clock ratio reads as a frequency-dependent delay. Measure it with the
+          <strong>Clock drift</strong> panel below and the two chirp screens will offer to correct
+          it, or use <em>Right channel is reference</em>, where the ratio of two channels of one
+          capture cancels it exactly.
         </p>
       </section>
 
       <p v-if="usesSoundCard" class="m-0 text-[12.5px] leading-relaxed text-neutral-600 dark:text-neutral-400">
         Which card, its channel pair and its calibration are in
         <button type="button" class="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300" @click="emit('soundCard')">
-          Sound card settings</button>. A split uses one direction of that one document, so only the
-        side it needs has to be chosen there.
+          Sound card settings</button>. With a card on one half only the side it needs has to be
+        chosen there; with a card on both, that dialog offers an <em>Input card</em> and an
+        <em>Output card</em>.
       </p>
 
       <!-- Rendered only once the pairing really is two devices. On a bench whose two halves are one

@@ -1,0 +1,347 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Tonebench.App.Services;
+using Tonebench.App.Streaming;
+using Tonebench.Device;
+using Tonebench.Device.Simulation;
+using Tonebench.Dsp;
+
+namespace Tonebench.App.Tests.Services;
+
+/// <summary>
+/// The oscilloscope runner against the simulator: that it takes the session, catches what it was
+/// pointed at, hands the pipeline back, and parks its record under the measurement it belongs to.
+/// </summary>
+public class OscilloscopeRunnerTests
+{
+    private const double SampleRateHz = 48_000.0;
+
+    private sealed class Bench
+    {
+        public required SimulatedDevice Device { get; init; }
+        public required SpectrumPipeline Pipeline { get; init; }
+        public required DeviceSessionService Session { get; init; }
+        public required ScopeTriggerEngine Engine { get; init; }
+        public required OscilloscopeRunner Runner { get; init; }
+    }
+
+    private static async Task<Bench> NewBenchAsync()
+    {
+        var device = new SimulatedDevice();
+        var engine = new ScopeTriggerEngine(new ScopeCaptureBuffer(2, 8192));
+        var pipeline = new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance);
+        var session = new DeviceSessionService(
+            device, pipeline, new CaptureDelaySetting { Ms = 0 },
+            NullLogger<DeviceSessionService>.Instance, null, engine);
+
+        await session.ConnectAsync(CancellationToken.None);
+
+        return new Bench
+        {
+            Device = device,
+            Pipeline = pipeline,
+            Session = session,
+            Engine = engine,
+            Runner = new OscilloscopeRunner(session, pipeline, engine, NullLogger<OscilloscopeRunner>.Instance),
+        };
+    }
+
+    private static OscilloscopeRequest Request(
+        ScopeRunMode mode = ScopeRunMode.Single,
+        double recordSeconds = 0.02,
+        double preTriggerFraction = 0.25,
+        double levelV = 0.0,
+        double sampleRateHz = SampleRateHz) =>
+        new(
+            sampleRateHz,
+            recordSeconds,
+            preTriggerFraction,
+            mode,
+            TriggerKind.Edge,
+            TriggerSource.ChannelA,
+            TriggerSlope.Rising,
+            levelV,
+            Generator: new GeneratorConfig(
+                new ChannelGeneratorConfig(true, [new GeneratorTone(1_000.0, -6.0)]),
+                new ChannelGeneratorConfig(true, [new GeneratorTone(1_000.0, -6.0)])));
+
+    private static async Task<bool> WaitForAsync(Func<bool> condition, int timeoutMs = 10_000)
+    {
+        for (int waited = 0; waited < timeoutMs; waited += 20)
+        {
+            if (condition())
+                return true;
+
+            await Task.Delay(20);
+        }
+
+        return condition();
+    }
+
+    [Fact]
+    public async Task ASingleRun_CatchesOneRecordAndFinishes()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            var started = await bench.Runner.StartAsync(Request(), CancellationToken.None);
+
+            Assert.Equal(SampleRateHz, started.SampleRateHz, 6);
+            Assert.Equal(960, started.RecordFrames);
+            Assert.Equal(240, started.PreTriggerFrames);
+
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            var status = bench.Runner.Status;
+            Assert.Equal(FrequencyResponsePhase.Finished, status.Phase);
+            Assert.Null(status.Error);
+            Assert.True(status.HasRecord);
+            Assert.Equal(1, status.RecordsTaken);
+            Assert.False(status.Forced);
+
+            // The readings the status carries are the record's own, and all finite.
+            Assert.NotNull(status.TriggerOffsetS);
+            Assert.NotNull(status.RecordFromS);
+            Assert.True(status.RecordFromS < 0.0, "a record with pre-trigger starts before t = 0");
+
+            var record = bench.Runner.Record;
+            Assert.NotNull(record);
+            Assert.Equal(960, record!.FrameCount);
+            Assert.Equal(0.5, WaveformMeasure.Measure(record.Channels[0]).AcRmsV, 2);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task TheRunIsBusyWhileItIsArmed()
+    {
+        // A level nothing reaches, so it stays armed. "Waiting for trigger" is a busy phase: the
+        // run holds the session, the pipeline options and the input range the whole time.
+        var bench = await NewBenchAsync();
+        try
+        {
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.Phase == FrequencyResponsePhase.WaitingForTrigger));
+            Assert.True(bench.Runner.Running);
+            Assert.False(bench.Runner.Status.HasRecord);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task TheRunHandsThePipelineBackWhateverHappens()
+    {
+        // The SoundCardCalibrationRunner lesson: a run that leaves its own record length behind is
+        // a setting the user never chose and cannot see.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var before = bench.Pipeline.Options;
+            await bench.Runner.StartAsync(Request(), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            Assert.Equal(before.FftSize, bench.Pipeline.Options.FftSize);
+            Assert.Equal(before.SingleShot, bench.Pipeline.Options.SingleShot);
+            Assert.Equal(before.AverageCount, bench.Pipeline.Options.AverageCount);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ACancelledRunSaysSo_AndStillHandsThePipelineBack()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            var before = bench.Pipeline.Options;
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => bench.Runner.Running));
+
+            await bench.Runner.CancelAsync();
+
+            Assert.Equal(FrequencyResponsePhase.Cancelled, bench.Runner.Status.Phase);
+            Assert.False(bench.Runner.Running);
+            Assert.Equal(before.FftSize, bench.Pipeline.Options.FftSize);
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ASecondStartIsRefusedWhileOneRuns()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => bench.Runner.Running));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => bench.Runner.StartAsync(Request(), CancellationToken.None));
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARateTheAnalyzerDoesNotHave_IsRefusedToTheCallerRatherThanOnTheRunTask()
+    {
+        // Synchronously with the request, so it is a 409 on the start rather than an exception on a
+        // task nobody is awaiting -- which is a 200 followed by a run that never produces anything.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => bench.Runner.StartAsync(Request(sampleRateHz: 44_100.0), CancellationToken.None));
+            Assert.Contains("44.1 kHz", ex.Message);
+
+            Assert.False(bench.Runner.Running);
+            Assert.Equal(FrequencyResponsePhase.Idle, bench.Runner.Status.Phase);
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARecordIsParkedUnderItsOwnMeasurement()
+    {
+        // Two scope measurements share this one runner, so without parking the second would show
+        // the first's waveform -- and Save reads the server, so it would store it too.
+        var bench = await NewBenchAsync();
+        try
+        {
+            bench.Runner.SwitchOwner("project@1:1");
+            await bench.Runner.StartAsync(Request(), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+            Assert.True(bench.Runner.Status.HasRecord);
+
+            // Away to a measurement that has never run: its own slot is empty.
+            var away = bench.Runner.SwitchOwner("project@1:2");
+            Assert.False(away.HasRecord);
+            Assert.Equal(0, away.RecordsTaken);
+
+            // And back: the first measurement's record is still its own.
+            var back = bench.Runner.SwitchOwner("project@1:1");
+            Assert.True(back.HasRecord);
+            Assert.Equal(1, back.RecordsTaken);
+            Assert.NotNull(bench.Runner.Record);
+            Assert.NotNull(bench.Runner.LastRequest);
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task AClearedRecordStaysCleared()
+    {
+        // A Clear is a deliberate "throw this away" and must not be undone by switching measurement
+        // and back -- which is what parking a null current does.
+        var bench = await NewBenchAsync();
+        try
+        {
+            bench.Runner.SwitchOwner("project@1:1");
+            await bench.Runner.StartAsync(Request(), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            bench.Runner.Clear();
+            Assert.False(bench.Runner.Status.HasRecord);
+
+            bench.Runner.SwitchOwner("project@1:2");
+            Assert.False(bench.Runner.SwitchOwner("project@1:1").HasRecord);
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ADestroyedMeasurementsRecordIsForgotten()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            bench.Runner.SwitchOwner("project@1:1");
+            await bench.Runner.StartAsync(Request(), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            bench.Runner.ForgetOwner("project@1:1");
+
+            Assert.False(bench.Runner.Status.HasRecord);
+            Assert.Null(bench.Runner.Record);
+            Assert.Equal(FrequencyResponsePhase.Idle, bench.Runner.Status.Phase);
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(2.0)]
+    [InlineData(-0.5)]
+    public void ARecordLengthOutsideTheBounds_IsRefused(double recordSeconds)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Request(recordSeconds: recordSeconds).Validate());
+    }
+
+    [Fact]
+    public void ATriggerOnAChannelThatIsNotBeingCaptured_IsRefused()
+    {
+        var request = Request() with { TriggerSource = TriggerSource.ChannelB, ProcessRight = false };
+
+        Assert.Throws<ArgumentException>(request.Validate);
+    }
+
+    [Fact]
+    public void NoChannelAtAll_IsRefused()
+    {
+        var request = Request() with { ProcessLeft = false, ProcessRight = false };
+
+        Assert.Throws<ArgumentException>(request.Validate);
+    }
+
+    [Fact]
+    public void AnUnimplementedTriggerKind_IsRefusedWithItsOwnMessage()
+    {
+        var request = Request() with { TriggerKind = TriggerKind.Runt };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Contains("edge trigger", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TheRecordLengthIsTheSecondsAskedForAtTheRateUsed()
+    {
+        // Seconds and a fraction, not frame counts, so the same request means the same measurement
+        // at every rate -- converted once, against the rate it will really stream at.
+        var request = Request(recordSeconds: 0.01, preTriggerFraction: 0.5);
+
+        Assert.Equal(480, request.RecordFramesAt(48_000.0));
+        Assert.Equal(240, request.PreTriggerFramesAt(48_000.0));
+        Assert.Equal(1920, request.RecordFramesAt(192_000.0));
+        Assert.Equal(960, request.PreTriggerFramesAt(192_000.0));
+    }
+}

@@ -39,6 +39,7 @@ public static class RunOwnersEndpoints
             ImpedanceRunner impedance,
             ImpulseResponseRunner impulse,
             OutputImpedanceRunner outputImpedance,
+            OscilloscopeRunner oscilloscope,
             SpectrumPipeline pipeline) =>
         {
             foreach (string owner in request.Normalized)
@@ -51,6 +52,7 @@ public static class RunOwnersEndpoints
                 impedance.ForgetOwner(owner);
                 impulse.ForgetOwner(owner);
                 outputImpedance.ForgetOwner(owner);
+                oscilloscope.ForgetOwner(owner);
                 pipeline.ForgetRetentionOwner(owner);
             }
 

@@ -29,14 +29,15 @@ public class RunOwnerCoverageTests
             .OrderBy(t => t.Name, StringComparer.Ordinal)];
 
     [Fact]
-    public void TheRunnersThatParkARunAreTheEightThisTestExpects()
+    public void TheRunnersThatParkARunAreTheNineThisTestExpects()
     {
         // Named rather than counted, so that adding a runner is a decision taken here — the two
         // tests below then hold it to the whole contract.
         Assert.Equal(
             [
                 "CrosstalkRunner", "FrequencyResponseRunner", "ImdSweepRunner", "ImpedanceRunner",
-                "ImpulseResponseRunner", "OutputImpedanceRunner", "SteppedResponseRunner", "ThdSweepRunner",
+                "ImpulseResponseRunner", "OscilloscopeRunner", "OutputImpedanceRunner",
+                "SteppedResponseRunner", "ThdSweepRunner",
             ],
             ParkingRunners.Select(t => t.Name));
     }

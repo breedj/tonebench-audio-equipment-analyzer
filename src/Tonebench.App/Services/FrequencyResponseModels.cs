@@ -130,6 +130,20 @@ public enum FrequencyResponsePhase
     /// reason <see cref="DeterminingRange"/> is.
     /// </summary>
     WaitingForLoadChange = 10,
+
+    /// <summary>
+    /// Armed, and waiting for something to cross the trigger level — <c>OscilloscopeRunner</c>
+    /// only. Its own phase rather than folded into <see cref="Measuring"/> because on a scope the
+    /// two states need different words on screen: "waiting for trigger" on a level nothing reaches
+    /// is a setting to fix, where "capturing" that never finishes is a fault. Conflating them is
+    /// how a mis-set level comes to look like a dead input.
+    ///
+    /// <para>A busy phase — the run owns the session, the pipeline options and the input range the
+    /// whole time it is armed, exactly as <see cref="WaitingForLoadChange"/> does — so it is in
+    /// that runner's <c>Running</c> and in no other's. Appended with an explicit ordinal for the
+    /// same reason <see cref="DeterminingRange"/> is.</para>
+    /// </summary>
+    WaitingForTrigger = 11,
 }
 
 /// <summary>

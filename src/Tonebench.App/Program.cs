@@ -191,6 +191,7 @@ try
     builder.Services.AddSingleton<FrequencyResponseRunner>();
     builder.Services.AddSingleton<SteppedResponseRunner>();
     builder.Services.AddSingleton<CrosstalkRunner>();
+    builder.Services.AddSingleton<OscilloscopeRunner>();
     builder.Services.AddSingleton<ClockDriftRunner>();
     builder.Services.AddSingleton<OutputImpedanceRunner>();
     builder.Services.AddSingleton<ILoopbackReferenceStore, SqliteLoopbackReferenceStore>();
@@ -240,6 +241,7 @@ try
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<FrequencyResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<SteppedResponseRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<CrosstalkRunner>());
+    builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<OscilloscopeRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ClockDriftRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<OutputImpedanceRunner>());
     builder.Services.AddSingleton<IMeasurementRun>(sp => sp.GetRequiredService<ImpulseResponseRunner>());

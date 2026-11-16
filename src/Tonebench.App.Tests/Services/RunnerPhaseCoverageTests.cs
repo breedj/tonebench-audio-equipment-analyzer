@@ -60,6 +60,18 @@ public class RunnerPhaseCoverageTests
             FrequencyResponsePhase.Measuring,
             FrequencyResponsePhase.Analyzing,
         ],
+        [typeof(OscilloscopeRunner)] =
+        [
+            // Armed and watching, which is busy: the run holds the session, the pipeline options
+            // and the input range the whole time it waits. Its own phase rather than Measuring,
+            // because "waiting for trigger" on a level nothing reaches is a setting to fix where a
+            // capture that never completes is a fault, and conflating the two is how a mis-set
+            // level comes to look like a dead input.
+            FrequencyResponsePhase.WaitingForTrigger,
+
+            // Triggered, filling the post-trigger half of the record.
+            FrequencyResponsePhase.Measuring,
+        ],
         [typeof(ImpedanceRunner)] =
         [
             // No DeterminingLevel: an impedance run is given its generator level rather than solving

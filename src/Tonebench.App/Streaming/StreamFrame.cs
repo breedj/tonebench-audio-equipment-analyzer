@@ -78,6 +78,19 @@ public enum StreamMsgType : byte
     /// <see cref="FrequencyResponse"/>'s does. See <see cref="StreamFrame.EncodeResponsePreview"/>.
     /// </summary>
     ResponsePreview = 14,
+
+    /// <summary>
+    /// One oscilloscope record, per channel.
+    ///
+    /// <para>Its own type rather than a flag on <see cref="Scope"/>, for three reasons each
+    /// sufficient on its own. That payload is <i>defined</i> as raw f32 with
+    /// <see cref="StreamFlags.Decimated"/> unset and its decoder throws on anything else; its x0 is
+    /// fixed at 0 where this one needs a <b>negative</b> x0, the trigger being t = 0 with the
+    /// pre-trigger to the left of it; and the FFT screen's scope frames and this screen's would
+    /// otherwise be indistinguishable on the wire and land in each other's store. The discriminator
+    /// has to be the byte a decoder reads first.</para>
+    /// </summary>
+    ScopeRecord = 15,
 }
 
 public enum StreamChannel : byte
@@ -183,6 +196,31 @@ public enum StreamFlags : ushort
     /// The raw frame is what the client triggers on; a residual has no fundamental crossings.
     /// </summary>
     ScopeResidual = 1 << 9,
+
+    /// <summary>
+    /// A <see cref="StreamMsgType.ScopeRecord"/> frame carrying the zoom window rather than the
+    /// whole record. Deliberately not <see cref="Zoomed"/> reused: that one is load-bearing for the
+    /// spectrum's axis-sizing rule -- "a frame that is not a zoom must never carry it" -- and
+    /// making it mean two things is how that rule gets broken a third time.
+    /// </summary>
+    ScopeZoomWindow = 1 << 10,
+
+    /// <summary>
+    /// The record was taken by Auto's timeout; nothing crossed the level. Flagged so a forced trace
+    /// cannot pass for a triggered one -- it is aligned to nothing, and drawn without saying so it
+    /// reads as a DUT that has stopped moving.
+    /// </summary>
+    ScopeForcedTrigger = 1 << 11,
+
+    /// <summary>Roll mode: a sliding window with no trigger, so the client draws no marker at t = 0.</summary>
+    ScopeRoll = 1 << 12,
+
+    /// <summary>
+    /// The record spans a dropped chunk or block, so somewhere in it two non-adjacent pieces of the
+    /// stream sit side by side. On a waveform a hole and a DUT fault look identical, which is why
+    /// this travels with the samples rather than only in a log.
+    /// </summary>
+    ScopeSpliced = 1 << 13,
 }
 
 /// <summary>
@@ -331,6 +369,143 @@ public static class StreamFrame
         }
 
         return buffer;
+    }
+
+    /// <summary>
+    /// Encodes one oscilloscope record as min/max columns — the overview the chart draws, and what
+    /// the zoom bar's strip is made of.
+    ///
+    /// <para>Payload is <c>nPoints</c> pairs of <c>(min, max)</c> f32, and <b>no x per column</b>,
+    /// which is the one place this differs from <see cref="EncodeSpectrum"/>. That one carries a
+    /// frequency with every column because its axis is log-spaced and irregular; a scope's time
+    /// axis is linear and regular, so column <c>i</c> is at <c>x0 + i*dx</c> and sending it would
+    /// be half the payload spent saying something the receiver can compute. 1600 columns is 12.8 kB
+    /// a channel.</para>
+    ///
+    /// <para><b>Min and max, never a mean</b>, and the client has to draw both: a mean flattens a
+    /// glitch narrower than a column into the trace around it and erases the very thing a scope is
+    /// being pointed at. The same rule the spectrum's noise floor is drawn under.</para>
+    /// </summary>
+    /// <param name="x0">Time of the first column relative to the trigger. Negative for any pre-trigger at all.</param>
+    /// <param name="dx">Column width in seconds.</param>
+    public static byte[] EncodeScopeRecord(
+        StreamChannel channel, uint seq, float x0, float dx, ReadOnlySpan<MinMax> columns, StreamFlags flags = StreamFlags.None)
+    {
+        RequireScopeFlags(flags);
+
+        int nPoints = columns.Length;
+        byte[] buffer = new byte[HeaderLength + (nPoints * 2 * sizeof(float))];
+        WriteHeader(buffer, StreamMsgType.ScopeRecord, channel, flags | StreamFlags.Decimated, seq, x0, dx, (uint)nPoints);
+
+        int offset = HeaderLength;
+        for (int i = 0; i < nPoints; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)columns[i].Min);
+            offset += 4;
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), (float)columns[i].Max);
+            offset += 4;
+        }
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// Encodes one oscilloscope record as raw samples, for a window tight enough that there is at
+    /// most one sample per column.
+    ///
+    /// <para>The floor the decimated form steps down to, mirroring the spectrum's one-bin-per-column
+    /// rule: once a zoom holds few enough samples, what is sent <i>is</i> the waveform rather than a
+    /// summary of it. That is what makes edge and timing work believable — a rise time read off a
+    /// min/max column pair is a reading of the decimation.</para>
+    /// </summary>
+    /// <param name="x0">Time of the first sample relative to the trigger.</param>
+    /// <param name="dx">The sample period in seconds.</param>
+    public static byte[] EncodeScopeSamples(
+        StreamChannel channel, uint seq, float x0, float dx, ReadOnlySpan<float> samples, StreamFlags flags = StreamFlags.None)
+    {
+        RequireScopeFlags(flags);
+
+        if (flags.HasFlag(StreamFlags.Decimated))
+            throw new ArgumentOutOfRangeException(nameof(flags), flags, "A raw sample payload must not claim to be decimated.");
+
+        int nPoints = samples.Length;
+        byte[] buffer = new byte[HeaderLength + (nPoints * sizeof(float))];
+        WriteHeader(buffer, StreamMsgType.ScopeRecord, channel, flags, seq, x0, dx, (uint)nPoints);
+
+        int offset = HeaderLength;
+        for (int i = 0; i < nPoints; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(offset, 4), samples[i]);
+            offset += 4;
+        }
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// Decodes a <see cref="StreamMsgType.ScopeRecord"/> payload of min/max columns.
+    /// </summary>
+    public static MinMax[] DecodeScopeColumns(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.ScopeRecord)
+            throw new ArgumentException($"Not a scope record frame: {header.MsgType}.", nameof(frame));
+        if (!header.Flags.HasFlag(StreamFlags.Decimated))
+            throw new ArgumentException("That scope record carries raw samples, not columns.", nameof(frame));
+
+        var columns = new MinMax[header.NPoints];
+        int offset = HeaderLength;
+        for (int i = 0; i < columns.Length; i++)
+        {
+            float min = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+            float max = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset + 4, 4));
+            columns[i] = new MinMax(min, max);
+            offset += 8;
+        }
+
+        return columns;
+    }
+
+    /// <summary>Decodes a <see cref="StreamMsgType.ScopeRecord"/> payload of raw samples.</summary>
+    public static float[] DecodeScopeRecordSamples(ReadOnlySpan<byte> frame)
+    {
+        var header = DecodeHeader(frame);
+        if (header.MsgType != StreamMsgType.ScopeRecord)
+            throw new ArgumentException($"Not a scope record frame: {header.MsgType}.", nameof(frame));
+        if (header.Flags.HasFlag(StreamFlags.Decimated))
+            throw new ArgumentException("That scope record carries columns, not raw samples.", nameof(frame));
+
+        var samples = new float[header.NPoints];
+        int offset = HeaderLength;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            samples[i] = BinaryPrimitives.ReadSingleLittleEndian(frame.Slice(offset, 4));
+            offset += 4;
+        }
+
+        return samples;
+    }
+
+    /// <summary>
+    /// The scope's counterpart of <see cref="RequireOriginFlag"/>: only the flags a scope record
+    /// may carry, so a caller cannot smuggle a spectrum's meaning onto one.
+    ///
+    /// <para>Separate from that guard rather than folded into it, because the two allow-lists have
+    /// nothing in common — the origin bits say which <i>measurement</i> a response frame came from,
+    /// and these say what a scope record <i>is</i>. Like it, this throws at run time rather than
+    /// compile time, so a new flag that forgets to be listed fails on the first encode.</para>
+    /// </summary>
+    private static void RequireScopeFlags(StreamFlags flags)
+    {
+        const StreamFlags allowed =
+            StreamFlags.Decimated | StreamFlags.ScopeZoomWindow | StreamFlags.ScopeForcedTrigger
+            | StreamFlags.ScopeRoll | StreamFlags.ScopeSpliced;
+
+        if ((flags & ~allowed) != StreamFlags.None)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(flags), flags, $"A scope record may only carry {allowed}.");
+        }
     }
 
     /// <summary>

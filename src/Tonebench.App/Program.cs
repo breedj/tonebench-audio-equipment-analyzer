@@ -356,6 +356,7 @@ try
     app.MapImpulseResponseEndpoints();
     app.MapSteppedResponseEndpoints();
     app.MapCrosstalkEndpoints();
+    app.MapOscilloscopeEndpoints();
     app.MapClockDriftEndpoints();
     app.MapOutputImpedanceEndpoints();
     app.MapImpedanceEndpoints();

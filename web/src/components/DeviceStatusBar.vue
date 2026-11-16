@@ -749,8 +749,15 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
          before either half is up, and when nothing is chosen yet this button is the only way to
          get anywhere.
 
-         The braid on a split and the cog on a plain card — the two glyphs the two gears had, since
-         what the dialog opens on really is two different pictures. -->
+         The cog on either bench. It was a braid on a split -- the glyph that gear carried while it
+         was one of three -- and once there is a single gear the distinction is the wrong one to
+         draw: a button that changes shape with the analyzer reads as a different button, where
+         what it opens is the same dialog with a section more in it. The cog is this app's "settings
+         live here" everywhere else, so a reader finds it in the same place whatever is attached
+         (Joost, 2026-11-16). The label and tooltip still name the bench, which is where that
+         difference belongs. -->
+    <!-- NOTE: the braid was `M3 7h5l4 5 4-5h5` with two small circles, i.e. two paths splitting to
+         two devices. Nothing pinned it, and nothing should: see above. -->
     <button
       v-if="hasDeviceSettings"
       type="button"
@@ -759,13 +766,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       :title="isSplit ? splitTitle : soundCardTitle"
       @click="emit('openDevices')"
     >
-      <svg v-if="isSplit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M3 7h5l4 5 4-5h5" />
-        <path d="M3 17h5l4-5" />
-        <circle cx="20" cy="7" r="1.6" />
-        <circle cx="20" cy="17" r="1.6" />
-      </svg>
-      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
       </svg>

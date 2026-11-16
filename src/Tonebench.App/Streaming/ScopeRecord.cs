@@ -3,7 +3,7 @@ using Tonebench.Dsp;
 namespace Tonebench.App.Streaming;
 
 /// <summary>How the engine re-arms itself after a capture, or whether it arms at all.</summary>
-internal enum ScopeRunMode
+public enum ScopeRunMode
 {
     /// <summary>One record, then hold. The engine does not re-arm.</summary>
     Single,
@@ -37,7 +37,7 @@ internal enum ScopeRunMode
 /// exactly 24 dB low for about 1.05 s, and <b>only the first of those ~10 blocks carries the
 /// discontinuity flag</b> -- so the flag bounds the splice but not the wrong levels that follow it.
 /// </param>
-internal readonly record struct ScopeCaptureSpec(
+public readonly record struct ScopeCaptureSpec(
     TriggerSpec Trigger,
     int TriggerChannel,
     int RecordFrames,
@@ -73,7 +73,7 @@ internal readonly record struct ScopeCaptureSpec(
 /// fault are indistinguishable in a waveform drawn without it.
 /// </param>
 /// <param name="Forced">Taken by <see cref="ScopeRunMode.Auto"/>'s timeout; nothing qualified.</param>
-internal sealed record ScopeRecord(
+public sealed record ScopeRecord(
     double[][] Channels,
     double SampleRateHz,
     long FirstIndex,

@@ -34,7 +34,7 @@ namespace Tonebench.App.Streaming;
 /// stimulus change may already have booked a longer discard, and taking the later of the two can
 /// never cancel it.</para>
 /// </summary>
-internal sealed class ScopeCaptureBuffer
+public sealed class ScopeCaptureBuffer
 {
     private readonly object _lock = new();
     private double[][] _channels;

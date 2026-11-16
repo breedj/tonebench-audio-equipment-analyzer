@@ -4,7 +4,7 @@ using Tonebench.Dsp;
 namespace Tonebench.App.Streaming;
 
 /// <summary>Where the engine is in the arm / trigger / fill / hold cycle.</summary>
-internal enum ScopeEngineState
+public enum ScopeEngineState
 {
     /// <summary>Not armed. Roll mode sits here for ever, and so does a Single that has delivered.</summary>
     Idle,
@@ -33,7 +33,7 @@ internal enum ScopeEngineState
 /// <c>DeviceSessionService.PumpAsync</c>, which is where the blocks arrive. Only
 /// <see cref="TakeRecord"/> and the state are read from elsewhere, and both are cheap snapshots.</para>
 /// </summary>
-internal sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
+public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
 {
     private readonly ScopeCaptureBuffer _buffer = buffer;
     private readonly object _handoff = new();

@@ -19,7 +19,8 @@ public sealed class DeviceSessionService(
     AnalyzerDeviceFactory deviceFactory, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
     ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
     SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null,
-    AutoRangeStepDownDelaySetting? stepDownDelay = null, SplitDeviceSetting? split = null)
+    AutoRangeStepDownDelaySetting? stepDownDelay = null, SplitDeviceSetting? split = null,
+    ScopeTriggerEngine? scopeEngine = null)
     : IDisposable, IMeasurementRun
 {
     /// <summary>
@@ -313,8 +314,10 @@ public sealed class DeviceSessionService(
     /// <summary>The pinned-device overload with a capture delay (and, optionally, an external gain) of the test's choosing.</summary>
     public DeviceSessionService(
         IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
-        ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null)
-        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger, externalGain)
+        ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
+        ScopeTriggerEngine? scopeEngine = null)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger, externalGain,
+            scopeEngine: scopeEngine)
     {
     }
 
@@ -324,6 +327,15 @@ public sealed class DeviceSessionService(
         ILogger<DeviceSessionService> logger, StreamRecorder streamRecorder)
         : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger,
             streamRecorder: streamRecorder)
+    {
+    }
+
+    /// <summary>The pinned-device overload with an oscilloscope engine, for the tests that capture one.</summary>
+    public DeviceSessionService(
+        IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
+        ILogger<DeviceSessionService> logger, ScopeTriggerEngine scopeEngine)
+        : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger,
+            scopeEngine: scopeEngine)
     {
     }
 
@@ -2221,6 +2233,8 @@ public sealed class DeviceSessionService(
     /// </summary>
     private async Task PumpAsync(AcquisitionConfig config, CancellationToken ct)
     {
+        double[]? scopeGains = null;
+
         try
         {
             await foreach (var block in _device.StreamAsync(config, ct).WithCancellation(ct))
@@ -2280,6 +2294,37 @@ public sealed class DeviceSessionService(
                     // Before the enqueue, which takes ownership and disposes the block: the
                     // recorder copies what it needs and keeps nothing.
                     streamRecorder?.WriteInput(block);
+
+                    // And the oscilloscope, for the same reason and on the same terms — it copies
+                    // into its own ring and keeps nothing of the block. There is no observer list
+                    // here on purpose: one `await foreach`, three consumers, and a fourth would go
+                    // in exactly this place.
+                    //
+                    // The external gain is applied here rather than inside the engine, because the
+                    // scope must draw the DUT's volts like everything else downstream of the
+                    // pipeline's door. That makes this a fourth door for that rule and the right
+                    // side of it: ranging is decided upstream by SessionInputRanger on analyzer
+                    // volts, so nothing has to be put back.
+                    //
+                    // The drop counters go in as one sum because only their *movement* is read —
+                    // a record they move across is spliced. They are per-acquisition, so the
+                    // absolute value would read exactly like a fresh fault after a stale run.
+                    if (scopeEngine is not null)
+                    {
+                        // One array for the life of the stream, refilled per block rather than
+                        // allocated per block: this runs once per 4096 frames for as long as the
+                        // device is up, and the gain is a setting the user can move under it.
+                        if (scopeGains is null || scopeGains.Length != block.ChannelCount)
+                            scopeGains = new double[block.ChannelCount];
+                        for (int ch = 0; ch < scopeGains.Length; ch++)
+                            scopeGains[ch] = externalGain?.LinearScale(ch) ?? 1.0;
+
+                        scopeEngine.Write(
+                            block.Samples,
+                            scopeGains,
+                            block.StartsAfterDiscontinuity,
+                            _device.DroppedRxChunks + _device.DroppedBlocks);
+                    }
 
                     spectrumPipeline.Enqueue(block); // takes ownership — disposes the block itself
                 }

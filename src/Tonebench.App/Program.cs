@@ -147,6 +147,15 @@ try
     builder.Services.AddSingleton(sp => new StreamRecorder(sp.GetRequiredService<ILogger<StreamRecorder>>()));
     builder.Services.AddSingleton<SpectrumBroadcastHub>();
     builder.Services.AddSingleton<SpectrumPipeline>();
+
+    // The oscilloscope's capture path, beside the pipeline rather than inside it: its record length
+    // is a timebase and has nothing to do with the FFT size, and it has to hold history from before
+    // a trigger that has not been found yet. A factory for the buffer because its two arguments are
+    // a channel count and a depth, both of which the engine resizes at arm time anyway -- this is
+    // only the initial allocation, and it is deliberately small so a bench that never opens the
+    // scope screen pays almost nothing for it.
+    builder.Services.AddSingleton(_ => new ScopeCaptureBuffer(channelCount: 2, capacityFrames: 8192));
+    builder.Services.AddSingleton<ScopeTriggerEngine>();
     builder.Services.AddSingleton<CaptureDelaySetting>();
     builder.Services.AddSingleton<Experimental384kSetting>();
     builder.Services.AddSingleton<AutoRangeStepDownDelaySetting>();

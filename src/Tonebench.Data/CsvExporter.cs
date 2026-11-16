@@ -377,6 +377,53 @@ public static class CsvExporter
     /// the reason the response export writes delays in microseconds: every impulse an audio DUT has
     /// fits in a few tens of milliseconds, and a spreadsheet column of 2.08e-05 is unreadable.</para>
     /// </summary>
+    /// <summary>
+    /// A captured oscilloscope waveform: one row per sample, time against each channel's volts.
+    ///
+    /// <para>Time is measured <b>from the trigger</b> and goes negative to the left of it, the same
+    /// convention the chart's axis uses and the one the decay surfaces' head start already follows.
+    /// Re-zeroing on the first sample would make "3 ms" mean three milliseconds after wherever the
+    /// record happened to start.</para>
+    ///
+    /// <para>Full resolution, not the decimated columns the wire carries: this is the one place a
+    /// stored waveform can be taken somewhere else and re-measured, which is the whole reason the
+    /// samples are stored rather than a preview of them.</para>
+    /// </summary>
+    /// <param name="triggerOffsetS">Seconds from the first sample to the trigger.</param>
+    public static string ExportWaveform(MeasurementDetail detail, StoredPcm pcm, double triggerOffsetS)
+    {
+        if (pcm.Channels.Length == 0 || pcm.Channels[0].Length == 0)
+            throw new ArgumentException("A waveform with at least one channel of samples is required.", nameof(pcm));
+
+        var sb = new StringBuilder();
+        WriteResultComments(sb, detail);
+        WriteComment(sb, "sample_rate_hz", pcm.SampleRateHz.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "frames", pcm.Channels[0].Length.ToString(CultureInfo.InvariantCulture));
+        WriteComment(sb, "trigger_offset_s", triggerOffsetS.ToString("G9", CultureInfo.InvariantCulture));
+        WriteComment(sb, "time_reference", "the trigger, so time is negative before it");
+
+        sb.Append("time_s");
+        for (int ch = 0; ch < pcm.Channels.Length; ch++)
+            sb.Append(ch == 0 ? ",left_volt" : ch == 1 ? ",right_volt" : $",ch{ch}_volt");
+        sb.Append('\n');
+
+        int frames = pcm.Channels[0].Length;
+        for (int i = 0; i < frames; i++)
+        {
+            double t = (i / pcm.SampleRateHz) - triggerOffsetS;
+            sb.Append(t.ToString("G9", CultureInfo.InvariantCulture));
+            foreach (var channel in pcm.Channels)
+            {
+                sb.Append(',');
+                sb.Append(channel[i].ToString("G9", CultureInfo.InvariantCulture));
+            }
+
+            sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
     public static string ExportImpulse(MeasurementDetail detail, StoredImpulseResult impulse)
     {
         if (impulse.Impulses.Count == 0)

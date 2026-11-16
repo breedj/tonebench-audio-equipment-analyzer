@@ -83,6 +83,27 @@ public static class OscilloscopeEndpoints
         group.MapPost("/owner", (RunOwnerRequest request, OscilloscopeRunner runner) =>
             Results.Ok(runner.SwitchOwner(request.Normalized)));
 
+        group.MapPost("/save", async (
+            SaveFrequencyResponseRequest request, OscilloscopeRunner runner, MeasurementSaveService saves, CancellationToken ct) =>
+        {
+            // The record and the request are read here rather than inside the save service, which
+            // takes them as arguments: the service has no business reaching into a runner, and this
+            // way the save is testable against a record that was never streamed.
+            if (runner.Record is not { } record || runner.LastRequest is not { } measurement)
+                return Results.Conflict("No oscilloscope record has been captured yet.");
+
+            try
+            {
+                long id = await saves.SaveOscilloscopeAsync(
+                    request.MeasurementTypeId, request.Name, request.Notes, record, measurement, request.ChartAnnotations, ct);
+                return Results.Ok(new IdResponse(id));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
+
         // The slice the chart is looking at. No window gives the overview the zoom strip draws;
         // a window tight enough to hold few enough samples comes back as the waveform itself
         // rather than as a summary of it.

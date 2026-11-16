@@ -214,6 +214,14 @@ public static class MeasurementsEndpoints
                     }
                 }
             }
+            else if (ExportShapeFor(detail.Kind) == CsvExportShape.Waveform)
+            {
+                var pcm = await repo.GetCapturePcmAsync(detail.CaptureId, ct);
+                if (pcm is null || pcm.Channels.Length == 0)
+                    return Results.NotFound();
+
+                csv = CsvExporter.ExportWaveform(detail, pcm, WaveformTriggerOffsetS(detail.ParamsJson, pcm));
+            }
             else if (ExportShapeFor(detail.Kind) == CsvExportShape.Impedance)
             {
                 var traces = await repo.GetResponseTracesAsync(detail.ResultId, ct);
@@ -287,6 +295,14 @@ public static class MeasurementsEndpoints
 
         /// <summary>Three grids that cannot share a table — see <see cref="ImpulseCsvPart"/>.</summary>
         Impulse,
+
+        /// <summary>
+        /// The time-domain samples of a captured waveform, out of <c>capture.pcm</c>. Its own shape
+        /// because a scope result stores no spectrum and no trace rows at all — fell through to
+        /// <see cref="Spectrum"/> it would find nothing and answer 404 to a CSV link the history
+        /// panel renders on every row.
+        /// </summary>
+        Waveform,
     }
 
     /// <summary>Which of an impulse result's three grids the caller asked for.</summary>
@@ -319,6 +335,33 @@ public static class MeasurementsEndpoints
     /// writes as <c>_db</c> columns. Crosstalk rows <i>are</i> response rows in plain dB, so the
     /// generic per-kind columns (<c>xtalk_l2r_min_db</c>, …) are exactly right for them.</para>
     /// </summary>
+    /// <summary>
+    /// Where the trigger sits in a stored waveform, in seconds from its first sample.
+    ///
+    /// <para>Derived from the pre-trigger <i>fraction</i> the result stored rather than kept as a
+    /// time, because the fraction is what the measurement was configured with and means the same
+    /// thing at any rate. Zero for a document that cannot be read — a CSV whose time column starts
+    /// at zero is wrong about where t = 0 is, which is better than refusing to export at all.</para>
+    /// </summary>
+    private static readonly JsonSerializerOptions WaveformParamsOptions =
+        new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
+
+    private static double WaveformTriggerOffsetS(string paramsJson, StoredPcm pcm)
+    {
+        try
+        {
+            var stored = JsonSerializer.Deserialize<OscilloscopeParameters>(paramsJson, WaveformParamsOptions);
+            if (stored is null || !(pcm.SampleRateHz > 0.0))
+                return 0.0;
+
+            return Math.Round(stored.PreTriggerFraction * pcm.Channels[0].Length) / pcm.SampleRateHz;
+        }
+        catch (JsonException)
+        {
+            return 0.0;
+        }
+    }
+
     internal static CsvExportShape ExportShapeFor(string kind)
     {
         if (MeasurementSaveService.IsImpulseResponseKind(kind))
@@ -332,6 +375,9 @@ public static class MeasurementsEndpoints
 
         if (MeasurementSaveService.IsSweepKind(kind))
             return CsvExportShape.Sweep;
+
+        if (MeasurementSaveService.IsOscilloscopeKind(kind))
+            return CsvExportShape.Waveform;
 
         return CsvExportShape.Spectrum;
     }

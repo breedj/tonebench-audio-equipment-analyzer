@@ -187,6 +187,94 @@ public sealed class MeasurementRepository(SqliteConnectionFactory connectionFact
     }
 
     /// <summary>
+    /// Stores one captured oscilloscope waveform.
+    ///
+    /// <para>A sibling of <see cref="SaveSimulationResultAsync"/> rather than a widening of the
+    /// generic save path, which that method's own remarks argue against: putting every existing
+    /// measurement through code that can carry a pcm blob buys nothing, since none of them has one.
+    /// The two differ in what they record beside the samples — this one is a measured capture, so
+    /// it carries the analyzer's identity and the range the samples were taken at — and in what
+    /// they do to the samples: <see cref="PcmCodec.RemoveMeanInPlace"/> is deliberately NOT called
+    /// here, because DC is one of the readings a scope exists to give.</para>
+    ///
+    /// <para><c>fs</c> and <c>pcm_fs</c> are the same rate here, unlike a simulation import where
+    /// the analysis grid and the sample grid genuinely differ. Both are written all the same:
+    /// <c>fs</c> is INTEGER and is what the history list reads, <c>pcm_fs</c> is REAL and is what
+    /// the samples are actually on, and a reader of one must not have to know about the other.</para>
+    /// </summary>
+    public async Task<long> SaveWaveformResultAsync(WaveformSaveRequest request, CancellationToken ct)
+    {
+        if (request.Samples.Count == 0)
+            throw new ArgumentException("A waveform needs at least one channel of samples.", nameof(request));
+
+        int frames = request.Samples[0].Length;
+        if (frames == 0)
+            throw new ArgumentException("A waveform needs at least one frame.", nameof(request));
+        foreach (var channel in request.Samples)
+        {
+            if (channel.Length != frames)
+                throw new ArgumentException("Every channel must have the same number of frames.", nameof(request));
+        }
+
+        await using var connection = await connectionFactory.OpenAsync(ct);
+        await using var transaction = connection.BeginTransaction();
+
+        long resultId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO measurement_result
+                (measurement_type_id, name, notes, ts, params_json, device_name, serial, fw_ver, is_simulated)
+            VALUES (@MeasurementTypeId, @Name, @Notes, @Ts, @ParamsJson, @DeviceName, @Serial, @FwVer, @IsSimulated);
+            SELECT last_insert_rowid();
+            """,
+            new
+            {
+                request.MeasurementTypeId,
+                request.Name,
+                request.Notes,
+                Ts = TonebenchTimestamp.Now(),
+                request.ParamsJson,
+                request.DeviceName,
+                request.Serial,
+                request.FwVer,
+                IsSimulated = request.IsSimulated ? 1 : 0,
+            },
+            transaction);
+
+        int channels = request.Samples.Count;
+        int pcmBytes = PcmCodec.ByteLength(channels, frames);
+
+        long captureId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO capture
+                (measurement_result_id, seq_index, ts, fs, n, in_range_dbv, out_range_dbv, gen_json, channels, pcm, pcm_fs)
+            VALUES (@ResultId, 0, @Ts, @Fs, @N, @InRangeDbv, @OutRangeDbv, @GenJson, @Channels, zeroblob(@PcmBytes), @PcmFs);
+            SELECT last_insert_rowid();
+            """,
+            new
+            {
+                ResultId = resultId,
+                Ts = TonebenchTimestamp.Now(),
+                Fs = RoundedFs(request.SampleRateHz),
+                N = frames,
+                InRangeDbv = request.InputRangeDbv,
+                OutRangeDbv = request.OutputRangeDbv,
+                request.GenJson,
+                Channels = channels,
+                PcmBytes = pcmBytes,
+                PcmFs = request.SampleRateHz,
+            },
+            transaction);
+
+        byte[] pcm = new byte[pcmBytes];
+        PcmCodec.EncodeTo(request.Samples, pcm);
+        using (var blob = new SqliteBlob(connection, "capture", "pcm", captureId))
+            await blob.WriteAsync(pcm, ct);
+
+        await transaction.CommitAsync(ct);
+        return resultId;
+    }
+
+    /// <summary>
     /// The stored time-domain samples of a capture, de-interleaved, with the rate they are on, or
     /// null when that capture carries none (which is every measured one).
     /// </summary>

@@ -111,6 +111,18 @@ public sealed class MeasurementSaveService(
     /// </summary>
     public static bool IsOutputImpedanceKind(string kind) => kind is OutputImpedanceKind;
 
+    /// <summary>An oscilloscope capture — <see cref="OscilloscopeRunner"/>. Mirrors web/src/measurements/kinds.ts.</summary>
+    public const string OscilloscopeKind = "Oscilloscope";
+
+    /// <summary>
+    /// Whether a kind's result is a captured waveform. Its own predicate like every other, and
+    /// emphatically not an arm of one of the curve families: a scope result stores time-domain
+    /// samples in <c>capture.pcm</c> and no <c>response_trace</c> row at all, so a kind that
+    /// answered true to <see cref="IsFrequencyResponseKind"/> would be read back through a table it
+    /// has nothing in and come out empty.
+    /// </summary>
+    public static bool IsOscilloscopeKind(string kind) => kind is OscilloscopeKind;
+
     /// <summary>The <c>measurement_type.kind</c> value for a swept-sine impulse response. Mirrors web/src/measurements/kinds.ts.</summary>
     public const string ImpulseResponseKind = "ImpulseResponse";
 
@@ -143,7 +155,7 @@ public sealed class MeasurementSaveService(
     /// <summary>Whether a kind's configuration lives only in its panel, with nothing live to snapshot — see <see cref="ResolveTypeParamsJson"/>.</summary>
     public static bool HasNoLiveConfiguration(string kind) =>
         IsSweepKind(kind) || IsFrequencyResponseKind(kind) || IsImpulseResponseKind(kind) || IsImpedanceKind(kind) || IsCrosstalkKind(kind)
-        || IsOutputImpedanceKind(kind);
+        || IsOutputImpedanceKind(kind) || IsOscilloscopeKind(kind);
 
     /// <summary>
     /// A brand-new sweep type's <c>params_json</c>. Unlike an FFT type there is nothing live to
@@ -392,6 +404,31 @@ public sealed class MeasurementSaveService(
             AdaptiveResolution: true), SerializerOptions);
 
     /// <summary>
+    /// A brand-new oscilloscope type's <c>params_json</c>, kept in step with
+    /// <c>ScopeConfigPanel.vue</c>'s own defaults.
+    ///
+    /// <para>A 20 ms record with a quarter of it before the trigger: twenty cycles of a 1 kHz tone
+    /// at a timebase that shows mains hum whole, which is what a scope is pointed at first. Auto
+    /// rather than Normal, so a level nobody has set yet still draws something — a blank screen and
+    /// a mis-set trigger are indistinguishable, and Auto is the mode that tells them apart.
+    /// Rising through zero, which is where a symmetric waveform crosses.</para>
+    /// </summary>
+    public string DefaultOscilloscopeParametersJson() =>
+        JsonSerializer.Serialize(new OscilloscopeParameters(
+            SampleRateHz: 192_000.0,
+            RecordSeconds: 0.02,
+            PreTriggerFraction: 0.25,
+            Mode: nameof(ScopeRunMode.Auto),
+            TriggerKind: nameof(Dsp.TriggerKind.Edge),
+            TriggerSource: nameof(Dsp.TriggerSource.ChannelA),
+            TriggerSlope: nameof(Dsp.TriggerSlope.Rising),
+            TriggerLevelV: 0.0,
+            TriggerHysteresisV: 0.0,
+            HoldoffSeconds: 0.0,
+            ProcessLeft: true,
+            ProcessRight: false), SerializerOptions);
+
+    /// <summary>
     /// A brand-new impedance type's <c>params_json</c>, kept in step with
     /// <c>ImpedanceConfigPanel.vue</c>'s own defaults.
     ///
@@ -528,6 +565,9 @@ public sealed class MeasurementSaveService(
 
         if (IsOutputImpedanceKind(kind))
             return existingParamsJson ?? DefaultOutputImpedanceParametersJson();
+
+        if (IsOscilloscopeKind(kind))
+            return existingParamsJson ?? DefaultOscilloscopeParametersJson();
 
         if (IsImpedanceKind(kind))
             return existingParamsJson ?? DefaultImpedanceParametersJson(globalCalibrationAvailable, globalShortAvailable);
@@ -951,6 +991,61 @@ public sealed class MeasurementSaveService(
             [.. status.Traces.Select(ToTraceInput)]);
 
         return await measurementRepository.SaveResponseResultAsync(saveRequest, ct);
+    }
+
+    /// <summary>
+    /// Stores the oscilloscope's record on hand, samples and all.
+    ///
+    /// <para>The waveform goes into <c>capture.pcm</c> rather than a decimated preview, which is
+    /// what makes a stored scope result re-measurable: the readings, the cursors and any later
+    /// filtering are all computed from the samples, so a result that kept only a 200-column curve
+    /// could be looked at and never read again.</para>
+    /// </summary>
+    public async Task<long> SaveOscilloscopeAsync(
+        long measurementTypeId,
+        string name,
+        string? notes,
+        ScopeRecord record,
+        OscilloscopeRequest request,
+        IReadOnlyList<JsonElement>? annotations,
+        CancellationToken ct)
+    {
+        string paramsJson = JsonSerializer.Serialize(
+            new OscilloscopeParameters(
+                SampleRateHz: record.SampleRateHz,
+                RecordSeconds: record.FrameCount / record.SampleRateHz,
+                PreTriggerFraction: request.PreTriggerFraction,
+                Mode: request.Mode.ToString(),
+                TriggerKind: request.TriggerKind.ToString(),
+                TriggerSource: request.TriggerSource.ToString(),
+                TriggerSlope: request.TriggerSlope.ToString(),
+                TriggerLevelV: request.TriggerLevelV,
+                TriggerHysteresisV: request.TriggerHysteresisV,
+                HoldoffSeconds: request.HoldoffSeconds,
+                ProcessLeft: request.ProcessLeft,
+                ProcessRight: request.ProcessRight,
+                Spliced: record.Spliced,
+                Forced: record.Forced,
+                Generator: request.Generator,
+                CaptureDelayMs: session.LastAppliedCaptureDelayMs,
+                ExternalGainLeftDb: session.ExternalGainLeftDb,
+                ExternalGainRightDb: session.ExternalGainRightDb,
+                ProgrammableLoadKind: LoadKindStamp,
+                ProgrammableLoadOhms: LoadOhmsStamp,
+                ChartAnnotations: annotations),
+            SerializerOptions);
+
+        var info = session.Info;
+        return await measurementRepository.SaveWaveformResultAsync(
+            new WaveformSaveRequest(
+                measurementTypeId, name, notes, paramsJson,
+                record.SampleRateHz,
+                record.Channels,
+                session.InputRangeDbv,
+                session.OutputRangeDbv,
+                GenJson: null,
+                info?.ProductName, info?.SerialNumber, info?.FirmwareVersion, info?.IsSimulated ?? false),
+            ct);
     }
 
     /// <summary>

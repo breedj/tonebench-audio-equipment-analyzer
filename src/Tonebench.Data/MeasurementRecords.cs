@@ -1209,6 +1209,89 @@ public sealed record CrosstalkParameters(
     IReadOnlyList<JsonElement>? ChartAnnotations = null);
 
 /// <summary>
+/// An oscilloscope measurement's <c>params_json</c>: the timebase and trigger the record was taken
+/// with, the generator that was playing, and the chart state.
+///
+/// <para>The timebase is kept in <b>seconds</b> and the pre-trigger as a <b>fraction</b>, the same
+/// way the request carries them, so a stored measurement means the same thing when it is re-run at
+/// another sample rate. A frame count would not: it is a different window at every rate, which is
+/// the lesson the transfer queue's depth and the decay surfaces' span each had to learn on their
+/// own.</para>
+///
+/// <para>The samples themselves are <b>not</b> here. They go in <c>capture.pcm</c> with their own
+/// <c>pcm_fs</c>, which has been in the schema since migration 001 and until now carried nothing
+/// but imported simulations — so a real waveform costs no migration, no new child table of
+/// <c>capture</c>, and therefore no <c>CaptureCascade</c> entry and no orphan-repair migration.</para>
+/// </summary>
+/// <param name="SampleRateHz">The rate the record was captured at.</param>
+/// <param name="RecordSeconds">The whole record, pre- and post-trigger together.</param>
+/// <param name="PreTriggerFraction">How much of it sits before the trigger, 0 to 1.</param>
+/// <param name="Mode">Single, Normal, Auto or Roll, as a name.</param>
+/// <param name="TriggerKind">Edge, PulseWidth, Window, Dropout or Runt, as a name.</param>
+/// <param name="TriggerSource">Which channel the trigger watched.</param>
+/// <param name="TriggerSlope">Rising, Falling or Either.</param>
+/// <param name="TriggerLevelV">The threshold, in the DUT volts the trace is drawn in.</param>
+/// <param name="TriggerHysteresisV">The noise-reject band; zero is a plain crossing test.</param>
+/// <param name="HoldoffSeconds">How long after a hit the trigger refused to fire again.</param>
+/// <param name="ProcessLeft">Whether the left channel was captured.</param>
+/// <param name="ProcessRight">And the right.</param>
+/// <param name="Spliced">
+/// The stored record spans a dropped chunk or block. Kept with the result rather than only logged,
+/// because on a waveform a hole and a DUT fault look identical and nothing else would ever say
+/// which this was.
+/// </param>
+/// <param name="Forced">Auto's timeout took the record; nothing crossed the level.</param>
+public sealed record OscilloscopeParameters(
+    double SampleRateHz,
+    double RecordSeconds,
+    double PreTriggerFraction,
+    string Mode,
+    string TriggerKind,
+    string TriggerSource,
+    string TriggerSlope,
+    double TriggerLevelV,
+    double TriggerHysteresisV,
+    double HoldoffSeconds,
+    bool ProcessLeft,
+    bool ProcessRight,
+    bool Spliced = false,
+    bool Forced = false,
+    GeneratorConfig? Generator = null,
+    /// <summary>The unit the level boxes were typed in, so a measurement quoted in mV reads in mV again.</summary>
+    string? GeneratorLevelUnit = null,
+    /// <summary>The volts window the chart was showing, per channel.</summary>
+    double? ChartVoltsPerDivision = null,
+    double? ChartVoltOffsetV = null,
+    /// <summary>The time window the chart was showing, relative to the trigger at t = 0.</summary>
+    double? ChartTimeFromS = null,
+    double? ChartTimeToS = null,
+    bool? ChartThickLines = null,
+    bool? ChartShowDataPoints = null,
+    bool? ChartShowTriggerLevel = null,
+    bool? ChartAutofitOnDone = null,
+    /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
+    double? CaptureDelayMs = null,
+    /// <summary>
+    /// The external input gain the app was configured with when the result was saved, in dB per
+    /// input (see ExternalGainSetting; a 10:1 divider is −20). The stored samples are already the
+    /// DUT's volts with this undone; the value is kept so a result can say what was in the path.
+    /// </summary>
+    double? ExternalGainLeftDb = null,
+    double? ExternalGainRightDb = null,
+    /// <summary>
+    /// The programmable load in force when the result was saved — see
+    /// <see cref="CrosstalkParameters.ProgrammableLoadKind"/>. Provenance only: applying a
+    /// measurement type must never push this back to a relay.
+    /// </summary>
+    string? ProgrammableLoadKind = null,
+    int? ProgrammableLoadOhms = null,
+    /// <summary>
+    /// This result's own annotations, frozen as they were when it was saved — see
+    /// <see cref="FftSpectrumParameters.ChartAnnotations"/>.
+    /// </summary>
+    IReadOnlyList<JsonElement>? ChartAnnotations = null);
+
+/// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the
 /// panel edits, the two run records (<see cref="GeneratorAmpDbv"/>, <see cref="InputRangeDbv"/> —
 /// the one range both passes were read at, which is what makes a 0.03 dB gain difference a
@@ -2534,6 +2617,38 @@ public sealed record StoredPcm(double[][] Channels, double SampleRateHz);
 /// on <c>capture.fs</c>, and not the same thing as <see cref="PcmSampleRateHz"/>.
 /// </param>
 /// <param name="PcmSampleRateHz">The simulator's own grid, stored on <c>capture.pcm_fs</c>.</param>
+/// <summary>
+/// One captured oscilloscope waveform on its way into the database.
+///
+/// <para>The samples go into <c>capture.pcm</c> with their own <c>pcm_fs</c> — the columns that
+/// have been in the schema since migration 001 and until now carried nothing but imported
+/// simulations. Reusing them is what makes a stored waveform cost no migration, no new child table
+/// of <c>capture</c>, and therefore no <c>CaptureCascade</c> entry and no orphan-repair migration
+/// of the kind 005, 007 and 010 exist to be.</para>
+///
+/// <para>Unlike <see cref="SimulationSaveRequest"/> this is a <b>measured</b> capture, so it
+/// carries the analyzer's identity and its input range, and the mean is <i>not</i> removed on the
+/// way in: DC is one of the readings a scope exists to give.</para>
+/// </summary>
+/// <param name="SampleRateHz">The rate the samples are on; stored as both <c>fs</c> and <c>pcm_fs</c>, which here are the same thing.</param>
+/// <param name="Samples">One array per channel, already in DUT volts and already quantised to f32.</param>
+/// <param name="InputRangeDbv">The range the samples were captured at, or null where the device has none.</param>
+/// <param name="GenJson">The stimulus that was playing, as the other save paths store it.</param>
+public sealed record WaveformSaveRequest(
+    long MeasurementTypeId,
+    string Name,
+    string? Notes,
+    string ParamsJson,
+    double SampleRateHz,
+    IReadOnlyList<double[]> Samples,
+    double? InputRangeDbv = null,
+    double? OutputRangeDbv = null,
+    string? GenJson = null,
+    string? DeviceName = null,
+    string? Serial = null,
+    string? FwVer = null,
+    bool IsSimulated = false);
+
 public sealed record SimulationSaveRequest(
     long MeasurementTypeId,
     string Name,

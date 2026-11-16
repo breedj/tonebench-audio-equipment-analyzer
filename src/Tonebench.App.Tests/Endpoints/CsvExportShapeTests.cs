@@ -39,6 +39,10 @@ public class CsvExportShapeTests
         [MeasurementSaveService.ImpedanceKind] = CsvExportShape.Impedance,
         [MeasurementSaveService.OutputImpedanceKind] = CsvExportShape.Impedance,
         [MeasurementSaveService.ImpulseResponseKind] = CsvExportShape.Impulse,
+
+        // The samples out of capture.pcm. Its own shape because a scope result stores no spectrum
+        // and no trace rows at all, so the fallback renderer would find nothing and answer 404.
+        [MeasurementSaveService.OscilloscopeKind] = CsvExportShape.Waveform,
     };
 
     /// <summary>Every <c>public const string *Kind</c> on the save service — the kinds a result can actually be saved under.</summary>

@@ -99,6 +99,9 @@ export const CROSSTALK_KIND = 'Crosstalk'
 /** Mirrors MeasurementSaveService.OutputImpedanceKind — an amplifier's output impedance and damping factor by the load-step method. */
 export const OUTPUT_IMPEDANCE_KIND = 'OutputImpedance'
 
+/** Mirrors MeasurementSaveService.OscilloscopeKind — a triggered time-domain capture. */
+export const OSCILLOSCOPE_KIND = 'Oscilloscope'
+
 /** The kind name a single-FFT-capture result carries — used to scope the overlay budget and colors that are specific to the FFT Spectrum chart (see spectrumOverlayColors.ts). */
 export const FFT_SPECTRUM_KIND = 'FFTSpectrum'
 
@@ -187,6 +190,18 @@ export function isImpulseResponseKind(kind: string | null | undefined): boolean 
  * also decides which start endpoint the UI drives, which settings record is written and how a result
  * is exported — and impedance differs in all three. What it shares is the storage, nothing else.
  */
+/**
+ * Whether a kind is a captured waveform.
+ *
+ * Its own predicate like every other, and emphatically not an arm of a curve family: a scope result
+ * stores time-domain samples and no `response_trace` row at all, so a kind that answered true to
+ * `isFrequencyResponseKind` would be read back through a table it has nothing in and draw an empty
+ * chart.
+ */
+export function isOscilloscopeKind(kind: string | null | undefined): boolean {
+  return kind === OSCILLOSCOPE_KIND
+}
+
 export function isImpedanceKind(kind: string | null | undefined): boolean {
   return kind === IMPEDANCE_KIND
 }
@@ -269,6 +284,16 @@ export const MEASUREMENT_KINDS: MeasurementKindMeta[] = [
       'Measures an amplifier\u2019s gain with the load connected and again with it removed, and plots its output impedance in ohms and damping factor against frequency.',
     group: 'impedance',
     tone: 'amber',
+  },
+  {
+    kind: OSCILLOSCOPE_KIND,
+    label: 'Oscilloscope',
+    description:
+      'Captures the waveform itself against time, triggered on an edge you choose, with as much of the record before the trigger as you ask for — for clipping, crossover, hum, ringing and anything that happens once.',
+    // The response group, whose label already reads "Frequency & time response": a captured
+    // waveform is the time half of it, and a group of its own would be a section badge reading 1.
+    group: 'response',
+    tone: 'cyan',
   },
 ]
 

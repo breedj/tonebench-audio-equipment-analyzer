@@ -3374,6 +3374,8 @@ function discardLiveStore(store: LiveStore): Promise<unknown> {
       return clearImpulse()
     case 'outputImpedance':
       return clearOutputImpedanceRun()
+    case 'scope':
+      return api.clearOscilloscope()
   }
 }
 

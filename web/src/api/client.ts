@@ -600,6 +600,13 @@ export type ResponsePhaseName =
   | 'Calibrating'
   /** An output-impedance run waiting for the user to change the load between its two passes. */
   | 'WaitingForLoadChange'
+  /**
+   * The oscilloscope, armed and watching for something to cross the level.
+   *
+   * Its own phase rather than Measuring, because the two need different words on screen: waiting on
+   * a level nothing reaches is a setting to fix, where a capture that never completes is a fault.
+   */
+  | 'WaitingForTrigger'
 
 /**
  * The spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each. The
@@ -1349,6 +1356,104 @@ export interface CrosstalkStartRequest {
   loadOhms: number
   averageCount: number
   adaptiveResolution: boolean
+}
+
+/** How the oscilloscope re-arms itself after a capture, or whether it arms at all. */
+export type ScopeRunMode = 'Single' | 'Normal' | 'Auto' | 'Roll'
+
+/** Which event qualifies. Only `Edge` is implemented so far; the rest are the shapes phase 6 fills in. */
+export type ScopeTriggerKind = 'Edge' | 'PulseWidth' | 'Window' | 'Dropout' | 'Runt'
+
+/** Which signal the trigger watches. `Math` and `Stimulus` are not implemented yet. */
+export type ScopeTriggerSource = 'ChannelA' | 'ChannelB' | 'Math' | 'Stimulus'
+
+export type ScopeTriggerSlope = 'Rising' | 'Falling' | 'Either'
+
+export interface OscilloscopeStartRequest {
+  sampleRateHz: number
+  /** The whole record, pre- and post-trigger together. Seconds, so one request means one measurement at any rate. */
+  recordSeconds: number
+  /** How much of it sits before the trigger, 0 to 1. One is 100 % pre-trigger. */
+  preTriggerFraction: number
+  mode: ScopeRunMode
+  triggerKind: ScopeTriggerKind
+  triggerSource: ScopeTriggerSource
+  triggerSlope: ScopeTriggerSlope
+  /** The threshold, in the DUT volts the trace is drawn in — the level the chart's draggable line sits at. */
+  triggerLevelV: number
+  /** The noise-reject band, drawn around the level. Zero is a plain crossing test. */
+  triggerHysteresisV?: number
+  holdoffSeconds?: number
+  autoTimeoutSeconds?: number
+  processLeft?: boolean
+  processRight?: boolean
+  generatorLeft?: GeneratorChannelRequest
+  generatorRight?: GeneratorChannelRequest
+  snapToBin?: boolean
+}
+
+export interface OscilloscopeStarted {
+  sampleRateHz: number
+  /** What the seconds asked for came to at this rate. */
+  recordFrames: number
+  preTriggerFrames: number
+}
+
+/**
+ * What the oscilloscope is doing and what it last caught.
+ *
+ * Every absent reading is `null` rather than a number: nothing has been captured yet, or the run is
+ * rolling and has no trigger at all. On the server these are nullable for a harder reason — a
+ * non-finite double truncates the whole response after the 200 has gone out.
+ */
+export interface OscilloscopeStatus {
+  phase: ResponsePhaseName
+  error: string | null
+  sampleRateHz: number
+  recordFrames: number
+  preTriggerFrames: number
+  recordsTaken: number
+  hasRecord: boolean
+  /** The record on hand spans a dropped chunk or block, so two non-adjacent pieces sit side by side in it. */
+  spliced: boolean
+  /** Auto's timeout took it; nothing crossed the level, so the trace is aligned to nothing. */
+  forced: boolean
+  triggerOffsetS: number | null
+  recordFromS: number | null
+  recordToS: number | null
+}
+
+/**
+ * One channel of a record as the chart draws it.
+ *
+ * Either `samples` or the `min`/`max` pair is set. **Both** of those are sent, never a mean: a mean
+ * flattens anything narrower than a column into the trace around it and erases the very thing the
+ * scope is pointed at.
+ */
+export interface ScopeChannelSlice {
+  channel: number
+  /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
+  x0: number
+  /** Column width, or the sample period when raw. */
+  dx: number
+  /** True when the window was tight enough to send the waveform itself rather than a summary of it. */
+  raw: boolean
+  samples: number[] | null
+  min: number[] | null
+  max: number[] | null
+}
+
+export interface ScopeRecordResponse {
+  sampleRateHz: number
+  /** The whole record's length, whatever slice came back. */
+  frameCount: number
+  triggerOffsetS: number
+  /** The record's own span, relative to the trigger — what the zoom strip's axis is. */
+  fromS: number
+  toS: number
+  spliced: boolean
+  forced: boolean
+  channels: ScopeChannelSlice[]
 }
 
 export interface CrosstalkStarted {
@@ -4539,6 +4644,45 @@ export const api = {
 
   saveCrosstalk: (req: SaveRunRequest) =>
     request<{ id: number }>('/crosstalk/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  // The oscilloscope. The usual six verbs plus `getOscilloscopeRecord`, which is this one's own:
+  // the samples do not travel on the socket at all. One second of 192 kS/s stereo is 1.5 MB and
+  // the broadcast hub's per-client queue is 64 frames deep, so the chart fetches the slice it is
+  // looking at instead -- and a window tight enough comes back as the waveform rather than as
+  // min/max columns.
+  startOscilloscope: (req: OscilloscopeStartRequest) =>
+    request<OscilloscopeStarted>('/oscilloscope/start', { method: 'POST', body: JSON.stringify(req) }),
+
+  cancelOscilloscope: () => request<OscilloscopeStatus>('/oscilloscope/cancel', { method: 'POST' }),
+
+  clearOscilloscope: () => request<OscilloscopeStatus>('/oscilloscope/clear', { method: 'POST' }),
+
+  getOscilloscopeStatus: () => request<OscilloscopeStatus>('/oscilloscope/status'),
+
+  /** Parks this runner's record under the measurement being left and hands back the arriving one's. */
+  setOscilloscopeOwner: (owner: string | null) =>
+    request<OscilloscopeStatus>('/oscilloscope/owner', { method: 'POST', body: JSON.stringify({ owner }) }),
+
+  saveOscilloscope: (req: SaveRunRequest) =>
+    request<{ id: number }>('/oscilloscope/save', { method: 'POST', body: JSON.stringify(req) }),
+
+  /**
+   * The record on hand, cut to `fromS`..`toS` if given and to the whole capture if not.
+   *
+   * No window is the overview the zoom strip is drawn from; a window is the main plot's. Null when
+   * nothing has been captured yet, which is the state the screen opens in.
+   */
+  getOscilloscopeRecord: (window?: { fromS: number; toS: number }, maxColumns?: number) => {
+    const query = new URLSearchParams()
+    if (window) {
+      query.set('fromS', String(window.fromS))
+      query.set('toS', String(window.toS))
+    }
+    if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
+
+    const suffix = query.size > 0 ? `?${query}` : ''
+    return request<ScopeRecordResponse | null>(`/oscilloscope/record${suffix}`)
+  },
 
   // The impulse response. The same five verbs as the two response measurements above, plus the
   // loopback calibration sub-resource — capturing one has a physical precondition (patch the

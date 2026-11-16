@@ -41,6 +41,11 @@ const EXPECTED: Record<string, SimulatorKnob[]> = {
   Impedance: ['noise', 'hum', 'crosstalk'],
   Crosstalk: ['noise', 'hum', 'crosstalk'],
   OutputImpedance: ['noise', 'hum', 'crosstalk', 'outputStage', 'load'],
+
+  // The scope reads both: the harmonic stack is added on the Tones path and shows up as a sine
+  // that is not one, which is what a scope is pointed at; and it draws both channels from one
+  // capture, so coupling is visible on it the way it is on the FFT screen.
+  Oscilloscope: ['noise', 'hum', 'harmonics', 'crosstalk'],
 }
 
 describe('visibleSimulatorKnobs', () => {

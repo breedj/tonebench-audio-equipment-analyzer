@@ -51,6 +51,7 @@ export type LiveStore =
   | 'impedance'
   | 'impulse'
   | 'outputImpedance'
+  | 'scope'
 
 /**
  * A project as the first half of an owner key: <b>which project file</b>, not which row.
@@ -123,6 +124,8 @@ export function liveStoreForKind(kind: string | null | undefined): LiveStore | n
       return 'impulse'
     case 'OutputImpedance':
       return 'outputImpedance'
+    case 'Oscilloscope':
+      return 'scope'
     default:
       return null
   }

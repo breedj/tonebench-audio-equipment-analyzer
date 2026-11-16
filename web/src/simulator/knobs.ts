@@ -7,6 +7,7 @@ import {
   IMPEDANCE_KIND,
   IMPULSE_RESPONSE_KIND,
   MEASUREMENT_KINDS,
+  OSCILLOSCOPE_KIND,
   OUTPUT_IMPEDANCE_KIND,
   STEPPED_RESPONSE_KIND,
   THD_VS_AMPLITUDE_KIND,
@@ -43,12 +44,20 @@ import {
  */
 export type SimulatorKnob = 'noise' | 'hum' | 'harmonics' | 'crosstalk' | 'outputStage' | 'load'
 
-/** The four kinds whose reading can carry the generator's harmonic stack. */
+/**
+ * The kinds whose reading can carry the generator's harmonic stack.
+ *
+ * The oscilloscope is one of them and is the only one that reads it in the time domain: the stack
+ * is added on the synthesizer's `Tones` path, so a captured sine carries it as a visible departure
+ * from a sine. That is exactly what someone points a scope at, which is why the knob has to be
+ * reachable from this screen rather than hidden on it.
+ */
 const HARMONICS_ARE_READ: readonly string[] = [
   FFT_SPECTRUM_KIND,
   THD_VS_FREQUENCY_KIND,
   THD_VS_AMPLITUDE_KIND,
   IMD_VS_AMPLITUDE_KIND,
+  OSCILLOSCOPE_KIND,
 ]
 
 /**
@@ -65,6 +74,10 @@ const CROSSTALK_IS_READ: readonly string[] = [
   IMPEDANCE_KIND,
   CROSSTALK_KIND,
   OUTPUT_IMPEDANCE_KIND,
+
+  // The scope draws both channels from one capture, so a coupling line is visible on it the same
+  // way it is on the FFT screen's two spectra.
+  OSCILLOSCOPE_KIND,
 ]
 
 /** Every knob shown: no measurement open, an unrecognised kind, or the bar's own reveal button. */

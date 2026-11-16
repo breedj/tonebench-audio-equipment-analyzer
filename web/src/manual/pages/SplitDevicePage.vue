@@ -97,7 +97,11 @@ const { showPage } = useManual()
       known quantity, so <strong>Full scale output</strong> needs no meter. Pick
       <strong>Measured by → The QA40x's input</strong>, connect the card's output straight to the
       analyzer's input — both channels — and press <strong>Measure peak output</strong>. It plays
-      the tone, reads it back and stores the figure in one press.
+      the tone, reads it back and stores the figure in one press. There is no
+      <strong>Generate sine</strong> button on this route, and that is deliberate rather than an
+      omission: a tone started by hand is a measurement in progress as far as the app is concerned,
+      so it would be refused by the very button it sits beside. <strong>Output level</strong> still
+      chooses what gets played.
     </p>
     <p>
       Both channels are read and their <em>mean</em> is stored, because a card has one output full

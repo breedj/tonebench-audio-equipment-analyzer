@@ -532,7 +532,9 @@ const { showPage } = useManual()
       2 uses in the other direction, and it means this step needs no meter at all. Connect the
       card's output straight to the analyzer's input, both channels, and press
       <strong>Measure peak output</strong>: it plays the tone, reads it back and stores the figure
-      in one press. Nothing in between — an attenuator would be measured as if it were the card,
+      in one press, so the <strong>Generate sine</strong> and <strong>Voltmeter reads</strong> steps
+      below are not on screen at all — <strong>Output level</strong> is the only one of them that
+      still applies. Nothing in between — an attenuator would be measured as if it were the card,
       unless it is declared as the external input gain. On a plain sound-card bench the route does
       not exist, because the only other end is the same uncalibrated card.
     </p>

@@ -1533,6 +1533,26 @@ const outputRoute = computed(() =>
   analyzerCanMeasureOutput.value ? outputStep.source : 'Voltmeter',
 )
 
+/**
+ * Leaving the voltmeter route silences whatever it was playing.
+ *
+ * <p>The analyzer route plays its own tone inside the one request, and a tone already running
+ * makes this runner <c>Running</c> — which is what <c>MeasurementRunGuard</c> answers with a 409,
+ * so a tone carried across the switch does not merely sit there, it refuses the button the user
+ * has just switched to. Stopped here rather than hidden: the Stop button is rendered until the
+ * tone is really off, so this can never be the thing that strands it.</p>
+ *
+ * <p>It fires on the route <em>in force</em> rather than on the dropdown, so putting a card on the
+ * capturing half — which takes the analyzer route away — leaves the tone alone, that fallback
+ * being back to the route the tone belongs to.</p>
+ */
+watch(
+  () => outputRoute.value,
+  async (route) => {
+    if (route === 'Analyzer' && playingDbFs.value !== null) await stopTone()
+  },
+)
+
 const canMeasureInput = computed(
   () =>
     !busy.value &&
@@ -2157,7 +2177,15 @@ function mvRms(value: number | null | undefined) {
             >
               <option v-for="level in OUTPUT_LEVELS" :key="level" :value="level">{{ level }} dBFS</option>
             </select>
+            <!-- Hidden on the analyzer route, where it is not merely redundant but a trap: that
+                 route plays its own tone inside the one request, and a tone started here makes the
+                 runner Running, so `MeasurementRunGuard` answers Measure peak output with a 409.
+                 A button whose only effect is to break the button beside it (Joost, 2026-11-16).
+                 Still rendered while a tone really is playing, whatever the route, or switching the
+                 dropdown mid-tone would take away the only thing that can stop it -- the rule the
+                 `settingsInEffect` gate below is written to the same way. -->
             <button
+              v-if="outputRoute === 'Voltmeter' || playingDbFs !== null"
               type="button"
               class="btn-chip"
               :style="

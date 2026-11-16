@@ -240,6 +240,38 @@ describe('measuring the output with the analyzer', () => {
     expect(button).toContain("outputRoute === 'Analyzer' ? !settingsInEffect : playingDbFs === null")
   })
 
+  /**
+   * The tone button is not merely redundant on this route, it is a trap: the route plays its own
+   * tone inside the one request, and a tone started by hand makes the runner `Running`, which
+   * `MeasurementRunGuard` answers with a 409 — so pressing it breaks the button beside it. Asked
+   * for 2026-11-16 ("the Generate sine button can be hidden ... Measure peak output does all we
+   * need"), after meeting exactly that.
+   */
+  it('does not offer the tone button on the route that plays its own tone', () => {
+    const at = source.indexOf('@click="toggleTone"')
+    const button = source.slice(source.lastIndexOf('<button', at), at)
+    expect(button).toContain("v-if=\"outputRoute === 'Voltmeter' || playingDbFs !== null\"")
+  })
+
+  it('still renders it while a tone really is playing, whatever the route', () => {
+    // The `|| playingDbFs !== null` half, and the reason it is not just belt and braces: without
+    // it, switching the dropdown mid-tone takes away the only control that can stop the tone --
+    // the same rule `settingsInEffect.test.ts` pins for the disabled binding.
+    const at = source.indexOf('@click="toggleTone"')
+    expect(source.slice(source.lastIndexOf('<button', at), at)).toContain('playingDbFs !== null')
+  })
+
+  it('silences a tone carried onto it, rather than leaving it to be refused', () => {
+    // Keyed on the route in force and not on the dropdown, so losing the route (a card arriving on
+    // the capturing half) falls back to the voltmeter without silencing anything.
+    const at = source.indexOf('watch(\n  () => outputRoute.value,')
+    expect(at, 'the route is watched').toBeGreaterThan(-1)
+    const body = source.slice(at, source.indexOf('\n)', at))
+    expect(body).toContain("route === 'Analyzer'")
+    expect(body).toContain('playingDbFs.value !== null')
+    expect(body).toContain('stopTone()')
+  })
+
   it('sends it to the step that measures rather than the one that is told', () => {
     const body = functionBody('acceptOutput')
     expect(body).toContain('measureOutputViaAnalyzer(outputStep.dbFs)')

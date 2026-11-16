@@ -6,6 +6,7 @@ using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Device.Simulation;
+using Tonebench.Dsp;
 
 namespace Tonebench.App.Tests.Services;
 
@@ -33,6 +34,56 @@ public class DeviceSessionServiceTests
         Assert.Equal(96_000.0, session.WidestAnalysisSpanHz);
         Assert.Contains(session.WidestAnalysisSpanHz, FrequencyResponseRequest.SupportedSpansHz);
     }
+
+    /// <summary>
+    /// The ladder a stepped sweep chooses among: the rates this analyzer can <b>both</b> capture
+    /// and play.
+    ///
+    /// <para>Reported 2026-11-16 — a split capturing at 384 kHz still stopped its sweep at
+    /// 0.98 x 96 kHz = 94 080 Hz, because the ladder was a constant. These are the four shapes a
+    /// bench comes in, and the QA403 case is the one that looks wrong and is not: it captures at
+    /// 384 kHz as a split's half and its generator stops at 192 kHz to protect the output relay, so
+    /// 384 is correctly absent from a sweep's choices.</para>
+    /// </summary>
+    [Fact]
+    public void SweepSampleRates_AreTheOnesThisBenchCanBothCaptureAndPlay()
+    {
+        // One clock, three rates: unchanged from before this existed.
+        Assert.Equal([48_000.0, 96_000.0, 192_000.0], Ladder([48_000.0, 96_000.0, 192_000.0], null));
+
+        // A QA403 as a split's capturing half. It hears 384 kHz and cannot speak it.
+        Assert.Equal(
+            [48_000.0, 96_000.0, 192_000.0],
+            Ladder([48_000.0, 96_000.0, 192_000.0, 384_000.0], [48_000.0, 96_000.0, 192_000.0]));
+
+        // The bench that asked for this: the QA403 captures at 384 and a DAC plays there too.
+        Assert.Equal(
+            [48_000.0, 96_000.0, 192_000.0, 384_000.0],
+            Ladder([48_000.0, 96_000.0, 192_000.0, 384_000.0],
+                   [48_000.0, 96_000.0, 192_000.0, 384_000.0, 768_000.0]));
+
+        // A card's 44.1 kHz family is not a sweep candidate -- see CandidateSampleRatesHz, which
+        // says why adding it would change what every existing bench measures.
+        Assert.Equal([48_000.0, 96_000.0], Ladder([44_100.0, 48_000.0, 88_200.0, 96_000.0], null));
+    }
+
+    /// <summary>
+    /// And it is never empty: a bench with no usable rate at all — a device that has not connected,
+    /// or one entirely in the 44.1 kHz family — answers with the built-in ladder rather than with
+    /// nothing, because a sweep asked to choose among no rates has no answer to give.
+    /// </summary>
+    [Fact]
+    public void SweepSampleRates_FallBackToTheBuiltInLadderRatherThanToNothing()
+    {
+        Assert.Equal(SweepResolution.SupportedSampleRatesHz, Ladder([44_100.0, 88_200.0], null));
+        Assert.NotEmpty(Ladder([44_100.0, 88_200.0], null));
+    }
+
+    private static double[] Ladder(double[] rates, double[]? outputRates) =>
+        [.. new DeviceSessionService(
+            new StubDevice { Rates = rates, OutputRates = outputRates },
+            new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance),
+            NullLogger<DeviceSessionService>.Instance).SweepSampleRatesHz];
 
     /// <summary>
     /// And it must never answer with half a rate that is not an offered span. The transform length
@@ -1085,8 +1136,19 @@ public class DeviceSessionServiceTests
         /// <summary>The rates this stub reports, for a test that needs a ladder the QA403 does not have.</summary>
         public double[]? Rates { get; init; }
 
-        public DeviceCapabilities Capabilities =>
-            Rates is null ? DeviceCapabilities.Qa403 : DeviceCapabilities.Qa403 with { SampleRatesHz = Rates };
+        /// <summary>The rates its <i>generator</i> reports, where they differ — a composite bench.</summary>
+        public double[]? OutputRates { get; init; }
+
+        public DeviceCapabilities Capabilities
+        {
+            get
+            {
+                DeviceCapabilities caps = Rates is null
+                    ? DeviceCapabilities.Qa403
+                    : DeviceCapabilities.Qa403 with { SampleRatesHz = Rates };
+                return OutputRates is null ? caps : caps with { DeclaredOutputSampleRatesHz = OutputRates };
+            }
+        }
 
         /// <summary>Non-zero, like real hardware — this stub stands in for a device that commits audio to the DAC ahead of time.</summary>
         public int StimulusLatencyFrames(double sampleRateHz) => 3584;

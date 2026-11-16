@@ -289,9 +289,26 @@ public sealed record ImpedanceRequest(
     /// band (<b>one</b> harmonic, not the sweeps' five: nothing here reads a harmonic), which drops a
     /// 20 kHz run from 192 kHz to 48 kHz.
     /// </summary>
-    public double SampleRateHz => IsStepped
+     /// <summary>
+    /// The rates this run may choose among, or null for the DSP default ladder.
+    ///
+    /// <para>Filled by the endpoint from <c>DeviceSessionService.SweepSampleRatesHz</c> — the rates
+    /// the connected analyzer can both capture and play — so a bench reaching 384 kHz can sweep
+    /// past 94 kHz, which a fixed ladder stopped it doing. Null is the default so every caller that
+    /// does not know (a test, a stored request replayed, a client that has not been updated) keeps
+    /// the behaviour this had before.</para>
+    ///
+    /// <para><b>It is set before <c>Validate()</c> runs, not after</b>: the validation reads
+    /// <c>MaxFrequencyHz</c>, which is derived from this, so filling it later would check the run
+    /// against one ladder and perform it on another.</para>
+    /// </summary>
+    public IReadOnlyList<double>? AvailableSampleRatesHz { get; init; }
+
+   public double SampleRateHz => IsStepped
         ? (AdaptiveResolution
-            ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+            ? SweepResolution.SampleRateFor(
+                EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction,
+                supportedRatesHz: AvailableSampleRatesHz)
             : SteppedSampleRateHz)
         : EffectiveSpanHz * 2.0;
 
@@ -662,7 +679,9 @@ public sealed record ImpedanceRequest(
         // unmeasurable start stored on the type would otherwise lie dormant until the next time the
         // stepped stimulus was selected.
         double sampleRateHz = AdaptiveResolution
-            ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+            ? SweepResolution.SampleRateFor(
+                EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction,
+                supportedRatesHz: AvailableSampleRatesHz)
             : SteppedSampleRateHz;
 
         int standardCeiling = SweepResolution.BoundsFor(sampleRateHz).Ceiling;

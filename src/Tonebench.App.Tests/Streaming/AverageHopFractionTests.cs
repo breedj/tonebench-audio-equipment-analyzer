@@ -117,7 +117,16 @@ public class AverageHopFractionTests
             $"hopped averaging ({welch.TotalMilliseconds:0} ms) should outlast tick-paced averaging ({legacy.TotalMilliseconds:0} ms)");
     }
 
+    // Category=Timing: an absolute band on elapsed wall time, so what it measures is the pipeline's
+    // pacing *and* the machine's. Excluded from CI, which is a shared runner -- it read 8.68 records
+    // against this 3.5-7 band on a macOS Intel leg that was running at about half speed, while the
+    // identical commit passed the same test on the same workflow's other legs minutes earlier. The
+    // two neighbours above stay in CI deliberately: one is a 17x margin against a hang rather than a
+    // measurement, and the other compares two runs on the one machine, so neither is judging the
+    // runner. Widening this band instead would delete the regression it exists to catch, which is
+    // that n averages at hop h really do cost (1 + (n-1)*h) records.
     [Fact]
+    [Trait("Category", "Timing")]
     public async Task EightAverages_AtFiftyPercentHop_SpanRoughlyFourAndAHalfRecords()
     {
         // n averages at hop h cost (1 + (n-1)*h) records: 4.5 here. Asserted as a band rather than a

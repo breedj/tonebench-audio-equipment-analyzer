@@ -107,12 +107,19 @@ cd tonebench-audio-equipment-analyzer
 
 cd web && npm ci && npm run build && npm test && cd ..
 dotnet build
-dotnet test --filter "Category!=Hardware&Category!=VirtualDevice"
+dotnet test --filter "Category!=Hardware&Category!=VirtualDevice&Category!=Timing"
 ```
 
-**Pass:** a clean build, about **2025** frontend tests and **7229** .NET tests, all green. CI gets
-exactly 7229 on both Mac architectures, so a failure here is a difference between your machine and a
-clean runner — which is worth knowing, and worth reporting.
+**Pass:** a clean build, about **2282** frontend tests and **7586** .NET tests, all green. CI runs
+that exact filter and gets the same number on both Mac architectures, so a failure here is a
+difference between your machine and a clean runner — which is worth knowing, and worth reporting.
+
+That filter is CI's, not the one a developer runs before a commit, and the difference is deliberate.
+`Category=Timing` is two tests that measure how long the analysis pipeline takes in wall-clock
+terms; what they really measure is how fast and how busy the machine is, so on anything shared —
+a CI runner, a laptop with a build or a backup going — they fail without anything being wrong.
+Comparing your number against a runner's is the whole method of this page, so both sides subtract
+the same things. If you want to run them anyway, drop the last clause; just expect noise.
 
 **If it fails:** send the full list of failing test names rather than patching anything. One test is
 expected to behave differently per platform (`RecentProjectsTests`, which checks how file paths

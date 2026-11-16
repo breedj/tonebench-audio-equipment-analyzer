@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, reactive, watch } from 'vue'
 import type {
   ThdMethodName,
@@ -43,8 +43,13 @@ import {
  * mid-sweep anyway.
  */
 
-defineProps<{
+const props = defineProps<{
   running: boolean
+  /**
+   * The rates a sweep may run at on this bench, from `DeviceRanges.sweepSampleRatesHz`. Undefined
+   * until the analyzer has reported, which the helpers read as "use the built-in ladder".
+   */
+  sweepSampleRatesHz?: number[] | null
 }>()
 
 const emit = defineEmits<{
@@ -236,7 +241,7 @@ watch(
  * preset is the reference both fall back to. Mirrors ThdSweepRequest.EffectiveSampleRateHz.
  */
 const effectiveSampleRateHz = computed(() =>
-  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz) : SWEEP_SAMPLE_RATE_HZ,
+  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, undefined, props.sweepSampleRatesHz) : SWEEP_SAMPLE_RATE_HZ,
 )
 
 const isNormalized = computed(() => form.thdMethod === 'FrequencyNormalized')

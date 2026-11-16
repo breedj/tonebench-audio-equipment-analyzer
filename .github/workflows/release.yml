@@ -18,12 +18,24 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      # Three categories, and the gate subtracts two of them. Category=Hardware needs a real QA403 or
-      # QA451 on a bench; Category=VirtualDevice needs virtual-qa40x-rs attached over USB/IP (see
-      # testbench/virtual-qa40x/README.md). CI has neither. Everything else runs here, matching
-      # CLAUDE.md's documented pre-commit command — a test carrying no Category trait satisfies both
-      # !=, which is what keeps the untraited bulk of the suite in this run.
-      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --configuration Release
+      # Four categories, and the gate subtracts three of them. Category=Hardware needs a real QA403
+      # or QA451 on a bench; Category=VirtualDevice needs virtual-qa40x-rs attached over USB/IP (see
+      # testbench/virtual-qa40x/README.md). CI has neither.
+      #
+      # Category=Timing is different in kind and was added 2026-11-16: those tests pass or fail on
+      # how fast the machine is, not on what the code does, so a shared runner cannot judge them.
+      # The evidence is a comparison rather than a suspicion — commit b56405ba ran this job twice,
+      # passing on the main push and failing on the v0.9.0 tag minutes later, same code, while the
+      # macos-15-intel leg took 4m30s over an assembly that takes 2m35s on the author's machine.
+      # They still run locally, where CLAUDE.md's documented pre-commit command includes them and
+      # the machine is known — so that command's count is two higher than this job's, deliberately.
+      # MACOS-TESTING.md uses this filter rather than that one, because its whole method is asking a
+      # volunteer to compare their number against a clean runner's, which only works if the two
+      # commands subtract the same things.
+      #
+      # Everything else runs here — a test carrying no Category trait satisfies all three !=, which
+      # is what keeps the untraited bulk of the suite in this run.
+      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice&Category!=Timing" --configuration Release
 
   # The first Mac ever to run this code. macOS is Apple Silicon, runs-from-source only, and nobody
   # on the project owns one — MACOS-TESTING.md exists to hand that to a volunteer. A GitHub standard
@@ -69,7 +81,7 @@ jobs:
           npm ci
           npm run build
 
-      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice" --configuration Release
+      - run: dotnet test Tonebench.sln --filter "Category!=Hardware&Category!=VirtualDevice&Category!=Timing" --configuration Release
 
       # Deliberately `dotnet build` and the framework-dependent binary, i.e. exactly what run.sh
       # does — NOT `dotnet publish -r osx-arm64`. The publish property group sets

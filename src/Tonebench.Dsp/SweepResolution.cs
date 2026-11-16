@@ -79,8 +79,35 @@ public static class SweepResolution
     /// </summary>
     public const int HarmonicHeadroomOrder = 5;
 
-    /// <summary>Sample rates a QA403 supports, ascending — the candidates <see cref="SampleRateFor"/> chooses among.</summary>
+    /// <summary>
+    /// The default candidates <see cref="SampleRateFor"/> chooses among, ascending: the three rates
+    /// a QA403 captures without the 384 kHz opt-in.
+    ///
+    /// <para>This is a <b>fallback</b>, not the rule. A caller that knows which rates the connected
+    /// analyzer can both play and capture passes them instead — see
+    /// <c>DeviceSessionService.SweepSampleRatesHz</c> — because a ladder fixed at 192 kHz caps every
+    /// stepped sweep at 0.98 × 96 kHz = 94 080 Hz, which is what a bench reporting 384 kHz was
+    /// still being held to (reported 2026-11-16, as "the QA403 is on 384 kHz but the sweep stops at
+    /// 94 kHz"). It stays the default so a caller with no device — a test, a panel estimating
+    /// before anything has connected — behaves exactly as it did.</para>
+    /// </summary>
     public static readonly double[] SupportedSampleRatesHz = [48000.0, 96000.0, 192000.0];
+
+    /// <summary>
+    /// Every rate a sweep may run at, ascending — the 48 kHz family, which is the superset a
+    /// device's own ladder is intersected with.
+    ///
+    /// <para><b>The 44.1 kHz family is left out deliberately, and not for the reason the response
+    /// spans leave it out.</b> A sweep's transform length is a plain power of two
+    /// (<see cref="FftSizeFor"/>), so 44.1 kHz would be arithmetically fine here where it is not
+    /// there. What it would change is behaviour nobody asked for: <see cref="SampleRateFor"/> picks
+    /// the <i>lowest</i> rate that covers the band, so a 4 kHz sweep on a card offering 44.1 kHz
+    /// would quietly stop running at 48 and start running at 44.1 — a different measurement, for no
+    /// gain, on every bench that has had one. Adding a family is a decision; adding the rungs above
+    /// 192 kHz is not.</para>
+    /// </summary>
+    public static readonly double[] CandidateSampleRatesHz =
+        [48000.0, 96000.0, 192000.0, 384000.0, 768000.0];
 
     /// <summary>
     /// The smallest power-of-two FFT size in [<paramref name="minFftSize"/>, <paramref name="maxFftSize"/>]

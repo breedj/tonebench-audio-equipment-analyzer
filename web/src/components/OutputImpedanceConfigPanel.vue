@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, reactive, watch } from 'vue'
 import type {
   OutputImpedanceParameters,
@@ -45,8 +45,13 @@ import {
  * convention (8 Ω on every specification sheet) rather than a part on the bench.
  */
 
-defineProps<{
+const props = defineProps<{
   running: boolean
+  /**
+   * The rates a sweep may run at on this bench, from `DeviceRanges.sweepSampleRatesHz`. Undefined
+   * until the analyzer has reported, which the helpers read as "use the built-in ladder".
+   */
+  sweepSampleRatesHz?: number[] | null
 }>()
 
 const emit = defineEmits<{
@@ -222,7 +227,7 @@ const passCount = 2
 
 /** Mirrors OutputImpedanceRequest.EffectiveSampleRateHz. */
 const effectiveSampleRateHz = computed(() =>
-  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, HARMONIC_ORDER) : FIXED_SAMPLE_RATE_HZ,
+  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, HARMONIC_ORDER, props.sweepSampleRatesHz) : FIXED_SAMPLE_RATE_HZ,
 )
 
 /** The pre-snap log grid, shared by the point count and the duration estimate. */

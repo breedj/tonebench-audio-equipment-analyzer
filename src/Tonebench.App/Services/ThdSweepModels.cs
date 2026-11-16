@@ -1,4 +1,4 @@
-using Tonebench.App.Streaming;
+﻿using Tonebench.App.Streaming;
 using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
@@ -292,8 +292,23 @@ public sealed record ThdSweepRequest(
     /// <see cref="SweepResolution.SampleRateFor"/>); it changes how many harmonics are measurable
     /// at the top of it, and how much USB and FFT load the sweep costs.
     /// </summary>
-    public double EffectiveSampleRateHz =>
-        AdaptiveResolution ? SweepResolution.SampleRateFor(EndFreqHz) : SampleRateHz;
+     /// <summary>
+    /// The rates this run may choose among, or null for the DSP default ladder.
+    ///
+    /// <para>Filled by the endpoint from <c>DeviceSessionService.SweepSampleRatesHz</c> — the rates
+    /// the connected analyzer can both capture and play — so a bench reaching 384 kHz can sweep
+    /// past 94 kHz, which a fixed ladder stopped it doing. Null is the default so every caller that
+    /// does not know (a test, a stored request replayed, a client that has not been updated) keeps
+    /// the behaviour this had before.</para>
+    ///
+    /// <para><b>It is set before <c>Validate()</c> runs, not after</b>: the validation reads
+    /// <c>MaxFrequencyHz</c>, which is derived from this, so filling it later would check the run
+    /// against one ladder and perform it on another.</para>
+    /// </summary>
+    public IReadOnlyList<double>? AvailableSampleRatesHz { get; init; }
+
+   public double EffectiveSampleRateHz =>
+        AdaptiveResolution ? SweepResolution.SampleRateFor(EndFreqHz, supportedRatesHz: AvailableSampleRatesHz) : SampleRateHz;
 
     /// <summary>The FFT size a given sweep point is analyzed at — constant unless <see cref="AdaptiveResolution"/> is on.</summary>
     public int FftSizeAt(double freqHz) =>

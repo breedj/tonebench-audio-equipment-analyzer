@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { api, ApiError, type ResponsePhaseKindName, type SimulatedProfileRequest, type StagedMeasurementConfig, type ThdSweepPoint } from './api/client'
 import { imdSpecFromStimulus, type ImdPresetId } from './imd/presets'
@@ -5085,6 +5085,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-else
                   ref="steppedResponseConfigPanel"
                   :running="responseRunning"
+                  :sweep-sample-rates-hz="ranges?.sweepSampleRatesHz"
                   @run="runSteppedResponse"
                 />
 
@@ -5385,6 +5386,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <CrosstalkConfigPanel
                   ref="crosstalkConfigPanel"
                   :running="responseRunning"
+                  :sweep-sample-rates-hz="ranges?.sweepSampleRatesHz"
                   @run="runCrosstalk"
                 />
 
@@ -5511,6 +5513,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <OutputImpedanceConfigPanel
                   ref="outputImpedanceConfigPanel"
                   :running="outputImpedanceRunning"
+                  :sweep-sample-rates-hz="ranges?.sweepSampleRatesHz"
                   @run="runOutputImpedance"
                 />
 
@@ -5674,6 +5677,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <ImpedanceConfigPanel
                   ref="impedanceConfigPanel"
                   :running="impedanceRunning"
+                  :sweep-sample-rates-hz="ranges?.sweepSampleRatesHz"
                   :sample-rates-hz="ranges?.sampleRatesHz"
                   :generator-rate-override-hz="ranges?.generatorRateOverrideHz ?? 0"
                   @calibrate="calibrateImpedance"
@@ -5819,7 +5823,13 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="sweepRunning"
                   @run="runAmplitudeSweep"
                 />
-                <SweepConfigPanel v-else ref="sweepConfigPanel" :running="sweepRunning" @run="runSweep" />
+                <SweepConfigPanel
+                  v-else
+                  ref="sweepConfigPanel"
+                  :running="sweepRunning"
+                  :sweep-sample-rates-hz="ranges?.sweepSampleRatesHz"
+                  @run="runSweep"
+                />
 
                 <!-- Each channel's point currently measuring (while running) or nearest the chart
                      cursor (once done) — see selectedSweepPointFor. Hidden entirely once the sweep

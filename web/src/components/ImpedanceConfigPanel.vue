@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
   RESPONSE_RESOLUTIONS,
@@ -44,6 +44,8 @@ const props = defineProps<{
   running: boolean
   /** The connected analyzer's analysis rates, which is what decides the spans below. */
   sampleRatesHz?: number[]
+  /** The rates a stepped run may choose among — see the other sweep panels. */
+  sweepSampleRatesHz?: number[] | null
   /**
    * The rate the generating half is pinned to, or 0 where it follows the capture rate. Only a split
    * has one, and only a split can therefore be in two rate families at once — see
@@ -413,7 +415,7 @@ watch(
 // ---- the stepped grid, mirroring ImpedanceRequest's derived members ----
 
 const steppedSampleRateHz = computed(() =>
-  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, HARMONIC_ORDER) : 192000,
+  form.adaptiveResolution ? adaptiveSampleRateHz(form.endFreqHz, HARMONIC_ORDER, props.sweepSampleRatesHz) : 192000,
 )
 
 /** The pre-snap log grid, shared by the point count and the duration estimate. */

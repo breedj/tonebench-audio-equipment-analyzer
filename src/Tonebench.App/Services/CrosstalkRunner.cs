@@ -106,6 +106,12 @@ public sealed class CrosstalkRunner(
     /// <exception cref="ArgumentOutOfRangeException">The request is not something that can be measured.</exception>
     public async Task<CrosstalkStarted> StartAsync(CrosstalkRequest request, CancellationToken ct)
     {
+        // Which rates this sweep may choose among is a property of the bench, not a constant, so it
+        // is stamped on here -- before Validate(), which reads MaxFrequencyHz and would otherwise
+        // check the run against one ladder and perform it on another. In the runner rather than in
+        // the endpoint because every start goes through here, so a new endpoint cannot forget it.
+        request = request with { AvailableSampleRatesHz = session.SweepSampleRatesHz };
+
         request.Validate();
 
         if (!session.Connected)

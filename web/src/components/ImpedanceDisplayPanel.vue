@@ -63,7 +63,10 @@ const Z_MAX = 1e9
 const zMin = computed(() => (zScale.value === 'Log' ? Z_LOG_MIN : 0))
 
 const X_FROM_OPTIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500]
-const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+// The top two rungs are for a bench that captures above 192 kHz -- see RESPONSE_X_TO_OPTIONS,
+// which carries the reasoning and the same two values, so the frequency ladders on every screen
+// end in the same place.
+const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000]
 
 /**
  * Clamped through `:value` + `@change` rather than `v-model`, and that is not a style choice: a

@@ -137,12 +137,22 @@ export function adaptiveFftSize(freqHz: number, sampleRateHz: number, maxFftSize
  * sweep, which measures them; **one** for a stepped-sine response, which measures only the tone
  * itself — and that is a real saving rather than a corner cut, since it drops a 20 kHz run from
  * 192 kHz to 48 kHz.
+ *
+ * `ratesHz` is the bench's own ladder, from `DeviceRanges.sweepSampleRatesHz` — the rates the
+ * analyzer can both capture and play. Omitted or empty falls back to the built-in three, which is
+ * what every caller did before a bench could reach past 192 kHz, and is still right for a panel
+ * estimating with nothing connected. Passing it is what lets a 384 kHz split sweep past 94 kHz.
  */
-export function adaptiveSampleRateHz(endFreqHz: number, harmonicOrder = ADAPTIVE_HARMONIC_ORDER): number {
-  const highest = SUPPORTED_SAMPLE_RATES_HZ[SUPPORTED_SAMPLE_RATES_HZ.length - 1]
+export function adaptiveSampleRateHz(
+  endFreqHz: number,
+  harmonicOrder = ADAPTIVE_HARMONIC_ORDER,
+  ratesHz?: readonly number[] | null,
+): number {
+  const rates = ratesHz && ratesHz.length > 0 ? ratesHz : SUPPORTED_SAMPLE_RATES_HZ
+  const highest = Math.max(...rates)
   if (!(endFreqHz > 0)) return highest
   const needed = harmonicOrder * endFreqHz
-  const usable = SUPPORTED_SAMPLE_RATES_HZ.filter((rate) => 0.98 * (rate / 2) >= needed)
+  const usable = rates.filter((rate) => 0.98 * (rate / 2) >= needed)
   return usable.length > 0 ? Math.min(...usable) : highest
 }
 

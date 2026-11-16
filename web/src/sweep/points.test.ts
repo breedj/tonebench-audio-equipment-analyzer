@@ -214,6 +214,48 @@ describe('adaptiveSampleRateHz', () => {
   it('falls back to the highest rate when nothing fits', () => {
     expect(adaptiveSampleRateHz(200000, 1)).toBe(192000)
   })
+
+  /**
+   * The bench's own ladder, from `DeviceRanges.sweepSampleRatesHz`. Reported 2026-11-16: a split
+   * whose analyzer said 384 kHz still refused to sweep past 0.98 x 96 kHz = 94 080 Hz, because the
+   * ladder was the three rates a QA403 captures and nothing could widen it.
+   */
+  describe('on a bench with its own ladder', () => {
+    const SPLIT_384 = [48000, 96000, 192000, 384000]
+
+    it('reaches past 94 kHz where the bench does', () => {
+      // 100 kHz needs 0.98 x rate/2 >= 100000, i.e. >= 204082 Hz: nothing in the built-in three.
+      expect(adaptiveSampleRateHz(100000, 1)).toBe(192000)
+      expect(adaptiveSampleRateHz(100000, 1, SPLIT_384)).toBe(384000)
+    })
+
+    it('still picks the lowest rate that covers the band', () => {
+      // The whole point of the adaptive rule, and the half a wider ladder could quietly break: a
+      // 20 kHz run must not start costing 384 kHz of USB and FFT just because the bench has it.
+      expect(adaptiveSampleRateHz(20000, 1, SPLIT_384)).toBe(48000)
+      expect(adaptiveSampleRateHz(90000, 1, SPLIT_384)).toBe(192000)
+    })
+
+    it('tops out at the bench rather than at the built-in list', () => {
+      // 500 kHz fits nothing anywhere -- the fallback is the highest rate this bench has, not the
+      // highest the module knows.
+      expect(adaptiveSampleRateHz(500000, 1, SPLIT_384)).toBe(384000)
+    })
+
+    it('falls back to the built-in ladder when the bench has not reported', () => {
+      // Undefined, null and empty are all "nothing connected yet", which every panel can be in
+      // while the user types -- and none of them may change the estimate it shows.
+      expect(adaptiveSampleRateHz(100000, 1, undefined)).toBe(192000)
+      expect(adaptiveSampleRateHz(100000, 1, null)).toBe(192000)
+      expect(adaptiveSampleRateHz(100000, 1, [])).toBe(192000)
+    })
+
+    it('honours a narrower bench too', () => {
+      // A 48 kHz-only card is the other end of the same rule: the fallback is its own top rate.
+      expect(adaptiveSampleRateHz(20000, 1, [48000])).toBe(48000)
+      expect(adaptiveSampleRateHz(90000, 1, [48000])).toBe(48000)
+    })
+  })
 })
 
 describe('adaptiveFftSize', () => {

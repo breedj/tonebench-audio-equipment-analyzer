@@ -122,8 +122,14 @@ const { showPage } = useManual()
           <td>
             Sizes the FFT per point and picks the sample rate from the top of the range. This
             measurement reads only the tone and no harmonics, so a 20 kHz run needs 48 kHz rather
-            than 192 kHz — a quarter of the work. Turn it off for a fixed 192 kHz / 131072-point
-            reference comparable with a THD sweep. The line underneath states what will be used.
+            than 192 kHz — a quarter of the work. The rates it chooses among are
+            <strong>your bench's</strong>: the ones your analyzer can both capture and play, so a
+            split reaching 384 kHz sweeps up to 188 kHz where one stopping at 192 kHz stops at
+            94 kHz. Note it is both halves that decide — a QA403 captures at 384 kHz but only plays
+            to 192, so on its own it keeps the lower ceiling however it is configured. Turn it off
+            for a fixed 192 kHz / 131072-point reference comparable with a THD sweep. The line
+            underneath states what will be used, and <strong>End (Hz)</strong> warns when it is
+            above what the bench can reach.
           </td>
         </tr>
       </tbody>

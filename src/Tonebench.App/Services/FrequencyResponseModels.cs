@@ -365,8 +365,25 @@ public sealed record FrequencyResponseRequest(
 
     /// <summary>
     /// Spans the UI offers, in Hz. These are <b>Nyquist</b> values — the label the old app showed —
-    /// so the sample rate is twice each one, which is also why they are exactly the QA403's three
-    /// supported rates halved.
+    /// so the sample rate is twice each one.
+    ///
+    /// <para><b>192 kHz was added 2026-11-16</b>, for the 384 kHz capture a split's halves have had
+    /// since 0.9.0: without it a bench whose analyzer reported 384 kHz still could not sweep past
+    /// 96 kHz, which is the contradiction Joost reported. It is <i>offered</i> to everyone and
+    /// <i>filtered</i> per analyzer — <c>supportedSpans()</c> on the client and
+    /// <see cref="Validate"/> plus <c>RequireSupportedSampleRate</c> on the server — so a standalone
+    /// QA403 never sees it. Note it is the capture rate that qualifies a span, which is why this
+    /// rung is real on a QA403-captures/DAC-plays split and not on a QA403 alone: 384 kHz on that
+    /// device is input-only, its generator being capped at 192 kHz to protect the output relay.
+    /// It lands on <b>262144</b> at multiplier 1 and 1048576 at 4 — the latter being the heaviest
+    /// transform this app runs, which the FFT screen has done since it had a 1M option.</para>
+    ///
+    /// <para><b>384 kHz (a 768 kHz rate) is deliberately not here yet.</b> Nothing can capture
+    /// there: the QA403 stops at 384 kHz and the sound cards on this bench stop at 192 kHz for
+    /// input, so the rung would be unreachable on every analyzer the project can test — and its top
+    /// resolution would want a 2097152-point transform, twice anything measured here. It is one
+    /// entry in this array and one in RESPONSE_SPANS_HZ the day a 768 kHz ADC exists to try it
+    /// on.</para>
     ///
     /// <para><b>The 44.1 kHz family is deliberately not here, and the reason is arithmetic rather
     /// than preference</b> (tried and reverted 2026-11-14). <see cref="FftSize"/> is
@@ -384,7 +401,7 @@ public sealed record FrequencyResponseRequest(
     /// 22 kHz. 44.1 kHz as an <i>analysis</i> rate is reachable on the FFT screen, which picks its
     /// own power-of-two transform length and so is unaffected by any of this.</para>
     /// </summary>
-    public static readonly double[] SupportedSpansHz = [24_000.0, 48_000.0, 96_000.0];
+    public static readonly double[] SupportedSpansHz = [24_000.0, 48_000.0, 96_000.0, 192_000.0];
 
     /// <summary>
     /// Bin width at <see cref="ResolutionMultiplier"/> 1, in Hz. The base FFT size scales with the

@@ -311,7 +311,23 @@ export function responseChartFlags(
  */
 export const RESPONSE_X_FROM_OPTIONS: readonly number[] = [1, 2, 5, 10, 20, 50, 100, 200, 500]
 
-export const RESPONSE_X_TO_OPTIONS: readonly number[] = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+/**
+ * <p>The top two rungs are for a bench that captures above 192 kHz — a split whose halves both
+ * reach 384 kHz, where the usable band runs to <b>188 160 Hz</b> (0.98 of Nyquist). They are the
+ * same two the delay axis has always offered, so this ladder and `DELAY_WINDOWS_US` now agree
+ * about where a frequency ladder ends.</p>
+ *
+ * <p><b>Offered unconditionally, unlike the FFT screen's To list</b>, which adds its 200 kHz entry
+ * only when the analyzer reports 384 kHz. That gate exists there because `withCurrentValue` folds
+ * Autofit's own answer into the list and drops it again on the next pick, so an entry coming and
+ * going was a real fault. Here the list is static and an axis is not a claim: widening it past what
+ * the bench can measure draws empty space, which is a legible answer to "is there anything up
+ * there". 500 kHz is above Nyquist for every rate this app knows (768 kHz gives 376 kHz), so it is
+ * always empty space — kept because asking the question costs one pick and nothing else.</p>
+ */
+export const RESPONSE_X_TO_OPTIONS: readonly number[] = [
+  1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000,
+]
 
 /**
  * The narrowest pair of offered values that still contains `fromHz..toHz` — outward, never inward,

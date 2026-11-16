@@ -92,7 +92,16 @@ public class SpectrumPipelineSnapshotTests
         }
     }
 
+    // Category=Timing: the seq assertion below is a race this test knowingly runs -- it reads one
+    // frame and then asks whether the retained snapshot is still that frame's, which is true only
+    // while the next tick has not landed. Excluded from CI for that reason: on a macOS Intel leg
+    // running at about half speed it read seq 2 against the frame's 1, while the identical commit
+    // passed on the same workflow's other legs. Every other test in this class checks structure
+    // rather than timing and stays in CI. Do not "fix" this by dropping the seq check and comparing
+    // only the values -- that is what makes a lost race a clear failure instead of a confusing
+    // mismatch, which is the whole point of asserting it (see the comment inside).
     [Fact]
+    [Trait("Category", "Timing")]
     public async Task LatestSnapshots_MatchesTheBroadcastMeters()
     {
         var device = new SimulatedDevice(randomSeed: 1);

@@ -160,8 +160,11 @@ const { showPage } = useManual()
         <tr>
           <td>Frequency span (Hz)</td>
           <td>
-            The highest frequency measured — 24, 48 or 96 kHz. The sample rate is twice it, so a
-            wider span costs no extra time; only resolution does.
+            The highest frequency measured — 24, 48 or 96 kHz, and <strong>192 kHz</strong> on a
+            bench that captures at 384. The sample rate is twice the span, so the list is filtered
+            to the rates your analyzer actually has: a standalone QA403 stops at 96 kHz because
+            384 kHz is an input-only rate there, while a split whose capture half reaches it offers
+            the 192 kHz rung. A wider span costs no extra time; only resolution does.
           </td>
         </tr>
         <tr>

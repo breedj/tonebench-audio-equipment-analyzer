@@ -1,4 +1,4 @@
-using Tonebench.Dsp;
+﻿using Tonebench.Dsp;
 
 namespace Tonebench.App.Services;
 
@@ -118,8 +118,25 @@ public sealed record SteppedResponseRequest(
     /// 20 kHz sweep then runs at 48 kHz instead of 192 kHz, a quarter of the USB and FFT load, with
     /// the top point still comfortably below the anti-alias filter.</para>
     /// </summary>
-    public double EffectiveSampleRateHz => AdaptiveResolution
-        ? SweepResolution.SampleRateFor(EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction)
+     /// <summary>
+    /// The rates this run may choose among, or null for the DSP default ladder.
+    ///
+    /// <para>Filled by the endpoint from <c>DeviceSessionService.SweepSampleRatesHz</c> — the rates
+    /// the connected analyzer can both capture and play — so a bench reaching 384 kHz can sweep
+    /// past 94 kHz, which a fixed ladder stopped it doing. Null is the default so every caller that
+    /// does not know (a test, a stored request replayed, a client that has not been updated) keeps
+    /// the behaviour this had before.</para>
+    ///
+    /// <para><b>It is set before <c>Validate()</c> runs, not after</b>: the validation reads
+    /// <c>MaxFrequencyHz</c>, which is derived from this, so filling it later would check the run
+    /// against one ladder and perform it on another.</para>
+    /// </summary>
+    public IReadOnlyList<double>? AvailableSampleRatesHz { get; init; }
+
+   public double EffectiveSampleRateHz => AdaptiveResolution
+        ? SweepResolution.SampleRateFor(
+                EndFreqHz, harmonicOrder: 1, nyquistFraction: MaxFrequencyNyquistFraction,
+                supportedRatesHz: AvailableSampleRatesHz)
         : SampleRateHz;
 
     /// <summary>The highest tone this run will play, given the rate it settles on.</summary>

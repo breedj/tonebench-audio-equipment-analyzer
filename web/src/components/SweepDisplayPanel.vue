@@ -91,7 +91,10 @@ const isFrequencyAxis = computed(() => xAxis.value === 'frequency')
 const Y_MAX_OPTIONS = [100, 10, 1]
 const Y_MIN_OPTIONS = [0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001]
 const X_FROM_OPTIONS = [5, 10, 20, 50, 100, 200, 500]
-const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
+// The top two rungs are for a bench that captures above 192 kHz -- see RESPONSE_X_TO_OPTIONS,
+// which carries the reasoning and the same two values, so the frequency ladders on every screen
+// end in the same place.
+const X_TO_OPTIONS = [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000]
 
 /**
  * Smallest x bound the volt/watt axes accept. They are typed rather than picked from a list — the

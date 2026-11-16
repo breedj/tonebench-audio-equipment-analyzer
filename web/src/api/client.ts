@@ -602,7 +602,10 @@ export type ResponsePhaseName =
   | 'WaitingForLoadChange'
 
 /**
- * The three spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each.
+ * The spans the UI offers, in Hz. These are Nyquist values — the sample rate is twice each. The
+ * 192 kHz rung (a 384 kHz rate) is there for a split that captures at 384; see
+ * `FrequencyResponseRequest.SupportedSpansHz`, which carries the whole reasoning and the matching
+ * list, and which also says why there is no 384 kHz rung yet.
  *
  * <p>Offering a span is not the same as an analyzer having it: `supportedSpans` filters this list
  * by the rates the connected analyzer reports, and every panel carrying a span dropdown must go
@@ -614,7 +617,7 @@ export type ResponsePhaseName =
  * lands on a power of two. See `FrequencyResponseRequest.SupportedSpansHz` for the figures. A
  * 44.1 kHz DAC is measured as the generating half of a split, captured at 192 kHz.</p>
  */
-export const RESPONSE_SPANS_HZ = [24000, 48000, 96000] as const
+export const RESPONSE_SPANS_HZ = [24000, 48000, 96000, 192000] as const
 
 /**
  * FFT-size multipliers and the bin width each produces. The base size scales with the sample rate,
@@ -2207,6 +2210,16 @@ export interface DeviceRanges {
    * at the capture rate walks the trace sideways on a bench whose halves differ.
    */
   generatorSampleRateHz: number | null
+  /**
+   * The rates a *stepped sweep* may choose among on this bench: the ones the analyzer can both
+   * capture and play. Null on a build or a bench that does not report them, which every reader
+   * takes as "use the built-in ladder" — `adaptiveSampleRateHz`'s own default.
+   *
+   * Intersected server-side rather than here, from `sampleRatesHz` and `outputSampleRatesHz`,
+   * because that intersection is the rule the run is refused against and four panels deriving it
+   * themselves is four chances to disagree with the runner.
+   */
+  sweepSampleRatesHz: number[] | null
 }
 
 export interface GeneratorTone {

@@ -69,7 +69,8 @@ public static class DeviceEndpoints
                 session.MinStimulusFrequencyHz, session.MaxGeneratorSampleRateHz,
                 drift?.Ppm, drift?.MeasuredUtc,
                 caps.OutputSampleRatesHz, session.GeneratorSampleRateHz,
-                session.GeneratorRateOverrideHz, session.BenchClocks is not null));
+                session.GeneratorRateOverrideHz, session.BenchClocks is not null,
+                session.SweepSampleRatesHz));
         });
 
         group.MapPost("/input-range", async (
@@ -566,7 +567,19 @@ public sealed record DeviceRangesResponse(
     /// nothing to correct" and "two clocks, never measured", and only the second is worth a line.
     /// </para>
     /// </summary>
-    bool BenchHasTwoClocks = false);
+    bool BenchHasTwoClocks = false,
+    /// <summary>
+    /// The rates a <i>stepped sweep</i> may choose among on this bench — see
+    /// <c>DeviceSessionService.SweepSampleRatesHz</c>, which is the one place that intersects the
+    /// capture and generator ladders.
+    ///
+    /// <para>Sent rather than derived on the client, although the client already has both lists.
+    /// Two reasons: a sweep ladder is the server's rule (the run is refused against it, by
+    /// <c>RequireGeneratorRateUsable</c>), and the four sweep panels only need to <i>show</i> what
+    /// the server will do. Deriving it in each of them is four copies of an intersection that can
+    /// drift from the one the runner stamps on.</para>
+    /// </summary>
+    IReadOnlyList<double>? SweepSampleRatesHz = null);
 
 public sealed record InputRangeRequest(double Dbv);
 

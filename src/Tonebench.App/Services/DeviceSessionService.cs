@@ -259,6 +259,48 @@ public sealed class DeviceSessionService(
     }
 
     /// <summary>
+    /// The rates a stepped sweep may choose among on this analyzer: every entry of
+    /// <see cref="SweepResolution.CandidateSampleRatesHz"/> the device can <b>both</b> capture and
+    /// play.
+    ///
+    /// <para><b>Both, because a sweep plays a tone and measures it.</b> That is the one place this
+    /// app intersects the two ladders, and <see cref="DeviceCapabilities.OutputSampleRatesHz"/>'s
+    /// own remarks explain why it must not be done in the capabilities themselves: a QA403
+    /// capturing at 384 kHz with a 192 kHz DAC playing is a real measurement, and intersecting
+    /// there would delete the input mode that rate exists for. A sweep is the opposite case — it
+    /// has no capture-only variant, so a rate the generator cannot reach is a rate the run would be
+    /// refused at by <see cref="RequireGeneratorRateUsable"/>, after the user had chosen it.</para>
+    ///
+    /// <para><b>Empty falls back to the DSP default</b> rather than to nothing: a device that has
+    /// not connected reports no capabilities at all, and a sweep ladder of zero rates has no answer
+    /// to give. The fallback is what the sweeps ran on before this existed, so an unconnected bench
+    /// estimates exactly as it used to.</para>
+    ///
+    /// <para>Note a QA403 lands on <c>[48, 96, 192]</c> here with the 384 kHz capture it now always
+    /// has as a split's half — because its <i>generator</i> stops at 192 kHz to protect the output
+    /// relay. 384 kHz reaches this list only when the playing half is something else, which is
+    /// exactly the bench that asked for it.</para>
+    /// </summary>
+    public IReadOnlyList<double> SweepSampleRatesHz
+    {
+        get
+        {
+            DeviceCapabilities caps = Capabilities;
+            IReadOnlyList<double> capture = caps.SampleRatesHz;
+            IReadOnlyList<double> play = caps.OutputSampleRatesHz;
+
+            var usable = SweepResolution.CandidateSampleRatesHz
+                .Where(rate => Has(capture, rate) && Has(play, rate))
+                .ToArray();
+
+            return usable.Length > 0 ? usable : SweepResolution.SupportedSampleRatesHz;
+
+            static bool Has(IReadOnlyList<double> rates, double rate) =>
+                rates.Any(r => Math.Abs(r - rate) < 1e-6);
+        }
+    }
+
+    /// <summary>
     /// A session pinned to one already-constructed device, with nothing to switch to. Every test in
     /// the app builds a session this way, and the shape of that call is what this overload exists to
     /// keep — the real app goes through the factory.

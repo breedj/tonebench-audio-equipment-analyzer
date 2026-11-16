@@ -856,6 +856,57 @@ public class SteppedResponseRunnerTests
             Request(endFreqHz: 20_000.0, adaptiveResolution: false, sampleRateHz: 192_000.0).EffectiveSampleRateHz);
     }
 
+    /// <summary>
+    /// And the rates it picks among are the bench's, not a constant.
+    ///
+    /// <para>Reported 2026-11-16: a split whose analyzer reported 384 kHz still had its sweep
+    /// stopped at 0.98 x 96 kHz = 94 080 Hz, because this chose from the three rates a QA403
+    /// captures and nothing could widen the list. The runner stamps
+    /// <c>DeviceSessionService.SweepSampleRatesHz</c> on before <c>Validate()</c>; this is the
+    /// property that reads it.</para>
+    /// </summary>
+    [Fact]
+    public void AdaptiveResolution_ChoosesAmongTheBenchsOwnRates()
+    {
+        double[] split384 = [48_000.0, 96_000.0, 192_000.0, 384_000.0];
+
+        // The report, both ways round. Without a ladder a 100 kHz end falls back to the highest of
+        // the built-in three and the top of the sweep is lost; with one it is reachable.
+        Assert.Equal(192_000.0, Request(endFreqHz: 100_000.0, adaptiveResolution: true).EffectiveSampleRateHz);
+        Assert.Equal(
+            384_000.0,
+            (Request(endFreqHz: 100_000.0, adaptiveResolution: true) with
+            {
+                AvailableSampleRatesHz = split384,
+            }).EffectiveSampleRateHz);
+
+        // MaxFrequencyHz is what the panel warns against and what the grid is filtered by, so it
+        // has to move with the rate -- 0.98 of Nyquist at each.
+        Assert.Equal(
+            188_160.0,
+            (Request(endFreqHz: 100_000.0, adaptiveResolution: true) with
+            {
+                AvailableSampleRatesHz = split384,
+            }).MaxFrequencyHz);
+
+        // A wider bench must not make an ordinary sweep more expensive: still the lowest rate that
+        // covers the band.
+        Assert.Equal(
+            48_000.0,
+            (Request(endFreqHz: 20_000.0, adaptiveResolution: true) with
+            {
+                AvailableSampleRatesHz = split384,
+            }).EffectiveSampleRateHz);
+
+        // And the fixed mode is untouched by any of it -- the rate there is the one asked for.
+        Assert.Equal(
+            192_000.0,
+            (Request(endFreqHz: 20_000.0, adaptiveResolution: false, sampleRateHz: 192_000.0) with
+            {
+                AvailableSampleRatesHz = split384,
+            }).EffectiveSampleRateHz);
+    }
+
     [Fact]
     public void AnOrdinarySweep_KeepsTheSweepsOwnFftCeilingAndItsFourPointFourHertzFloor()
     {

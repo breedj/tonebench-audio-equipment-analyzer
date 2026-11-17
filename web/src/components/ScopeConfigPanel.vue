@@ -46,6 +46,13 @@ const triggerSource = defineModel<ScopeTriggerSource>('triggerSource', { require
 const recordSeconds = defineModel<number>('recordSeconds', { required: true })
 const preTriggerFraction = defineModel<number>('preTriggerFraction', { required: true })
 const mode = defineModel<ScopeRunMode>('mode', { required: true })
+/**
+ * The staged capture rate, read by the generator panel in the same rail: it decides whether the
+ * analyzer could play what is composed there at all (384 kHz is capture-only on a QA403), and it
+ * is the rate a generator-only stream should come up at. Kept in step with the form below, like
+ * the record length and the pre-trigger fraction.
+ */
+const sampleRateHz = defineModel<number>('sampleRateHz', { required: true })
 
 const props = defineProps<{
   running: boolean
@@ -128,7 +135,10 @@ function applyStoredParams(paramsJson: string) {
   if (!stored || typeof stored !== 'object') return
 
   restoring = true
-  if (typeof stored.sampleRateHz === 'number' && stored.sampleRateHz > 0) form.sampleRateHz = stored.sampleRateHz
+  if (typeof stored.sampleRateHz === 'number' && stored.sampleRateHz > 0) {
+    form.sampleRateHz = stored.sampleRateHz
+    sampleRateHz.value = stored.sampleRateHz
+  }
   if (typeof stored.recordSeconds === 'number' && stored.recordSeconds > 0)
     form.recordMs = stored.recordSeconds * 1000
   if (typeof stored.preTriggerFraction === 'number')
@@ -176,6 +186,12 @@ watch(
   () => form.recordMs,
   (ms) => {
     recordSeconds.value = ms / 1000
+  },
+)
+watch(
+  () => form.sampleRateHz,
+  (hz) => {
+    sampleRateHz.value = hz
   },
 )
 watch(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
-import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import {
   isWaveKind,
@@ -16,16 +16,26 @@ import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquival
 import { generatorLevelFromDbv, generatorLevelToDbv } from '../generatorLevel'
 import GeneratorLevelUnitSelect from './GeneratorLevelUnitSelect.vue'
 
-const props = defineProps<{
-  /**
-   * Set whenever a measurement is (re)selected — see GeneratorPanel.vue. Loads this stimulus's
-   * kind/tones/etc into the form. Not "live device status": the whole point of the Run/Stop model
-   * is that selecting a measurement stages its generator config without playing it, so this always
-   * comes from the measurement type's stored parameters, never from a status poll (which would show
-   * whatever's *actually* configured, i.e. usually silence).
-   */
-  loadState: GeneratorChannelState | null | undefined
-}>()
+const props = withDefaults(
+  defineProps<{
+    /**
+     * Set whenever a measurement is (re)selected — see GeneratorPanel.vue. Loads this stimulus's
+     * kind/tones/etc into the form. Not "live device status": the whole point of the Run/Stop model
+     * is that selecting a measurement stages its generator config without playing it, so this always
+     * comes from the measurement type's stored parameters, never from a status poll (which would show
+     * whatever's *actually* configured, i.e. usually silence).
+     */
+    loadState: GeneratorChannelState | null | undefined
+    /**
+     * Which screen's staged form this panel edits — the FFT screen's when nothing is passed.
+     *
+     * <p>Read once rather than watched: a mounted panel belongs to one screen, so the store never
+     * changes identity under it. See useScopeStimulus.ts for why there is more than one.</p>
+     */
+    stimulus?: GeneratorStimulusStore
+  }>(),
+  { stimulus: () => useGeneratorStimulus() },
+)
 
 // Bubbled up to GeneratorPanel, then App.vue — pushes the edit live if a generator is already
 // playing, otherwise a no-op (the value's already staged here regardless). See
@@ -61,7 +71,7 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, wave, chirp, imd, levelUnit } = useGeneratorStimulus()
+const { kind, tones, multitone, noise, wave, chirp, imd, levelUnit } = props.stimulus
 
 // The rate Run would ask for, not the one the device happens to be streaming at — the quantised
 // frequency depends on it, and the panel has to show the right answer before anything is running.

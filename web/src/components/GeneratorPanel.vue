@@ -1,29 +1,56 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import type { DeviceRanges, DeviceStatus, GeneratorChannelRequest, GeneratorKind } from '../api/client'
-import { useProjects } from '../composables/useProjects'
+import type {
+  DeviceRanges,
+  DeviceStatus,
+  GeneratorChannelRequest,
+  GeneratorKind,
+  StoredGeneratorConfig,
+} from '../api/client'
 import { useLoadOhms } from '../composables/useLoadOhms'
-import { useGeneratorStimulus } from '../composables/useGeneratorStimulus'
+import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
 import { canSnapToBin as canSnapToBinKind, snapToBinOnLoad } from '../measurements/snapToBin'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import { generatorRateCeilingNotice } from '../generatorRateCeiling'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
-const props = defineProps<{
-  ranges: DeviceRanges | null
-  /**
-   * Which analyzer is selected, read only to decide which lever the rate notice names: a split's
-   * generator rate is a control in its own settings, and on a single analyzer the second device is
-   * the thing that does not exist yet.
-   */
-  deviceKind?: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    ranges: DeviceRanges | null
+    /**
+     * Which analyzer is selected, read only to decide which lever the rate notice names: a split's
+     * generator rate is a control in its own settings, and on a single analyzer the second device is
+     * the thing that does not exist yet.
+     */
+    deviceKind?: string | null
+    /**
+     * The stimulus this measurement saved, staged on every (re)selection of it.
+     *
+     * <p>Passed in rather than read from <code>loadedParams</code> here, because the two screens
+     * that render this panel keep it in different places: the FFT screen's is the applied type's
+     * live config, and the oscilloscope's is its own stored
+     * <code>OscilloscopeParameters.Generator</code> — <code>ApplyAsync</code> answers that kind
+     * with the live session, which is the device's state rather than the measurement's. See
+     * scope/generator.ts.</p>
+     */
+    restore?: StoredGeneratorConfig | null
+    /**
+     * Which screen's staged form this panel edits — the FFT screen's when nothing is passed.
+     */
+    stimulus?: GeneratorStimulusStore
+    /**
+     * The rate the screen beside this panel has staged, which is what decides whether the analyzer
+     * could play what is composed here at all (see generatorRateCeiling.ts). Each screen has its
+     * own; the FFT screen's shared one is the fallback.
+     */
+    stagedSampleRateHz?: number | null
+  }>(),
+  { stimulus: () => useGeneratorStimulus() },
+)
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
 const { loadOhms } = useLoadOhms()
-
-const { loadedParams } = useProjects()
 
 // Forwarded to App.vue, which pushes the edit live if a generator is already playing (see
 // applyGeneratorLive) — otherwise a no-op, since the value is already staged in this component's
@@ -32,9 +59,10 @@ const emit = defineEmits<{ change: [] }>()
 
 const channelPanel = useTemplateRef<InstanceType<typeof GeneratorChannelPanel>>('channelPanel')
 
-// The rate the FFT settings panel beside this one currently has staged -- not what the device is
-// streaming at (see useStagedSampleRate.ts).
-const { stagedSampleRateHz } = useStagedSampleRate()
+// The rate the settings panel beside this one currently has staged -- not what the device is
+// streaming at (see useStagedSampleRate.ts). The prop wins where the screen has its own.
+const { stagedSampleRateHz: fftStagedSampleRateHz } = useStagedSampleRate()
+const stagedRateHz = computed(() => props.stagedSampleRateHz ?? fftStagedSampleRateHz.value)
 
 /**
  * Non-null when the FFT screen is staged at a rate this analyzer captures at but cannot play --
@@ -49,7 +77,7 @@ const { stagedSampleRateHz } = useStagedSampleRate()
  */
 const rateCeilingNotice = computed(() =>
   generatorRateCeilingNotice({
-    stagedSampleRateHz: stagedSampleRateHz.value,
+    stagedSampleRateHz: stagedRateHz.value,
     generatorRateOverrideHz: props.ranges?.generatorRateOverrideHz,
     generatorRatesHz: props.ranges?.outputSampleRatesHz,
     maxGeneratorRateHz: props.ranges?.maxGeneratorSampleRateHz,
@@ -64,7 +92,7 @@ const generatorUsable = computed(() => rateCeilingNotice.value === null)
 const leftEnabled = ref(true)
 const rightEnabled = ref(false)
 const snapToBin = ref(true)
-const { kind: stimulusKind } = useGeneratorStimulus()
+const { kind: stimulusKind } = props.stimulus
 
 // Which kinds snap is `snapToBin.ts`'s to say, for both this and the watcher below — the rule
 // used to be written out twice here, in two different spellings, and they disagreed.
@@ -90,17 +118,17 @@ watch(stimulusKind, (kind) => {
 })
 
 watch(
-  loadedParams,
-  (params) => {
-    if (!params) return
-    leftEnabled.value = params.generatorLeft.enabled
-    rightEnabled.value = params.generatorRight.enabled
+  () => props.restore,
+  (stored) => {
+    if (!stored) return
+    leftEnabled.value = stored.left.enabled
+    rightEnabled.value = stored.right.enabled
     // Judged against the loaded kind rather than stimulusKind, which the child syncs a tick later
     // — see snapToBin.ts for the two things that are easy to get wrong here, both of which this
     // line had: the multitone comb does snap, and `Off` is not a stimulus.
-    snapToBin.value = snapToBinOnLoad(params.snapToBin, params.generatorLeft.kind)
+    snapToBin.value = snapToBinOnLoad(stored.snapToBin ?? true, stored.left.kind)
     // `Off` leaves the child's own default selected (GeneratorChannelPanel), so nothing is coming.
-    pendingLoadKind = params.generatorLeft.kind === 'Off' ? null : params.generatorLeft.kind
+    pendingLoadKind = stored.left.kind === 'Off' ? null : stored.left.kind
   },
   { immediate: true },
 )
@@ -183,7 +211,8 @@ defineExpose({ buildRequest, resyncTones })
 
       <GeneratorChannelPanel
         ref="channelPanel"
-        :load-state="loadedParams?.generatorLeft"
+        :load-state="restore?.left"
+        :stimulus="props.stimulus"
         @change="emit('change')"
       />
 

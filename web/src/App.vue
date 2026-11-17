@@ -66,6 +66,8 @@ import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
 import ScopeMeasurementsPanel from './components/ScopeMeasurementsPanel.vue'
 import { useOscilloscope } from './composables/useOscilloscope'
+import { useScopeStimulus } from './composables/useScopeStimulus'
+import { scopeGeneratorFromParams, scopeGeneratorToParams } from './scope/generator'
 import {
   DEFAULT_SCOPE_DISPLAY,
   scopeDisplayFromParams,
@@ -599,6 +601,22 @@ interface RunConfig {
 }
 
 const generatorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
+
+/**
+ * What the FFT screen's generator panel stages from: the applied measurement type, which for that
+ * kind is the live session's own config — see scope/generator.ts for why the oscilloscope cannot
+ * use the same source. Mapped here rather than inside the panel so both screens hand it the same
+ * shape and neither has to know where the other's comes from.
+ */
+const fftGeneratorRestore = computed(() =>
+  loadedParams.value
+    ? {
+        left: loadedParams.value.generatorLeft,
+        right: loadedParams.value.generatorRight,
+        snapToBin: loadedParams.value.snapToBin,
+      }
+    : null,
+)
 const spectrumConfigPanel = ref<InstanceType<typeof SpectrumConfigPanel> | null>(null)
 const saveDialogOpen = ref(false)
 // Importing a simulation as a trace. The flag is a module store rather than a ref here, because
@@ -2051,6 +2069,53 @@ const scopePreTriggerFraction = ref(0.25)
 const scopeMode = ref<import('./api/client').ScopeRunMode>('Auto')
 
 const scopeConfigPanel = ref<InstanceType<typeof ScopeConfigPanel> | null>(null)
+const scopeGeneratorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
+
+/** This screen's own staged stimulus, never the FFT screen's — see useScopeStimulus.ts. */
+const scopeStimulus = useScopeStimulus()
+
+/** The rate the Acquisition panel has staged, which is what the generator must be playable at. */
+const scopeStagedSampleRateHz = ref(192_000)
+
+/**
+ * The stimulus this measurement saved, out of its own params_json.
+ *
+ * <p>Not <code>loadedParams</code>, which for a kind in <code>HasNoLiveConfiguration</code> is the
+ * live session's generator — i.e. whatever the device is set to, not what this measurement plays.
+ * See scope/generator.ts.</p>
+ */
+const scopeGeneratorRestore = computed(() =>
+  isOscilloscope.value ? scopeGeneratorFromParams(currentType.value?.paramsJson) : null,
+)
+
+/**
+ * Pushes a generator edit to a scope that is already playing, and marks the measurement dirty.
+ *
+ * <p>The FFT screen's <code>applyGeneratorLive</code> one screen along, and through the same
+ * <code>/api/generator</code> rather than through <code>/oscilloscope/retune</code>, which refuses
+ * a generator on purpose: reconfiguring one books a stimulus-latency and capture-delay discard,
+ * which cannot ride on a control that moves per pointer move. The scope's own capture is unaffected
+ * either way — it reads the stream, and the new stimulus simply arrives in it.</p>
+ */
+function applyScopeGeneratorLive() {
+  return withErrorReporting(async () => {
+    markDirty()
+    const live = scopeRunning.value || status.value?.generatorLeft.enabled || status.value?.generatorRight.enabled
+    if (!live) return
+
+    const generator = scopeGeneratorPanel.value?.buildRequest()
+    if (!generator) return
+    status.value = await api.setGenerator({
+      left: generator.left,
+      right: generator.right,
+      snapToBin: generator.snapToBin,
+      // So a generator turned on before Run brings the stream up at this screen's rate rather than
+      // the FFT screen's -- see GeneratorEndpoints' streamConfigHint.
+      sampleRateHz: scopeStagedSampleRateHz.value,
+    })
+    scopeGeneratorPanel.value?.resyncTones(status.value)
+  })
+}
 const scopeChart = ref<InstanceType<typeof OscilloscopeScreenChart> | null>(null)
 
 const {
@@ -2155,8 +2220,17 @@ const scopeExtremes = computed(() => {
 })
 
 async function runOscilloscope(request: import('./api/client').OscilloscopeStartRequest) {
+  // The generator is merged in here rather than built by ScopeConfigPanel: the panel composing the
+  // stimulus is its sibling in the rail, and a retune must *not* carry one (the endpoint refuses
+  // it), so this is the one path that adds it.
+  const generator = scopeGeneratorPanel.value?.buildRequest()
+  const withGenerator = generator
+    ? { ...request, generatorLeft: generator.left, generatorRight: generator.right, snapToBin: generator.snapToBin }
+    : request
+
   try {
-    await startOscilloscope(request)
+    await startOscilloscope(withGenerator)
+    if (status.value) scopeGeneratorPanel.value?.resyncTones(status.value)
   } catch {
     // The composable has already put the refusal on `scopeError`, which the screen prints.
   }
@@ -4276,7 +4350,13 @@ function buildTypeParamsJsonCore(): string | undefined {
   if (isOscilloscope.value) {
     const base = scopeConfigPanel.value?.buildParamsJson()
     if (!base) return undefined
-    return JSON.stringify({ ...JSON.parse(base), ...scopeDisplayToParams(currentScopeDisplay()) })
+    return JSON.stringify({
+      ...JSON.parse(base),
+      ...scopeDisplayToParams(currentScopeDisplay()),
+      // The stimulus this measurement plays, which is the one thing on this screen the server
+      // cannot tell us back: ApplyAsync answers this kind with the live session's generator.
+      ...scopeGeneratorToParams(scopeGeneratorPanel.value?.buildRequest(), scopeGeneratorRestore.value),
+    })
   }
 
   if (isCrosstalk.value) {
@@ -5687,6 +5767,16 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   </button>
                 </div>
 
+                <GeneratorPanel
+                  ref="scopeGeneratorPanel"
+                  :ranges="ranges"
+                  :device-kind="status?.deviceKind"
+                  :restore="scopeGeneratorRestore"
+                  :stimulus="scopeStimulus"
+                  :staged-sample-rate-hz="scopeStagedSampleRateHz"
+                  @change="applyScopeGeneratorLive"
+                />
+
                 <ScopeConfigPanel
                   ref="scopeConfigPanel"
                   :running="scopeRunning"
@@ -5699,6 +5789,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:record-seconds="scopeRecordSeconds"
                   v-model:pre-trigger-fraction="scopePreTriggerFraction"
                   v-model:mode="scopeMode"
+                  v-model:sample-rate-hz="scopeStagedSampleRateHz"
                   @run="runOscilloscope"
                   @retune="onScopeRetune"
                 />
@@ -6442,6 +6533,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 ref="generatorPanel"
                 :ranges="ranges"
                 :device-kind="status?.deviceKind"
+                :restore="fftGeneratorRestore"
                 @change="applyGeneratorLive"
               />
               <SpectrumConfigPanel

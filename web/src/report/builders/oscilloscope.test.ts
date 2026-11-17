@@ -103,20 +103,18 @@ describe('scopeMeasurementSections', () => {
   it('quotes the extremes off the picture and the mean off the samples', () => {
     const sections = scopeMeasurementSections(scopeData().record, 0.5, true, true)
     const table = sections.find((s) => s.kind === 'table')
-    expect(table).toBeDefined()
-    if (table?.kind !== 'table') throw new Error('expected a table')
-    expect(table.headers).toEqual(['Channel', 'Maximum', 'Minimum', 'Peak to peak', 'Mean'])
+    expect(table?.headers).toEqual(['Channel', 'Maximum', 'Minimum', 'Peak to peak', 'Mean'])
+    const cells = table?.cells ?? []
     // The mean is the slice's own, not derived from the min/max pair -- which for this slice would
     // be 0.000 V on both channels, and is the whole reason it travels beside the picture.
-    expect(table.cells[0]).toEqual(['Left', '1.000 V', '-1.000 V', '2.000 V', '0.020 V'])
-    expect(table.cells[1]).toEqual(['Right', '0.500 V', '-0.500 V', '1.000 V', '-0.010 V'])
+    expect(cells[0]).toEqual(['Left', '1.000 V', '-1.000 V', '2.000 V', '0.020 V'])
+    expect(cells[1]).toEqual(['Right', '0.500 V', '-0.500 V', '1.000 V', '-0.010 V'])
   })
 
   it('leaves out a channel the display rail is hiding, as the screen does', () => {
     const sections = scopeMeasurementSections(scopeData().record, 0.5, true, false)
     const table = sections.find((s) => s.kind === 'table')
-    if (table?.kind !== 'table') throw new Error('expected a table')
-    expect(table.cells.map((row) => row[0])).toEqual(['Left'])
+    expect((table?.cells ?? []).map((row) => row[0])).toEqual(['Left'])
   })
 
   it('says so when nothing was captured', () => {
@@ -133,8 +131,7 @@ describe('scopeMeasurementSections', () => {
       true,
     )
     const facts = sections.find((s) => s.kind === 'keyValues')
-    if (facts?.kind !== 'keyValues') throw new Error('expected the record facts')
-    const labels = facts.rows.map((r) => r.label)
+    const labels = (facts?.rows ?? []).map((r) => r.label)
     expect(labels).toContain('Untriggered')
     expect(labels).toContain('Spliced')
   })
@@ -144,7 +141,7 @@ describe('scopeMeasurementSections', () => {
     // read as the DUT's.
     const text = scopeMeasurementSections(scopeData().record, 0.5, true, true)
       .filter((s) => s.kind === 'paragraph')
-      .map((s) => (s.kind === 'paragraph' ? s.text : ''))
+      .map((s) => s.text ?? '')
       .join(' ')
     expect(text).toMatch(/AC-coupled/)
   })

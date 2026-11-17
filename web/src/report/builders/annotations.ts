@@ -38,6 +38,7 @@ export function annotationsOf(data: ReportSubjectData): ChartAnnotation[] {
     case 'impedance':
     case 'outputImpedance':
     case 'crosstalk':
+    case 'scope':
       return data.display.annotations
     default:
       return []

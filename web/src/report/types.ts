@@ -6,6 +6,8 @@ import type {
   MeasurementDetail,
   ReportRow,
   ResponsePhaseKindName,
+  ScopeRecordResponse,
+  ScopeTriggerSource,
   ThdMethodName,
   ThdSweepPoint,
 } from '../api/client'
@@ -20,6 +22,7 @@ import type { ImpulseRunFacts } from '../measurements/impulseReadings'
 import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
+import type { ScopeDisplay } from '../scope/display'
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame, MultitoneFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { StimulusSummary } from '../metrics'
@@ -146,6 +149,27 @@ export type ReportSubjectData =
       /** What the damping factor is quoted against. */
       nominalOhms: number
       rightChannelIsReference: boolean
+    }
+  | {
+      kind: 'scope'
+      /**
+       * The slice the chart is drawing — the window on screen, cut by the analyzer, exactly as the
+       * screen has it. Null when nothing has been captured, which prints the chapter without its
+       * picture rather than refusing it.
+       *
+       * <p>A <b>stored</b> result has none: its samples are in <code>capture.pcm</code> and reach a
+       * reader through the CSV export, so a stored scope result reports its settings and its notes
+       * and says so. The FFT screen's own scope element has the same shape of limitation.</p>
+       */
+      record: ScopeRecordResponse | null
+      display: ScopeDisplay
+      /** Where the trigger line sits, and the band around it — drawn over the trace. */
+      triggerLevelV: number
+      triggerHysteresisV: number
+      triggerSource: ScopeTriggerSource
+      /** What the settings ask for, which is the axis an empty chart draws. */
+      recordSeconds: number
+      preTriggerFraction: number
     }
   | {
       kind: 'crosstalk'

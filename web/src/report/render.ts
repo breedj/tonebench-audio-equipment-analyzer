@@ -11,6 +11,7 @@ import ImpedancePlaneChart from '../components/ImpedancePlaneChart.vue'
 import ImpulseHarmonicsChart from '../components/ImpulseHarmonicsChart.vue'
 import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
 import OscilloscopeChart from '../components/OscilloscopeChart.vue'
+import OscilloscopeScreenChart from '../components/OscilloscopeScreenChart.vue'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
@@ -81,6 +82,11 @@ export function subjectHasChartData(subject: ReportSubject): boolean {
       return data.traces.length > 0
     case 'crosstalk':
       return data.traces.length > 0
+    case 'scope':
+      // A stored result keeps its samples in capture.pcm and has none here, so its chapter prints
+      // its settings and its notes and no picture -- the FFT screen's own scope element has the
+      // same shape of limitation.
+      return data.record !== null && data.record.channels.length > 0
     case 'outputImpedance':
       return data.trace !== null
     default:
@@ -530,6 +536,36 @@ export async function renderView(
         options,
       )
       return { png, caption: 'Output impedance and damping factor against frequency' }
+    }
+
+    case 'scope': {
+      if (!data.record || view !== 'Oscilloscope') return null
+      const { record, display } = data
+      const png = await renderChartPng(
+        OscilloscopeScreenChart,
+        {
+          record,
+          annotations: display.annotations,
+          annotationNumbers,
+          voltsPerDivision: display.voltsPerDivision,
+          voltOffsetV: display.voltOffsetV,
+          timeFromS: display.timeFromS,
+          timeToS: display.timeToS,
+          thickLines: display.thickLines,
+          showDataPoints: display.showDataPoints,
+          showTriggerLevel: display.showTriggerLevel,
+          showLeft: display.showLeft,
+          showRight: display.showRight,
+          triggerLevelV: data.triggerLevelV,
+          triggerHysteresisV: data.triggerHysteresisV,
+          triggerSource: data.triggerSource,
+          recordSeconds: data.recordSeconds,
+          preTriggerFraction: data.preTriggerFraction,
+          running: false,
+        },
+        options,
+      )
+      return { png, caption: 'The captured waveform against time, with the trigger at zero' }
     }
 
     case 'crosstalk': {

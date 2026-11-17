@@ -5,6 +5,7 @@ import {
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../../measurements/kinds'
@@ -17,6 +18,7 @@ import { frequencyResponseSections } from './frequencyResponse'
 import { descriptionSections, genericSettingsSection } from './generic'
 import { impedanceSections } from './impedance'
 import { impulseResponseSections } from './impulseResponse'
+import { scopeSections } from './oscilloscope'
 import { spectrumSections } from './spectrum'
 import { sweepSections } from './sweep'
 
@@ -52,6 +54,7 @@ function kindSections(subject: ReportSubject, elements: readonly ReportElementId
   if (isSweepKind(subject.kind)) return sweepSections(subject, elements)
   if (isImpedanceKind(subject.kind)) return impedanceSections(subject, elements)
   if (isImpulseResponseKind(subject.kind)) return impulseResponseSections(subject, elements)
+  if (isOscilloscopeKind(subject.kind)) return scopeSections(subject, elements)
   if (subject.kind === FFT_SPECTRUM_KIND) return spectrumSections(subject, elements)
 
   const sections: ReportSection[] = []

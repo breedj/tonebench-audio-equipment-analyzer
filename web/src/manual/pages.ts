@@ -23,6 +23,7 @@ import {
   IMD_VS_AMPLITUDE_KIND,
   IMPEDANCE_KIND,
   IMPULSE_RESPONSE_KIND,
+  OSCILLOSCOPE_KIND,
   STEPPED_RESPONSE_KIND,
   THD_VS_AMPLITUDE_KIND,
   THD_VS_FREQUENCY_KIND,
@@ -211,6 +212,14 @@ const GUIDE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/guide/GuideAmplifierPage.vue')),
   },
   {
+    id: 'guide-waveform',
+    title: 'Looking at the waveform',
+    summary: 'The oscilloscope: what a trigger is for, how to make the picture stand still, and what a flat top means.',
+    group: 'Things to measure',
+    counterpart: 'oscilloscope',
+    component: manualPage(() => import('./pages/guide/GuideWaveformPage.vue')),
+  },
+  {
     id: 'guide-loudspeaker',
     title: 'Measuring a loudspeaker',
     summary: 'A resistor, two clips and an impedance curve — the easiest useful measurement on the bench.',
@@ -325,6 +334,13 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     component: manualPage(() => import('./pages/wiring/WiringOutputImpedancePage.vue')),
   },
   {
+    id: 'wiring-oscilloscope',
+    title: 'Wiring: the oscilloscope',
+    summary: 'The reference leg that puts the stimulus on screen beside the response, and the two things this wiring cannot give you.',
+    group: 'Wiring',
+    component: manualPage(() => import('./pages/wiring/WiringOscilloscopePage.vue')),
+  },
+  {
     id: 'fft-spectrum',
     title: 'FFT analysis',
     summary: 'Spectrum, THD, harmonics and noise floor from a single FFT capture.',
@@ -387,6 +403,14 @@ const REFERENCE_PAGES: ManualPageEntry[] = [
     kind: CROSSTALK_KIND,
     group: 'Measurements',
     component: manualPage(() => import('./pages/CrosstalkPage.vue')),
+  },
+  {
+    id: 'oscilloscope',
+    title: 'Oscilloscope',
+    summary: 'The waveform itself against time: a triggered capture, free pre-trigger, and a zoom that fetches every sample.',
+    kind: OSCILLOSCOPE_KIND,
+    group: 'Measurements',
+    component: manualPage(() => import('./pages/OscilloscopePage.vue')),
   },
   {
     id: 'output-impedance',

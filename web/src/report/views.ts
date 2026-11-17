@@ -4,6 +4,7 @@ import {
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../measurements/kinds'
@@ -47,6 +48,9 @@ const IMPEDANCE_VIEWS: ReportView[] = [
 ]
 const CROSSTALK_VIEWS: ReportView[] = [{ id: 'Crosstalk', label: 'Crosstalk', combinable: true }]
 const OUTPUT_IMPEDANCE_VIEWS: ReportView[] = [{ id: 'Bode', label: 'Output impedance', combinable: true }]
+// Not combinable, and the id is the annotation view's: a waveform chart draws one record and takes
+// no overlays, so two measurements cannot share it any more than two can share a decay surface.
+const OSCILLOSCOPE_VIEWS: ReportView[] = [{ id: 'Oscilloscope', label: 'Waveform', combinable: false }]
 
 export function reportViewsForKind(kind: string | null | undefined): readonly ReportView[] {
   if (kind === FFT_SPECTRUM_KIND) return SPECTRUM_VIEWS
@@ -56,6 +60,7 @@ export function reportViewsForKind(kind: string | null | undefined): readonly Re
   if (isImpedanceKind(kind)) return IMPEDANCE_VIEWS
   if (isCrosstalkKind(kind)) return CROSSTALK_VIEWS
   if (isOutputImpedanceKind(kind)) return OUTPUT_IMPEDANCE_VIEWS
+  if (isOscilloscopeKind(kind)) return OSCILLOSCOPE_VIEWS
   return []
 }
 

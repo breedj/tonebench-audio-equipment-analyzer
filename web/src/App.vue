@@ -3321,6 +3321,22 @@ function buildLiveSubject(): ReportSubject | null {
       rightChannelIsReference: responseRightChannelIsReference.value,
       latencySamples: responseLatencySamples.value,
     }
+  } else if (isOscilloscope.value) {
+    subject.sampleRateHz = scopeRecord.value?.sampleRateHz ?? scopeStagedSampleRateHz.value
+    if (subject.sampleRateHz > 0) facts.push({ label: 'Sample rate', value: `${subject.sampleRateHz} Hz` })
+    if (scopeRecord.value) facts.push({ label: 'Record', value: `${scopeRecord.value.frameCount.toLocaleString()} samples` })
+    subject.data = {
+      kind: 'scope',
+      // The slice on screen, which is what the chart draws -- a zoom included, since here the
+      // window *is* the measurement being reported rather than a view of a wider one.
+      record: scopeRecord.value,
+      display: currentScopeDisplay(),
+      triggerLevelV: scopeTriggerLevelV.value,
+      triggerHysteresisV: scopeTriggerHysteresisV.value,
+      triggerSource: scopeTriggerSource.value,
+      recordSeconds: scopeRecordSeconds.value,
+      preTriggerFraction: scopePreTriggerFraction.value,
+    }
   } else if (isCrosstalk.value) {
     subject.sampleRateHz = responseSampleRateHz.value
     if (responseSampleRateHz.value > 0) facts.push({ label: 'Sample rate', value: `${responseSampleRateHz.value} Hz` })

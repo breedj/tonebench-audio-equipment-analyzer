@@ -4,6 +4,7 @@ import {
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../measurements/kinds'
@@ -120,6 +121,12 @@ const OSCILLOSCOPE: ReportElement = {
   hint: 'The waveform under the spectrum. Only for the measurement on screen — a stored result keeps no waveform.',
 }
 
+const SCOPE_MEASUREMENTS: ReportElement = {
+  id: 'measurements',
+  label: 'Measurements',
+  hint: 'Per drawn channel: maximum, minimum, peak to peak and the mean — then the record itself, its rate and where the trigger sits in it.',
+}
+
 const SPECTROGRAM: ReportElement = {
   id: 'spectrogram',
   label: 'Spectrogram',
@@ -146,6 +153,7 @@ export function reportElementsForKind(kind: string | null | undefined): readonly
   if (isImpedanceKind(kind))
     return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, IMPEDANCE_MEASUREMENTS, IMPEDANCE_COMPONENT, IMPEDANCE_EQUIVALENT]
   if (isImpulseResponseKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, IMPULSE_MEASUREMENTS]
+  if (isOscilloscopeKind(kind)) return [CHART, DESCRIPTION, SETTINGS, ANNOTATIONS, SCOPE_MEASUREMENTS]
   if (kind === FFT_SPECTRUM_KIND)
     return [CHART, DESCRIPTION, SETTINGS, METRICS, HARMONICS, ANNOTATIONS, OSCILLOSCOPE, SPECTROGRAM]
   return GENERIC_REPORT_ELEMENTS

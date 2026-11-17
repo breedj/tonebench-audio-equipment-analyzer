@@ -4709,6 +4709,16 @@ export const api = {
   startOscilloscope: (req: OscilloscopeStartRequest) =>
     request<OscilloscopeStarted>('/oscilloscope/start', { method: 'POST', body: JSON.stringify(req) }),
 
+  /**
+   * New settings for the capture already running, applied without stopping it.
+   *
+   * <p>The same body as a start, minus the generator, which this route refuses rather than ignores.
+   * It is not guarded by <code>MeasurementRunGuard</code> — a retune is not a start, and "another
+   * measurement is still running" is exactly the answer a turned knob must never get.</p>
+   */
+  retuneOscilloscope: (req: OscilloscopeStartRequest) =>
+    request<OscilloscopeStatus>('/oscilloscope/retune', { method: 'POST', body: JSON.stringify(req) }),
+
   cancelOscilloscope: () => request<OscilloscopeStatus>('/oscilloscope/cancel', { method: 'POST' }),
 
   clearOscilloscope: () => request<OscilloscopeStatus>('/oscilloscope/clear', { method: 'POST' }),

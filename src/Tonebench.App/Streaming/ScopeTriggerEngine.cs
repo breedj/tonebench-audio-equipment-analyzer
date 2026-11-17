@@ -40,6 +40,12 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
 
     private ScopeCaptureSpec _spec;
     private IScanTrigger? _scanner;
+
+    /// <summary>
+    /// A retune waiting to be taken up, built on the caller's thread and applied on the stream's.
+    /// See <see cref="Retune"/>.
+    /// </summary>
+    private (ScopeCaptureSpec Spec, IScanTrigger Scanner)? _pending;
     private ScopeEngineState _state = ScopeEngineState.Idle;
     private ScopeRecord? _record;
 
@@ -73,35 +79,58 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     /// </summary>
     public void Arm(ScopeCaptureSpec spec, long droppedTotal)
     {
-        if (spec.RecordFrames < 2)
-            throw new ArgumentOutOfRangeException(nameof(spec), spec.RecordFrames, "A record needs at least two frames.");
-        if (spec.PreTriggerFrames < 0 || spec.PreTriggerFrames > spec.RecordFrames)
-            throw new ArgumentOutOfRangeException(nameof(spec), spec.PreTriggerFrames, "The pre-trigger cannot be negative or longer than the record.");
-        if (!(spec.SampleRateHz > 0.0))
-            throw new ArgumentOutOfRangeException(nameof(spec), spec.SampleRateHz, "The sample rate must be positive.");
-
-        _spec = spec;
-
-        // Twice the record, so a hit landing anywhere in the newest block still has a whole
-        // pre-trigger window behind it that has not been overwritten while the rest was filling.
-        _buffer.EnsureCapacity(checked(spec.RecordFrames * 2));
-
-        _scanner = spec.Trigger.Kind switch
-        {
-            TriggerKind.Edge => new EdgeTrigger(spec.Trigger),
-            _ => throw new NotSupportedException($"The {spec.Trigger.Kind} trigger is not implemented yet."),
-        };
+        Validate(spec);
+        var scanner = BuildScanner(spec);
 
         _droppedAtArm = droppedTotal;
         _droppedSeen = droppedTotal;
-        _armedAt = _buffer.Newest;
-        _forced = false;
 
         lock (_handoff)
-        {
             _record = null;
-            _state = spec.Mode == ScopeRunMode.Roll ? ScopeEngineState.Idle : ScopeEngineState.Waiting;
-        }
+
+        Take(spec, scanner);
+
+        // A retune queued before this arm is deliberately NOT dropped, and that is not an
+        // oversight. OscilloscopeRunner.StartAsync sets its phase and spawns the run task, so the
+        // runner is Running -- and therefore retunable -- a moment before the task gets here: a
+        // control turned in that moment reaches Retune first and would be lost silently, which the
+        // user meets as a knob that did nothing. A retune can only ever arrive after its own run's
+        // start, so a pending one is always the newer intent; one left over from a run that has
+        // ended is cleared by Disarm, which every run's finally calls.
+    }
+
+    /// <summary>
+    /// Changes the settings of a capture already running, without stopping it.
+    ///
+    /// <para><b>Why this exists.</b> A trigger level is set by dragging it, so a level that only
+    /// took effect on a restart would be a level nobody could find -- and the same is true of every
+    /// other control on a bench instrument, where nothing needs a stop and a start to take effect.
+    /// The one setting that genuinely cannot be applied to a capture already running is the sample
+    /// rate, which re-clocks the hardware; <see cref="Services.OscilloscopeRunner.Retune"/> refuses
+    /// that by name rather than appearing to honour it.</para>
+    ///
+    /// <para>The spec is validated and its scanner built <b>here</b>, on the caller's thread, so a
+    /// setting this engine cannot honour is an error on the request that asked for it rather than
+    /// an exception thrown on the stream. It is <b>applied</b> on the stream's own thread, at the
+    /// top of the next <see cref="Write"/>, because that is the only thread allowed to touch the
+    /// scan state -- so a retune lands within one block, a few tens of milliseconds at any
+    /// supported rate.</para>
+    ///
+    /// <para>What it abandons is deliberate. A fill in progress goes back to waiting: the record it
+    /// was filling was triggered on settings the user has just replaced. A record already committed
+    /// and not yet taken is <i>kept</i> -- it is the last thing the screen saw, and blanking the
+    /// trace because a knob moved is the opposite of what the knob is for.</para>
+    ///
+    /// <para>A retune that lands just before <see cref="Arm"/> survives it rather than being
+    /// dropped; see the note there for why that window is reachable at all.</para>
+    /// </summary>
+    public void Retune(ScopeCaptureSpec spec)
+    {
+        Validate(spec);
+        var scanner = BuildScanner(spec);
+
+        lock (_handoff)
+            _pending = (spec, scanner);
     }
 
     /// <summary>Stops capturing. A record already committed stays takeable.</summary>
@@ -110,9 +139,62 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         _scanner = null;
         lock (_handoff)
         {
+            // Or a retune that arrived as the run was ending would re-arm a disarmed engine.
+            _pending = null;
+
             if (_state is ScopeEngineState.Waiting or ScopeEngineState.Filling)
                 _state = ScopeEngineState.Idle;
         }
+    }
+
+    private static void Validate(ScopeCaptureSpec spec)
+    {
+        if (spec.RecordFrames < 2)
+            throw new ArgumentOutOfRangeException(nameof(spec), spec.RecordFrames, "A record needs at least two frames.");
+        if (spec.PreTriggerFrames < 0 || spec.PreTriggerFrames > spec.RecordFrames)
+            throw new ArgumentOutOfRangeException(nameof(spec), spec.PreTriggerFrames, "The pre-trigger cannot be negative or longer than the record.");
+        if (!(spec.SampleRateHz > 0.0))
+            throw new ArgumentOutOfRangeException(nameof(spec), spec.SampleRateHz, "The sample rate must be positive.");
+    }
+
+    private static IScanTrigger BuildScanner(ScopeCaptureSpec spec) => spec.Trigger.Kind switch
+    {
+        TriggerKind.Edge => new EdgeTrigger(spec.Trigger),
+        _ => throw new NotSupportedException($"The {spec.Trigger.Kind} trigger is not implemented yet."),
+    };
+
+    /// <summary>Puts a validated spec and its scanner into service: armed, and scanning from here on.</summary>
+    private void Take(ScopeCaptureSpec spec, IScanTrigger scanner)
+    {
+        _spec = spec;
+
+        // Twice the record, so a hit landing anywhere in the newest block still has a whole
+        // pre-trigger window behind it that has not been overwritten while the rest was filling.
+        _buffer.EnsureCapacity(checked(spec.RecordFrames * 2));
+
+        _scanner = scanner;
+        _armedAt = _buffer.Newest;
+        _forced = false;
+
+        lock (_handoff)
+            _state = spec.Mode == ScopeRunMode.Roll ? ScopeEngineState.Idle : ScopeEngineState.Waiting;
+    }
+
+    /// <summary>Takes up a queued retune. Called at the top of <see cref="Write"/> and nowhere else.</summary>
+    private void ApplyPending()
+    {
+        (ScopeCaptureSpec Spec, IScanTrigger Scanner) pending;
+        lock (_handoff)
+        {
+            if (_pending is not { } next)
+                return;
+
+            _pending = null;
+            pending = next;
+        }
+
+        _droppedAtArm = _droppedSeen;
+        Take(pending.Spec, pending.Scanner);
     }
 
     /// <summary>
@@ -140,6 +222,8 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     /// </param>
     public void Write(ReadOnlySpan<float> interleaved, ReadOnlySpan<double> scale, bool startsAfterDiscontinuity, long droppedTotal)
     {
+        ApplyPending();
+
         long from = _buffer.Newest;
         _buffer.Write(interleaved, scale, startsAfterDiscontinuity);
         long to = _buffer.Newest;

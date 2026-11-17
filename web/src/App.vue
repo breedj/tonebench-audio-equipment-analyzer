@@ -2060,7 +2060,9 @@ const {
   progressLabel: scopeProgressLabel,
   recordsTaken: scopeRecordsTaken,
   recordBounds: scopeRecordBounds,
+  sampleRateHz: scopeSampleRateHz,
   start: startOscilloscope,
+  retune: retuneOscilloscope,
   cancel: cancelOscilloscopeRun,
   clear: clearOscilloscopeRun,
   switchOwner: switchOscilloscopeOwner,
@@ -2142,17 +2144,44 @@ async function runOscilloscope(request: import('./api/client').OscilloscopeStart
 }
 
 /**
- * Re-arms after the trigger line has been dragged.
+ * A setting turned while the scope is running, handed to the capture in flight.
  *
- * <p>Only while something is running, and only in the two modes that re-arm themselves: in Single
- * the level decides what the <em>next</em> press of Single does, and interrupting a held capture to
- * apply it would throw away the record on screen. Debounced to the release rather than written per
- * pointer move -- re-arming per pixel would throw away a capture per pixel.</p>
+ * <p><b>Nothing here restarts the run</b>, and that is the point: a scope is set up <em>while</em>
+ * it is running, so "another measurement is still running — stop or cancel it first" is the one
+ * answer a turned knob must never get. <code>/retune</code> is not a start and is not behind
+ * <code>MeasurementRunGuard</code>.</p>
+ *
+ * <p><b>Except the sample rate</b>, which re-clocks the analyzer and so cannot be applied to a
+ * capture in flight at all. The server refuses it by name; this answers that refusal before it
+ * happens, by stopping and starting the run itself — which is what the user meant by turning the
+ * control, and costs them nothing to find out.</p>
  */
-async function onScopeTriggerLevelCommitted() {
+async function onScopeRetune(request: import('./api/client').OscilloscopeStartRequest) {
   if (!scopeRunning.value) return
-  if (scopeMode.value === 'Single') return
-  scopeConfigPanel.value?.run()
+
+  if (Math.abs(request.sampleRateHz - scopeSampleRateHz.value) > 0.5) {
+    await cancelOscilloscopeRun()
+    await runOscilloscope(request)
+    return
+  }
+
+  try {
+    await retuneOscilloscope(request)
+  } catch {
+    // The run ended between the check and the request -- the poll already says so, and a refusal
+    // the user cannot act on is worse than silence.
+  }
+}
+
+/**
+ * The release of a trigger-line drag: whatever the debounce still owes, sent now.
+ *
+ * <p>The level is written live so the line and the box cannot disagree mid-drag, and the
+ * <em>capture</em> follows on a debounce so a drag costs one request rather than one per pointer
+ * move. Flushing on the release is what keeps the two from disagreeing after the user has let go.</p>
+ */
+function onScopeTriggerLevelCommitted() {
+  scopeConfigPanel.value?.flushRetune()
 }
 
 /** "Set axis" from the chart: the window on screen written back into the display panel's boxes. */
@@ -5634,6 +5663,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:pre-trigger-fraction="scopePreTriggerFraction"
                   v-model:mode="scopeMode"
                   @run="runOscilloscope"
+                  @retune="onScopeRetune"
                 />
 
                 <ScopeMeasurementsPanel

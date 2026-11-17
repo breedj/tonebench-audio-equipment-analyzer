@@ -369,4 +369,167 @@ public class ScopeTriggerEngineTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => engine.Arm(Spec(recordFrames: 2048, preTriggerFrames: preTriggerFrames), droppedTotal: 0));
     }
+    /// <summary>
+    /// The report this was written for: in Normal, a level moved past the signal must stop the
+    /// trace. It did not, because the level never reached the engine -- the only way to change it
+    /// was a restart, and a restart is refused while the run that owns the session is going.
+    /// </summary>
+    [Fact]
+    public void ARetunedLevelStopsACaptureThatWasTriggeringHappily()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        Assert.NotEmpty(Feed(engine, blocks: 4));
+
+        // Past the square's own +1, so nothing can cross it.
+        engine.Retune(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal) with
+        {
+            Trigger = TriggerSpec.Edge(5.0),
+        });
+
+        Assert.Empty(Feed(engine, blocks: 4, firstIndex: 4L * BlockFrames));
+        Assert.Equal(ScopeEngineState.Waiting, engine.State);
+    }
+
+    /// <summary>
+    /// And the other way about, which is what makes it a retune rather than a stop: a level moved
+    /// back onto the signal starts catching records again, with no arm in between.
+    /// </summary>
+    [Fact]
+    public void ARetunedLevelStartsCatchingAgainWithoutBeingRearmed()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal) with
+        {
+            Trigger = TriggerSpec.Edge(5.0),
+        }, droppedTotal: 0);
+
+        Assert.Empty(Feed(engine, blocks: 4));
+
+        engine.Retune(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal));
+
+        Assert.NotEmpty(Feed(engine, blocks: 4, firstIndex: 4L * BlockFrames));
+    }
+
+    /// <summary>
+    /// A retune is taken up on the stream's own thread, at the top of the next block -- it is built
+    /// on the caller's, which is an HTTP thread, and that one may not touch the scan state.
+    /// </summary>
+    [Fact]
+    public void ARetuneIsTakenUpOnTheNextBlockAndNotBefore()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        var retuned = Spec(recordFrames: 2048, preTriggerFrames: 512, mode: ScopeRunMode.Normal);
+        engine.Retune(retuned);
+
+        Assert.Equal(1024, engine.Spec.RecordFrames);
+
+        Feed(engine, blocks: 1);
+
+        Assert.Equal(2048, engine.Spec.RecordFrames);
+    }
+
+    /// <summary>
+    /// A fill in progress is abandoned: the record it was filling was triggered on settings the
+    /// user has just replaced, so committing it would draw the old trigger under the new readout.
+    /// </summary>
+    [Fact]
+    public void ARetuneAbandonsAFillInProgress()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 4096, preTriggerFrames: 2048, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        Feed(engine, blocks: 1);
+        Assert.Equal(ScopeEngineState.Filling, engine.State);
+
+        engine.Retune(Spec(recordFrames: 4096, preTriggerFrames: 2048, mode: ScopeRunMode.Normal) with
+        {
+            Trigger = TriggerSpec.Edge(5.0),
+        });
+        Feed(engine, blocks: 1, firstIndex: BlockFrames);
+
+        Assert.Equal(ScopeEngineState.Waiting, engine.State);
+    }
+
+    /// <summary>
+    /// What a retune must <i>not</i> throw away: the record already on screen. A level moved past
+    /// the signal is exactly when the last capture has to stay -- a blank chart would read as the
+    /// scope having broken rather than as the trigger having been set where nothing crosses it.
+    /// </summary>
+    [Fact]
+    public void ARetuneKeepsTheRecordAlreadyCommitted()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        // Fed without taking what it commits, so there is an uncollected record to lose.
+        for (int b = 0; b < 2; b++)
+            engine.Write(Square(b * BlockFrames, BlockFrames, 512), default, startsAfterDiscontinuity: false, 0);
+
+        engine.Retune(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal) with
+        {
+            Trigger = TriggerSpec.Edge(5.0),
+        });
+        engine.Write(Square(2 * BlockFrames, BlockFrames, 512), default, startsAfterDiscontinuity: false, 0);
+
+        Assert.NotNull(engine.TakeRecord());
+    }
+
+    /// <summary>
+    /// A retune queued <i>before</i> the arm is honoured, which is not the obvious reading and is
+    /// the one the runner needs: <c>StartAsync</c> sets its phase and spawns the run task, so the
+    /// runner is Running -- and therefore retunable -- a moment before the task reaches
+    /// <c>Arm</c>. A control turned in that moment reaches Retune first, and dropping the pending
+    /// retune at the arm would lose it silently: a knob that did nothing.
+    /// </summary>
+    [Fact]
+    public void ARetuneQueuedBeforeTheArmSurvivesIt()
+    {
+        var (_, engine) = NewEngine();
+        engine.Retune(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal));
+        engine.Arm(Spec(recordFrames: 2048, preTriggerFrames: 1024, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        Feed(engine, blocks: 1);
+
+        Assert.Equal(1024, engine.Spec.RecordFrames);
+    }
+
+    /// <summary>A retune that arrived as the run was ending must not re-arm a disarmed engine.</summary>
+    [Fact]
+    public void DisarmDropsARetuneThatHasNotBeenTakenUp()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        engine.Retune(Spec(recordFrames: 1024, preTriggerFrames: 512, mode: ScopeRunMode.Normal));
+        engine.Disarm();
+        Feed(engine, blocks: 2);
+
+        Assert.Equal(ScopeEngineState.Idle, engine.State);
+    }
+
+    /// <summary>
+    /// A setting the engine cannot honour is an error on the request that asked for it, not an
+    /// exception thrown later on the stream -- which is why the spec is validated and its scanner
+    /// built on the caller's thread rather than at the top of the next block.
+    /// </summary>
+    [Fact]
+    public void ARetuneToAnUnimplementedTriggerIsRefusedOnTheCallersThread()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        var spec = Spec(mode: ScopeRunMode.Normal) with
+        {
+            Trigger = new TriggerSpec(TriggerKind.Runt, TriggerSource.ChannelA, TriggerSlope.Rising, 0.0),
+        };
+
+        Assert.Throws<NotSupportedException>(() => engine.Retune(spec));
+
+        // And the capture it was armed with is untouched.
+        Assert.NotEmpty(Feed(engine, blocks: 3));
+    }
 }

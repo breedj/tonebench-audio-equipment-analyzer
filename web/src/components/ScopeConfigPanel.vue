@@ -60,6 +60,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   run: [request: OscilloscopeStartRequest]
+  retune: [request: OscilloscopeStartRequest]
 }>()
 
 const { markDirty } = useProjects()
@@ -240,10 +241,9 @@ function buildParamsJson(): string {
   return JSON.stringify(parameters)
 }
 
-/** A run in whatever mode is staged, or in `Single` for the Single button. */
-function run(single = false): void {
-  if (invalid.value) return
-  emit('run', {
+/** The staged settings as the server takes them. One builder, so a start and a retune agree. */
+function buildRequest(single = false): OscilloscopeStartRequest {
+  return {
     sampleRateHz: form.sampleRateHz,
     recordSeconds: form.recordMs / 1000,
     preTriggerFraction: form.preTriggerPercent / 100,
@@ -257,10 +257,67 @@ function run(single = false): void {
     autoTimeoutSeconds: form.autoTimeoutMs / 1000,
     processLeft: form.processLeft,
     processRight: form.processRight,
-  })
+  }
 }
 
-defineExpose({ run, invalid, buildParamsJson })
+/** A run in whatever mode is staged, or in `Single` for the Single button. */
+function run(single = false): void {
+  if (invalid.value) return
+  emit('run', buildRequest(single))
+}
+
+/**
+ * How long a change waits before it is sent to a running capture.
+ *
+ * <p>Long enough that dragging the trigger line sends one request rather than one per pointer move,
+ * short enough that a typed figure lands before the eye leaves the box. The drag's own release
+ * flushes whatever is still owed, so the wait is never felt at the end of a gesture.</p>
+ */
+const RETUNE_DEBOUNCE_MS = 80
+
+let retuneHandle: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Sends the staged settings to the capture already running, now.
+ *
+ * <p>Called on the release of a trigger-line drag, where waiting out the debounce would leave the
+ * line and the capture disagreeing for a tenth of a second after the user has let go.</p>
+ */
+function flushRetune(): void {
+  if (retuneHandle !== null) {
+    clearTimeout(retuneHandle)
+    retuneHandle = null
+  }
+  if (!props.running || invalid.value) return
+  emit('retune', buildRequest())
+}
+
+/**
+ * Every control takes effect where it is turned.
+ *
+ * <p>A scope is set up while it is running — the trigger level above all else, which is <em>set</em>
+ * by dragging it — so a change that needed a stop and a start would be a change the user has to
+ * work around. Nothing here restarts the run: <code>/retune</code> hands the settings to the
+ * capture in flight, and the one setting that cannot be handed over, the sample rate, is answered
+ * by App.vue restarting the run rather than by an error the user did not cause.</p>
+ *
+ * <p>Gated on `restoring` for the dirty watcher's reason: loading a type's saved settings is not a
+ * turn of a knob. An invalid form sends nothing and the next valid change catches up.</p>
+ */
+watch(
+  () => [form, triggerLevelV.value, triggerHysteresisV.value, triggerSource.value, mode.value] as const,
+  () => {
+    if (restoring || !props.running) return
+    if (retuneHandle !== null) clearTimeout(retuneHandle)
+    retuneHandle = setTimeout(() => {
+      retuneHandle = null
+      flushRetune()
+    }, RETUNE_DEBOUNCE_MS)
+  },
+  { deep: true },
+)
+
+defineExpose({ run, flushRetune, invalid, buildParamsJson })
 
 function onRecordChange(event: Event) {
   const typed = Number((event.target as HTMLInputElement).value)

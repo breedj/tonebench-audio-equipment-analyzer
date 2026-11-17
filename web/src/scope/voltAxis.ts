@@ -130,6 +130,31 @@ export function formatVolts(volts: number, voltsPerDivision: number, withUnit = 
   return withUnit ? `${cleaned} ${milli ? 'mV' : 'V'}` : cleaned
 }
 
+/**
+ * A dragged voltage, rounded to about a thousandth of the window it was read from.
+ *
+ * <p>Dragging a line reads a pixel back through the plot's own scale, so what comes out is the
+ * arithmetic of that division: <code>0.6017391304347828</code> for a line the user put at roughly
+ * six tenths of a volt. A thousandth of the window is far below one pixel of the plot, so the line
+ * does not visibly step — but it is the difference between a trigger box reading "0.602" and one
+ * reading all seventeen digits.</p>
+ *
+ * <p><b>As a decimal place, not as a multiplier</b>, and that distinction is the whole of why this
+ * is a function rather than one line at the call site: rounding to the nearest multiple of
+ * <code>span / 1000</code> puts the digits straight back, because that step is itself not
+ * representable — 144 × 0.004 is 0.5760000000000001, which was the box's reading after the first
+ * attempt at this.</p>
+ */
+export function roundVoltsForWindow(volts: number, spanV: number): number {
+  if (!Number.isFinite(volts)) return volts
+  if (!Number.isFinite(spanV) || spanV <= 0) return volts
+
+  // Clamped at both ends: a window of several hundred volts would otherwise ask for no decimals at
+  // all, and one of microvolts for more than a double can carry.
+  const decimals = Math.min(12, Math.max(0, Math.ceil(-Math.log10(spanV / 1000))))
+  return Number(volts.toFixed(decimals))
+}
+
 /** The per-division figure the status line quotes — "500 mV/div". */
 export function formatVoltsPerDivision(voltsPerDivision: number): string {
   if (!Number.isFinite(voltsPerDivision) || voltsPerDivision <= 0) return '—'

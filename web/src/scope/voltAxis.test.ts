@@ -5,6 +5,7 @@ import {
   fitVoltWindow,
   formatVolts,
   formatVoltsPerDivision,
+  roundVoltsForWindow,
   snapVoltsPerDivision,
   stepVoltsPerDivision,
   voltWindow,
@@ -165,5 +166,40 @@ describe('formatVoltsPerDivision', () => {
 
   it('has a reading for every rung of the ladder', () => {
     for (const rung of VOLTS_PER_DIVISION_LADDER) expect(formatVoltsPerDivision(rung)).not.toBe('—')
+  })
+})
+
+describe('roundVoltsForWindow', () => {
+  it('turns a drag back into a figure a box can show', () => {
+    // The report: a line dragged to roughly six tenths of a volt put
+    // "0.6017391304347828" in the trigger panel's Level box.
+    expect(roundVoltsForWindow(0.6017391304347828, 4)).toBe(0.602)
+  })
+
+  it('rounds to a decimal place rather than to a multiple of the step', () => {
+    // 144 x (4 / 1000) is 0.5760000000000001, so rounding to the nearest multiple of the step puts
+    // back exactly the digits the rounding is for. This is the first attempt at it, pinned.
+    expect(roundVoltsForWindow(0.5761, 4)).toBe(0.576)
+    expect(String(roundVoltsForWindow(0.5761, 4))).toBe('0.576')
+  })
+
+  it('follows the window, so a millivolt screen keeps its millivolts', () => {
+    // Eight divisions of 0.1 mV: a thousandth of that window is 0.8 uV, so the figure keeps seven
+    // decimals where a four-volt window keeps three -- and a level of 97.6 uV survives as one
+    // rather than rounding away to nothing.
+    expect(roundVoltsForWindow(0.0000976123456, 0.0008)).toBe(0.0000976)
+    expect(roundVoltsForWindow(0.0000976123456, 4)).toBe(0)
+  })
+
+  it('leaves a figure alone when there is no window to round against', () => {
+    expect(roundVoltsForWindow(0.6017391304347828, 0)).toBe(0.6017391304347828)
+    expect(roundVoltsForWindow(0.6017391304347828, Number.NaN)).toBe(0.6017391304347828)
+    expect(Number.isNaN(roundVoltsForWindow(Number.NaN, 4))).toBe(true)
+  })
+
+  it('keeps a whole-volt window usable', () => {
+    // A 400 V window would ask for no decimals at all if the clamp were not there; one decimal is
+    // what the arithmetic gives, and it is finer than the thousandth asked for.
+    expect(roundVoltsForWindow(123.456789, 400)).toBe(123.5)
   })
 })

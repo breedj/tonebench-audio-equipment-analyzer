@@ -344,4 +344,103 @@ public class OscilloscopeRunnerTests
         Assert.Equal(1920, request.RecordFramesAt(192_000.0));
         Assert.Equal(960, request.PreTriggerFramesAt(192_000.0));
     }
+    /// <summary>
+    /// The report this was written for, from the other end: turning a control while the scope runs
+    /// must not need a stop and a start. A <c>/start</c> is refused by MeasurementRunGuard while
+    /// this runner holds the session -- rightly -- so a level that could only be changed by one was
+    /// a level that could not be changed at all.
+    /// </summary>
+    [Fact]
+    public async Task ARetuneChangesASettingWithoutStoppingTheRun()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.Phase == FrequencyResponsePhase.WaitingForTrigger));
+
+            bench.Runner.Retune(Request(mode: ScopeRunMode.Normal, recordSeconds: 0.01, levelV: 0.0));
+
+            // The run is the same run: no cancel, no restart, and the record counter is still this
+            // run's own. What has moved is the record length and, once a block has carried the new
+            // level, the trigger -- which was reaching nothing at 50 V.
+            Assert.True(bench.Runner.Running);
+            Assert.Equal(480, bench.Runner.Status.RecordFrames);
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.RecordsTaken > 0));
+            Assert.True(bench.Runner.Running);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    /// <summary>
+    /// A retune can move the mode, and the run loop has to read it rather than the mode its start
+    /// request carried -- Normal to Single is an ordinary thing to do mid-capture.
+    /// </summary>
+    [Fact]
+    public async Task ARetuneToSingleEndsTheRunOnTheNextRecord()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.Phase == FrequencyResponsePhase.WaitingForTrigger));
+
+            bench.Runner.Retune(Request(mode: ScopeRunMode.Single, levelV: 0.0));
+
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+            Assert.Equal(FrequencyResponsePhase.Finished, bench.Runner.Status.Phase);
+            Assert.Equal(1, bench.Runner.Status.RecordsTaken);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    /// <summary>
+    /// The sample rate is the one setting a running capture cannot take: it re-clocks the analyzer.
+    /// Refused by name, so the screen can answer by restarting the run rather than by showing the
+    /// user an error they did not cause.
+    /// </summary>
+    [Fact]
+    public async Task ARetuneAtAnotherSampleRateIsRefusedByName()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            await bench.Runner.StartAsync(Request(mode: ScopeRunMode.Normal, levelV: 50.0), CancellationToken.None);
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.Phase == FrequencyResponsePhase.WaitingForTrigger));
+
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => bench.Runner.Retune(Request(mode: ScopeRunMode.Normal, sampleRateHz: 96_000.0)));
+
+            Assert.Contains("sample rate", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(bench.Runner.Running);
+            Assert.Equal(SampleRateHz, bench.Runner.Status.SampleRateHz, 6);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ARetuneWithNothingRunningIsRefused()
+    {
+        var bench = await NewBenchAsync();
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => bench.Runner.Retune(Request(mode: ScopeRunMode.Normal)));
+        }
+        finally
+        {
+            await bench.Session.ShutdownAsync();
+        }
+    }
 }

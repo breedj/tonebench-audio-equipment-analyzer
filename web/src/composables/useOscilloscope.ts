@@ -138,6 +138,19 @@ export function useOscilloscope() {
     startPolling()
   }
 
+  /**
+   * Hands the running capture new settings, in place.
+   *
+   * <p>No <code>invalidateRecord</code> and no clearing: the record on screen is the last thing
+   * that was actually captured, and a level moved past the signal is precisely when it has to stay
+   * there — in Normal nothing will trigger again, and a blank chart would read as the scope having
+   * broken rather than as the trigger having been set where nothing crosses it.</p>
+   */
+  async function retune(request: OscilloscopeStartRequest): Promise<void> {
+    status.value = await api.retuneOscilloscope(request)
+    error.value = null
+  }
+
   async function cancel(): Promise<void> {
     status.value = await api.cancelOscilloscope()
     stopPolling()
@@ -231,6 +244,7 @@ export function useOscilloscope() {
     fetchRecord,
     setWindow,
     start,
+    retune,
     cancel,
     clear,
     switchOwner,

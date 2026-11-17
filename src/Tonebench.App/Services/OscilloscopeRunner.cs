@@ -54,6 +54,15 @@ public sealed class OscilloscopeRunner(
     private OscilloscopeRequest? _lastRequest;
 
     /// <summary>
+    /// The mode the run loop reads, rather than the one the start request carried.
+    ///
+    /// <para><see cref="Retune"/> can change it under a running loop -- Normal to Single is an
+    /// ordinary thing to do mid-capture -- and a loop reading its own captured argument would go on
+    /// obeying the mode the user has just moved away from.</para>
+    /// </summary>
+    private ScopeRunMode _mode;
+
+    /// <summary>
     /// Armed or capturing. A pure function of the phase field and nothing else — the mechanical
     /// coverage test builds an uninitialized runner and sets that field by reflection, so anything
     /// here that touched another field (or took a lock) would throw rather than answer.
@@ -132,6 +141,7 @@ public sealed class OscilloscopeRunner(
                 _recordsTaken = 0;
                 _record = null;
                 _lastRequest = request;
+                _mode = request.Mode;
             }
 
             _cts = new CancellationTokenSource();
@@ -143,6 +153,82 @@ public sealed class OscilloscopeRunner(
         }
 
         return new OscilloscopeStarted(request.SampleRateHz, recordFrames, preTriggerFrames);
+    }
+
+    /// <summary>
+    /// Applies new settings to the capture already running, without stopping it.
+    ///
+    /// <para><b>A scope's controls take effect as they are turned.</b> Dragging the trigger line
+    /// <i>is</i> how a level is set, so a level that needed a stop and a start would be a level
+    /// nobody could find -- and once one control works that way, every control has to. That is the
+    /// whole of why this exists beside <see cref="StartAsync"/>: a <c>/start</c> is refused by
+    /// <see cref="Endpoints.MeasurementRunGuard"/> while this runner holds the session, which is
+    /// right, and a retune is not a start.</para>
+    ///
+    /// <para><b>The sample rate is refused by name</b>, and it is the only one. Changing it
+    /// re-clocks the analyzer -- on a QA403 that is 15 to 30 seconds of settling, and on a sound
+    /// card a re-opened stream -- so it cannot be done to a capture in flight at all. Refusing it
+    /// here, rather than silently keeping the old rate, is what lets the screen answer the refusal
+    /// by restarting the run instead of showing the user an error they did not cause.</para>
+    ///
+    /// <para><b>The generator is deliberately not part of this.</b> It is not on the request that
+    /// reaches here -- the endpoint refuses one -- because reconfiguring it books a stimulus-latency
+    /// and capture-delay discard at <c>ConfigureGeneratorCoreAsync</c>, and a drag of the trigger
+    /// line that threw away a record per pointer move would be worse than no live retune at all.
+    /// The generator keeps its own apply path when the scope screen grows one.</para>
+    /// </summary>
+    public OscilloscopeStatus Retune(OscilloscopeRequest request)
+    {
+        request.Validate();
+
+        lock (_stateLock)
+        {
+            if (!Running)
+                throw new InvalidOperationException("The oscilloscope is not running, so there is nothing to retune.");
+
+            // Compared rather than taken, because the rate decides the frame counts below and a
+            // record sized at one rate and captured at another is a record of neither.
+            if (Math.Abs(request.SampleRateHz - _sampleRateHz) > 0.5)
+            {
+                throw new InvalidOperationException(
+                    "The sample rate cannot be changed while a capture is running: it re-clocks the analyzer. "
+                        + "Stop the run and start it again.");
+            }
+
+            int recordFrames = request.RecordFramesAt(request.SampleRateHz);
+            int preTriggerFrames = request.PreTriggerFramesAt(request.SampleRateHz);
+
+            // The engine validates and builds the scanner on this thread and applies both on the
+            // stream's, so a trigger it cannot honour is this request's error -- see Retune there.
+            engine.Retune(BuildSpec(request, recordFrames, preTriggerFrames));
+
+            // Which channels the pipeline analyses is the ranger's business rather than the
+            // capture's: the buffer is fed whole blocks either way. It still has to follow, or
+            // MaybeStepInputRangeAsync goes on ranging on a channel the user has stopped reading.
+            pipeline.Options = pipeline.Options with
+            {
+                ProcessLeft = request.ProcessLeft,
+                ProcessRight = request.ProcessRight,
+            };
+
+            _recordFrames = recordFrames;
+            _preTriggerFrames = preTriggerFrames;
+            _mode = request.Mode;
+
+            // The running generator is kept: it is what is actually playing, and the save path
+            // reads this request to say what produced the waveform.
+            _lastRequest = request with { Generator = _lastRequest?.Generator };
+
+            logger.LogDebug(
+                "Oscilloscope retuned: {Mode}, {RecordMs:0.###} ms ({RecordFrames} frames, {PreTriggerFrames} pre-trigger), "
+                    + "{Slope} edge at {LevelV:0.######} V, hysteresis {HysteresisV:0.######} V, holdoff {HoldoffMs:0.##} ms, "
+                    + "channels L={Left} R={Right}",
+                request.Mode, request.RecordSeconds * 1e3, recordFrames, preTriggerFrames,
+                request.TriggerSlope, request.TriggerLevelV, request.TriggerHysteresisV,
+                request.HoldoffSeconds * 1e3, request.ProcessLeft, request.ProcessRight);
+
+            return Status;
+        }
     }
 
     public async Task CancelAsync()
@@ -256,6 +342,7 @@ public sealed class OscilloscopeRunner(
         _recordFrames = 0;
         _preTriggerFrames = 0;
         _recordsTaken = 0;
+        _mode = ScopeRunMode.Single;
     }
 
     private async Task RunAsync(OscilloscopeRequest request, int recordFrames, int preTriggerFrames, CancellationToken ct)
@@ -311,10 +398,15 @@ public sealed class OscilloscopeRunner(
             {
                 if (engine.TakeRecord() is { } record)
                 {
+                    bool single;
                     lock (_stateLock)
                     {
                         _record = record;
                         _recordsTaken++;
+
+                        // The field, not the request: a retune may have moved the mode since.
+                        single = _mode == ScopeRunMode.Single;
+
                         if (record.Spliced)
                         {
                             logger.LogWarning(
@@ -323,7 +415,7 @@ public sealed class OscilloscopeRunner(
                         }
                     }
 
-                    if (request.Mode == ScopeRunMode.Single)
+                    if (single)
                     {
                         terminalPhase = FrequencyResponsePhase.Finished;
                         terminalError = null;

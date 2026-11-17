@@ -23,14 +23,8 @@ public static class OscilloscopeEndpoints
 
         group.MapPost("/start", async (OscilloscopeStartRequest request, OscilloscopeRunner runner, CancellationToken ct) =>
         {
-            if (!EnumParsing.TryParse(request.Mode, ScopeRunMode.Single, out ScopeRunMode mode, out var modeError))
-                return Results.BadRequest(modeError);
-            if (!EnumParsing.TryParse(request.TriggerKind, TriggerKind.Edge, out TriggerKind triggerKind, out var kindError))
-                return Results.BadRequest(kindError);
-            if (!EnumParsing.TryParse(request.TriggerSource, TriggerSource.ChannelA, out TriggerSource source, out var sourceError))
-                return Results.BadRequest(sourceError);
-            if (!EnumParsing.TryParse(request.TriggerSlope, TriggerSlope.Rising, out TriggerSlope slope, out var slopeError))
-                return Results.BadRequest(slopeError);
+            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var enumError))
+                return Results.BadRequest(enumError);
 
             GeneratorConfig? generator = null;
             if (request.GeneratorLeft is not null && request.GeneratorRight is not null)
@@ -58,6 +52,37 @@ public static class OscilloscopeEndpoints
                 return Results.Conflict(ex.Message);
             }
         }).AddEndpointFilter<MeasurementRunGuard>();
+
+        // Deliberately not behind MeasurementRunGuard, and that is the whole point of it: the
+        // guard refuses a /start while this very runner holds the session, which is right for a
+        // start and wrong for a change to the capture already running. A scope's controls take
+        // effect as they are turned -- dragging the trigger line IS how a level is set -- so
+        // "stop or cancel it first" is the one answer this route must never give.
+        group.MapPost("/retune", (OscilloscopeStartRequest request, OscilloscopeRunner runner) =>
+        {
+            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var enumError))
+                return Results.BadRequest(enumError);
+
+            // Refused rather than ignored. Reconfiguring the generator books a stimulus-latency and
+            // capture-delay discard, so it cannot ride on a control that moves per pointer move --
+            // and a field accepted and silently dropped is how a setting comes to look applied
+            // when it is not.
+            if (request.GeneratorLeft is not null || request.GeneratorRight is not null)
+                return Results.BadRequest("The generator is not part of a retune.");
+
+            try
+            {
+                return Results.Ok(runner.Retune(request.ToMeasurement(mode, triggerKind, source, slope, generator: null)));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(ex.Message);
+            }
+        });
 
         group.MapPost("/cancel", async (OscilloscopeRunner runner) =>
         {
@@ -145,6 +170,35 @@ public static class OscilloscopeEndpoints
                 record.Forced,
                 channels));
         });
+    }
+
+    /// <summary>
+    /// The four enums a start or a retune carries, parsed once. Shared rather than copied because
+    /// the two routes must agree about what a mode or a slope is called, and a second copy is how
+    /// they come to disagree.
+    /// </summary>
+    private static bool TryParseEnums(
+        OscilloscopeStartRequest request,
+        out ScopeRunMode mode,
+        out TriggerKind triggerKind,
+        out TriggerSource source,
+        out TriggerSlope slope,
+        out string? error)
+    {
+        triggerKind = TriggerKind.Edge;
+        source = TriggerSource.ChannelA;
+        slope = TriggerSlope.Rising;
+
+        if (!EnumParsing.TryParse(request.Mode, ScopeRunMode.Single, out mode, out error))
+            return false;
+        if (!EnumParsing.TryParse(request.TriggerKind, TriggerKind.Edge, out triggerKind, out error))
+            return false;
+        if (!EnumParsing.TryParse(request.TriggerSource, TriggerSource.ChannelA, out source, out error))
+            return false;
+        if (!EnumParsing.TryParse(request.TriggerSlope, TriggerSlope.Rising, out slope, out error))
+            return false;
+
+        return true;
     }
 }
 

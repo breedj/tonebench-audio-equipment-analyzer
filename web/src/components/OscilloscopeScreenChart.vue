@@ -33,7 +33,7 @@ import {
   toChartMs,
   fromChartMs,
 } from '../scope/timeAxis'
-import { formatVolts, formatVoltsPerDivision, voltWindow } from '../scope/voltAxis'
+import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
 import type { ScopeAxisWindow } from '../scope/display'
 import { triggerChannel, triggerIndicator } from '../scope/triggerSpec'
 
@@ -541,13 +541,9 @@ function onHandlePointerMove(event: PointerEvent) {
   // *re-arm* waits for the release -- re-arming per pointer move would throw away a capture per
   // pixel.
   //
-  // Rounded to a thousandth of the window on screen, which is far below one pixel of the plot and
-  // so cannot be seen in the line's position -- but is the difference between the trigger panel's
-  // box reading "0.602" and reading "0.6017391304347828", which is what a drag's arithmetic
-  // actually produces (seen in the app before this).
-  const span = Math.abs(liveYWindow.value.topV - liveYWindow.value.bottomV)
-  const step = span > 0 ? span / 1000 : 0
-  triggerLevelV.value = step > 0 ? Math.round(volts / step) * step : volts
+  // Rounded against the window on screen -- see roundVoltsForWindow for why that is a decimal
+  // place rather than a step, and for what the box read before it.
+  triggerLevelV.value = roundVoltsForWindow(volts, Math.abs(liveYWindow.value.topV - liveYWindow.value.bottomV))
 }
 
 function onHandlePointerUp(event: PointerEvent) {

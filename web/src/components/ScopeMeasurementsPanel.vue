@@ -11,14 +11,16 @@ import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis
  * What the record on screen reads — one block per captured channel, plus the facts about the record
  * itself.
  *
- * <p><b>Three vertical readings and no more, deliberately.</b> A min/max pair per display column
- * keeps both extremes of every column exactly, so Vmax, Vmin and Vpp survive the decimation and are
- * the figures a full-resolution pass would give. Nothing else does — an RMS over column maxima is
- * an RMS of nothing, and a rise time read off a column pair is a reading of the column width, which
- * is the measurement a scope is most often pointed at and the one it would be worst to get plausibly
- * wrong. The rest of the set (RMS, mean, top/base, period, rise, fall, duty, the channel delay) is
- * computed server-side on the committed record and arrives with the measurements phase. See
- * scope/measurements.ts.</p>
+ * <p><b>Three of the four are read off the picture and the fourth is not, which is the rule.</b> A
+ * min/max pair per display column keeps both extremes of every column exactly, so Vmax, Vmin and
+ * Vpp survive the decimation and are the figures a full-resolution pass would give. Nothing else
+ * does — an RMS over column maxima is an RMS of nothing, and a rise time read off a column pair is
+ * a reading of the column width, which is the measurement a scope is most often pointed at and the
+ * one it would be worst to get plausibly wrong. So <b>Vmean is measured server-side on the
+ * samples</b> and travels beside the picture (<code>ScopeChannelSlice.meanV</code>); a mean of
+ * column maxima is the mean of an envelope, about 0.64 of the amplitude high on a sine. The rest
+ * (RMS, top/base, period, rise, fall, duty, the channel delay) arrives with the measurements
+ * phase. See scope/measurements.ts.</p>
  */
 
 const props = withDefaults(
@@ -49,6 +51,7 @@ const blocks = computed(() =>
       channel: slice.channel,
       label: slice.channel === 0 ? 'Left' : 'Right',
       extremes: sliceExtremes(slice),
+      meanV: slice.meanV,
       raw: slice.raw,
     }))
     .filter((block) => block.extremes !== null),
@@ -93,6 +96,15 @@ const recordFacts = computed(() => {
               <td class="pr-2" title="Peak to peak — the maximum less the minimum.">Peak to peak</td>
               <td><ReadingValue :text="volts(block.extremes!.ppV)" /></td>
             </tr>
+            <tr>
+              <td
+                class="pr-2"
+                title="Vmean — the average of the window's samples, measured at full resolution on the analyzer rather than read off the drawn columns. Both this analyzer and a sound card are AC-coupled, so on a quiet input this is the input's own residual offset and not the DUT's DC."
+              >
+                Mean
+              </td>
+              <td><ReadingValue :text="volts(block.meanV)" /></td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -131,8 +143,13 @@ const recordFacts = computed(() => {
       </p>
 
       <p class="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        RMS, mean, period, rise and fall are measured on the whole record server-side and are not in
-        this build. Reading them off a decimated column pair would be a reading of the decimation.
+        The mean is measured on the samples themselves. Both this analyzer and a sound card are
+        AC-coupled, so on a quiet input it is the input's own residual offset rather than the DUT's
+        DC — a few millivolts is ordinary, and nothing corrects it.
+      </p>
+      <p class="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        RMS, period, rise and fall are measured on the whole record server-side and are not in this
+        build. Reading them off a decimated column pair would be a reading of the decimation.
       </p>
     </template>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">Nothing captured yet.</p>

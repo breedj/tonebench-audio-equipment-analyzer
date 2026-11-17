@@ -240,4 +240,52 @@ public class ScopeFrameBuilderTests
         Assert.Throws<ArgumentException>(() => StreamFrame.DecodeScopeRecordSamples(columns));
         Assert.Throws<ArgumentException>(() => StreamFrame.DecodeScopeColumns(raw));
     }
+
+    [Fact]
+    public void TheMeanIsOfTheSamples_NotOfTheColumnsTheyAreDrawnAs()
+    {
+        // The reading the decimation cannot carry, and the reason it is measured here at all. A
+        // sine of amplitude A about an offset has a sample mean of exactly the offset; the mean of
+        // its column *maxima* is about 0.64 A above that (the envelope's own average over a
+        // window holding many periods per column). So a client working this out from what arrives
+        // on the wire would be confidently wrong rather than coarse.
+        const int frames = 192_000;
+        const double offsetV = 0.25;
+        const double amplitudeV = 1.0;
+
+        var samples = new double[frames];
+        for (int i = 0; i < frames; i++)
+            samples[i] = offsetV + (amplitudeV * Math.Sin(2 * Math.PI * 1_000.0 * i / SampleRateHz));
+
+        var record = new ScopeRecord(
+            [samples], SampleRateHz, FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
+
+        var slice = ScopeFrameBuilder.Overview(record, channel: 0, maxColumns: 600);
+        Assert.False(slice.IsRaw);
+        Assert.Equal(offsetV, slice.MeanV, 4);
+
+        // What a reader would have got from the picture, so the test says what it is protecting
+        // against rather than only what is right.
+        double fromTheColumns = slice.Columns!.Average(c => c.Max);
+        Assert.True(fromTheColumns - offsetV > 0.5, $"columns mean {fromTheColumns} was expected to sit well above {offsetV}");
+    }
+
+    [Fact]
+    public void AWindowsMeanIsOfThatWindow_AndSurvivesBeingServedRaw()
+    {
+        // The same figure whichever side of the raw floor the window falls, because it is the same
+        // samples either way -- and it follows the window rather than the record, so it is a
+        // reading of what is on screen.
+        var record = Record(frames: 192_000, preTrigger: 0);
+
+        // The ramp is the frame index, so the mean of frames [a, b) is their midpoint.
+        var raw = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0, toS: 1_000 / SampleRateHz, maxColumns: 600);
+        Assert.True(raw.IsRaw);
+        Assert.Equal((raw.FirstFrame + raw.FrameCount - 1) / 2.0, raw.MeanV, 3);
+
+        var decimated = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0, toS: 0.5, maxColumns: 600);
+        Assert.False(decimated.IsRaw);
+        Assert.Equal(
+            decimated.FirstFrame + ((decimated.FrameCount - 1) / 2.0), decimated.MeanV, 3);
+    }
 }

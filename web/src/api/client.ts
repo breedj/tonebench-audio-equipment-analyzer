@@ -1436,6 +1436,14 @@ export interface ScopeChannelSlice {
   x0: number
   /** Column width, or the sample period when raw. */
   dx: number
+  /**
+   * The window's average, measured server-side on the samples themselves.
+   *
+   * <p>Not derivable from what arrives: a mean of column maxima is the mean of an envelope. Note
+   * that both the QA403 and a sound card are AC-coupled, so what this reads on a quiet input is
+   * the analyzer's own residual offset rather than the DUT's DC.</p>
+   */
+  meanV: number
   /** True when the window was tight enough to send the waveform itself rather than a summary of it. */
   raw: boolean
   samples: number[] | null

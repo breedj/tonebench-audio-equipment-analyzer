@@ -3,11 +3,13 @@ import type { ScopeChannelSlice } from '../api/client'
 import { recordExtremes, sliceExtremes } from './measurements'
 
 function columns(min: number[], max: number[]): ScopeChannelSlice {
-  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max }
+  // meanV is the server's own reading of the samples and is not derived from these columns -- see
+  // ScopeFrameSlice.MeanV. Zero here because nothing in this file reads it.
+  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, meanV: 0 }
 }
 
 function raw(samples: number[]): ScopeChannelSlice {
-  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null }
+  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null, meanV: 0 }
 }
 
 describe('sliceExtremes', () => {

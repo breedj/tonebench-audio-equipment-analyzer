@@ -1,0 +1,815 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import uPlot from 'uplot'
+import 'uplot/dist/uPlot.min.css'
+import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerSource } from '../api/client'
+import { useResultChartHeight } from '../charts/useResultChartHeight'
+import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
+import ExpandToggle from './ExpandToggle.vue'
+import ChartZoomControls from './ChartZoomControls.vue'
+import { useAppTheme } from '../composables/useAppTheme'
+import { useZoomBounds } from '../composables/useZoomBounds'
+import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
+import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
+import { annotationTheme } from '../charts/annotationPainter'
+import {
+  annotationOverlayRect,
+  annotationsPlugin,
+  attachAnnotationListeners,
+  cssAnnotationPlot,
+  finishBoxGesture,
+  syncBoxDragMode,
+  type BoxDragResting,
+  type UplotAnnotationAxes,
+} from '../charts/uplotAnnotations'
+import ChartAnnotationOverlay from './ChartAnnotationOverlay.vue'
+import { exportGridTheme } from '../charts/palette'
+import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
+import {
+  formatPerDivision,
+  formatScopeTime,
+  recordWindow,
+  scopeTimeScale,
+  toChartMs,
+  fromChartMs,
+} from '../scope/timeAxis'
+import { formatVolts, formatVoltsPerDivision, voltWindow } from '../scope/voltAxis'
+import type { ScopeAxisWindow } from '../scope/display'
+import { triggerChannel, triggerIndicator } from '../scope/triggerSpec'
+
+/**
+ * The oscilloscope screen's chart — a waveform on a <b>linear</b> time axis with the trigger at
+ * t = 0 and negative time to its left, over a graticule of eight vertical and ten horizontal
+ * divisions.
+ *
+ * <p><b>This is a second chart and not a change to <code>OscilloscopeChart.vue</code></b>, which
+ * stays exactly as it is as the FFT screen's glance at the waveform behind a spectrum. The two have
+ * almost nothing in common beyond drawing a trace against time: that one is handed a fixed 2048
+ * samples and triggers in the browser on a zero crossing; this one draws a server-triggered record
+ * of up to a second, with a window into it, a trigger level that is dragged rather than typed, and
+ * the min/max band a decimated record has to be drawn with.</p>
+ *
+ * <p><b>Both extremes of every column are drawn</b> — the max as the line, the min as a band under
+ * it — for the reason the spectrum and impulse charts do it, which bites hardest here: a glitch can
+ * be one sample wide, and a column showing one side of the waveform would hide exactly the thing a
+ * scope is being pointed at. Once a window is tight enough the server sends the samples themselves
+ * instead, and then there is no band to draw because there is nothing left to summarise.</p>
+ */
+
+const annotationArmed = defineModel<AnnotationStyle | null>('annotationArmed', { default: null })
+/** The measurement's notes. See FrequencyResponseChart for how one list serves a kind's charts. */
+const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: () => [] })
+
+/**
+ * The trigger level, in DUT volts — <b>a model, because the chart writes it</b>.
+ *
+ * <p>Dragging the line is how a trigger level is set on a bench instrument; the number box in the
+ * trigger panel is the precise fallback, and the two are one value rather than two that have to be
+ * kept in step.</p>
+ */
+const triggerLevelV = defineModel<number>('triggerLevelV', { default: 0 })
+
+// `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop with
+// no default to `false`, which silently turned the ordinal badges off on every chart but the FFT's.
+const props = withDefaults(defineProps<{
+  annotationNumbers?: boolean
+  /** The slice on screen, or null before anything has been captured. */
+  record: ScopeRecordResponse | null
+  voltsPerDivision: number
+  voltOffsetV: number
+  /** The window, in seconds relative to the trigger. Negative to its left. */
+  timeFromS: number
+  timeToS: number
+  thickLines: boolean
+  showDataPoints: boolean
+  showTriggerLevel: boolean
+  triggerHysteresisV: number
+  triggerSource: ScopeTriggerSource
+  /** The record the settings ask for, so an empty chart can draw the axis the next capture lands on. */
+  recordSeconds: number
+  preTriggerFraction: number
+  /** True while the run is armed or capturing — what makes the trace read as live rather than held. */
+  running?: boolean
+}>(), { annotationNumbers: true, running: false })
+
+const emit = defineEmits<{
+  axisWindow: [window: ScopeAxisWindow]
+  /** The level drag has ended: the parent re-arms once, rather than once per pointer move. */
+  triggerLevelCommitted: []
+}>()
+
+const { isDark } = useAppTheme()
+
+const root = ref<HTMLElement | null>(null)
+const container = ref<HTMLDivElement | null>(null)
+const chartHeight = useResultChartHeight(root, container)
+const plot = shallowRef<uPlot | null>(null)
+
+/** The channel colours the FFT screen's waveform panel already uses, so one signal is one colour app-wide. */
+const CHANNEL_COLORS = ['#3b82f6', '#f97316'] as const
+
+const THEME = {
+  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, trigger: '#a3a3a3', marker: '#f59e0b' },
+  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, trigger: '#525252', marker: '#b45309' },
+} as const
+
+type Theme = (typeof THEME)[keyof typeof THEME]
+
+function theme(): Theme {
+  return isDark.value ? THEME.dark : THEME.light
+}
+
+/** One channel ready to draw: the line, the band under it when there is one, and what it is called. */
+interface ChannelSeries {
+  index: number
+  label: string
+  color: string
+  /** The max of every column, or the samples themselves. */
+  line: (number | null)[]
+  /** The min of every column, or null for a raw slice — there is nothing left to summarise. */
+  band: (number | null)[] | null
+  raw: boolean
+}
+
+/** The x array every series shares, in the milliseconds this chart plots. */
+function sliceXMs(slice: ScopeChannelSlice, count: number): number[] {
+  const x = new Array<number>(count)
+  const x0 = toChartMs(slice.x0)
+  const dx = toChartMs(slice.dx)
+  for (let i = 0; i < count; i++) x[i] = x0 + i * dx
+  return x
+}
+
+function sliceLength(slice: ScopeChannelSlice): number {
+  if (slice.raw) return slice.samples?.length ?? 0
+  return Math.min(slice.max?.length ?? 0, slice.min?.length ?? 0)
+}
+
+/**
+ * What the plot draws.
+ *
+ * <p>Every channel is cut from the same window by the server and so shares one x array — which is
+ * also what uPlot requires. The <b>longest</b> slice is what it is built from rather than the first:
+ * a channel that came back short would otherwise silently decide the axis for the one that did not.
+ * </p>
+ */
+const series = computed(() => {
+  const record = props.record
+  if (!record?.channels.length) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+
+  let longest: ScopeChannelSlice | null = null
+  let count = 0
+  for (const slice of record.channels) {
+    const length = sliceLength(slice)
+    if (length > count) {
+      count = length
+      longest = slice
+    }
+  }
+  if (!longest || count === 0) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+
+  const xMs = sliceXMs(longest, count)
+  const channels: ChannelSeries[] = record.channels.map((slice) => {
+    const length = sliceLength(slice)
+    const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
+      const out = new Array<number | null>(count).fill(null)
+      for (let i = 0; i < length; i++) out[i] = values?.[i] ?? null
+      return out
+    }
+    return {
+      index: slice.channel,
+      label: slice.channel === 0 ? 'Left' : 'Right',
+      color: CHANNEL_COLORS[slice.channel] ?? CHANNEL_COLORS[0],
+      line: slice.raw ? pad(slice.samples) : pad(slice.max),
+      band: slice.raw ? null : pad(slice.min),
+      raw: slice.raw,
+    }
+  })
+
+  return { xMs, channels }
+})
+
+/** The window the chart shows, in the milliseconds it plots. */
+const xWindowMs = computed(() => ({ min: toChartMs(props.timeFromS), max: toChartMs(props.timeToS) }))
+
+/** The span the time formatter reads its unit from — what the window shows, not what the record holds. */
+const spanMs = computed(() => Math.abs(xWindowMs.value.max - xWindowMs.value.min))
+
+/** The two ends of the volts axis, derived from the V/div and the centre. See scope/voltAxis.ts. */
+const yWindow = computed(() => voltWindow(props.voltsPerDivision, props.voltOffsetV))
+
+/** Where the trigger line goes, and whether the level is really there. */
+const indicator = computed(() =>
+  triggerIndicator(triggerLevelV.value, yWindow.value.topV, yWindow.value.bottomV, props.triggerHysteresisV),
+)
+
+/** Which trace the trigger watches — the line is drawn in that channel's own colour. */
+const triggerColor = computed(() => CHANNEL_COLORS[triggerChannel(props.triggerSource)] ?? CHANNEL_COLORS[0])
+
+/** The per-division pair the status line quotes, the way a bench instrument does. */
+const timebaseLabel = computed(() => formatPerDivision(spanMs.value))
+const verticalLabel = computed(() => formatVoltsPerDivision(props.voltsPerDivision))
+
+/**
+ * Both extremes of every column, the min as a band under the line.
+ *
+ * <p>Skipped for a raw slice, where the line <em>is</em> the waveform — drawing a band there would
+ * be a band of zero width over every sample, which costs a full pass for nothing.</p>
+ */
+function minMaxBandPlugin(): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: [
+        (u) => {
+          const { xMs, channels } = series.value
+          if (!xMs.length) return
+
+          const ctx = u.ctx
+          for (const channel of channels) {
+            if (!channel.band) continue
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
+            ctx.clip()
+
+            const path = new Path2D()
+            for (let i = 0; i < xMs.length; i++) {
+              const lo = channel.band[i]
+              const hi = channel.line[i]
+              if (lo === null || hi === null) continue
+              const x = u.valToPos(xMs[i], 'x', true)
+              path.moveTo(x, u.valToPos(lo, 'y', true))
+              path.lineTo(x, u.valToPos(hi, 'y', true))
+            }
+
+            ctx.strokeStyle = channel.color
+            ctx.globalAlpha = 0.35
+            ctx.lineWidth = 1
+            ctx.stroke(path)
+            ctx.restore()
+          }
+        },
+      ],
+    },
+  }
+}
+
+/** A dashed vertical at t = 0 with a marker on the axis — where the trigger fired, and the origin every reading is from. */
+function triggerPositionPlugin(t: Theme): uPlot.Plugin {
+  return {
+    hooks: {
+      drawAxes: [
+        (u) => {
+          const x = u.valToPos(0, 'x', true)
+          if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return
+
+          const ctx = u.ctx
+          ctx.save()
+          ctx.setLineDash([4, 4])
+          ctx.strokeStyle = t.marker
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(x, u.bbox.top)
+          ctx.lineTo(x, u.bbox.top + u.bbox.height)
+          ctx.stroke()
+
+          // The downward marker on the top edge, which is where a scope puts the trigger position.
+          ctx.setLineDash([])
+          ctx.fillStyle = t.marker
+          const size = 5 * (u.bbox.width / Math.max(u.over.clientWidth, 1))
+          ctx.beginPath()
+          ctx.moveTo(x - size, u.bbox.top)
+          ctx.lineTo(x + size, u.bbox.top)
+          ctx.lineTo(x, u.bbox.top + size * 1.6)
+          ctx.closePath()
+          ctx.fill()
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
+/**
+ * The trigger level, and the hysteresis band around it.
+ *
+ * <p>Drawn in the <b>trigger source channel's own colour</b>, so there is never a question of which
+ * trace the level belongs to. The band is the one control whose effect is otherwise completely
+ * invisible — it is what a user reaches for when the trace will not stand still, and without
+ * something on screen there is nothing to aim it at.</p>
+ *
+ * <p>In <code>drawAxes</code> rather than <code>draw</code>, so it sits under the traces: the level
+ * is a setting rather than a reading, and a line painted over the waveform hides the samples that
+ * decide whether it is in the right place.</p>
+ */
+function triggerLevelPlugin(color: string): uPlot.Plugin {
+  return {
+    hooks: {
+      drawAxes: [
+        (u) => {
+          if (!props.showTriggerLevel) return
+          const { levelV, band, offWindow } = indicator.value
+
+          const ctx = u.ctx
+          const left = u.bbox.left
+          const right = u.bbox.left + u.bbox.width
+          ctx.save()
+
+          if (band) {
+            const top = u.valToPos(band.topV, 'y', true)
+            const bottom = u.valToPos(band.bottomV, 'y', true)
+            ctx.fillStyle = color
+            ctx.globalAlpha = 0.12
+            ctx.fillRect(left, Math.min(top, bottom), u.bbox.width, Math.abs(bottom - top))
+            ctx.globalAlpha = 1
+          }
+
+          const y = u.valToPos(levelV, 'y', true)
+          ctx.strokeStyle = color
+          ctx.lineWidth = 1
+          // Dashed, so it cannot be mistaken for a trace; solid at the edge when the level is off
+          // the window, which is where the arrow says the rest of it is.
+          ctx.setLineDash(offWindow ? [] : [6, 4])
+          ctx.beginPath()
+          ctx.moveTo(left, y)
+          ctx.lineTo(right, y)
+          ctx.stroke()
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
+const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
+  () => plot.value,
+  () => ({
+    xMin: xWindowMs.value.min,
+    xMax: xWindowMs.value.max,
+    yMin: yWindow.value.bottomV,
+    yMax: yWindow.value.topV,
+  }),
+)
+
+/**
+ * This chart's own drag-zoom, and what the Box gesture puts back when it is disarmed — one constant
+ * so <code>cursor.drag</code> and <code>syncBoxDragMode</code> cannot disagree. See BoxDragResting.
+ *
+ * <p>Both axes: a scope is zoomed in time far more often than in volts, but the vertical window is
+ * a V/div rung rather than an arbitrary pair, so a vertical drag is the only way to get between two
+ * rungs — and demanding a pixel-accurate horizontal drag to avoid it would make both awkward.</p>
+ */
+const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
+
+/**
+ * "Set axis": hands the window on screen up, for the display panel's own boxes to take it on.
+ *
+ * <p>Converted here rather than by the parent, which is the point of `fromChartMs` existing: this
+ * chart is the one place that knows it plots milliseconds, and the boxes upstream are in seconds.</p>
+ */
+function applyZoomToAxis() {
+  const w = currentWindow()
+  if (!w) return
+  emit('axisWindow', {
+    fromS: fromChartMs(w.xMin),
+    toS: fromChartMs(w.xMax),
+    topV: Math.max(w.yMin, w.yMax),
+    bottomV: Math.min(w.yMin, w.yMax),
+  })
+}
+
+function buildOptions(width: number, height: number, t: Theme, interactive: boolean): uPlot.Options {
+  const channels = series.value.channels
+  return {
+    width,
+    height,
+    scales: {
+      // Arguments passed through rather than ignored, so a drag-zoom survives setScale. What puts
+      // the panel's window on the x axis is refresh()'s explicit setScale, not the `??` here — on
+      // an x scale that fallback is dead code, since uPlot only passes null with no data yet.
+      x: { time: false, auto: false, range: (_u, min, max) => [min ?? xWindowMs.value.min, max ?? xWindowMs.value.max] },
+      y: { auto: false, range: (_u, min, max) => [min ?? yWindow.value.bottomV, max ?? yWindow.value.topV] },
+    },
+    axes: [
+      {
+        label: `Time (${scopeTimeScale(spanMs.value).label})`,
+        stroke: t.axis,
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
+        // One formatter for the ticks, the readout and the panel's boxes, so a figure means the
+        // same thing wherever it is read. The unit is on the label, so not repeated per tick.
+        values: (_u, splits) => splits.map((ms) => formatScopeTime(ms, spanMs.value, false)),
+      },
+      {
+        label: 'Level',
+        size: 64,
+        stroke: t.axis,
+        grid: { stroke: t.grid, width: t.gridWidth },
+        ticks: { stroke: t.grid, width: t.gridWidth },
+        values: (_u, splits) => splits.map((v) => formatVolts(v, props.voltsPerDivision)),
+      },
+    ],
+    series: [
+      { label: 'Time' },
+      ...channels.map((channel) => ({
+        label: channel.label,
+        stroke: channel.color,
+        width: props.thickLines ? 2 : 1,
+        // Markers only on a raw slice: a point drawn on a min/max column marks the column's
+        // maximum rather than a sample, which is a reading of the decimation.
+        points: { show: props.showDataPoints && channel.raw, size: 4 },
+      })),
+    ],
+    // Last: whatever draws after the annotations paints over their labels.
+    plugins: [
+      minMaxBandPlugin(),
+      triggerPositionPlugin(t),
+      triggerLevelPlugin(triggerColor.value),
+      annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(t === THEME.dark)),
+    ],
+    cursor: interactive ? { drag: { x: true, ...DRAG_RESTING } } : { show: false },
+    legend: { show: false },
+    hooks: interactive
+      ? {
+          setScale: [(u: uPlot) => noteScale(u)],
+          setSelect: [(u: uPlot) => noteZoomGesture(u)],
+        }
+      : {},
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dragging the trigger level
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the drag handle sits, in CSS pixels relative to the chart's container, or null when there is
+ * no plot to put it on.
+ *
+ * <p><b>A DOM handle above the canvas, not a third claimant on uPlot's drag.</b> The plot already
+ * carries a drag-zoom, and the annotation system commandeers that same gesture while a Box is armed;
+ * a third would be the <code>syncBoxDragMode</code> trap exactly. A handle that is its own element
+ * takes the pointer only when the press starts on it, by construction rather than by a rule — a
+ * <code>pointerdown</code> on it never reaches <code>u.over</code>, so nothing has to be restored
+ * afterwards and nothing can be left half-restored.</p>
+ */
+const handleRect = shallowRef<{ top: number; right: number; height: number; width: number } | null>(null)
+
+/** How wide the grab area is, and how tall. Generous enough to hit, far enough right to be clear of a zoom drag. */
+const HANDLE_WIDTH_PX = 48
+const HANDLE_HEIGHT_PX = 18
+
+function syncHandle() {
+  const u = plot.value
+  if (!u || !props.showTriggerLevel) {
+    handleRect.value = null
+    return
+  }
+  const css = u.over.clientWidth
+  const scale = css > 0 ? u.bbox.width / css : 1
+  const y = u.valToPos(indicator.value.levelV, 'y', false)
+  if (!Number.isFinite(y)) {
+    handleRect.value = null
+    return
+  }
+  handleRect.value = {
+    top: u.bbox.top / scale + y - HANDLE_HEIGHT_PX / 2,
+    right: 0,
+    height: HANDLE_HEIGHT_PX,
+    width: HANDLE_WIDTH_PX,
+  }
+}
+
+const dragging = ref(false)
+
+function onHandlePointerDown(event: PointerEvent) {
+  const u = plot.value
+  if (!u) return
+  // Keeps the press away from uPlot's own listeners on `over`, which is the whole reason the handle
+  // is an element of its own.
+  event.stopPropagation()
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  dragging.value = true
+}
+
+function onHandlePointerMove(event: PointerEvent) {
+  if (!dragging.value) return
+  const u = plot.value
+  if (!u) return
+
+  const rect = u.over.getBoundingClientRect()
+  const volts = u.posToVal(event.clientY - rect.top, 'y')
+  if (!Number.isFinite(volts)) return
+
+  // Written live rather than on release, so the line and the setting cannot disagree mid-drag. The
+  // *re-arm* waits for the release -- re-arming per pointer move would throw away a capture per
+  // pixel.
+  triggerLevelV.value = volts
+}
+
+function onHandlePointerUp(event: PointerEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  emit('triggerLevelCommitted')
+}
+
+/** The reading beside the handle while it is dragged — the level in the same unit the axis is in. */
+const triggerReadout = computed(() => formatVolts(triggerLevelV.value, props.voltsPerDivision))
+
+// ---------------------------------------------------------------------------
+
+async function exportPng({ width, height, captureZoom = false }: ChartExportOptions): Promise<Blob> {
+  const header = CHART_EXPORT_HEADER_PX
+  const plotHeight = height - header
+
+  const host = document.createElement('div')
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${plotHeight}px;pointer-events:none`
+  document.body.appendChild(host)
+
+  const live = plot.value
+  const xWin =
+    captureZoom && live?.scales.x.min != null && live.scales.x.max != null
+      ? { min: live.scales.x.min, max: live.scales.x.max }
+      : xWindowMs.value
+  const yWin =
+    captureZoom && live?.scales.y.min != null && live.scales.y.max != null
+      ? { min: live.scales.y.min, max: live.scales.y.max }
+      : { min: yWindow.value.bottomV, max: yWindow.value.topV }
+
+  let u: uPlot | null = null
+  try {
+    const { xMs, channels } = series.value
+    const blank = [[], ...channels.map(() => [])] as unknown as uPlot.AlignedData
+    u = new uPlot(buildOptions(width, plotHeight, exportGridTheme(THEME.light), false), blank, host)
+    u.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData)
+    u.setScale('x', xWin)
+    u.setScale('y', yWin)
+    await nextPaint()
+
+    const record = props.record
+    const detail = record
+      ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${record.spliced ? ' · spliced' : ''}${
+          record.forced ? ' · untriggered' : ''
+        }`
+      : ''
+    return await composeChartPng({
+      width,
+      height,
+      plotCanvas: u.ctx.canvas,
+      headerHeight: header,
+      title: `Oscilloscope${detail}`,
+      legend: channels.map((c) => ({ label: c.label, color: c.color })),
+    })
+  } finally {
+    u?.destroy()
+    host.remove()
+  }
+}
+
+defineExpose({ exportPng })
+
+function rebuild() {
+  const el = container.value
+  if (!el) return
+
+  plot.value?.destroy()
+  const width = el.getBoundingClientRect().width || 600
+  // One empty array per declared series. Empty construction then setData is also what makes the x
+  // window honour the panel's props rather than the data's span (CLAUDE.md).
+  const blank = [[], ...series.value.channels.map(() => [])] as unknown as uPlot.AlignedData
+  plot.value = new uPlot(buildOptions(width, chartHeight.value, theme(), true), blank, el)
+
+  attachAnnotationListeners(plot.value, annotationOverlay)
+  syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING)
+  plot.value.over.addEventListener('dblclick', resetZoom)
+  refresh()
+}
+
+function refresh() {
+  const p = plot.value
+  if (!p) return
+
+  const { xMs, channels } = series.value
+  p.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData)
+  p.setScale('x', xWindowMs.value)
+  p.setScale('y', { min: yWindow.value.bottomV, max: yWindow.value.topV })
+  syncHandle()
+}
+
+let observer: ResizeObserver | null = null
+
+function fit() {
+  const el = container.value
+  if (el && plot.value) {
+    plot.value.setSize({ width: el.getBoundingClientRect().width, height: chartHeight.value })
+    syncHandle()
+  }
+}
+watch(chartHeight, fit)
+
+/**
+ * What this chart's two axes are, in annotation terms.
+ *
+ * <p>A <b>linear time in milliseconds that crosses zero</b> — the pre-trigger sits at a negative
+ * time, which is the case the parser's "any finite x" rule and the linear offset space exist for;
+ * a log axis has no position for t = 0 at all. The same quantity the impulse chart uses, so a note
+ * means the same thing on both.</p>
+ *
+ * <p>Not a computed, unlike the impulse chart's: neither axis of this chart ever changes which
+ * quantity it plots. The displayed <em>unit</em> moves with the window, but the stored figure does
+ * not, which is exactly the arrangement that keeps a note in place when a tighter window changes
+ * the axis from milliseconds to microseconds.</p>
+ */
+const ANNOTATION_AXES: UplotAnnotationAxes = {
+  x: { quantity: 'ms' },
+  y: { quantity: 'volt' },
+}
+
+const annotationOverlay = useAnnotationOverlay({
+  view: () => OSCILLOSCOPE_ANNOTATION_VIEW,
+  list: annotationList,
+  armed: annotationArmed,
+  numbers: () => props.annotationNumbers !== false,
+  cssPlot: () => (plot.value ? cssAnnotationPlot(plot.value, ANNOTATION_AXES) : null),
+  surface: () => plot.value?.over ?? null,
+  overlayRect: () => (plot.value ? annotationOverlayRect(plot.value) : null),
+  redraw: () => plot.value?.redraw(),
+  onArmedChange: () => syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING),
+})
+
+function onWindowMouseUp() {
+  finishBoxGesture(plot.value, annotationOverlay, DRAG_RESTING)
+}
+
+function onWindowKeyDown(event: KeyboardEvent) {
+  annotationOverlay.onWindowKeyDown(event)
+}
+
+// A redraw, never a rebuild: annotations are draw-hook state, and a rebuild throws the zoom away.
+watch(
+  () => [annotationList.value, props.annotationNumbers] as const,
+  () => plot.value?.redraw(),
+  { deep: true },
+)
+
+// The trigger line and its band are draw-hook state too, so moving the level is a redraw and the
+// handle follows it. A rebuild here would discard the zoom on every pixel of a drag.
+watch(
+  () => [triggerLevelV.value, props.triggerHysteresisV, props.showTriggerLevel, triggerColor.value] as const,
+  () => {
+    plot.value?.redraw()
+    syncHandle()
+  },
+)
+
+onMounted(() => {
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('keydown', onWindowKeyDown)
+  rebuild()
+  observer = new ResizeObserver(fit)
+  if (container.value) observer.observe(container.value)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
+  observer?.disconnect()
+  observer = null
+  plot.value?.destroy()
+  plot.value = null
+})
+
+/**
+ * A theme change or a change of series count needs the whole plot rebuilt; new data does not.
+ *
+ * <p>The axis <em>unit</em> is in this list because it is baked into the axis label and the tick
+ * formatter at construction — so a window tightened from milliseconds into microseconds is a
+ * rebuild, where moving the same window is not.</p>
+ */
+watch(
+  [
+    isDark,
+    () => props.thickLines,
+    () => props.showDataPoints,
+    () => scopeTimeScale(spanMs.value).unit,
+    () => series.value.channels.map((c) => `${c.index}:${c.raw}`).join(','),
+  ],
+  rebuild,
+)
+
+watch(
+  [
+    () => props.record,
+    () => props.timeFromS,
+    () => props.timeToS,
+    () => props.voltsPerDivision,
+    () => props.voltOffsetV,
+  ],
+  refresh,
+)
+
+/**
+ * The axis an empty chart draws — the window the <em>settings</em> ask for.
+ *
+ * <p>An empty scope still has to show where the next capture will land, which is the "an empty chart
+ * draws empty axes, it does not destroy its plot" rule: a torn-down plot is a zero-height box, and
+ * the whole column jumps the moment a capture arrives.</p>
+ */
+const emptyWindow = computed(() => recordWindow(props.recordSeconds, props.preTriggerFraction))
+
+watch(emptyWindow, () => {
+  if (!props.record) refresh()
+})
+
+/** What the header says about the record on screen. */
+const recordNote = computed(() => {
+  const record = props.record
+  if (!record) return 'Nothing captured yet'
+  const parts = [`${record.frameCount.toLocaleString()} samples`, `${(record.sampleRateHz / 1000).toFixed(0)} kS/s`]
+  const raw = record.channels.some((c) => c.raw)
+  parts.push(raw ? 'every sample drawn' : 'min/max per column')
+  return parts.join(' · ')
+})
+
+/** The window in the one place a reader needs it spelled out — what fromChartMs is for. */
+const windowNote = computed(
+  () =>
+    `${formatScopeTime(xWindowMs.value.min, spanMs.value)} to ${formatScopeTime(xWindowMs.value.max, spanMs.value)}`,
+)
+</script>
+
+<template>
+  <section
+    ref="root"
+    class="relative flex flex-col gap-1 panel-surface rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
+  >
+    <ExpandToggle class="absolute right-3 top-3" :target="root" />
+    <div class="min-h-6 pr-9 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+      <span class="shrink-0">Oscilloscope</span>
+      <span class="truncate">
+        {{ timebaseLabel }} · {{ verticalLabel }} · {{ windowNote }} · {{ recordNote }}
+      </span>
+
+      <ChartZoomControls
+        :zoomed="zoomed"
+        :can-go-back="canGoBack"
+        reset-title="Back to the time and level window set in the display panel."
+        apply-title="Write this window into the display panel's time and level boxes."
+        @back="zoomBack"
+        @apply="applyZoomToAxis"
+        @reset="resetZoom"
+      />
+      <span v-if="!zoomed" class="shrink-0">Drag to zoom · double-click to reset</span>
+    </div>
+
+    <!-- Two warnings a reader has to see on the picture itself, because both make a trace that
+         looks ordinary mean something else. A spliced record holds two non-adjacent pieces side by
+         side; an untriggered one is aligned to nothing. -->
+    <p v-if="record?.spliced" class="text-xs text-amber-600 dark:text-amber-400">
+      This record spans a dropped chunk or block — two pieces of the stream sit side by side in it,
+      so an edge in the middle may be the splice rather than the signal.
+    </p>
+    <p v-else-if="record?.forced" class="text-xs text-amber-600 dark:text-amber-400">
+      Nothing crossed the trigger level within the timeout, so this record was taken anyway and is
+      aligned to nothing. Drag the trigger line onto the trace, or switch to Roll.
+    </p>
+
+    <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
+      <div ref="container" class="w-full"></div>
+      <ChartAnnotationOverlay :controller="annotationOverlay" />
+
+      <!-- The trigger level's grab handle. Its own element above the canvas, so a press on it never
+           reaches uPlot's drag listeners and nothing has to be restored afterwards. -->
+      <div
+        v-if="handleRect"
+        class="absolute flex items-center justify-end gap-1 pr-0.5 cursor-ns-resize select-none touch-none"
+        :style="{
+          top: `${handleRect.top}px`,
+          right: `${handleRect.right}px`,
+          width: `${handleRect.width}px`,
+          height: `${handleRect.height}px`,
+        }"
+        :title="`Trigger level ${triggerReadout} — drag to move it`"
+        @pointerdown="onHandlePointerDown"
+        @pointermove="onHandlePointerMove"
+        @pointerup="onHandlePointerUp"
+        @pointercancel="onHandlePointerUp"
+      >
+        <span
+          v-if="dragging"
+          class="rounded px-1 text-[10px] font-medium tabular-nums text-white"
+          :style="{ backgroundColor: triggerColor }"
+        >{{ triggerReadout }}</span>
+        <!-- An arrow rather than a bar when the level is off the window: the line is clamped to the
+             edge and this is how a bench instrument says the rest of it is that way. -->
+        <span
+          class="grid h-[14px] w-[14px] place-items-center rounded-sm text-[9px] font-bold leading-none text-white"
+          :style="{ backgroundColor: triggerColor }"
+          >{{ indicator.offWindow === 'above' ? '▲' : indicator.offWindow === 'below' ? '▼' : 'T' }}</span
+        >
+      </div>
+    </div>
+  </section>
+</template>

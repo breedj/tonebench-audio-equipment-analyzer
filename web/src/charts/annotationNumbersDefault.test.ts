@@ -35,6 +35,7 @@ describe('the annotationNumbers prop', () => {
       'ImpulseHarmonicsChart.vue',
       'ImpulseResponseChart.vue',
       'OscilloscopeChart.vue',
+      'OscilloscopeScreenChart.vue',
       'ResponsePolarChart.vue',
       'ResponseSPlaneChart.vue',
       'SpectrogramChart.vue',

@@ -1567,6 +1567,62 @@ export interface OutputImpedanceParameters {
   captureDelayMs?: number | null
 }
 
+/**
+ * A `GeneratorConfig` as it sits inside a stored `params_json` — the server's own record, so both
+ * channels and the snap flag, with the tone list already the effective one.
+ *
+ * Distinct from `StagedMeasurementConfig`'s `generatorLeft`/`generatorRight`, which are the
+ * *request* shape: this is what comes back out of a measurement's stored settings, and it is what
+ * the oscilloscope screen restores its own staged stimulus from rather than reading the live device.
+ */
+export interface StoredGeneratorConfig {
+  left: GeneratorChannelState
+  right: GeneratorChannelState
+  snapToBin?: boolean | null
+}
+
+/**
+ * An oscilloscope type's stored settings — see `OscilloscopeParameters` server-side.
+ *
+ * The trigger and the timebase are measurement settings and are always present; every `chart*`
+ * field is a display preference and is nullable, so a measurement saved before one existed reads
+ * that build's own default rather than a `null` (see `scope/display.ts`).
+ */
+export interface OscilloscopeParameters {
+  sampleRateHz: number
+  recordSeconds: number
+  preTriggerFraction: number
+  mode: ScopeRunMode
+  triggerKind: ScopeTriggerKind
+  triggerSource: ScopeTriggerSource
+  triggerSlope: ScopeTriggerSlope
+  triggerLevelV: number
+  triggerHysteresisV: number
+  holdoffSeconds: number
+  processLeft: boolean
+  processRight: boolean
+  /** The record this result was taken from spanned a dropped chunk or block. A run record; null on a type's own params. */
+  spliced?: boolean | null
+  /** Auto's timeout took it; nothing crossed the level. A run record. */
+  forced?: boolean | null
+  generator?: StoredGeneratorConfig | null
+  generatorLevelUnit?: string | null
+  chartVoltsPerDivision?: number | null
+  chartVoltOffsetV?: number | null
+  chartTimeFromS?: number | null
+  chartTimeToS?: number | null
+  chartThickLines?: boolean | null
+  chartShowDataPoints?: boolean | null
+  chartShowTriggerLevel?: boolean | null
+  chartAutofitOnDone?: boolean | null
+  captureDelayMs?: number | null
+  externalGainLeftDb?: number | null
+  externalGainRightDb?: number | null
+  programmableLoadKind?: string | null
+  programmableLoadOhms?: number | null
+  chartAnnotations?: unknown
+}
+
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */
 export interface CrosstalkParameters {
   startFreqHz: number

@@ -161,7 +161,7 @@ public static class OscilloscopeEndpoints
                     slice.Samples,
                     slice.Columns?.Select(c => (float)c.Min).ToArray(),
                     slice.Columns?.Select(c => (float)c.Max).ToArray(),
-                    slice.MeanV));
+                    slice.Measurements));
             }
 
             return Results.Ok(new ScopeRecordResponse(
@@ -237,10 +237,10 @@ public static class OscilloscopeEndpoints
 /// <param name="X0">Time of the first column or sample, relative to the trigger.</param>
 /// <param name="Dx">Column width, or the sample period when raw.</param>
 /// <param name="Raw">True when this is the waveform rather than a summary of it.</param>
-/// <param name="MeanV">
-/// The window's average, measured on the samples themselves — see
-/// <see cref="ScopeFrameSlice.MeanV"/>. The one vertical reading that cannot be taken from what is
-/// drawn, which is why it travels beside the picture rather than being worked out from it.
+/// <param name="Measurements">
+/// Every reading of this window, measured on the samples themselves — see
+/// <see cref="ScopeSliceMeasurements"/>. They travel beside the picture because they cannot be
+/// taken from it.
 /// </param>
 public sealed record ScopeChannelSlice(
     int Channel,
@@ -250,7 +250,7 @@ public sealed record ScopeChannelSlice(
     float[]? Samples,
     float[]? Min,
     float[]? Max,
-    double MeanV);
+    ScopeSliceMeasurements Measurements);
 
 /// <summary>A record, as the chart fetches it.</summary>
 /// <param name="SampleRateHz">The rate the samples are on.</param>

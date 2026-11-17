@@ -1,7 +1,6 @@
 import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordResponse } from '../../api/client'
-import { sliceExtremes } from '../../scope/measurements'
+import { scopeChannelReadings } from '../../scope/readings'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
-import { formatVolts } from '../../scope/voltAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -86,12 +85,14 @@ export function scopeSettingsRows(paramsJson: string): ReportRow[] {
 }
 
 /**
- * The Measurements panel as one table per drawn channel, plus the record's own facts.
+ * The Measurements panel as one table, plus the record's own facts.
  *
- * <p>Max, min and peak-to-peak survive the decimation exactly — both extremes of every column are
- * kept — and the <b>mean</b> is the one the analyzer measured on the samples, which is why it
- * travels on the slice rather than being worked out here. A channel the display rail is hiding is
- * left out, as it is on screen.</p>
+ * <p>A <b>row per reading and a column per channel</b>, which is the shape that reads on paper:
+ * the figures a reader compares are the two channels' own, side by side. The rows are
+ * <code>scope/readings.ts</code>'s — the same function the panel prints from, so the paper and the
+ * screen cannot quote different numbers or call them different things — and a reading no channel
+ * has is not a row at all. A channel the display rail is hiding is left out, as it is on
+ * screen.</p>
  */
 export function scopeMeasurementSections(
   record: ScopeRecordResponse | null,
@@ -103,27 +104,30 @@ export function scopeMeasurementSections(
     return [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing captured.' }]
   }
 
-  const drawn = record.channels.filter((c) => (c.channel === 1 ? showRight : showLeft))
-  const rows = drawn
-    .map((slice) => ({ slice, extremes: sliceExtremes(slice) }))
-    .filter((r): r is { slice: (typeof drawn)[number]; extremes: NonNullable<ReturnType<typeof sliceExtremes>> } => r.extremes !== null)
+  const blocks = scopeChannelReadings(record.channels, voltsPerDivision, showLeft, showRight)
 
   const sections: ReportSection[] = []
-  const volts = (v: number) => formatVolts(v, voltsPerDivision)
-
-  if (rows.length === 0) {
+  if (blocks.length === 0) {
     sections.push({ kind: 'paragraph', title: 'Measurements', text: 'No channel is drawn.' })
   } else {
+    // The union of the labels, in the order the first channel that has them puts them: the two
+    // channels can legitimately differ about which readings exist -- one may hold two settled
+    // levels where the other holds noise -- and a row missing from one of them is a blank cell
+    // rather than a missing row.
+    const labels: string[] = []
+    for (const block of blocks) {
+      for (const reading of block.readings) {
+        if (!labels.includes(reading.label)) labels.push(reading.label)
+      }
+    }
+
     sections.push({
       kind: 'table',
       title: 'Measurements',
-      headers: ['Channel', 'Maximum', 'Minimum', 'Peak to peak', 'Mean'],
-      cells: rows.map((r) => [
-        r.slice.channel === 0 ? 'Left' : 'Right',
-        volts(r.extremes.maxV),
-        volts(r.extremes.minV),
-        volts(r.extremes.ppV),
-        volts(r.slice.meanV),
+      headers: ['Reading', ...blocks.map((b) => b.label)],
+      cells: labels.map((label) => [
+        label,
+        ...blocks.map((b) => b.readings.find((r) => r.label === label)?.value ?? '—'),
       ]),
     })
   }

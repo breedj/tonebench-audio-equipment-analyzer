@@ -12,13 +12,13 @@ namespace Tonebench.App.Streaming;
 /// <param name="Samples">The samples themselves, or null when the window is decimated.</param>
 /// <param name="FirstFrame">Index into the record of the first frame in this slice.</param>
 /// <param name="FrameCount">How many frames of the record the slice covers.</param>
-/// <param name="MeanV">
-/// The average of the window's samples, at <b>full resolution</b> whether or not the slice itself
-/// was decimated — which is the whole reason it is computed here rather than on the client. A mean
-/// of column maxima is the mean of an envelope: on a sine it reads about 0.64 of the amplitude
-/// above the true one, so a reading taken from what goes on the wire would be confidently wrong
-/// rather than merely coarse. Vmax, Vmin and Vpp survive decimation because both extremes of every
-/// column are kept; nothing else about the samples does.
+/// <param name="Measurements">
+/// Every reading of the window, measured on the samples at <b>full resolution</b> whether or not
+/// the slice itself was decimated — which is the whole reason they are taken here rather than on
+/// the client. Vmax, Vmin and Vpp would survive the decimation, because both extremes of every
+/// column are kept; nothing else about the samples does. A mean of column maxima is the mean of an
+/// envelope, a period read off a column pair is a reading of the column width, and an RMS over
+/// maxima is an RMS of nothing — each of them confidently wrong rather than merely coarse.
 /// </param>
 public sealed record ScopeFrameSlice(
     double X0,
@@ -27,7 +27,7 @@ public sealed record ScopeFrameSlice(
     float[]? Samples,
     int FirstFrame,
     int FrameCount,
-    double MeanV)
+    ScopeSliceMeasurements Measurements)
 {
     /// <summary>True when the window was tight enough to send the waveform itself.</summary>
     public bool IsRaw => Samples is not null;
@@ -94,10 +94,7 @@ public static class ScopeFrameBuilder
         double samplePeriod = 1.0 / record.SampleRateHz;
         double x0 = record.TimeAt(firstFrame);
 
-        double sum = 0.0;
-        foreach (double v in source)
-            sum += v;
-        double meanV = frameCount > 0 ? sum / frameCount : 0.0;
+        var measurements = ScopeSliceMeasurements.Of(source, record.SampleRateHz);
 
         if (frameCount <= maxColumns * RawSamplesPerColumn)
         {
@@ -105,7 +102,7 @@ public static class ScopeFrameBuilder
             for (int i = 0; i < frameCount; i++)
                 samples[i] = (float)source[i];
 
-            return new ScopeFrameSlice(x0, samplePeriod, Columns: null, samples, firstFrame, frameCount, meanV);
+            return new ScopeFrameSlice(x0, samplePeriod, Columns: null, samples, firstFrame, frameCount, measurements);
         }
 
         int columnCount = Math.Min(maxColumns, frameCount);
@@ -116,7 +113,7 @@ public static class ScopeFrameBuilder
         // first column to the centre of the last would be a different convention and a different
         // axis; this one matches what the encoder documents.
         double dx = frameCount * samplePeriod / columnCount;
-        return new ScopeFrameSlice(x0, dx, columns, Samples: null, firstFrame, frameCount, meanV);
+        return new ScopeFrameSlice(x0, dx, columns, Samples: null, firstFrame, frameCount, measurements);
     }
 
     /// <summary>The frame index a time relative to the trigger falls on.</summary>

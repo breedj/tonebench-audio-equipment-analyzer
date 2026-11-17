@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest'
 import type { ScopeChannelSlice } from '../api/client'
 import { recordExtremes, sliceExtremes } from './measurements'
 
+const NO_MEASUREMENTS = { maxV: 0, minV: 0, peakToPeakV: 0, meanV: 0, rmsV: 0, acRmsV: 0 }
+
 function columns(min: number[], max: number[]): ScopeChannelSlice {
-  // meanV is the server's own reading of the samples and is not derived from these columns -- see
-  // ScopeFrameSlice.MeanV. Zero here because nothing in this file reads it.
-  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, meanV: 0 }
+  // The measurements are the server's own reading of the samples and are not derived from these
+  // columns -- see ScopeSliceMeasurements. Empty here because nothing in this file reads them.
+  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements: NO_MEASUREMENTS }
 }
 
 function raw(samples: number[]): ScopeChannelSlice {
-  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null, meanV: 0 }
+  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null, measurements: NO_MEASUREMENTS }
 }
 
 describe('sliceExtremes', () => {

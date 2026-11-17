@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ScopeChannelSlice, ScopeRecordResponse } from '../../api/client'
+import type { ScopeChannelSlice, ScopeRecordResponse, ScopeSliceMeasurements } from '../../api/client'
 import { DEFAULT_SCOPE_DISPLAY } from '../../scope/display'
 import type { ReportSubject } from '../types'
 import { scopeMeasurementSections, scopeSections, scopeSettingsRows } from './oscilloscope'
@@ -26,8 +26,22 @@ function rowsToObject(rows: { label: string; value: string }[]) {
   return Object.fromEntries(rows.map((r) => [r.label, r.value]))
 }
 
-function slice(channel: number, min: number[], max: number[], meanV: number): ScopeChannelSlice {
-  return { channel, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, meanV }
+/**
+ * A decimated slice whose *measurements* are supplied separately from its columns -- which is the
+ * shape the wire really has, and the thing these tests are about: the readings are the analyzer's
+ * own reading of the samples, not of the min/max pairs beside them.
+ */
+function slice(channel: number, min: number[], max: number[], measured: Partial<ScopeSliceMeasurements>): ScopeChannelSlice {
+  const measurements: ScopeSliceMeasurements = {
+    maxV: Math.max(...max),
+    minV: Math.min(...min),
+    peakToPeakV: Math.max(...max) - Math.min(...min),
+    meanV: 0,
+    rmsV: 0,
+    acRmsV: 0,
+    ...measured,
+  }
+  return { channel, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements }
 }
 
 function record(channels: ScopeChannelSlice[], extra: Partial<ScopeRecordResponse> = {}): ScopeRecordResponse {
@@ -67,7 +81,10 @@ function subjectWith(data: ReportSubject['data']): ReportSubject {
 const scopeData = (overrides: Partial<Extract<ReportSubject['data'], { kind: 'scope' }>> = {}) =>
   ({
     kind: 'scope' as const,
-    record: record([slice(0, [-1, -0.9], [1, 0.95], 0.02), slice(1, [-0.5, -0.4], [0.5, 0.45], -0.01)]),
+    record: record([
+      slice(0, [-1, -0.9], [1, 0.95], { meanV: 0.02, rmsV: 0.7, acRmsV: 0.7, frequencyHz: 1000, periodS: 1e-3 }),
+      slice(1, [-0.5, -0.4], [0.5, 0.45], { meanV: -0.01, rmsV: 0.35, acRmsV: 0.35 }),
+    ]),
     display: { ...DEFAULT_SCOPE_DISPLAY },
     triggerLevelV: 0.25,
     triggerHysteresisV: 0.4,
@@ -103,18 +120,21 @@ describe('scopeMeasurementSections', () => {
   it('quotes the extremes off the picture and the mean off the samples', () => {
     const sections = scopeMeasurementSections(scopeData().record, 0.5, true, true)
     const table = sections.find((s) => s.kind === 'table')
-    expect(table?.headers).toEqual(['Channel', 'Maximum', 'Minimum', 'Peak to peak', 'Mean'])
+    expect(table?.headers).toEqual(['Reading', 'Left', 'Right'])
     const cells = table?.cells ?? []
+    const row = (label: string) => cells.find((c) => c[0] === label)
     // The mean is the slice's own, not derived from the min/max pair -- which for this slice would
     // be 0.000 V on both channels, and is the whole reason it travels beside the picture.
-    expect(cells[0]).toEqual(['Left', '1.000 V', '-1.000 V', '2.000 V', '0.020 V'])
-    expect(cells[1]).toEqual(['Right', '0.500 V', '-0.500 V', '1.000 V', '-0.010 V'])
+    expect(row('Maximum')).toEqual(['Maximum', '1.000 V', '0.500 V'])
+    expect(row('Mean')).toEqual(['Mean', '0.020 V', '-0.010 V'])
+    // A reading one channel has and the other does not is a blank cell rather than a missing row.
+    expect(row('Frequency')).toEqual(['Frequency', '1.00 kHz', '—'])
   })
 
   it('leaves out a channel the display rail is hiding, as the screen does', () => {
     const sections = scopeMeasurementSections(scopeData().record, 0.5, true, false)
     const table = sections.find((s) => s.kind === 'table')
-    expect((table?.cells ?? []).map((row) => row[0])).toEqual(['Left'])
+    expect(table?.headers).toEqual(['Reading', 'Left'])
   })
 
   it('says so when nothing was captured', () => {
@@ -125,7 +145,7 @@ describe('scopeMeasurementSections', () => {
 
   it('carries the two flags into the record facts, because a trace that looks ordinary is not', () => {
     const sections = scopeMeasurementSections(
-      record([slice(0, [-1], [1], 0)], { forced: true, spliced: true }),
+      record([slice(0, [-1], [1], { meanV: 0 })], { forced: true, spliced: true }),
       0.5,
       true,
       true,

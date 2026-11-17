@@ -3,24 +3,22 @@ import { computed } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import ReadingValue from './ReadingValue.vue'
 import { useOscilloscope } from '../composables/useOscilloscope'
-import { sliceExtremes } from '../scope/measurements'
-import { formatVolts } from '../scope/voltAxis'
+import { scopeChannelReadings } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
 /**
  * What the record on screen reads — one block per captured channel, plus the facts about the record
  * itself.
  *
- * <p><b>Three of the four are read off the picture and the fourth is not, which is the rule.</b> A
- * min/max pair per display column keeps both extremes of every column exactly, so Vmax, Vmin and
- * Vpp survive the decimation and are the figures a full-resolution pass would give. Nothing else
- * does — an RMS over column maxima is an RMS of nothing, and a rise time read off a column pair is
- * a reading of the column width, which is the measurement a scope is most often pointed at and the
- * one it would be worst to get plausibly wrong. So <b>Vmean is measured server-side on the
- * samples</b> and travels beside the picture (<code>ScopeChannelSlice.meanV</code>); a mean of
- * column maxima is the mean of an envelope, about 0.64 of the amplitude high on a sine. The rest
- * (RMS, top/base, period, rise, fall, duty, the channel delay) arrives with the measurements
- * phase. See scope/measurements.ts.</p>
+ * <p><b>Every figure here was measured on the analyzer, and none of it is read off the picture.</b>
+ * Vmax, Vmin and Vpp would survive the decimation — a min/max pair per column keeps both extremes
+ * of every column exactly — and nothing else would: a mean of column maxima is the mean of an
+ * envelope, an RMS over them is an RMS of nothing, and a rise time read off a column pair is a
+ * reading of the column width, which is the measurement a scope is most often pointed at and the
+ * one it would be worst to get plausibly wrong. So the whole set travels beside the picture
+ * (<code>ScopeChannelSlice.measurements</code>), measured over the window on screen at full
+ * resolution, and this panel formats it through <code>scope/readings.ts</code> — the same function
+ * the report prints from, so the paper and the screen cannot disagree.</p>
  */
 
 const props = withDefaults(
@@ -45,21 +43,8 @@ const props = withDefaults(
 const { record, spliced, forced } = useOscilloscope()
 
 const blocks = computed(() =>
-  (record.value?.channels ?? [])
-    .filter((slice) => (slice.channel === 1 ? props.showRight : props.showLeft))
-    .map((slice) => ({
-      channel: slice.channel,
-      label: slice.channel === 0 ? 'Left' : 'Right',
-      extremes: sliceExtremes(slice),
-      meanV: slice.meanV,
-      raw: slice.raw,
-    }))
-    .filter((block) => block.extremes !== null),
+  scopeChannelReadings(record.value?.channels, props.voltsPerDivision, props.showLeft, props.showRight),
 )
-
-function volts(value: number): string {
-  return formatVolts(value, props.voltsPerDivision)
-}
 
 const spanMs = computed(() => Math.abs(toChartMs(props.timeToS) - toChartMs(props.timeFromS)))
 
@@ -84,26 +69,9 @@ const recordFacts = computed(() => {
         <div class="mb-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{{ block.label }}</div>
         <table class="w-full text-left text-[11px]">
           <tbody>
-            <tr>
-              <td class="pr-2" title="The highest sample in the window — exact even on a decimated slice, because both extremes of every column are kept.">Maximum</td>
-              <td><ReadingValue :text="volts(block.extremes!.maxV)" /></td>
-            </tr>
-            <tr>
-              <td class="pr-2" title="The lowest sample in the window.">Minimum</td>
-              <td><ReadingValue :text="volts(block.extremes!.minV)" /></td>
-            </tr>
-            <tr>
-              <td class="pr-2" title="Peak to peak — the maximum less the minimum.">Peak to peak</td>
-              <td><ReadingValue :text="volts(block.extremes!.ppV)" /></td>
-            </tr>
-            <tr>
-              <td
-                class="pr-2"
-                title="Vmean — the average of the window's samples, measured at full resolution on the analyzer rather than read off the drawn columns. Both this analyzer and a sound card are AC-coupled, so on a quiet input this is the input's own residual offset and not the DUT's DC."
-              >
-                Mean
-              </td>
-              <td><ReadingValue :text="volts(block.meanV)" /></td>
+            <tr v-for="reading in block.readings" :key="reading.label">
+              <td class="pr-2" :title="reading.title">{{ reading.label }}</td>
+              <td><ReadingValue :text="reading.value" /></td>
             </tr>
           </tbody>
         </table>
@@ -148,8 +116,8 @@ const recordFacts = computed(() => {
         DC — a few millivolts is ordinary, and nothing corrects it.
       </p>
       <p class="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        RMS, period, rise and fall are measured on the whole record server-side and are not in this
-        build. Reading them off a decimated column pair would be a reading of the decimation.
+        A reading a waveform does not have is left out rather than dashed — a period needs two
+        crossings, an edge needs two settled levels, and a record with one level has neither.
       </p>
     </template>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">Nothing captured yet.</p>

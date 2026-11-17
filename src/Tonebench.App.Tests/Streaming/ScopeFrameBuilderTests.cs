@@ -262,7 +262,7 @@ public class ScopeFrameBuilderTests
 
         var slice = ScopeFrameBuilder.Overview(record, channel: 0, maxColumns: 600);
         Assert.False(slice.IsRaw);
-        Assert.Equal(offsetV, slice.MeanV, 4);
+        Assert.Equal(offsetV, slice.Measurements.MeanV, 4);
 
         // What a reader would have got from the picture, so the test says what it is protecting
         // against rather than only what is right.
@@ -281,11 +281,11 @@ public class ScopeFrameBuilderTests
         // The ramp is the frame index, so the mean of frames [a, b) is their midpoint.
         var raw = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0, toS: 1_000 / SampleRateHz, maxColumns: 600);
         Assert.True(raw.IsRaw);
-        Assert.Equal((raw.FirstFrame + raw.FrameCount - 1) / 2.0, raw.MeanV, 3);
+        Assert.Equal((raw.FirstFrame + raw.FrameCount - 1) / 2.0, raw.Measurements.MeanV, 3);
 
         var decimated = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0, toS: 0.5, maxColumns: 600);
         Assert.False(decimated.IsRaw);
         Assert.Equal(
-            decimated.FirstFrame + ((decimated.FrameCount - 1) / 2.0), decimated.MeanV, 3);
+            decimated.FirstFrame + ((decimated.FrameCount - 1) / 2.0), decimated.Measurements.MeanV, 3);
     }
 }

@@ -1430,6 +1430,39 @@ export interface OscilloscopeStatus {
  * flattens anything narrower than a column into the trace around it and erases the very thing the
  * scope is pointed at.
  */
+/**
+ * One window's readings, measured on the analyzer at full resolution.
+ *
+ * <p>The three extremes are always there for a window with samples in it; everything else is
+ * undefined on some waveform — a period on noise, a rise time with no edge, a duty cycle on DC —
+ * and is **null** there rather than NaN, which `System.Text.Json` cannot write and which truncates
+ * the whole response part way through.</p>
+ */
+export interface ScopeSliceMeasurements {
+  maxV: number
+  minV: number
+  peakToPeakV: number
+  /** The DC component. Both the QA403 and a sound card are AC-coupled, so on a quiet input this is the input's own residual offset. */
+  meanV: number
+  rmsV: number
+  /** RMS about the mean — the figure to quote for a signal riding on an offset. */
+  acRmsV: number
+  crestFactor?: number | null
+  /** The settled levels, from a histogram rather than from the extremes; null where the record has one level. */
+  topV?: number | null
+  baseV?: number | null
+  amplitudeV?: number | null
+  periodS?: number | null
+  frequencyHz?: number | null
+  positiveWidthS?: number | null
+  negativeWidthS?: number | null
+  dutyPercent?: number | null
+  riseTimeS?: number | null
+  fallTimeS?: number | null
+  overshootPercent?: number | null
+  preshootPercent?: number | null
+}
+
 export interface ScopeChannelSlice {
   channel: number
   /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
@@ -1437,13 +1470,14 @@ export interface ScopeChannelSlice {
   /** Column width, or the sample period when raw. */
   dx: number
   /**
-   * The window's average, measured server-side on the samples themselves.
+   * Every reading of this window, measured server-side on the samples themselves.
    *
-   * <p>Not derivable from what arrives: a mean of column maxima is the mean of an envelope. Note
-   * that both the QA403 and a sound card are AC-coupled, so what this reads on a quiet input is
-   * the analyzer's own residual offset rather than the DUT's DC.</p>
+   * <p>Not derivable from what arrives: a mean of column maxima is the mean of an envelope, and a
+   * period read off a column pair is a reading of the column width. Mirrors
+   * `Tonebench.App.Streaming.ScopeSliceMeasurements`, where the rule that absent is null and never
+   * NaN is written down.</p>
    */
-  meanV: number
+  measurements: ScopeSliceMeasurements
   /** True when the window was tight enough to send the waveform itself rather than a summary of it. */
   raw: boolean
   samples: number[] | null

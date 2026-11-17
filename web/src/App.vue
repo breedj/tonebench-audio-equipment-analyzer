@@ -62,6 +62,7 @@ import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import OscilloscopeScreenChart from './components/OscilloscopeScreenChart.vue'
+import ScopeOverviewStrip from './components/ScopeOverviewStrip.vue'
 import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
 import ScopeMeasurementsPanel from './components/ScopeMeasurementsPanel.vue'
@@ -76,7 +77,7 @@ import {
 } from './scope/display'
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
-import { clampWindow, recordWindow } from './scope/timeAxis'
+import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
 import { recordExtremes } from './scope/measurements'
 import SaveAsDialog from './components/SaveAsDialog.vue'
@@ -2133,6 +2134,7 @@ const scopeChart = ref<InstanceType<typeof OscilloscopeScreenChart> | null>(null
 
 const {
   record: scopeRecord,
+  overview: scopeOverview,
   running: scopeRunning,
   phase: scopePhase,
   error: scopeError,
@@ -2185,6 +2187,9 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeShowDataPoints.value = display.showDataPoints
   scopeShowTriggerLevel.value = display.showTriggerLevel
   scopeAutofitOnDone.value = display.autofitOnDone
+  // A window belonging to the measurement being left would put the arriving one's box in the
+  // wrong place until its chart reported for itself.
+  scopeViewWindow.value = null
   scopeShowResidual.value = display.showResidual
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
@@ -2306,6 +2311,38 @@ async function onScopeRetune(request: import('./api/client').OscilloscopeStartRe
  * <em>capture</em> follows on a debounce so a drag costs one request rather than one per pointer
  * move. Flushing on the release is what keeps the two from disagreeing after the user has let go.</p>
  */
+/**
+ * The window the chart is actually showing, which is <b>not</b> always the display panel's pair.
+ *
+ * <p>A drag-zoom moves uPlot's scales in place and deliberately does not write the panel's boxes —
+ * only "Set axis" does that, so a zoom does not mark the measurement dirty. The zoom bar has to
+ * show where the chart really is, so this is the one value both writers keep: the chart reports it
+ * after any gesture, and the strip sets it with the panel's pair when its box is dragged. Null
+ * before the chart has reported anything, where the panel's pair is the answer.</p>
+ */
+const scopeViewWindow = ref<ScopeTimeWindow | null>(null)
+
+/** What the zoom bar draws its box from — the chart's own window, or the panel's before there is one. */
+const scopeStripWindow = computed<ScopeTimeWindow>(
+  () => scopeViewWindow.value ?? { fromS: scopeTimeFromS.value, toS: scopeTimeToS.value },
+)
+
+/** The axis the zoom bar draws: the record's span, or the one the settings are about to capture. */
+const scopeStripBounds = computed<ScopeTimeWindow>(
+  () => scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopePreTriggerFraction.value),
+)
+
+/**
+ * The zoom bar's box moved: the display panel's pair, which is what ends any drag-zoom the chart
+ * was holding — so the box and the chart cannot disagree about where the window is.
+ */
+function onScopeStripWindow(next: ScopeTimeWindow) {
+  const clamped = clampWindow(next, scopeStripBounds.value)
+  scopeTimeFromS.value = clamped.fromS
+  scopeTimeToS.value = clamped.toS
+  scopeViewWindow.value = clamped
+}
+
 function onScopeTriggerLevelCommitted() {
   scopeConfigPanel.value?.flushRetune()
 }
@@ -2371,6 +2408,8 @@ function requestScopeSlice(window: { fromS: number; toS: number } | null, column
 
 function onScopeViewport(view: import('./components/OscilloscopeScreenChart.vue').ScopeViewport) {
   if (!isOscilloscope.value) return
+  // What the chart has ended up showing, whatever moved it. The zoom bar reads this.
+  scopeViewWindow.value = { fromS: view.fromS, toS: view.toS }
   const bounds = scopeRecordBounds.value
   // No record yet, or a window that reaches both ends of one: the overview is the answer, and it is
   // what the zoom strip will draw over.
@@ -5884,6 +5923,15 @@ onBeforeUnmount(() => stopLoadPolling?.())
               <template #default>
                 <p v-if="scopeRunError" class="text-xs text-red-600 dark:text-red-400">{{ scopeRunError }}</p>
                 <p v-else-if="scopeError" class="text-xs text-red-600 dark:text-red-400">{{ scopeError }}</p>
+
+                <ScopeOverviewStrip
+                  :overview="scopeOverview"
+                  :window="scopeStripWindow"
+                  :bounds="scopeStripBounds"
+                  :show-left="scopeShowLeft"
+                  :show-right="scopeShowRight"
+                  @update:window="onScopeStripWindow"
+                />
 
                 <OscilloscopeScreenChart
                   ref="scopeChart"

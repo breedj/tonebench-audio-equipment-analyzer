@@ -41,6 +41,21 @@ const status = shallowRef<OscilloscopeStatus | null>(null)
  */
 const record = shallowRef<ScopeRecordResponse | null>(null)
 
+/**
+ * The <b>whole</b> record, for the zoom bar to draw.
+ *
+ * <p>Kept beside the drawn slice rather than derived from it, because a zoom is answered with the
+ * window asked for and that answer <em>replaces</em> what the client holds — so anything wanting
+ * the measurement rather than the view is left with the slice. That is
+ * <code>spectrumOverview</code>'s own lesson one screen along, and here it is load-bearing rather
+ * than a nicety: the strip cannot show where a box sits in a record it does not have.</p>
+ *
+ * <p>Re-fetched only when a new record is committed, never when the window moves — which is what
+ * keeps a drag at one request per window instead of two. While the chart is showing the whole
+ * record the two are the same fetch and this is simply that answer.</p>
+ */
+const overview = shallowRef<ScopeRecordResponse | null>(null)
+
 /** Why a start was refused, or a fetch failed. Cleared by the next successful one. */
 const error = ref<string | null>(null)
 
@@ -89,6 +104,9 @@ let fetchToken = 0
 /** The record counter the slice on screen was fetched for, so an unchanged record is not re-fetched. */
 let fetchedFor = -1
 
+/** The same for the overview, which only has to follow the record and not the window. */
+let overviewFetchedFor = -1
+
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 function stopPolling() {
@@ -114,6 +132,22 @@ async function fetchRecord(force = false): Promise<void> {
     if (token !== fetchToken) return
     record.value = next
     fetchedFor = taken
+
+    // The whole record for the strip. The windowed fetch above *is* the whole record when nothing
+    // is zoomed, so that is the common case and it costs nothing; a zoomed one needs its own, and
+    // only once per committed record.
+    if (window.value === null) {
+      overview.value = next
+      overviewFetchedFor = taken
+    } else if (taken !== overviewFetchedFor || overview.value === null) {
+      // No gate and no residual: the strip draws the waveform and nothing else, and the residual
+      // is a least-squares sine fit per channel that nothing here would read.
+      const whole = await api.getOscilloscopeRecord(undefined, maxColumns.value)
+      if (token !== fetchToken) return
+      overview.value = whole
+      overviewFetchedFor = taken
+    }
+
     error.value = null
   } catch (e) {
     if (token !== fetchToken) return
@@ -125,7 +159,10 @@ async function refresh(): Promise<void> {
   const next = await api.getOscilloscopeStatus()
   status.value = next
   if (next.hasRecord) await fetchRecord()
-  else record.value = null
+  else {
+    record.value = null
+    overview.value = null
+  }
   if (!isRunning(next)) stopPolling()
 }
 
@@ -143,6 +180,7 @@ function startPolling() {
 function invalidateRecord() {
   fetchToken++
   fetchedFor = -1
+  overviewFetchedFor = -1
 }
 
 export function useOscilloscope() {
@@ -184,6 +222,7 @@ export function useOscilloscope() {
   async function clear(): Promise<void> {
     invalidateRecord()
     record.value = null
+    overview.value = null
     status.value = await api.clearOscilloscope()
   }
 
@@ -195,6 +234,7 @@ export function useOscilloscope() {
   async function switchOwner(owner: string | null): Promise<void> {
     invalidateRecord()
     record.value = null
+    overview.value = null
     status.value = await api.setOscilloscopeOwner(owner)
     if (status.value.hasRecord) await fetchRecord(true)
   }
@@ -267,6 +307,7 @@ export function useOscilloscope() {
   return {
     status,
     record,
+    overview,
     error,
     window,
     gate,

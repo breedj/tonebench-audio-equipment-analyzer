@@ -157,6 +157,19 @@ const { showPage } = useManual()
       it went, rather than disappearing.
     </p>
     <p>
+      <strong>The zoom bar</strong> across the top of the chart is the whole record, drawn small,
+      with a box showing which part of it the chart below is looking at. Drag the box to move the
+      window, drag either edge to resize it, or click anywhere on the bar to jump there keeping the
+      same span. The dashed amber line on it is the trigger, so the bar says where you are in the
+      record even when the chart is showing a tenth of a millisecond of it. The figure beside it is
+      the <strong>record's</strong> own timebase, against the chart's own below — two timebases, the
+      way a bench scope with a zoom window shows them.
+    </p>
+    <p>
+      The box and the chart are <strong>one window</strong>: dragging the box, dragging the plot and
+      pressing Back all move the same thing, so the bar always shows where the chart really is.
+    </p>
+    <p>
       <strong>Drag to zoom, double-click to reset.</strong> A zoom is not only a magnification: the
       window is sent to the analyzer, which cuts the record to it and — once the window holds no
       more samples than the chart has columns to draw them in — sends <strong>every sample</strong>

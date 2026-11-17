@@ -2198,26 +2198,44 @@ function onScopeAxisWindow(window: ScopeAxisWindow) {
 }
 
 /**
- * Asks the server for the slice the window now covers.
+ * Asks the server for the slice the window on screen covers.
  *
- * <p>Debounced, because the window moves per pointer move while a box is dragged and each fetch is
- * the whole slice. The *token* inside the composable is what stops a late answer winning; this is
- * only about not asking a hundred times.</p>
+ * <p><b>Driven by the chart rather than by the display panel's boxes</b>, and that is the fix for
+ * what a zoom used to look like: a drag moves uPlot's scales in place, so the boxes never hear
+ * about it, nothing was re-fetched, and the chart went on drawing the overview's min/max columns —
+ * which at a tight zoom is a vertical stroke per column rather than the waveform. Reported
+ * 2026-11-17 as "not all data is shown when zoomed in", and it is the same lesson as the
+ * spectrum's `reportViewport`: the chart is the only thing that knows what is drawn. The boxes
+ * still reach here, one step further round — they move the chart's own window, which reports.</p>
+ *
+ * <p>Debounced because a reset, a Back and a rebuild each move the window within a few
+ * milliseconds of each other, and de-duplicated because the chart re-reports the window it is
+ * already showing whenever a record arrives in it. The *token* inside the composable is what stops
+ * a late answer winning; this is only about not asking.</p>
  */
 let scopeWindowHandle: ReturnType<typeof setTimeout> | null = null
-watch([scopeTimeFromS, scopeTimeToS], () => {
-  if (!isOscilloscope.value) return
+let scopeWindowAsked: string | null = null
+
+function requestScopeSlice(window: { fromS: number; toS: number } | null, columns: number) {
+  const key = window ? `${window.fromS}:${window.toS}:${columns}` : `whole:${columns}`
+  if (key === scopeWindowAsked) return
+  scopeWindowAsked = key
+
   if (scopeWindowHandle !== null) clearTimeout(scopeWindowHandle)
   scopeWindowHandle = setTimeout(() => {
     scopeWindowHandle = null
-    const bounds = scopeRecordBounds.value
-    if (!bounds) return
-    const whole = scopeTimeFromS.value <= bounds.fromS && scopeTimeToS.value >= bounds.toS
-    void setOscilloscopeWindow(whole ? null : { fromS: scopeTimeFromS.value, toS: scopeTimeToS.value }).catch(
-      () => undefined,
-    )
-  }, 150)
-})
+    void setOscilloscopeWindow(window, columns).catch(() => undefined)
+  }, 120)
+}
+
+function onScopeViewport(view: import('./components/OscilloscopeScreenChart.vue').ScopeViewport) {
+  if (!isOscilloscope.value) return
+  const bounds = scopeRecordBounds.value
+  // No record yet, or a window that reaches both ends of one: the overview is the answer, and it is
+  // what the zoom strip will draw over.
+  const whole = !bounds || (view.fromS <= bounds.fromS && view.toS >= bounds.toS)
+  requestScopeSlice(whole ? null : { fromS: view.fromS, toS: view.toS }, view.columns)
+}
 
 
 // Output-impedance chart display preferences — the crosstalk arrangement, through
@@ -5710,6 +5728,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :pre-trigger-fraction="scopePreTriggerFraction"
                   :running="scopeRunning"
                   @axis-window="onScopeAxisWindow"
+                  @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
                 />
 

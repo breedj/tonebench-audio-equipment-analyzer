@@ -96,7 +96,26 @@ const emit = defineEmits<{
   axisWindow: [window: ScopeAxisWindow]
   /** The level drag has ended: the parent re-arms once, rather than once per pointer move. */
   triggerLevelCommitted: []
+  /**
+   * The window this chart is drawing, after anything that moved it.
+   *
+   * <p>The server cuts the record to the window it is asked for and sends the <b>waveform itself</b>
+   * once that window holds no more samples than there are columns to draw it in — which is the
+   * whole of what makes a rise time or an edge believable. So something has to tell it what is on
+   * screen, and the only thing that knows is the chart: a drag-zoom moves uPlot's scales in place
+   * and the display panel's From/To boxes never hear about it. Reported here rather than watched
+   * upstream for exactly that reason, which is `SpectrumChart.reportViewport`'s own.</p>
+   */
+  viewport: [window: ScopeViewport]
 }>()
+
+/** What `viewport` carries: the window on screen in seconds, and the width to cut it into. */
+export interface ScopeViewport {
+  fromS: number
+  toS: number
+  /** The plot's own width in pixels, so a column is about a pixel and the raw floor is honest. */
+  columns: number
+}
 
 const { isDark } = useAppTheme()
 
@@ -388,6 +407,9 @@ const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, 
  */
 const DRAG_RESTING: BoxDragResting = { y: true, uni: 12 }
 
+/** How long a burst of window changes is collapsed for before the parent is told. See reportViewport. */
+const VIEWPORT_DEBOUNCE_MS = 150
+
 /**
  * "Set axis": hands the window on screen up, for the display panel's own boxes to take it on.
  *
@@ -459,12 +481,13 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
     hooks: interactive
       ? {
           setScale: [
-            (u: uPlot) => {
+            (u: uPlot, key: string) => {
               noteScale(u)
               // The indicator and its handle are positioned against the window on screen, so a
               // zoom has to move them -- uPlot's scales are mutated in place and Vue sees nothing.
               plotWindowTick.value++
               syncHandle()
+              if (key === 'x') reportViewport()
             },
           ],
           setSelect: [(u: uPlot) => noteZoomGesture(u)],
@@ -612,6 +635,13 @@ function rebuild() {
   const el = container.value
   if (!el) return
 
+  // A rebuild may not throw the window away, and on this chart that is not a nicety: both of the
+  // things in the rebuild watcher's list -- the axis unit, and a slice flipping between min/max
+  // columns and raw samples -- are *consequences* of a zoom. Rebuilding back to the panel's window
+  // would undo the gesture that caused the rebuild, report the whole record, and be handed the
+  // overview again, which is a loop rather than a lost zoom.
+  const keep = zoomed.value ? currentWindow() : null
+
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
   // One empty array per declared series. Empty construction then setData is also what makes the x
@@ -623,17 +653,71 @@ function rebuild() {
   syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING)
   plot.value.over.addEventListener('dblclick', resetZoom)
   refresh()
+  if (keep) {
+    plot.value.setScale('x', { min: keep.xMin, max: keep.xMax })
+    plot.value.setScale('y', { min: keep.yMin, max: keep.yMax })
+  }
 }
 
-function refresh() {
+/**
+ * New data, and the window it is drawn in.
+ *
+ * <p><b>The window is only re-applied when the chart is not zoomed</b>, which is the other half of
+ * fetching a slice per window: the record that arrives for a zoomed window <em>is</em> that window,
+ * so setting the panel's would both undo the zoom and ask the server for the overview again on the
+ * next report. A change to the panel's own boxes passes <code>force</code>, because typing a window
+ * is an instruction rather than an arriving record — and it is what ends the zoom.</p>
+ */
+function refresh(force = false) {
   const p = plot.value
   if (!p) return
 
   const { xMs, channels } = series.value
-  p.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData)
-  p.setScale('x', xWindowMs.value)
-  p.setScale('y', { min: yWindow.value.bottomV, max: yWindow.value.topV })
+  // `false`: setData's default is to autoscale x to the *data's* own span, and a slice cut to a
+  // zoom window is data whose span is that window -- so the default both fights the window being
+  // held and, on the tick where the previous record is still in hand, snaps the axis to the old
+  // one. Every window this chart shows is set deliberately, below or by a drag.
+  p.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData, false)
+  if (force || !zoomed.value) {
+    p.setScale('x', xWindowMs.value)
+    p.setScale('y', { min: yWindow.value.bottomV, max: yWindow.value.topV })
+  }
   syncHandle()
+}
+
+/**
+ * Hands the parent the window on screen, for the fetch that cuts the record to it.
+ *
+ * <p><b>Debounced and change-gated here</b>, which is <code>SpectrumChart.reportViewport</code>'s
+ * own shape and is not merely about asking less often. A rebuild — which a slice flipping between
+ * min/max columns and raw samples causes — constructs the plot at the panel's window and only then
+ * puts the held window back, so it passes through a window that was never on screen. Reported
+ * straight out, that intermediate is the <em>last</em> thing the parent hears, and it fetches the
+ * overview, which flips the slice back, which rebuilds: a loop that settles on the unzoomed record.
+ * One debounce collapses the pair and only the window that ended up on screen leaves.</p>
+ */
+let viewportTimer: ReturnType<typeof setTimeout> | undefined
+let lastReportedFromS: number | undefined
+let lastReportedToS: number | undefined
+
+function reportViewport() {
+  const p = plot.value
+  if (!p) return
+  const min = p.scales.x.min
+  const max = p.scales.x.max
+  if (min == null || max == null || !(max > min)) return
+
+  const view = {
+    fromS: fromChartMs(min),
+    toS: fromChartMs(max),
+    columns: Math.max(1, Math.round(p.over?.getBoundingClientRect().width || p.width || 600)),
+  }
+  if (view.fromS === lastReportedFromS && view.toS === lastReportedToS) return
+  lastReportedFromS = view.fromS
+  lastReportedToS = view.toS
+
+  clearTimeout(viewportTimer)
+  viewportTimer = setTimeout(() => emit('viewport', view), VIEWPORT_DEBOUNCE_MS)
 }
 
 let observer: ResizeObserver | null = null
@@ -643,6 +727,9 @@ function fit() {
   if (el && plot.value) {
     plot.value.setSize({ width: el.getBoundingClientRect().width, height: chartHeight.value })
     syncHandle()
+    // The width is the column budget, so a wider chart is a finer slice -- and a chart narrow
+    // enough turns a raw window back into columns.
+    reportViewport()
   }
 }
 watch(chartHeight, fit)
@@ -711,6 +798,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(viewportTimer)
   window.removeEventListener('mouseup', onWindowMouseUp)
   window.removeEventListener('keydown', onWindowKeyDown)
   observer?.disconnect()
@@ -737,15 +825,13 @@ watch(
   rebuild,
 )
 
+// A record arriving keeps whatever window is on screen; see refresh().
+watch(() => props.record, () => refresh())
+
+// The panel's own boxes are an instruction, and they end a zoom.
 watch(
-  [
-    () => props.record,
-    () => props.timeFromS,
-    () => props.timeToS,
-    () => props.voltsPerDivision,
-    () => props.voltOffsetV,
-  ],
-  refresh,
+  [() => props.timeFromS, () => props.timeToS, () => props.voltsPerDivision, () => props.voltOffsetV],
+  () => refresh(true),
 )
 
 /**

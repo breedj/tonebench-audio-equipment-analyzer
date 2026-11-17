@@ -137,6 +137,22 @@ describe('scopeDisplayToParams', () => {
   })
 })
 
+
+describe('the residual', () => {
+  it('is off until a measurement says otherwise', () => {
+    // It costs a least-squares sine fit per channel per fetch, so it is asked for rather than
+    // always sent -- and a measurement saved before it existed states nothing and reads as off.
+    expect(DEFAULT_SCOPE_DISPLAY.showResidual).toBe(false)
+    expect(scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.2 })).showResidual).toBe(false)
+  })
+
+  it('round-trips through the params it is written to', () => {
+    const params = scopeDisplayToParams({ ...DEFAULT_SCOPE_DISPLAY, showResidual: true })
+    expect(params.chartShowResidual).toBe(true)
+    expect(scopeDisplayFromParams(JSON.stringify(params)).showResidual).toBe(true)
+  })
+})
+
 describe('the per-channel display pair', () => {
   it('draws both inputs until a measurement says otherwise', () => {
     expect(DEFAULT_SCOPE_DISPLAY.showLeft).toBe(true)

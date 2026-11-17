@@ -36,6 +36,14 @@ export interface ScopeDisplay {
    */
   showLeft: boolean
   showRight: boolean
+  /**
+   * Whether the THD residual is drawn as a second trace — the window with its fitted fundamental
+   * subtracted, so what is left is the distortion and the noise.
+   *
+   * <p>Off by default, and asked for rather than always sent: it costs a least-squares sine fit per
+   * channel per fetch, and on a record with no fundamental there is nothing to remove.</p>
+   */
+  showResidual: boolean
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -77,6 +85,7 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   autofitOnDone: true,
   showLeft: true,
   showRight: true,
+  showResidual: false,
   annotations: [],
 })
 
@@ -139,6 +148,7 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartAutofitOnDone === 'boolean') display.autofitOnDone = stored.chartAutofitOnDone
   if (typeof stored.chartShowLeft === 'boolean') display.showLeft = stored.chartShowLeft
   if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
+  if (typeof stored.chartShowResidual === 'boolean') display.showResidual = stored.chartShowResidual
 
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
@@ -162,5 +172,6 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartAutofitOnDone: display.autofitOnDone,
     chartShowLeft: display.showLeft,
     chartShowRight: display.showRight,
+    chartShowResidual: display.showResidual,
   }
 }

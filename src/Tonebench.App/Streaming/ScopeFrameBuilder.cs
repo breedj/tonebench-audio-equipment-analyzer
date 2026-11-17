@@ -33,6 +33,34 @@ public sealed record ScopeFrameSlice(
     public bool IsRaw => Samples is not null;
 }
 
+
+/// <summary>
+/// One channel's window with its fundamental removed — the THD residual, drawn as a second trace.
+///
+/// <para><b>It shares the slice's own <c>X0</c>, <c>Dx</c> and raw-or-columns shape</b>, and that is
+/// why it rides on the slice rather than arriving as a slice of its own: the two traces are drawn
+/// against one x array, and a residual on an x array a fraction of a sample different from the
+/// waveform it was subtracted from would put the error where the signal is not.</para>
+/// </summary>
+/// <param name="Columns">Min/max per column, or null when the window is served raw.</param>
+/// <param name="Samples">The residual itself, or null when it is decimated.</param>
+/// <param name="FitFrequencyHz">The fitted fundamental — refined, so a tone off a bin cancels too.</param>
+/// <param name="FitAmplitudeVpk">Its peak amplitude.</param>
+/// <param name="FitOffsetV">Its DC term, which is subtracted with it.</param>
+/// <param name="ResidualRmsV">RMS of what is left, over the whole window.</param>
+/// <param name="ResidualPercent">
+/// That against the fundamental's own RMS, which is the figure a THD+N reading is quoted as. Null
+/// where the fit found no amplitude to divide by.
+/// </param>
+public sealed record ScopeResidual(
+    MinMax[]? Columns,
+    float[]? Samples,
+    double FitFrequencyHz,
+    double FitAmplitudeVpk,
+    double FitOffsetV,
+    double ResidualRmsV,
+    double? ResidualPercent);
+
 /// <summary>
 /// Cuts a <see cref="ScopeRecord"/> down to what a chart needs.
 ///
@@ -61,6 +89,96 @@ public static class ScopeFrameBuilder
     /// happens exactly when decimation stops being able to say anything a sample could not.
     /// </summary>
     public const int RawSamplesPerColumn = 2;
+
+
+    /// <summary>
+    /// How many whole periods of the fundamental the fit is taken over, at least. Four, which is
+    /// what <c>SpectrumPipeline.ResidualFitCount</c> settled on: below about three the fit starts
+    /// eating the harmonics, and from there every window agrees within 0.2 dB.
+    /// </summary>
+    public const int ResidualFitPeriods = 4;
+
+    /// <summary>The bounds on that window, in samples. See <see cref="Residual"/> for why it is bounded at all.</summary>
+    public const int MinResidualFitFrames = 8192;
+    public const int MaxResidualFitFrames = 32768;
+
+    /// <summary>
+    /// The window with its fundamental removed, on the same geometry as the slice it is given.
+    ///
+    /// <para><b>The fit is bounded, and it is <i>centred</i> rather than taken from the tail</b> —
+    /// which is the one place this differs from the FFT screen's residual and the difference is the
+    /// subtraction, not the fit. There the fit is subtracted from a 2048-sample tail, so a window at
+    /// the tail is where the error is smallest; here it is subtracted across the <i>whole</i> window,
+    /// so the worst case sits at both ends and a centred window halves it. Bounded because
+    /// <see cref="SineFit"/> is O(n) per iteration and takes 2.65 s over a 1,048,576-point record,
+    /// which is not a thing to put on a fetch that happens several times a second.</para>
+    ///
+    /// <para><b>Null when there is no fundamental to remove.</b> The seed comes from the window's own
+    /// measured frequency, which is absent on noise, on DC and on anything with one settled level —
+    /// and a fit seeded with a guess is a sine subtracted from a record that has none, i.e. a
+    /// "residual" that is the record plus an invented tone.</para>
+    /// </summary>
+    public static ScopeResidual? Residual(ScopeRecord record, int channel, ScopeFrameSlice slice, int maxColumns = DefaultMaxColumns)
+    {
+        if (slice.Measurements.FrequencyHz is not { } seedHz || !(seedHz > 0.0))
+            return null;
+        if (slice.FrameCount < 4)
+            return null;
+
+        var window = record.Channels[channel].AsSpan(slice.FirstFrame, slice.FrameCount);
+        double fs = record.SampleRateHz;
+
+        // At least four whole periods of the seed, then the bounds, then the window itself.
+        int wanted = (int)Math.Ceiling(ResidualFitPeriods * fs / seedHz);
+        int fitLength = Math.Clamp(Math.Max(wanted, MinResidualFitFrames), 1, MaxResidualFitFrames);
+        fitLength = Math.Min(fitLength, slice.FrameCount);
+        if (fitLength < 4)
+            return null;
+
+        int fitStart = (slice.FrameCount - fitLength) / 2;
+
+        SineFitResult fit;
+        try
+        {
+            fit = SineFit.Fit(window.Slice(fitStart, fitLength), fs, seedHz);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+
+        // The fit's phase is referenced to sample 0 of the span it was fitted on, which is
+        // window[fitStart]. Re-referencing it to window[0] is what lets one fit be subtracted
+        // across the whole window -- the same transform the solver itself does at the end.
+        double omega = 2.0 * Math.PI * fit.FreqHz / fs;
+        var shifted = fit with { PhaseRad = fit.PhaseRad - (omega * fitStart) };
+
+        var residual = new double[slice.FrameCount];
+        double sumSquares = 0.0;
+        for (int i = 0; i < residual.Length; i++)
+        {
+            double r = window[i] - ((shifted.AmplitudeVpk * Math.Cos(omega * i + shifted.PhaseRad)) + shifted.OffsetV);
+            residual[i] = r;
+            sumSquares += r * r;
+        }
+
+        double rms = Math.Sqrt(sumSquares / residual.Length);
+        double? percent = fit.Vrms > 0.0 ? rms / fit.Vrms * 100.0 : null;
+
+        // The same shape as the slice, by construction rather than by repeating its own test: two
+        // traces on one x array cannot be one raw and the other decimated.
+        if (slice.IsRaw)
+        {
+            var samples = new float[residual.Length];
+            for (int i = 0; i < residual.Length; i++)
+                samples[i] = (float)residual[i];
+            return new ScopeResidual(Columns: null, samples, fit.FreqHz, fit.AmplitudeVpk, fit.OffsetV, rms, percent);
+        }
+
+        var columns = new MinMax[slice.Columns!.Length];
+        SpectrumDecimator.DecimateLinear(residual, columns);
+        return new ScopeResidual(columns, Samples: null, fit.FreqHz, fit.AmplitudeVpk, fit.OffsetV, rms, percent);
+    }
 
     /// <summary>Cuts the whole record, for the overview a chart and the zoom strip both draw.</summary>
     public static ScopeFrameSlice Overview(ScopeRecord record, int channel, int maxColumns = DefaultMaxColumns) =>

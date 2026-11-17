@@ -1463,6 +1463,28 @@ export interface ScopeSliceMeasurements {
   preshootPercent?: number | null
 }
 
+/**
+ * One window with its fundamental subtracted — the THD residual, drawn as a second trace.
+ *
+ * <p>Mirrors <code>Tonebench.App.Endpoints.ScopeResidualSlice</code>. It carries no geometry of its
+ * own: the <code>x0</code>, <code>dx</code> and raw-or-columns shape are the slice's, which is what
+ * keeps the two traces on one x array.</p>
+ */
+export interface ScopeResidualSlice {
+  samples: number[] | null
+  min: number[] | null
+  max: number[] | null
+  /** The fitted fundamental — refined rather than taken, so a tone off a bin cancels too. */
+  fitFrequencyHz: number
+  fitAmplitudeVpk: number
+  /** The DC term, subtracted with the tone. */
+  fitOffsetV: number
+  /** RMS of what is left, over the whole window. */
+  residualRmsV: number
+  /** That against the fundamental's own RMS — a THD+N figure over this window. */
+  residualPercent: number | null
+}
+
 export interface ScopeChannelSlice {
   channel: number
   /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
@@ -1486,6 +1508,15 @@ export interface ScopeChannelSlice {
    * window's, under a heading saying it is the cursors', is the one answer worse than no figure.</p>
    */
   gated: ScopeSliceMeasurements | null
+  /**
+   * This window with its fundamental removed, when the fetch asked for it.
+   *
+   * <p>On the same <code>x0</code>, <code>dx</code> and raw-or-columns shape as the slice that
+   * carries it, so the two traces share one x array. Null when the fetch did not ask, and null when
+   * the window has no fundamental to remove — which is the honest answer on noise, on DC and on
+   * anything with one settled level.</p>
+   */
+  residual: ScopeResidualSlice | null
   /** True when the window was tight enough to send the waveform itself rather than a summary of it. */
   raw: boolean
   samples: number[] | null
@@ -1668,6 +1699,8 @@ export interface OscilloscopeParameters {
   /** Whether each captured input is drawn — the display rail's own pair, not the Acquisition boxes. */
   chartShowLeft?: boolean | null
   chartShowRight?: boolean | null
+  /** Whether the THD residual is drawn as a second trace. Costs a sine fit per fetch, so it is asked for. */
+  chartShowResidual?: boolean | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null
@@ -4795,6 +4828,7 @@ export const api = {
     window?: { fromS: number; toS: number },
     maxColumns?: number,
     gate?: { fromS: number; toS: number },
+    residual?: boolean,
   ) => {
     const query = new URLSearchParams()
     if (window) {
@@ -4807,6 +4841,8 @@ export const api = {
       query.set('gateFromS', String(gate.fromS))
       query.set('gateToS', String(gate.toS))
     }
+    // Asked for rather than always sent: it costs a least-squares sine fit per channel per fetch.
+    if (residual) query.set('residual', 'true')
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 
     const suffix = query.size > 0 ? `?${query}` : ''

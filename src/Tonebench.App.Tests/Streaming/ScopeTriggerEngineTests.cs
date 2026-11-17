@@ -34,7 +34,8 @@ public class ScopeTriggerEngineTests
         int preTriggerFrames = 1024,
         ScopeRunMode mode = ScopeRunMode.Single,
         long autoTimeoutFrames = 0,
-        long discontinuityHoldoffFrames = 0) =>
+        long discontinuityHoldoffFrames = 0,
+        long settleFrames = 0) =>
         new(
             TriggerSpec.Edge(0.0),
             TriggerChannel: 0,
@@ -43,7 +44,8 @@ public class ScopeTriggerEngineTests
             Mode: mode,
             SampleRateHz: SampleRateHz,
             AutoTimeoutFrames: autoTimeoutFrames,
-            DiscontinuityHoldoffFrames: discontinuityHoldoffFrames);
+            DiscontinuityHoldoffFrames: discontinuityHoldoffFrames,
+            SettleFrames: settleFrames);
 
     private static (ScopeCaptureBuffer Buffer, ScopeTriggerEngine Engine) NewEngine()
     {
@@ -531,5 +533,59 @@ public class ScopeTriggerEngineTests
 
         // And the capture it was armed with is untouched.
         Assert.NotEmpty(Feed(engine, blocks: 3));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The stimulus settle -- the scope's own, because the pipeline's flush does not reach it
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ASettle_KeepsTheFirstRecordOffTheSamplesThatFollowAStimulusChange()
+    {
+        // The capture buffer is fed by a call of its own in PumpAsync, before the pipeline takes
+        // the block -- so FlushAfterStimulusChange's discard never reaches it, and a scope armed
+        // the instant a generator was configured triggers on audio that is still the old stimulus.
+        var (buffer, engine) = NewEngine();
+        engine.Arm(Spec(settleFrames: BlockFrames * 2), droppedTotal: 0);
+
+        var records = Feed(engine, blocks: 6);
+
+        Assert.Single(records);
+        // Every sample of it, pre-trigger included, from after the settle.
+        Assert.True(
+            records[0].FirstIndex >= BlockFrames * 2,
+            $"the record started at {records[0].FirstIndex}, inside the settle");
+        Assert.Equal(BlockFrames * 2L, buffer.ContiguousFrom);
+    }
+
+    [Fact]
+    public void WithNoSettle_TheFirstCrossingIsTaken()
+    {
+        // The control: the same feed with nothing booked triggers on the first crossing that has a
+        // pre-trigger window behind it, which is what every run with no generator of its own wants.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(), droppedTotal: 0);
+
+        var records = Feed(engine, blocks: 6);
+
+        Assert.Single(records);
+        Assert.True(records[0].FirstIndex < BlockFrames * 2, $"the record started at {records[0].FirstIndex}");
+    }
+
+    [Fact]
+    public void ARetune_BooksNoSettleOfItsOwn()
+    {
+        // A retune changes no stimulus -- the endpoint refuses a generator on one -- so booking a
+        // settle there would make every turn of a knob cost a few hundred milliseconds of stream.
+        // The spec a retune carries has SettleFrames at its default for the same reason.
+        var (buffer, engine) = NewEngine();
+        engine.Arm(Spec(settleFrames: BlockFrames), droppedTotal: 0);
+        Feed(engine, blocks: 2);
+
+        long afterArm = buffer.ContiguousFrom;
+        engine.Retune(Spec(settleFrames: BlockFrames));
+        Feed(engine, blocks: 2);
+
+        Assert.Equal(afterArm, buffer.ContiguousFrom);
     }
 }

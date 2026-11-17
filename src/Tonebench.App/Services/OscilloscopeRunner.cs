@@ -390,8 +390,15 @@ public sealed class OscilloscopeRunner(
             // The two counters summed, because only their movement across a record is read. They
             // stay two numbers everywhere they are reported, since one combined figure cannot say
             // which half of the chain fell behind — here the question is only "did anything".
+            // Only where a stimulus was actually configured: with no generator in the request
+            // nothing about what is being measured has changed, and a settle would cost a few
+            // hundred milliseconds before the first trace for nothing. See
+            // DeviceSessionService.StimulusSettleFrames for what this is and why the scope has to
+            // book it for itself.
+            long settleFrames = request.Generator is not null ? session.StimulusSettleFrames : 0;
+
             engine.Arm(
-                BuildSpec(request, recordFrames, preTriggerFrames),
+                BuildSpec(request, recordFrames, preTriggerFrames, settleFrames),
                 session.DroppedRxChunks + session.DroppedBlocks);
 
             while (!ct.IsCancellationRequested)
@@ -483,7 +490,8 @@ public sealed class OscilloscopeRunner(
         }
     }
 
-    private static ScopeCaptureSpec BuildSpec(OscilloscopeRequest request, int recordFrames, int preTriggerFrames)
+    private static ScopeCaptureSpec BuildSpec(
+        OscilloscopeRequest request, int recordFrames, int preTriggerFrames, long settleFrames = 0)
     {
         var trigger = new TriggerSpec(
             request.TriggerKind,
@@ -505,7 +513,10 @@ public sealed class OscilloscopeRunner(
             // A whole record after a break, because the 24 dB attenuator release leaves about a
             // second of samples reading exactly 24 dB low with only the first block flagged. On a
             // device that does not range itself there is nothing to wait out.
-            DiscontinuityHoldoffFrames: recordFrames);
+            DiscontinuityHoldoffFrames: recordFrames,
+
+            // Zero on a retune, which is what the default is for: a retune changes no stimulus.
+            SettleFrames: settleFrames);
     }
 
     private sealed record ParkedRun(

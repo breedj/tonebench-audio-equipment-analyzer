@@ -138,6 +138,7 @@ public static class OscilloscopeEndpoints
             double? toS,
             double? gateFromS,
             double? gateToS,
+            bool? residual,
             int? maxColumns) =>
         {
             if (runner.Record is not { } record)
@@ -163,6 +164,10 @@ public static class OscilloscopeEndpoints
                     ? ScopeFrameBuilder.Measure(record, ch, gateFrom, gateTo)
                     : null;
 
+                // On the same geometry as the slice above, which is why it is built from it
+                // rather than from the record: the two traces share one x array.
+                var left = residual == true ? ScopeFrameBuilder.Residual(record, ch, slice, columns) : null;
+
                 channels.Add(new ScopeChannelSlice(
                     ch,
                     slice.X0,
@@ -172,7 +177,18 @@ public static class OscilloscopeEndpoints
                     slice.Columns?.Select(c => (float)c.Min).ToArray(),
                     slice.Columns?.Select(c => (float)c.Max).ToArray(),
                     slice.Measurements,
-                    gated));
+                    gated,
+                    left is null
+                        ? null
+                        : new ScopeResidualSlice(
+                            left.Samples,
+                            left.Columns?.Select(c => (float)c.Min).ToArray(),
+                            left.Columns?.Select(c => (float)c.Max).ToArray(),
+                            left.FitFrequencyHz,
+                            left.FitAmplitudeVpk,
+                            left.FitOffsetV,
+                            left.ResidualRmsV,
+                            left.ResidualPercent)));
             }
 
             return Results.Ok(new ScopeRecordResponse(
@@ -259,6 +275,12 @@ public static class OscilloscopeEndpoints
 /// <see cref="Measurements"/>: a gated figure that is quietly the whole window's is the one answer
 /// worse than no figure.
 /// </param>
+/// <param name="Residual">
+/// This window with its fundamental removed, when the request asked for it — see
+/// <see cref="ScopeFrameBuilder.Residual"/>. Null when it did not, and null when the window has no
+/// fundamental to remove, which is the honest answer on noise, on DC and on anything with one
+/// settled level.
+/// </param>
 public sealed record ScopeChannelSlice(
     int Channel,
     double X0,
@@ -268,7 +290,30 @@ public sealed record ScopeChannelSlice(
     float[]? Min,
     float[]? Max,
     ScopeSliceMeasurements Measurements,
-    ScopeSliceMeasurements? Gated = null);
+    ScopeSliceMeasurements? Gated = null,
+    ScopeResidualSlice? Residual = null);
+
+/// <summary>
+/// The residual as the client draws it: the same <c>X0</c>, <c>Dx</c> and raw-or-columns shape as
+/// the slice that carries it, so the two traces share one x array.
+/// </summary>
+/// <param name="Samples">The residual itself, or null when the window is decimated.</param>
+/// <param name="Min">Both extremes of every column, as the waveform's own are sent.</param>
+/// <param name="Max">The other one.</param>
+/// <param name="FitFrequencyHz">The fitted fundamental, refined rather than taken.</param>
+/// <param name="FitAmplitudeVpk">Its peak amplitude.</param>
+/// <param name="FitOffsetV">Its DC term.</param>
+/// <param name="ResidualRmsV">RMS of what is left, over the whole window.</param>
+/// <param name="ResidualPercent">That against the fundamental's RMS — a THD+N figure over this window.</param>
+public sealed record ScopeResidualSlice(
+    float[]? Samples,
+    float[]? Min,
+    float[]? Max,
+    double FitFrequencyHz,
+    double FitAmplitudeVpk,
+    double FitOffsetV,
+    double ResidualRmsV,
+    double? ResidualPercent);
 
 /// <summary>A record, as the chart fetches it.</summary>
 /// <param name="SampleRateHz">The rate the samples are on.</param>

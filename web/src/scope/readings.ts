@@ -1,4 +1,4 @@
-import type { ScopeChannelSlice, ScopeSliceMeasurements } from '../api/client'
+import type { ScopeChannelSlice, ScopeResidualSlice, ScopeSliceMeasurements } from '../api/client'
 import { formatHz } from '../response/format'
 import { formatScopeTime, toChartMs } from './timeAxis'
 import { formatVolts } from './voltAxis'
@@ -77,6 +77,54 @@ export function scopeReadings(
   add('Preshoot', maybe(m.preshootPercent, percent), 'The same below the base.')
 
   return rows
+}
+
+
+/**
+ * What the residual trace reads: the fundamental it took out, and what is left.
+ *
+ * <p>Three rows, and the third is the one a reader is after — the residual against the
+ * fundamental's own RMS, which is a <b>THD+N figure over this window</b>. It is not the FFT
+ * screen's THD+N: that one integrates a measurement bandwidth and this one is simply everything the
+ * fit did not explain, noise, hum, harmonics above Nyquist's reach and any drift alike.</p>
+ *
+ * <p>Separate from <code>scopeReadings</code> rather than folded into it, because these are
+ * readings of a <em>derived</em> trace: they exist only while the Residual box is ticked, and only
+ * where the window had a fundamental to remove.</p>
+ */
+export function residualReadings(
+  residual: ScopeResidualSlice | null | undefined,
+  voltsPerDivision: number,
+): ScopeReading[] {
+  if (!residual) return []
+  const rows: ScopeReading[] = []
+  rows.push({
+    label: 'Fundamental',
+    value: formatCursorHz(residual.fitFrequencyHz),
+    title:
+      'The sine that was fitted and subtracted. Its frequency is refined rather than taken from a bin, so a tone that is not on a whole number of samples cancels too.',
+  })
+  rows.push({
+    label: 'Residual',
+    value: formatVolts(residual.residualRmsV, voltsPerDivision),
+    title: 'RMS of what is left once that sine and its DC term are taken out, over the whole window.',
+  })
+  if (residual.residualPercent !== null && Number.isFinite(residual.residualPercent)) {
+    rows.push({
+      label: 'Residual',
+      value: `${residual.residualPercent.toFixed(4)} %`,
+      title:
+        'That against the fundamental own RMS — a THD+N figure over this window. Not the FFT screen figure, which integrates a measurement bandwidth: this is everything the fit did not explain.',
+    })
+  }
+  return rows
+}
+
+/** A fitted frequency as the row writes it — the same ladder the cursors' 1/Δt uses. */
+function formatCursorHz(hz: number): string {
+  if (!Number.isFinite(hz)) return '—'
+  if (hz >= 1_000) return `${(hz / 1000).toFixed(4)} kHz`
+  return `${hz.toFixed(3)} Hz`
 }
 
 /**

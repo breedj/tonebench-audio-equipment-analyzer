@@ -7,11 +7,11 @@ const NO_MEASUREMENTS = { maxV: 0, minV: 0, peakToPeakV: 0, meanV: 0, rmsV: 0, a
 function columns(min: number[], max: number[]): ScopeChannelSlice {
   // The measurements are the server's own reading of the samples and are not derived from these
   // columns -- see ScopeSliceMeasurements. Empty here because nothing in this file reads them.
-  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements: NO_MEASUREMENTS, gated: null }
+  return { channel: 0, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements: NO_MEASUREMENTS, gated: null, residual: null }
 }
 
 function raw(samples: number[]): ScopeChannelSlice {
-  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null, measurements: NO_MEASUREMENTS, gated: null }
+  return { channel: 0, x0: 0, dx: 1e-5, raw: true, samples, min: null, max: null, measurements: NO_MEASUREMENTS, gated: null, residual: null }
 }
 
 describe('sliceExtremes', () => {

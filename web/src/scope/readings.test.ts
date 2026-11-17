@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ScopeChannelSlice, ScopeSliceMeasurements } from '../api/client'
-import { scopeChannelReadings, scopeReadings } from './readings'
+import type { ScopeChannelSlice, ScopeResidualSlice, ScopeSliceMeasurements } from '../api/client'
+import { residualReadings, scopeChannelReadings, scopeReadings } from './readings'
 
 const always: ScopeSliceMeasurements = {
   maxV: 1,
@@ -24,7 +24,7 @@ function slice(
   measurements: ScopeSliceMeasurements,
   gated: ScopeSliceMeasurements | null = null,
 ): ScopeChannelSlice {
-  return { channel, x0: 0, dx: 1e-5, raw: true, samples: [0], min: null, max: null, measurements, gated }
+  return { channel, x0: 0, dx: 1e-5, raw: true, samples: [0], min: null, max: null, measurements, gated, residual: null }
 }
 
 describe('scopeReadings', () => {
@@ -99,5 +99,39 @@ describe('scopeChannelReadings', () => {
     // The server answers null when the cursor window holds none of this record. The whole
     // window's figures under a "between the cursors" heading is the one answer worse than none.
     expect(scopeChannelReadings([slice(0, always, null)], 0.5, true, true, 'gate')).toEqual([])
+  })
+})
+
+
+describe('residualReadings', () => {
+  const residual: ScopeResidualSlice = {
+    samples: null,
+    min: null,
+    max: null,
+    fitFrequencyHz: 1000.0004,
+    fitAmplitudeVpk: 1,
+    fitOffsetV: 0.002,
+    residualRmsV: 0.00707,
+    residualPercent: 1.0,
+  }
+
+  it('reads the fundamental it took out and what is left', () => {
+    const rows = residualReadings(residual, 0.5)
+    expect(rows.map((r) => r.label)).toEqual(['Fundamental', 'Residual', 'Residual'])
+    expect(rows[0].value).toBe('1.0000 kHz')
+    expect(rows[2].value).toBe('1.0000 %')
+  })
+
+  it('leaves out the percentage when there is no fundamental to quote it against', () => {
+    // A fit that found no amplitude has nothing to divide by, and the server sends null rather
+    // than an infinity -- the same rule as every other reading here.
+    const rows = residualReadings({ ...residual, residualPercent: null }, 0.5)
+    expect(rows.map((r) => r.label)).toEqual(['Fundamental', 'Residual'])
+  })
+
+  it('answers nothing where there was no fundamental to remove', () => {
+    // Noise, DC, silence: the server declines to fit, and the panel simply has no residual block.
+    expect(residualReadings(null, 0.5)).toEqual([])
+    expect(residualReadings(undefined, 0.5)).toEqual([])
   })
 })

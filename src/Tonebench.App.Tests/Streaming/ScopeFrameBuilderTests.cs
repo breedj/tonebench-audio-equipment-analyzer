@@ -378,4 +378,128 @@ public class ScopeFrameBuilderTests
         Assert.Equal(1_999, ScopeFrameBuilder.Measure(record, 0, from, to)!.MaxV, 0);
         Assert.Equal(-1_000, ScopeFrameBuilder.Measure(record, 1, from, to)!.MaxV, 0);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // The residual -- the window with its fundamental taken out
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>A record of a tone plus a third harmonic of a known size, which is what the residual must be left holding.</summary>
+    private static ScopeRecord ToneRecord(
+        double freqHz = 1_000.0, double ampV = 1.0, double h3 = 0.01, int frames = 19_200, double offsetV = 0.0)
+    {
+        var left = new double[frames];
+        var right = new double[frames];
+        for (int i = 0; i < frames; i++)
+        {
+            double t = i / SampleRateHz;
+            left[i] = (ampV * Math.Sin(2.0 * Math.PI * freqHz * t))
+                + (ampV * h3 * Math.Sin(2.0 * Math.PI * 3.0 * freqHz * t))
+                + offsetV;
+            right[i] = left[i];
+        }
+
+        return new ScopeRecord(
+            [left, right], SampleRateHz, FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
+    }
+
+    [Fact]
+    public void TheResidual_IsWhatIsLeftWhenTheFundamentalIsTakenOut()
+    {
+        // A 1 % third harmonic on a 1 V tone: the residual's RMS must be that harmonic's own, and
+        // the percentage must read 1 %. Both are figures the waveform was built with.
+        var record = ToneRecord(h3: 0.01);
+        var slice = ScopeFrameBuilder.Overview(record, channel: 0);
+
+        var residual = ScopeFrameBuilder.Residual(record, 0, slice);
+
+        Assert.NotNull(residual);
+        // Within a millihertz over a 171 ms fit window that also holds the harmonic being measured.
+        Assert.Equal(1_000.0, residual!.FitFrequencyHz, 2);
+        Assert.Equal(1.0, residual.FitAmplitudeVpk, 4);
+        Assert.Equal(0.01 / Math.Sqrt(2.0), residual.ResidualRmsV, 5);
+        Assert.NotNull(residual.ResidualPercent);
+        Assert.Equal(1.0, residual.ResidualPercent!.Value, 3);
+    }
+
+    [Fact]
+    public void TheResidual_SubtractsTheDcTermWithTheTone()
+    {
+        // The fit is four-parameter, so an offset rides out with the sine rather than being left in
+        // the residual and read as distortion. Every input here is AC-coupled, but the analyzer's
+        // own few millivolts are real and would otherwise dominate a quiet residual.
+        var record = ToneRecord(h3: 0.01, offsetV: 0.25);
+        var residual = ScopeFrameBuilder.Residual(record, 0, ScopeFrameBuilder.Overview(record, channel: 0));
+
+        Assert.NotNull(residual);
+        Assert.Equal(0.25, residual!.FitOffsetV, 4);
+        Assert.Equal(0.01 / Math.Sqrt(2.0), residual.ResidualRmsV, 5);
+    }
+
+    [Fact]
+    public void TheResidual_CancelsAToneThatIsNotOnAWholeNumberOfSamples()
+    {
+        // The whole reason SineFit refines its frequency. Half a bin is pi radians of drift end to
+        // end, which reads as a fundamental-sized residual with nothing wrong.
+        var record = ToneRecord(freqHz: 997.37, h3: 0.0);
+        var residual = ScopeFrameBuilder.Residual(record, 0, ScopeFrameBuilder.Overview(record, channel: 0));
+
+        Assert.NotNull(residual);
+        // Better than -100 dB of the fundamental, over a window the fit covered only part of.
+        Assert.True(residual!.ResidualPercent < 0.001, $"residual was {residual.ResidualPercent} %");
+    }
+
+    [Fact]
+    public void TheResidual_IsRefusedWhereThereIsNoFundamentalToRemove()
+    {
+        // Digital silence has one settled level, so no period is measured and no seed exists. A fit
+        // seeded with a guess would subtract an invented tone and call the difference a residual.
+        var flat = new double[4_800];
+        var record = new ScopeRecord(
+            [flat, flat], SampleRateHz, FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
+
+        var slice = ScopeFrameBuilder.Overview(record, channel: 0);
+        Assert.Null(slice.Measurements.FrequencyHz);
+        Assert.Null(ScopeFrameBuilder.Residual(record, 0, slice));
+    }
+
+    [Fact]
+    public void TheResidual_HasTheSameShapeAsTheSliceItIsDrawnWith()
+    {
+        // Two traces on one x array: one raw and the other decimated would put the error where the
+        // signal is not.
+        var record = ToneRecord(frames: 192_000);
+
+        var overview = ScopeFrameBuilder.Overview(record, channel: 0);
+        var decimated = ScopeFrameBuilder.Residual(record, 0, overview);
+        Assert.NotNull(decimated);
+        Assert.Null(decimated!.Samples);
+        Assert.Equal(overview.Columns!.Length, decimated.Columns!.Length);
+
+        var tight = ScopeFrameBuilder.Window(record, 0, record.TimeAt(0), record.TimeAt(1_000));
+        Assert.True(tight.IsRaw);
+        var raw = ScopeFrameBuilder.Residual(record, 0, tight);
+        Assert.NotNull(raw);
+        Assert.Null(raw!.Columns);
+        Assert.Equal(tight.Samples!.Length, raw.Samples!.Length);
+    }
+
+    [Fact]
+    public void TheResidualsFitWindowIsBounded_AndStillCancelsAcrossTheWholeWindow()
+    {
+        // SineFit is O(n) per iteration and takes 2.65 s over a 1,048,576-point record, so the fit
+        // is taken over a bounded, centred window and subtracted across the whole of it. What that
+        // has to buy is cancellation at the *ends*, which is where a centred window's worst case is.
+        var record = ToneRecord(freqHz: 1_013.7, h3: 0.0, frames: 192_000);
+        var slice = ScopeFrameBuilder.Overview(record, channel: 0);
+
+        Assert.True(slice.FrameCount > ScopeFrameBuilder.MaxResidualFitFrames, "the window must be longer than the fit");
+
+        var residual = ScopeFrameBuilder.Residual(record, 0, slice);
+        Assert.NotNull(residual);
+
+        // Every column, both extremes -- so the ends are included rather than averaged away.
+        double worst = residual!.Columns!.Max(c => Math.Max(Math.Abs(c.Min), Math.Abs(c.Max)));
+        Assert.True(worst < 1e-3, $"worst residual sample was {worst} V against a 1 V fundamental");
+    }
+
 }

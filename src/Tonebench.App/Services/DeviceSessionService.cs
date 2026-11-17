@@ -1621,6 +1621,21 @@ public sealed class DeviceSessionService(
         captureDelay.FramesAt(_streamConfig?.SampleRateHz ?? _lastSampleRateHz);
 
     /// <summary>
+    /// What a consumer outside the pipeline has to discard for itself after a stimulus change:
+    /// <see cref="StimulusLatencyFrames"/> plus <see cref="CaptureDelayFrames"/>.
+    ///
+    /// <para><b>Public only because the scope's capture buffer is not the pipeline.</b>
+    /// <see cref="FlushAfterStimulusChange"/> books exactly this on the ring buffers, and everything
+    /// that reads a spectrum gets it for free; the oscilloscope's buffer is fed by a separate call
+    /// in <c>PumpAsync</c> and that flush never reaches it, so a scope armed the instant a generator
+    /// was configured triggers on audio that is still the old stimulus. Measured against the
+    /// simulator: a 20 ms record taken straight after a start caught the tone ramping from 0.14 V to
+    /// 0.70 V across it, which a single-sine fit reads as 1004.7 Hz at 0.55 V and a 57 % residual —
+    /// every figure on the panel plausible and none of them of a settled signal.</para>
+    /// </summary>
+    public int StimulusSettleFrames => StimulusLatencyFrames + CaptureDelayFrames;
+
+    /// <summary>
     /// The one flush every stimulus change ends with: the in-flight audio, then the settle time.
     /// Only stimulus changes — an input-range step is a gain change in the ADC path that the DUT
     /// never sees, so <see cref="SetInputRangeCoreAsync"/> flushes the latency alone.

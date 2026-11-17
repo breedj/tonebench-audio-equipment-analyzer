@@ -45,7 +45,8 @@ public readonly record struct ScopeCaptureSpec(
     ScopeRunMode Mode,
     double SampleRateHz,
     long AutoTimeoutFrames = 0,
-    long DiscontinuityHoldoffFrames = 0);
+    long DiscontinuityHoldoffFrames = 0,
+    long SettleFrames = 0);
 
 /// <summary>
 /// One captured record: the samples, and everything needed to say what they are.

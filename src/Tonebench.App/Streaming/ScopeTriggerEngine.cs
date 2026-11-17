@@ -90,6 +90,19 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
 
         Take(spec, scanner);
 
+        // The stimulus settle, booked here and deliberately NOT in Take -- so it applies to an arm
+        // and not to a retune. An arm follows a generator configuration, where the audio in flight
+        // is still the old stimulus and the DUT has not settled on the new one; a retune changes no
+        // stimulus at all (the endpoint refuses a generator on one), so booking it there would make
+        // every knob turn cost a few hundred milliseconds of stream for nothing.
+        //
+        // Booked on the buffer rather than kept as a deadline here, which is the point: it raises
+        // ContiguousFrom, so those samples are excluded from the trigger scan AND from any record's
+        // pre-trigger history. A deadline on the scan alone would still let the first record reach
+        // back into the old stimulus for its pre-trigger window.
+        if (spec.SettleFrames > 0)
+            _buffer.BookDiscard(spec.SettleFrames);
+
         // A retune queued before this arm is deliberately NOT dropped, and that is not an
         // oversight. OscilloscopeRunner.StartAsync sets its phase and spawns the run task, so the
         // runner is Running -- and therefore retunable -- a moment before the task gets here: a

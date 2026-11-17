@@ -1276,6 +1276,13 @@ public sealed record OscilloscopeParameters(
     /// </summary>
     bool? ChartShowLeft = null,
     bool? ChartShowRight = null,
+    /// <summary>
+    /// Whether the THD residual was drawn as a second trace — the window with its fitted
+    /// fundamental subtracted. A display preference like the pair above, so it is stored with the
+    /// measurement; what it costs is a least-squares sine fit per fetch, which is why it is a
+    /// checkbox rather than something always sent.
+    /// </summary>
+    bool? ChartShowResidual = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

@@ -34,6 +34,7 @@ const showTriggerLevel = defineModel<boolean>('showTriggerLevel', { required: tr
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
+const showResidual = defineModel<boolean>('showResidual', { required: true })
 
 /** The cursors. See scope/cursors.ts — session state, so they are not in <code>params_json</code>. */
 const cursors = defineModel<ScopeCursors>('cursors', { required: true })
@@ -406,6 +407,16 @@ function onVoltsPerDivisionChange(event: Event) {
         Right
       </label>
     </div>
+
+    <label class="tb-check-row">
+      <input
+        v-model="showResidual"
+        type="checkbox"
+        class="tb-check"
+        title="Draws each channel again with its fitted fundamental subtracted - what is left is the distortion and the noise. The fit is a least-squares sine with its frequency refined, so a tone off a bin cancels too; a record with no fundamental has nothing to remove and nothing is drawn."
+      />
+      Residual
+    </label>
 
     <div class="tb-field">
       <span class="tb-group">Style</span>

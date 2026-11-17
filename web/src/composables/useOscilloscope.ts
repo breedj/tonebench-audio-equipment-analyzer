@@ -68,6 +68,15 @@ const maxColumns = ref(1600)
 const gate = shallowRef<CursorGate | null>(null)
 
 /**
+ * Whether the fetch asks for the residual too.
+ *
+ * <p>Here rather than read from the display rail directly, for the gate's reason: it is a third
+ * thing a fetch is keyed on, and it rides on the same request as the picture so the residual on
+ * screen is always of the record under it.</p>
+ */
+const wantResidual = ref(false)
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -101,7 +110,7 @@ async function fetchRecord(force = false): Promise<void> {
   const token = ++fetchToken
   try {
     const next = await api.getOscilloscopeRecord(
-      window.value ?? undefined, maxColumns.value, gate.value ?? undefined)
+      window.value ?? undefined, maxColumns.value, gate.value ?? undefined, wantResidual.value)
     if (token !== fetchToken) return
     record.value = next
     fetchedFor = taken
@@ -203,6 +212,13 @@ export function useOscilloscope() {
     await fetchRecord(true)
   }
 
+  /** Turns the residual trace on or off, and re-fetches so it arrives with the record it is of. */
+  async function setResidual(on: boolean): Promise<void> {
+    if (wantResidual.value === on) return
+    wantResidual.value = on
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -271,6 +287,7 @@ export function useOscilloscope() {
     fetchRecord,
     setWindow,
     setGate,
+    setResidual,
     start,
     retune,
     cancel,

@@ -172,7 +172,18 @@ interface ChannelSeries {
   /** The min of every column, or null for a raw slice — there is nothing left to summarise. */
   band: (number | null)[] | null
   raw: boolean
+  /** True for the residual, which is drawn thinner and dashed so it is never read as a trace. */
+  residual?: boolean
 }
+
+/**
+ * The residual's colours, one per channel.
+ *
+ * <p>A <b>lighter shade of the channel's own</b> rather than a colour of its own: it is that
+ * channel's waveform with its fundamental taken out, so it has to read as belonging to it. The
+ * dashing is what says it is derived rather than measured.</p>
+ */
+const RESIDUAL_COLORS = ['#93c5fd', '#fdba74'] as const
 
 /** The x array every series shares, in the milliseconds this chart plots. */
 function sliceXMs(slice: ScopeChannelSlice, count: number): number[] {
@@ -218,22 +229,40 @@ const series = computed(() => {
   if (!longest || count === 0) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
 
   const xMs = sliceXMs(longest, count)
-  const channels: ChannelSeries[] = drawn.map((slice) => {
+  const channels: ChannelSeries[] = []
+  for (const slice of drawn) {
     const length = sliceLength(slice)
     const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
       const out = new Array<number | null>(count).fill(null)
       for (let i = 0; i < length; i++) out[i] = values?.[i] ?? null
       return out
     }
-    return {
+    channels.push({
       index: slice.channel,
       label: slice.channel === 0 ? 'Left' : 'Right',
       color: CHANNEL_COLORS[slice.channel] ?? CHANNEL_COLORS[0],
       line: slice.raw ? pad(slice.samples) : pad(slice.max),
       band: slice.raw ? null : pad(slice.min),
       raw: slice.raw,
+    })
+
+    // The residual, on the same x array by construction: the server builds it from the very slice
+    // above, so it is raw exactly where the waveform is and has the same column count where it is
+    // not. It arrives only when the display rail asks and only where there was a fundamental to
+    // remove, so an absent one is a state rather than a failure.
+    const left = slice.residual
+    if (left) {
+      channels.push({
+        index: slice.channel,
+        label: `${slice.channel === 0 ? 'Left' : 'Right'} residual`,
+        color: RESIDUAL_COLORS[slice.channel] ?? RESIDUAL_COLORS[0],
+        line: slice.raw ? pad(left.samples) : pad(left.max),
+        band: slice.raw ? null : pad(left.min),
+        raw: slice.raw,
+        residual: true,
+      })
     }
-  })
+  }
 
   return { xMs, channels }
 })
@@ -575,10 +604,14 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       ...channels.map((channel) => ({
         label: channel.label,
         stroke: channel.color,
-        width: props.thickLines ? 2 : 1,
+        // Thinner and dashed for the residual: it is derived from the trace beside it rather than
+        // measured, and at a quiet DUT it sits on the zero line where a solid line of the same
+        // weight would read as a second waveform.
+        width: channel.residual ? 1 : props.thickLines ? 2 : 1,
+        dash: channel.residual ? [4, 3] : undefined,
         // Markers only on a raw slice: a point drawn on a min/max column marks the column's
         // maximum rather than a sample, which is a reading of the decimation.
-        points: { show: props.showDataPoints && channel.raw, size: 4 },
+        points: { show: props.showDataPoints && channel.raw && !channel.residual, size: 4 },
       })),
     ],
     // Last: whatever draws after the annotations paints over their labels.
@@ -1105,7 +1138,7 @@ watch(
     () => props.thickLines,
     () => props.showDataPoints,
     () => scopeTimeScale(spanMs.value).unit,
-    () => series.value.channels.map((c) => `${c.index}:${c.raw}`).join(','),
+    () => series.value.channels.map((c) => `${c.index}:${c.raw}:${c.residual === true}`).join(','),
   ],
   rebuild,
 )

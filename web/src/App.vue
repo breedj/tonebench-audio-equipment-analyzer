@@ -2053,6 +2053,7 @@ const scopeShowTriggerLevel = ref(DEFAULT_SCOPE_DISPLAY.showTriggerLevel)
 const scopeAutofitOnDone = ref(DEFAULT_SCOPE_DISPLAY.autofitOnDone)
 const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
 const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
+const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
 
 /**
  * The cursors — <b>session state, and deliberately not part of the display record</b>.
@@ -2148,6 +2149,7 @@ const {
   refresh: refreshOscilloscope,
   setWindow: setOscilloscopeWindow,
   setGate: setOscilloscopeGate,
+  setResidual: setOscilloscopeResidual,
 } = useOscilloscope()
 
 function currentScopeDisplay() {
@@ -2161,6 +2163,7 @@ function currentScopeDisplay() {
     showDataPoints: scopeShowDataPoints.value,
     showTriggerLevel: scopeShowTriggerLevel.value,
     autofitOnDone: scopeAutofitOnDone.value,
+    showResidual: scopeShowResidual.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2182,6 +2185,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeShowDataPoints.value = display.showDataPoints
   scopeShowTriggerLevel.value = display.showTriggerLevel
   scopeAutofitOnDone.value = display.autofitOnDone
+  scopeShowResidual.value = display.showResidual
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2212,10 +2216,26 @@ watch(
     scopeAutofitOnDone,
     scopeShowLeft,
     scopeShowRight,
+    scopeShowResidual,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
   },
+)
+
+/**
+ * The residual is a <b>fetch</b> as well as a preference: it is computed server-side on the window
+ * being drawn and arrives on the same slice, so it cannot be turned on without asking again.
+ *
+ * <p>Watched rather than emitted from the checkbox, unlike the cursor gate, because it is a
+ * checkbox: it changes once per click, where a cursor changes once per pointer move.</p>
+ */
+watch(
+  scopeShowResidual,
+  (on) => {
+    if (isOscilloscope.value) void setOscilloscopeResidual(on).catch(() => undefined)
+  },
+  { immediate: true },
 )
 
 /**
@@ -5910,6 +5930,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:autofit-on-done="scopeAutofitOnDone"
                   v-model:show-left="scopeShowLeft"
                   v-model:show-right="scopeShowRight"
+                  v-model:show-residual="scopeShowResidual"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

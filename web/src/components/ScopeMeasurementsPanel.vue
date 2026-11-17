@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import ReadingValue from './ReadingValue.vue'
 import { useOscilloscope } from '../composables/useOscilloscope'
-import { scopeChannelReadings } from '../scope/readings'
+import { residualReadings, scopeChannelReadings } from '../scope/readings'
 import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
@@ -64,6 +64,24 @@ const blocks = computed(() =>
   ),
 )
 
+/**
+ * The residual's own readings, per drawn channel.
+ *
+ * <p>Taken off the <b>window's</b> slice whether or not the cursors are gating, because the
+ * residual is a property of what is drawn: the fit is made on the window on screen, and the trace
+ * beside these figures is that window's.</p>
+ */
+const residualBlocks = computed(() =>
+  (record.value?.channels ?? [])
+    .filter((slice) => (slice.channel === 1 ? props.showRight : props.showLeft))
+    .map((slice) => ({
+      channel: slice.channel,
+      label: slice.channel === 0 ? 'Left' : 'Right',
+      readings: residualReadings(slice.residual, props.voltsPerDivision),
+    }))
+    .filter((block) => block.readings.length > 0),
+)
+
 /** The gate as the heading quotes it, so the reader can see which stretch the figures are of. */
 const gateNote = computed(() => {
   const window = gate.value
@@ -108,6 +126,23 @@ const recordFacts = computed(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div
+        v-if="residualBlocks.length > 0"
+        class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800"
+      >
+        <div class="mb-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-300">Residual</div>
+        <div v-for="block in residualBlocks" :key="`res-${block.channel}`" class="mb-2 last:mb-0">
+          <table class="w-full text-left text-[11px]">
+            <tbody>
+              <tr v-for="(reading, i) in block.readings" :key="`${reading.label}-${i}`">
+                <td class="pr-2" :title="reading.title">{{ block.label }} {{ reading.label.toLowerCase() }}</td>
+                <td><ReadingValue :text="reading.value" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div v-if="recordFacts" class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">

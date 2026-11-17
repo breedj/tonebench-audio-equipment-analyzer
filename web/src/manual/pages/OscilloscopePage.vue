@@ -199,6 +199,13 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Residual</td>
+          <td>
+            Draws each channel again with its fitted fundamental taken out — see
+            <strong>The residual</strong> below.
+          </td>
+        </tr>
+        <tr>
           <td>Cursors</td>
           <td>
             Two pairs of measuring lines — see <strong>Cursors</strong> below. Switching a pair on
@@ -288,6 +295,44 @@ const { showPage } = useManual()
         <strong>Mean</strong> on a quiet input is the analyzer's own residual offset — a few
         millivolts, different on each channel, and corrected by nobody — rather than the DUT's DC.
         Measure DC with a multimeter.
+      </p>
+    </div>
+
+    <h2>The residual</h2>
+    <p>
+      Tick <strong>Residual</strong> in the display rail and each drawn channel gets a second,
+      dashed trace: the window with <strong>one fitted sine subtracted</strong>. What is left is the
+      distortion, the noise and anything else the fundamental does not explain — the same view the
+      FFT screen's waveform panel offers, on a window you can set.
+    </p>
+    <p>
+      The fit is least-squares and four-parameter, so the <strong>DC term goes with the tone</strong>
+      and the <strong>frequency is refined rather than taken</strong>. That second part is what makes
+      it work at all: a tone that is not a whole number of samples per period drifts in phase across
+      the record, and subtracting a sine at the nearest round frequency leaves a residual that is the
+      drift rather than the DUT — half a cycle's worth of it, at the fundamental's own size.
+    </p>
+    <p>
+      The <strong>Residual</strong> rows under the measurements quote the fundamental that was taken
+      out, the RMS of what is left, and that as a percentage of the fundamental. The percentage is a
+      THD+N figure <em>over this window</em>, and it is not the one
+      <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
+      gives: that one integrates a measurement bandwidth, while this is simply everything the fit did
+      not explain.
+    </p>
+    <p>
+      <strong>Wind the V/div down to see it.</strong> The residual is as small as the distortion is
+      — a clean amplifier's is a thousandth of its output, which at the trace's own V/div is a flat
+      line along the centre. The ladder reaches 10 µV/div for exactly this; the waveform goes off
+      the screen while you look, which is the normal way to read one.
+    </p>
+
+    <div class="manual-note">
+      <p>
+        <strong>A window with no fundamental has none to remove</strong>, and nothing is drawn — no
+        period measured means no sine to fit, and a fit started from a guess would subtract an
+        invented tone and call the difference distortion. Zoom in past about one cycle and the
+        residual disappears for exactly that reason; zoom back out and it returns.
       </p>
     </div>
 

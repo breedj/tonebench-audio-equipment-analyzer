@@ -22,6 +22,7 @@ import {
   triggerSourceProblem,
 } from '../scope/triggerSpec'
 import { formatScopeTime } from '../scope/timeAxis'
+import { roundVoltsForWindow } from '../scope/voltAxis'
 
 /**
  * Everything an oscilloscope run needs, staged locally and only sent on Run or Single.
@@ -199,7 +200,13 @@ const canAutoLevel = computed(
 
 function setFiftyPercent() {
   if (!canAutoLevel.value) return
-  triggerLevelV.value = ((props.measuredMaxV as number) + (props.measuredMinV as number)) / 2
+  const max = props.measuredMaxV as number
+  const min = props.measuredMinV as number
+  // Rounded against the span it was taken from, the way a dragged level is rounded against the
+  // window it was read from: the midpoint of two measured extremes carries every digit the
+  // arithmetic produced, and "-0.0000049938025" in the box is a reading of the noise floor rather
+  // than a level anybody set.
+  triggerLevelV.value = roundVoltsForWindow((max + min) / 2, Math.abs(max - min))
 }
 
 /**

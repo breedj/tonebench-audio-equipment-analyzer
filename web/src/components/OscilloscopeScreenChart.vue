@@ -37,6 +37,7 @@ import {
 import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
 import type { ScopeAxisWindow } from '../scope/display'
 import { triggerChannel, triggerIndicator } from '../scope/triggerSpec'
+import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
 
 /**
  * The oscilloscope screen's chart — a waveform on a <b>linear</b> time axis with the trigger at
@@ -70,6 +71,15 @@ const annotationList = defineModel<ChartAnnotation[]>('annotations', { default: 
  */
 const triggerLevelV = defineModel<number>('triggerLevelV', { default: 0 })
 
+/**
+ * The cursors — <b>a model, for the same reason the trigger level is one</b>: they are dragged on
+ * the chart, and the panel's number boxes are the precise fallback rather than the other way round.
+ *
+ * <p>One object rather than four numbers, so the chart and the panel can watch them as a unit and
+ * so a replacement is one write. Replaced, never mutated: a mutated model does not emit.</p>
+ */
+const cursors = defineModel<ScopeCursors>('cursors', { default: () => ({ ...DEFAULT_SCOPE_CURSORS }) })
+
 // `annotationNumbers` is defaulted rather than left absent: Vue casts an absent Boolean prop with
 // no default to `false`, which silently turned the ordinal badges off on every chart but the FFT's.
 const props = withDefaults(defineProps<{
@@ -101,6 +111,14 @@ const emit = defineEmits<{
   /** The level drag has ended: the parent re-arms once, rather than once per pointer move. */
   triggerLevelCommitted: []
   /**
+   * A cursor drag has ended, or a box was typed into: the parent gates the measurements once.
+   *
+   * <p>Not watched upstream, deliberately. The positions are written live so the lines and the
+   * readout cannot disagree mid-drag, and the gate is a <em>fetch</em> — a watcher on the pair
+   * would ask the server for a window per pointer move.</p>
+   */
+  cursorsCommitted: []
+  /**
    * The window this chart is drawing, after anything that moved it.
    *
    * <p>The server cuts the record to the window it is asked for and sends the <b>waveform itself</b>
@@ -131,9 +149,11 @@ const plot = shallowRef<uPlot | null>(null)
 /** The channel colours the FFT screen's waveform panel already uses, so one signal is one colour app-wide. */
 const CHANNEL_COLORS = ['#3b82f6', '#f97316'] as const
 
+// The cursor teal is neither channel's colour and not the trigger's amber, which is the whole
+// requirement: a line on this chart has to say what kind of line it is before it says where it is.
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, trigger: '#a3a3a3', marker: '#f59e0b' },
-  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, trigger: '#525252', marker: '#b45309' },
+  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, trigger: '#a3a3a3', marker: '#f59e0b', cursor: '#2dd4bf' },
+  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, trigger: '#525252', marker: '#b45309', cursor: '#0f766e' },
 } as const
 
 type Theme = (typeof THEME)[keyof typeof THEME]
@@ -258,6 +278,9 @@ const liveYWindow = computed(() => {
 const indicator = computed(() =>
   triggerIndicator(triggerLevelV.value, liveYWindow.value.topV, liveYWindow.value.bottomV, props.triggerHysteresisV),
 )
+
+/** The cursors' own colour, for their grips — the chart paints the lines in it through `theme()`. */
+const cursorColor = computed(() => theme().cursor)
 
 /** Which trace the trigger watches — the line is drawn in that channel's own colour. */
 const triggerColor = computed(() => CHANNEL_COLORS[triggerChannel(props.triggerSource)] ?? CHANNEL_COLORS[0])
@@ -397,6 +420,85 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
   }
 }
 
+
+/**
+ * The cursors: two dashed verticals in time and two dashed horizontals in volts.
+ *
+ * <p>In <code>draw</code> rather than <code>drawAxes</code>, which is the opposite of where the
+ * trigger level goes and for the matching reason: the level is a <em>setting</em> and must not hide
+ * the samples that decide whether it is in the right place, while a cursor is a <em>reading</em>
+ * and has to be visible exactly where it crosses the trace it is being read against.</p>
+ *
+ * <p>Each line carries its letter at the end the handle is on, so the readout's "Time A" and the
+ * line on screen cannot be confused for one another.</p>
+ */
+function cursorsPlugin(t: Theme): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: [
+        (u) => {
+          const c = cursors.value
+          if (!c.timeOn && !c.voltOn) return
+
+          const ctx = u.ctx
+          const left = u.bbox.left
+          const right = left + u.bbox.width
+          const top = u.bbox.top
+          const bottom = top + u.bbox.height
+          const px = u.bbox.width / Math.max(u.over.clientWidth, 1)
+
+          ctx.save()
+          ctx.strokeStyle = t.cursor
+          ctx.fillStyle = t.cursor
+          ctx.lineWidth = px
+          ctx.setLineDash([3 * px, 3 * px])
+          ctx.font = `${Math.round(10 * px)}px system-ui, sans-serif`
+
+          if (c.timeOn) {
+            for (const [label, seconds] of [['A', c.timeAS], ['B', c.timeBS]] as const) {
+              if (!Number.isFinite(seconds)) continue
+              const x = u.valToPos(toChartMs(seconds), 'x', true)
+              // Off the window: drawn nowhere rather than clamped to the edge. A time cursor is read
+              // against the trace under it, so a clamped one would claim a crossing it is not at --
+              // where the trigger level, which is a setting rather than a reading, is better clamped
+              // and marked than hidden.
+              if (x < left || x > right) continue
+              ctx.beginPath()
+              ctx.moveTo(x, top)
+              ctx.lineTo(x, bottom)
+              ctx.stroke()
+              ctx.setLineDash([])
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'bottom'
+              ctx.fillText(label, x, bottom - 2 * px)
+              ctx.setLineDash([3 * px, 3 * px])
+            }
+          }
+
+          if (c.voltOn) {
+            for (const [label, volts] of [['A', c.voltAV], ['B', c.voltBV]] as const) {
+              if (!Number.isFinite(volts)) continue
+              const y = u.valToPos(volts, 'y', true)
+              if (y < top || y > bottom) continue
+              ctx.beginPath()
+              ctx.moveTo(left, y)
+              ctx.lineTo(right, y)
+              ctx.stroke()
+              ctx.setLineDash([])
+              ctx.textAlign = 'left'
+              ctx.textBaseline = 'middle'
+              ctx.fillText(label, left + 3 * px, y)
+              ctx.setLineDash([3 * px, 3 * px])
+            }
+          }
+
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
 const { zoomed, isZoomedNow, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot.value,
   () => ({
@@ -484,6 +586,7 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       minMaxBandPlugin(),
       triggerPositionPlugin(t),
       triggerLevelPlugin(triggerColor.value),
+      cursorsPlugin(t),
       annotationsPlugin(annotationOverlay, ANNOTATION_AXES, () => annotationTheme(t === THEME.dark)),
     ],
     cursor: interactive ? { drag: { x: true, ...DRAG_RESTING } } : { show: false },
@@ -530,6 +633,10 @@ const HANDLE_WIDTH_PX = 48
 const HANDLE_HEIGHT_PX = 18
 
 function syncHandle() {
+  // The cursors' grips are positioned against the same window, so they move with it -- in one
+  // function rather than beside every call, so a new call site cannot update one and not the other.
+  syncCursorHandles()
+
   const u = plot.value
   if (!u || !props.showTriggerLevel) {
     handleRect.value = null
@@ -590,6 +697,137 @@ function onHandlePointerUp(event: PointerEvent) {
 
 /** The reading beside the handle while it is dragged — the level in the same unit the axis is in. */
 const triggerReadout = computed(() => formatVolts(triggerLevelV.value, props.voltsPerDivision))
+
+// ---------------------------------------------------------------------------
+// Dragging the cursors
+// ---------------------------------------------------------------------------
+
+/**
+ * Which cursor a handle belongs to. The four are one list rather than four refs so the template
+ * draws them in one loop and the drag reads which one it has from the handle itself.
+ */
+type CursorId = 'timeA' | 'timeB' | 'voltA' | 'voltB'
+
+interface CursorHandle {
+  id: CursorId
+  label: string
+  /** 'time' sits on the bottom axis and moves in x; 'volt' sits on the left and moves in y. */
+  axis: 'time' | 'volt'
+  /** Position in CSS pixels within the chart container. */
+  left: number
+  top: number
+}
+
+/** The grab squares, in CSS pixels. 18 px, the trigger handle's own height, so all five feel alike. */
+const CURSOR_HANDLE_PX = 18
+
+/**
+ * Where the four grab squares sit.
+ *
+ * <p><b>On the bottom and left edges, which is the one placement that is free.</b> The trigger
+ * level's handle is on the right and the trigger position's marker is on the top, so time cursors go
+ * along the bottom and level cursors down the left: no two of the five claimants overlap, and a
+ * press therefore lands on exactly one of them by construction rather than by a rule — the same
+ * thing that keeps all of them clear of uPlot's own drag on <code>over</code>.</p>
+ */
+const cursorHandles = shallowRef<CursorHandle[]>([])
+
+function syncCursorHandles() {
+  const u = plot.value
+  const c = cursors.value
+  if (!u) {
+    cursorHandles.value = []
+    return
+  }
+
+  const css = u.over.clientWidth
+  const scale = css > 0 ? u.bbox.width / css : 1
+  const plotLeft = u.bbox.left / scale
+  const plotTop = u.bbox.top / scale
+  const plotWidth = u.bbox.width / scale
+  const plotHeight = u.bbox.height / scale
+  const half = CURSOR_HANDLE_PX / 2
+
+  const out: CursorHandle[] = []
+
+  if (c.timeOn) {
+    for (const [id, label, seconds] of [
+      ['timeA', 'A', c.timeAS],
+      ['timeB', 'B', c.timeBS],
+    ] as const) {
+      const x = u.valToPos(toChartMs(seconds), 'x', false)
+      // A handle for a cursor that is off the window is not drawn, matching the line: there is
+      // nothing on screen for it to be the grip of.
+      if (!Number.isFinite(x) || x < 0 || x > plotWidth) continue
+      out.push({ id, label, axis: 'time', left: plotLeft + x - half, top: plotTop + plotHeight - half })
+    }
+  }
+
+  if (c.voltOn) {
+    for (const [id, label, volts] of [
+      ['voltA', 'A', c.voltAV],
+      ['voltB', 'B', c.voltBV],
+    ] as const) {
+      const y = u.valToPos(volts, 'y', false)
+      if (!Number.isFinite(y) || y < 0 || y > plotHeight) continue
+      out.push({ id, label, axis: 'volt', left: plotLeft, top: plotTop + y - half })
+    }
+  }
+
+  cursorHandles.value = out
+}
+
+const draggingCursor = ref<CursorId | null>(null)
+
+function onCursorPointerDown(event: PointerEvent, id: CursorId) {
+  if (!plot.value) return
+  // Away from uPlot's listeners on `over`, which is why each of these is an element of its own.
+  event.stopPropagation()
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  draggingCursor.value = id
+}
+
+function onCursorPointerMove(event: PointerEvent) {
+  const id = draggingCursor.value
+  const u = plot.value
+  if (!id || !u) return
+
+  const rect = u.over.getBoundingClientRect()
+  // Written live, so the lines, the readout and the panel's boxes cannot disagree mid-drag; the
+  // *gate* waits for the release, a fetch per pointer move being the thing to avoid.
+  //
+  // The other three fields come from the model as it stands, which is safe for the reason the
+  // trigger drag is: the one field being written is taken from the pointer each move rather than
+  // from a value that has to have arrived back as a prop first.
+  if (id === 'timeA' || id === 'timeB') {
+    const ms = u.posToVal(event.clientX - rect.left, 'x')
+    if (!Number.isFinite(ms)) return
+    cursors.value = { ...cursors.value, [id === 'timeA' ? 'timeAS' : 'timeBS']: fromChartMs(ms) }
+  } else {
+    const volts = u.posToVal(event.clientY - rect.top, 'y')
+    if (!Number.isFinite(volts)) return
+    const rounded = roundVoltsForWindow(volts, Math.abs(liveYWindow.value.topV - liveYWindow.value.bottomV))
+    cursors.value = { ...cursors.value, [id === 'voltA' ? 'voltAV' : 'voltBV']: rounded }
+  }
+}
+
+function onCursorPointerUp(event: PointerEvent) {
+  if (!draggingCursor.value) return
+  draggingCursor.value = null
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  emit('cursorsCommitted')
+}
+
+/** What a handle says while it is held — the cursor's own position, in the axis's own unit. */
+function cursorReadout(id: CursorId): string {
+  const c = cursors.value
+  if (id === 'timeA') return formatScopeTime(toChartMs(c.timeAS), spanMs.value)
+  if (id === 'timeB') return formatScopeTime(toChartMs(c.timeBS), spanMs.value)
+  return formatVolts(id === 'voltA' ? c.voltAV : c.voltBV, props.voltsPerDivision)
+}
+
+
 
 // ---------------------------------------------------------------------------
 
@@ -829,6 +1067,13 @@ watch(
   },
 )
 
+// The cursors are draw-hook state too, so moving one is a redraw and its grip follows it. A rebuild
+// here would discard the zoom on every pixel of a drag.
+watch(cursors, () => {
+  plot.value?.redraw()
+  syncCursorHandles()
+})
+
 onMounted(() => {
   window.addEventListener('mouseup', onWindowMouseUp)
   window.addEventListener('keydown', onWindowKeyDown)
@@ -997,6 +1242,30 @@ const windowNote = computed(
           :style="{ backgroundColor: triggerColor }"
           >{{ indicator.offWindow === 'above' ? '▲' : indicator.offWindow === 'below' ? '▼' : 'T' }}</span
         >
+      </div>
+
+      <!-- The cursors' grips. Each is its own element above the canvas, for the trigger handle's
+           reason, and they sit on the two edges nothing else claims: time along the bottom, level
+           down the left. -->
+      <div
+        v-for="handle in cursorHandles"
+        :key="handle.id"
+        class="absolute grid place-items-center rounded-sm text-[10px] font-bold leading-none text-white select-none touch-none"
+        :class="handle.axis === 'time' ? 'cursor-ew-resize' : 'cursor-ns-resize'"
+        :style="{
+          left: `${handle.left}px`,
+          top: `${handle.top}px`,
+          width: `${CURSOR_HANDLE_PX}px`,
+          height: `${CURSOR_HANDLE_PX}px`,
+          backgroundColor: cursorColor,
+        }"
+        :title="`Cursor ${handle.label} ${cursorReadout(handle.id)} — drag to move it`"
+        @pointerdown="onCursorPointerDown($event, handle.id)"
+        @pointermove="onCursorPointerMove"
+        @pointerup="onCursorPointerUp"
+        @pointercancel="onCursorPointerUp"
+      >
+        {{ handle.label }}
       </div>
     </div>
   </section>

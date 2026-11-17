@@ -136,6 +136,8 @@ public static class OscilloscopeEndpoints
             OscilloscopeRunner runner,
             double? fromS,
             double? toS,
+            double? gateFromS,
+            double? gateToS,
             int? maxColumns) =>
         {
             if (runner.Record is not { } record)
@@ -153,6 +155,14 @@ public static class OscilloscopeEndpoints
                     ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
                     : ScopeFrameBuilder.Overview(record, ch, columns);
 
+                // The gate rides on the same fetch as the picture it qualifies, which is the
+                // point of it being a parameter here rather than a second route: two round trips
+                // could answer for two different records, and a panel heading saying "between the
+                // cursors" over the previous capture's figures is a plausible wrong answer.
+                var gated = gateFromS is { } gateFrom && gateToS is { } gateTo
+                    ? ScopeFrameBuilder.Measure(record, ch, gateFrom, gateTo)
+                    : null;
+
                 channels.Add(new ScopeChannelSlice(
                     ch,
                     slice.X0,
@@ -161,7 +171,8 @@ public static class OscilloscopeEndpoints
                     slice.Samples,
                     slice.Columns?.Select(c => (float)c.Min).ToArray(),
                     slice.Columns?.Select(c => (float)c.Max).ToArray(),
-                    slice.Measurements));
+                    slice.Measurements,
+                    gated));
             }
 
             return Results.Ok(new ScopeRecordResponse(
@@ -242,6 +253,12 @@ public static class OscilloscopeEndpoints
 /// <see cref="ScopeSliceMeasurements"/>. They travel beside the picture because they cannot be
 /// taken from it.
 /// </param>
+/// <param name="Gated">
+/// The same readings over the gate the request asked for — the cursor pair — or null when it asked
+/// for none, or when the window it named holds no samples of this record. Never a fallback to
+/// <see cref="Measurements"/>: a gated figure that is quietly the whole window's is the one answer
+/// worse than no figure.
+/// </param>
 public sealed record ScopeChannelSlice(
     int Channel,
     double X0,
@@ -250,7 +267,8 @@ public sealed record ScopeChannelSlice(
     float[]? Samples,
     float[]? Min,
     float[]? Max,
-    ScopeSliceMeasurements Measurements);
+    ScopeSliceMeasurements Measurements,
+    ScopeSliceMeasurements? Gated = null);
 
 /// <summary>A record, as the chart fetches it.</summary>
 /// <param name="SampleRateHz">The rate the samples are on.</param>

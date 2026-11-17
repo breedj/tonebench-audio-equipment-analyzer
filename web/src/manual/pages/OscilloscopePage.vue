@@ -199,6 +199,14 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Cursors</td>
+          <td>
+            Two pairs of measuring lines — see <strong>Cursors</strong> below. Switching a pair on
+            places it a quarter and three quarters across the window, so there is always something
+            to grab.
+          </td>
+        </tr>
+        <tr>
           <td>Thick lines, Show data points</td>
           <td>Line weight, and a marker per sample — drawn only where the window is tight enough for the chart to hold real samples, because a marker on a min/max column would mark the column.</td>
         </tr>
@@ -211,11 +219,66 @@ const { showPage } = useManual()
 
     <h2>Measurements</h2>
     <p>
-      Four readings per drawn channel. <strong>Maximum</strong>, <strong>Minimum</strong> and
-      <strong>Peak to peak</strong> are exact even on a decimated view, because both extremes of
-      every column are kept. <strong>Mean</strong> is not read off the picture at all — an average
-      of column maxima is an average of the envelope — so it is measured on the samples themselves,
+      Nineteen readings per drawn channel, and <strong>every one of them is measured on the
+      analyzer rather than read off the picture</strong>. Maximum, minimum and peak to peak would
+      survive the drawing — both extremes of every column are kept — and nothing else would: an
+      average of column maxima is an average of the envelope, and a rise time read off a column
+      pair is a reading of the column width. So the whole set is taken on the samples themselves,
       at full resolution, over the window on screen.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Reading</th>
+          <th>What it is</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Maximum, Minimum, Peak to peak</td>
+          <td>The extremes of the window, and the distance between them.</td>
+        </tr>
+        <tr>
+          <td>Mean, RMS, AC RMS</td>
+          <td>
+            The average of the samples, the true RMS with it included, and the RMS about it. On a
+            signal riding on an offset, AC RMS is the figure to quote.
+          </td>
+        </tr>
+        <tr>
+          <td>Crest factor</td>
+          <td>Peak over true RMS. 1.41 for a sine, 1.00 for a square, higher for anything peaky.</td>
+        </tr>
+        <tr>
+          <td>Top, Base, Amplitude</td>
+          <td>
+            The two <em>settled</em> levels, taken from a histogram of the samples rather than from
+            the maximum and the minimum — which is the whole difference between a rise time that is
+            right and one that reads fast. A square that overshoots reaches well past the level it
+            settles at, and the edge is timed between the settled pair.
+          </td>
+        </tr>
+        <tr>
+          <td>Period, Frequency, + Width, − Width, Duty</td>
+          <td>Measured between crossings of the middle of the top and base, interpolated between samples.</td>
+        </tr>
+        <tr>
+          <td>Rise, Fall</td>
+          <td>10 % to 90 % of the first clean edge, against the settled pair. See the floor below.</td>
+        </tr>
+        <tr>
+          <td>Overshoot, Preshoot</td>
+          <td>How far past the top, and below the base, the record goes — as a percentage of the amplitude.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>A reading the waveform does not have is left out rather than dashed.</strong> A period
+      needs two crossings, an edge needs two settled levels, and a record with one level — DC,
+      silence, structureless noise — has neither, so the list is simply shorter. No attempt is made
+      to decide whether a waveform &ldquo;has&rdquo; a top: a sine's samples really do pile up at the
+      peaks, so no test separates it from a square, and every bench instrument quotes a top and a
+      base for a sine anyway.
     </p>
 
     <div class="manual-note">
@@ -227,6 +290,42 @@ const { showPage } = useManual()
         Measure DC with a multimeter.
       </p>
     </div>
+
+    <h2>Cursors</h2>
+    <p>
+      Two pairs of measuring lines, switched on in the display rail and <strong>dragged by the
+      lettered grips on the chart</strong> — time along the bottom edge, level down the left. The
+      number boxes beside each checkbox are the precise fallback. Switching a pair on places it a
+      quarter and three quarters across the window, so it is never stacked somewhere you cannot
+      find it.
+    </p>
+    <ul>
+      <li>
+        <strong>Time cursors</strong> read where each sits, the time between them, and
+        <strong>1/Δt</strong> — the frequency of whatever you have put them a cycle apart on. That
+        is a different claim from the measured <strong>Frequency</strong> above, which is taken
+        between crossings of the settled middle: the two agreeing is a check, and the two
+        disagreeing is itself a reading.
+      </li>
+      <li>
+        <strong>Level cursors</strong> read each level and <strong>ΔV</strong>. They do not gate
+        anything — a pair of levels names no stretch of the record.
+      </li>
+    </ul>
+    <p>
+      <strong>While the time pair is on, the Measurements panel reads the stretch between them</strong>
+      instead of the whole window, and says so above the figures. The window travels to the analyzer
+      and it measures those samples afresh: gating on the drawn picture would be a reading of the
+      min/max columns rather than a measurement. A pair with no span, or one dragged entirely off
+      the record, gates nothing and the panel goes back to the window's own figures rather than
+      quoting them under a heading that says otherwise.
+    </p>
+    <p>
+      Cursors belong to the session and not to the measurement: they are not saved with it, they do
+      not come back when you reopen it, and they are not in a report. A note you want to keep is an
+      <strong>annotation</strong> — see
+      <button type="button" class="manual-link" @click="showPage('charts')">Charts</button>.
+    </p>
 
     <h2>Two flags on the header</h2>
     <ul>

@@ -19,8 +19,12 @@ function valueOf(m: ScopeSliceMeasurements, label: string, voltsPerDivision = 0.
   return scopeReadings(m, voltsPerDivision).find((r) => r.label === label)?.value
 }
 
-function slice(channel: number, measurements: ScopeSliceMeasurements): ScopeChannelSlice {
-  return { channel, x0: 0, dx: 1e-5, raw: true, samples: [0], min: null, max: null, measurements }
+function slice(
+  channel: number,
+  measurements: ScopeSliceMeasurements,
+  gated: ScopeSliceMeasurements | null = null,
+): ScopeChannelSlice {
+  return { channel, x0: 0, dx: 1e-5, raw: true, samples: [0], min: null, max: null, measurements, gated }
 }
 
 describe('scopeReadings', () => {
@@ -80,5 +84,20 @@ describe('scopeChannelReadings', () => {
 
   it('answers nothing before anything is captured', () => {
     expect(scopeChannelReadings(null, 0.5, true, true)).toEqual([])
+  })
+
+  it('reads the gated set when asked for it, and the window own otherwise', () => {
+    const gated: ScopeSliceMeasurements = { ...always, maxV: 5, minV: -5, peakToPeakV: 10 }
+    const channels = [slice(0, always, gated)]
+    const window = scopeChannelReadings(channels, 0.5, true, true)
+    const gate = scopeChannelReadings(channels, 0.5, true, true, 'gate')
+    expect(window[0].readings.find((r) => r.label === 'Peak to peak')?.value).toBe('2.000 V')
+    expect(gate[0].readings.find((r) => r.label === 'Peak to peak')?.value).toBe('10.000 V')
+  })
+
+  it('leaves out a channel the gate measured nothing of, rather than falling back', () => {
+    // The server answers null when the cursor window holds none of this record. The whole
+    // window's figures under a "between the cursors" heading is the one answer worse than none.
+    expect(scopeChannelReadings([slice(0, always, null)], 0.5, true, true, 'gate')).toEqual([])
   })
 })

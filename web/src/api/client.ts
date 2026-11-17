@@ -1478,6 +1478,14 @@ export interface ScopeChannelSlice {
    * NaN is written down.</p>
    */
   measurements: ScopeSliceMeasurements
+  /**
+   * The same readings over the cursor window, when the fetch asked for one.
+   *
+   * <p>Null when it did not, and null when the window it named holds no samples of this record —
+   * never a fallback to <code>measurements</code>. A gated figure that is quietly the whole
+   * window's, under a heading saying it is the cursors', is the one answer worse than no figure.</p>
+   */
+  gated: ScopeSliceMeasurements | null
   /** True when the window was tight enough to send the waveform itself rather than a summary of it. */
   raw: boolean
   samples: number[] | null
@@ -4783,11 +4791,21 @@ export const api = {
    * No window is the overview the zoom strip is drawn from; a window is the main plot's. Null when
    * nothing has been captured yet, which is the state the screen opens in.
    */
-  getOscilloscopeRecord: (window?: { fromS: number; toS: number }, maxColumns?: number) => {
+  getOscilloscopeRecord: (
+    window?: { fromS: number; toS: number },
+    maxColumns?: number,
+    gate?: { fromS: number; toS: number },
+  ) => {
     const query = new URLSearchParams()
     if (window) {
       query.set('fromS', String(window.fromS))
       query.set('toS', String(window.toS))
+    }
+    // The cursor window rides on the same fetch as the picture it qualifies, rather than on a
+    // second route: two round trips could answer for two different records.
+    if (gate) {
+      query.set('gateFromS', String(gate.fromS))
+      query.set('gateToS', String(gate.toS))
     }
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 

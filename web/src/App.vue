@@ -74,6 +74,7 @@ import {
   scopeDisplayToParams,
   type ScopeAxisWindow,
 } from './scope/display'
+import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2054,6 +2055,17 @@ const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
 const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
 
 /**
+ * The cursors — <b>session state, and deliberately not part of the display record</b>.
+ *
+ * <p>Which is the whole difference between a cursor and an annotation: a note is saved with the
+ * measurement and travels into a report, where a cursor is a transient reading. So this ref is not
+ * in <code>DEFAULT_SCOPE_DISPLAY</code>, not written by <code>currentScopeDisplay</code>, not read
+ * by <code>scopeDisplayFromParams</code> and not in the report's subject data — and it survives a
+ * measurement switch, the way a knob left where it was on a bench instrument does.</p>
+ */
+const scopeCursors = ref<ScopeCursors>({ ...DEFAULT_SCOPE_CURSORS })
+
+/**
  * The five settings the chart needs as well as the panel.
  *
  * <p>Here rather than inside `ScopeConfigPanel` because the chart <b>writes</b> the trigger level —
@@ -2135,6 +2147,7 @@ const {
   switchOwner: switchOscilloscopeOwner,
   refresh: refreshOscilloscope,
   setWindow: setOscilloscopeWindow,
+  setGate: setOscilloscopeGate,
 } = useOscilloscope()
 
 function currentScopeDisplay() {
@@ -2275,6 +2288,21 @@ async function onScopeRetune(request: import('./api/client').OscilloscopeStartRe
  */
 function onScopeTriggerLevelCommitted() {
   scopeConfigPanel.value?.flushRetune()
+}
+
+/**
+ * A cursor drag has ended, or a box was typed into: the measurements are gated to the pair.
+ *
+ * <p>The window travels to the server and it <b>re-measures</b> over those samples, which is the
+ * point — gating on the client would be a reading of the min/max columns the chart happens to be
+ * drawing rather than a measurement of the record. Only the <em>time</em> pair gates; a pair of
+ * levels names no stretch of anything. See <code>cursorGate</code>.</p>
+ *
+ * <p>On the commit rather than in a watcher, because the gate is a fetch: a watcher on the pair
+ * would ask the server for a window per pointer move.</p>
+ */
+function onScopeCursorsCommitted() {
+  void setOscilloscopeGate(cursorGate(scopeCursors.value)).catch(() => undefined)
 }
 
 /** "Set axis" from the chart: the window on screen written back into the display panel's boxes. */
@@ -5842,6 +5870,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
                   v-model:trigger-level-v="scopeTriggerLevelV"
+                  v-model:cursors="scopeCursors"
                   :record="scopeRecord"
                   :volts-per-division="scopeVoltsPerDivision"
                   :volt-offset-v="scopeVoltOffsetV"
@@ -5860,6 +5889,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
+                  @cursors-committed="onScopeCursorsCommitted"
                 />
 
                 <MeasurementNotesPanel />
@@ -5880,6 +5910,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:autofit-on-done="scopeAutofitOnDone"
                   v-model:show-left="scopeShowLeft"
                   v-model:show-right="scopeShowRight"
+                  v-model:cursors="scopeCursors"
+                  @cursors-committed="onScopeCursorsCommitted"
                 />
 
                 <MeasurementChecklist @error="reportError" />

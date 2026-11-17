@@ -288,4 +288,94 @@ public class ScopeFrameBuilderTests
         Assert.Equal(
             decimated.FirstFrame + ((decimated.FrameCount - 1) / 2.0), decimated.Measurements.MeanV, 3);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // The gate -- a window measured and not drawn, which is what a cursor pair asks for
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AGate_MeasuresTheWindowItNames_AndNotTheWholeRecord()
+    {
+        // The left channel is a ramp of frame indices, so a window's own max and min say exactly
+        // which frames were measured -- which is the whole question a gated reading raises.
+        var record = Record();
+        double from = record.TimeAt(1_000);
+        double to = record.TimeAt(2_000);
+
+        var gated = ScopeFrameBuilder.Measure(record, channel: 0, from, to);
+
+        // Half-open, like the slice: the window holds frames 1000..1999, the end being the frame
+        // the time rounds up to rather than one inside it.
+        Assert.NotNull(gated);
+        Assert.Equal(1_000, gated!.MinV, 0);
+        Assert.Equal(1_999, gated.MaxV, 0);
+        Assert.Equal(1_499.5, gated.MeanV, 6);
+    }
+
+    [Fact]
+    public void AGate_AgreesWithTheSliceDrawnForTheSameWindow()
+    {
+        // Two code paths naming the same frames: a gated reading of a window half a sample
+        // different from the one on screen is exactly the plausible disagreement nothing would
+        // flag, which is why both go through one FrameRange.
+        var record = Record();
+        double from = record.TimeAt(4_000);
+        double to = record.TimeAt(9_000);
+
+        var slice = ScopeFrameBuilder.Window(record, channel: 0, from, to);
+        var gated = ScopeFrameBuilder.Measure(record, channel: 0, from, to);
+
+        Assert.NotNull(gated);
+        Assert.Equal(slice.Measurements.MinV, gated!.MinV, 9);
+        Assert.Equal(slice.Measurements.MaxV, gated.MaxV, 9);
+        Assert.Equal(slice.Measurements.RmsV, gated.RmsV, 9);
+    }
+
+    [Theory]
+    [InlineData(double.NaN, 0.0)]
+    [InlineData(0.0, double.NaN)]
+    [InlineData(0.01, 0.01)] // zero width
+    [InlineData(0.02, 0.01)] // reversed
+    public void AGate_ThatNamesNothing_IsRefusedRatherThanAnsweredWithTheWholeRecord(double from, double to)
+    {
+        // Window() falls back to the overview here, deliberately: a picture is always better drawn
+        // than blank. A *gate* must not, or the panel quotes the whole record's figures under a
+        // heading saying they are the cursors'.
+        Assert.Null(ScopeFrameBuilder.Measure(Record(), channel: 0, from, to));
+    }
+
+    [Theory]
+    [InlineData(-5.0, -4.0)]
+    [InlineData(4.0, 5.0)]
+    public void AGate_WhollyOutsideTheRecord_IsRefused(double from, double to)
+    {
+        // Clamped instead, this would measure the first or the last sample alone and read as a
+        // measurement of a flat line.
+        Assert.Null(ScopeFrameBuilder.Measure(Record(), channel: 0, from, to));
+    }
+
+    [Fact]
+    public void AGate_ReachingPastTheRecord_MeasuresTheOverlap()
+    {
+        // Half in is a real window, unlike wholly out: the samples it names exist.
+        var record = Record();
+        var gated = ScopeFrameBuilder.Measure(record, channel: 0, record.TimeAt(0) - 1.0, record.TimeAt(10));
+
+        Assert.NotNull(gated);
+        Assert.Equal(0, gated!.MinV, 0);
+        Assert.Equal(9, gated.MaxV, 0);
+    }
+
+    [Fact]
+    public void AGate_ReadsItsOwnChannel()
+    {
+        var record = Record();
+        double from = record.TimeAt(1_000);
+        double to = record.TimeAt(2_000);
+
+        // The right channel is the negated ramp, so a gate that read channel 0 for both would be
+        // obvious here and nowhere else.
+        Assert.Equal(1_999, ScopeFrameBuilder.Measure(record, 0, from, to)!.MaxV, 0);
+        Assert.Equal(-1_000, ScopeFrameBuilder.Measure(record, 1, from, to)!.MaxV, 0);
+    }
 }

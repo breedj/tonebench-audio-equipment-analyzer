@@ -4,6 +4,7 @@ import CollapsibleSection from './CollapsibleSection.vue'
 import ReadingValue from './ReadingValue.vue'
 import { useOscilloscope } from '../composables/useOscilloscope'
 import { scopeChannelReadings } from '../scope/readings'
+import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
 /**
@@ -40,11 +41,35 @@ const props = withDefaults(
   { showLeft: true, showRight: true },
 )
 
-const { record, spliced, forced } = useOscilloscope()
+const { record, spliced, forced, gate } = useOscilloscope()
+
+/**
+ * Whether the figures below are the cursors' or the window's.
+ *
+ * <p>Read off the <b>slice</b> and not off the cursors, which is the one choice here worth stating:
+ * the gate rides on the same fetch as the picture, so a slice carrying a gated set is a slice whose
+ * gated set is of that record. Keying the heading on the cursors instead would label the previous
+ * capture's figures "between the cursors" for one tick after a drag — which is exactly the
+ * plausible wrong answer the server refuses to give by answering null.</p>
+ */
+const gated = computed(() => (record.value?.channels ?? []).some((slice) => slice.gated !== null))
 
 const blocks = computed(() =>
-  scopeChannelReadings(record.value?.channels, props.voltsPerDivision, props.showLeft, props.showRight),
+  scopeChannelReadings(
+    record.value?.channels,
+    props.voltsPerDivision,
+    props.showLeft,
+    props.showRight,
+    gated.value ? 'gate' : 'window',
+  ),
 )
+
+/** The gate as the heading quotes it, so the reader can see which stretch the figures are of. */
+const gateNote = computed(() => {
+  const window = gate.value
+  if (!window || !gated.value) return null
+  return `${formatSeconds(window.fromS)} to ${formatSeconds(window.toS)} · ${formatSeconds(window.toS - window.fromS)}`
+})
 
 const spanMs = computed(() => Math.abs(toChartMs(props.timeToS) - toChartMs(props.timeFromS)))
 
@@ -65,6 +90,14 @@ const recordFacts = computed(() => {
 <template>
   <CollapsibleSection title="Measurements">
     <template v-if="blocks.length > 0">
+      <p
+        v-if="gateNote"
+        class="mb-2 rounded bg-teal-500/10 px-1.5 py-1 text-[11px] leading-snug text-teal-700 dark:text-teal-300"
+      >
+        Between the cursors — {{ gateNote }}. Re-measured on the samples in that stretch, not read
+        off the window's own figures.
+      </p>
+
       <div v-for="block in blocks" :key="block.channel" class="mb-2 last:mb-0" :data-scope-block="block.label">
         <div class="mb-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{{ block.label }}</div>
         <table class="w-full text-left text-[11px]">

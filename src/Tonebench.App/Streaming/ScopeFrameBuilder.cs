@@ -74,16 +74,55 @@ public static class ScopeFrameBuilder
     public static ScopeFrameSlice Window(
         ScopeRecord record, int channel, double fromS, double toS, int maxColumns = DefaultMaxColumns)
     {
-        if (!double.IsFinite(fromS) || !double.IsFinite(toS) || toS <= fromS)
+        if (FrameRange(record, fromS, toS) is not { } range)
             return Overview(record, channel, maxColumns);
+
+        return Build(record, channel, range.First, range.Count, maxColumns);
+    }
+
+    /// <summary>
+    /// The readings of one window and nothing else — no columns, no samples. What a measurement
+    /// gated to a cursor pair is.
+    ///
+    /// <para><b>A window that selects nothing answers null, where <see cref="Window"/> answers with
+    /// the whole record.</b> That difference is the point of this being its own method rather than a
+    /// flag on that one: a picture is always better drawn than blank, so falling back to the whole
+    /// record is the right answer for a slice — and it is the <i>wrong</i> answer for a gate, where
+    /// it would quote the whole record's figures under a heading saying they are the cursors'. A
+    /// reading nothing was measured for is absent, like every other reading here.</para>
+    /// </summary>
+    public static ScopeSliceMeasurements? Measure(ScopeRecord record, int channel, double fromS, double toS)
+    {
+        if (FrameRange(record, fromS, toS) is not { } range)
+            return null;
+
+        return ScopeSliceMeasurements.Of(
+            record.Channels[channel].AsSpan(range.First, range.Count), record.SampleRateHz);
+    }
+
+    /// <summary>
+    /// The frames a window names, clamped to the record, or null when it names none.
+    ///
+    /// <para>Shared by the slice and the gate so the two cannot disagree about which samples a pair
+    /// of times selects — a gated reading of a window half a sample different from the one drawn is
+    /// exactly the kind of plausible disagreement nothing on screen would flag.</para>
+    /// </summary>
+    private static (int First, int Count)? FrameRange(ScopeRecord record, double fromS, double toS)
+    {
+        if (!double.IsFinite(fromS) || !double.IsFinite(toS) || toS <= fromS || record.FrameCount <= 0)
+            return null;
 
         int first = FrameAt(record, fromS, roundUp: false);
         int last = FrameAt(record, toS, roundUp: true);
 
-        first = Math.Clamp(first, 0, Math.Max(0, record.FrameCount - 1));
-        last = Math.Clamp(last, first + 1, record.FrameCount);
+        // Outside the record altogether, in either direction: clamping would silently measure the
+        // first or last sample instead of saying the window holds nothing.
+        if (last <= 0 || first >= record.FrameCount)
+            return null;
 
-        return Build(record, channel, first, last - first, maxColumns);
+        first = Math.Clamp(first, 0, record.FrameCount - 1);
+        last = Math.Clamp(last, first + 1, record.FrameCount);
+        return (first, last - first);
     }
 
     private static ScopeFrameSlice Build(ScopeRecord record, int channel, int firstFrame, int frameCount, int maxColumns)

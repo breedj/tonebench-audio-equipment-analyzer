@@ -79,19 +79,31 @@ export function scopeReadings(
   return rows
 }
 
+/**
+ * Which set of readings to take off a slice: the window that is drawn, or the cursor gate.
+ *
+ * <p>Both arrive on the same slice, from the same fetch, so the choice is a presentation one and
+ * cannot put the two out of step with each other or with the picture.</p>
+ */
+export type ScopeReadingSource = 'window' | 'gate'
+
 /** The readings of each drawn channel, labelled — what both the panel and the report iterate. */
 export function scopeChannelReadings(
   channels: readonly ScopeChannelSlice[] | null | undefined,
   voltsPerDivision: number,
   showLeft: boolean,
   showRight: boolean,
+  source: ScopeReadingSource = 'window',
 ): { channel: number; label: string; readings: ScopeReading[] }[] {
   return (channels ?? [])
     .filter((slice) => (slice.channel === 1 ? showRight : showLeft))
     .map((slice) => ({
       channel: slice.channel,
       label: slice.channel === 0 ? 'Left' : 'Right',
-      readings: scopeReadings(slice.measurements, voltsPerDivision),
+      // A channel with no gated set is left out rather than falling back to the window's: the
+      // server answers null when the cursor window holds none of this record, and the whole
+      // window's figures under a "between the cursors" heading is the one answer worse than none.
+      readings: scopeReadings(source === 'gate' ? slice.gated : slice.measurements, voltsPerDivision),
     }))
     .filter((block) => block.readings.length > 0)
 }

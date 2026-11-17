@@ -10,8 +10,10 @@ import {
   fitVoltWindow,
   formatVoltsPerDivision,
   snapVoltsPerDivision,
+  voltWindow,
 } from '../scope/voltAxis'
 import { clampWindow, fromChartMs, recordWindow, scopeTimeScale, toChartMs } from '../scope/timeAxis'
+import { cursorPairNeedsPlacing, cursorReadings, placeCursorPair, type ScopeCursors } from '../scope/cursors'
 
 /**
  * The oscilloscope chart's display rail: the vertical pair, the time window, one Autofit for both,
@@ -32,6 +34,19 @@ const showTriggerLevel = defineModel<boolean>('showTriggerLevel', { required: tr
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
+
+/** The cursors. See scope/cursors.ts — session state, so they are not in <code>params_json</code>. */
+const cursors = defineModel<ScopeCursors>('cursors', { required: true })
+
+const emit = defineEmits<{
+  /**
+   * A cursor has been moved, or switched on or off: the parent gates the measurements once.
+   *
+   * <p>Emitted from the control rather than watched upstream, for the chart's own reason — the gate
+   * is a fetch, and a watcher would ask the server for a window per keystroke.</p>
+   */
+  cursorsCommitted: []
+}>()
 
 const props = defineProps<{
   /** The record the settings ask for, so the window can be fitted before anything is captured. */
@@ -207,6 +222,86 @@ const windowSpan = computed(() => {
   return `${(toChartMs(span) / scale.msPerUnit).toPrecision(3)} ${scale.label}`
 })
 
+
+// ---------------------------------------------------------------------------
+// Cursors
+// ---------------------------------------------------------------------------
+
+/**
+ * Switching a pair on, which also <b>places it where it can be seen</b>.
+ *
+ * <p>The defaults are both cursors at zero, and a pair left over from another measurement may be
+ * off this record entirely — either way there is nothing to read and nothing to grab. See
+ * <code>cursorPairNeedsPlacing</code>; the placement happens only on the way <em>on</em>, so a pair
+ * the reader has put somewhere is never moved for them.</p>
+ */
+function toggleTimeCursors(on: boolean) {
+  const next: ScopeCursors = { ...cursors.value, timeOn: on }
+  if (on && cursorPairNeedsPlacing(next.timeAS, next.timeBS, timeFromS.value, timeToS.value)) {
+    const placed = placeCursorPair(timeFromS.value, timeToS.value)
+    next.timeAS = placed.a
+    next.timeBS = placed.b
+  }
+  cursors.value = next
+  emit('cursorsCommitted')
+}
+
+function toggleVoltCursors(on: boolean) {
+  const next: ScopeCursors = { ...cursors.value, voltOn: on }
+  const level = voltWindow(voltsPerDivision.value, voltOffsetV.value)
+  if (on && cursorPairNeedsPlacing(next.voltAV, next.voltBV, level.bottomV, level.topV)) {
+    const placed = placeCursorPair(level.bottomV, level.topV)
+    next.voltAV = placed.a
+    next.voltBV = placed.b
+  }
+  cursors.value = next
+  emit('cursorsCommitted')
+}
+
+/** A cursor written from a box: replaced, never mutated, and committed, a typed figure being a commit. */
+function setCursor(field: 'timeAS' | 'timeBS' | 'voltAV' | 'voltBV', value: number) {
+  cursors.value = { ...cursors.value, [field]: value }
+  emit('cursorsCommitted')
+}
+
+/** The time boxes are in the window boxes' own unit, so the four figures can be compared by eye. */
+const cursorABoxValue = computed(() => toBox(cursors.value.timeAS))
+const cursorBBoxValue = computed(() => toBox(cursors.value.timeBS))
+
+function onCursorTimeChange(event: Event, field: 'timeAS' | 'timeBS') {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed)) {
+    ;(event.target as HTMLInputElement).value = String(
+      field === 'timeAS' ? cursorABoxValue.value : cursorBBoxValue.value,
+    )
+    return
+  }
+  // Not clamped to the window, deliberately: a cursor off the window is drawn nowhere and still
+  // reads its own position, and clamping would silently move a pair a zoom is about to bring back.
+  setCursor(field, fromBox(typed))
+}
+
+function onCursorVoltChange(event: Event, field: 'voltAV' | 'voltBV') {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed)) {
+    ;(event.target as HTMLInputElement).value = String(cursors.value[field])
+    return
+  }
+  setCursor(field, typed)
+}
+
+/** One press of a level cursor's spinner: a tenth of a division, which is how finely one is placed. */
+const cursorVoltStep = computed(() => voltsPerDivision.value / 10)
+
+/** What the pairs read — Δt, 1/Δt and ΔV. See cursorReadings. */
+const cursorRows = computed(() =>
+  cursorReadings(
+    cursors.value,
+    voltsPerDivision.value,
+    Math.abs(toChartMs(timeToS.value) - toChartMs(timeFromS.value)),
+  ),
+)
+
 /** Snapped on the way in, so a window arriving from a drag-zoom's "Set axis" lands on a rung. */
 function onVoltsPerDivisionChange(event: Event) {
   voltsPerDivision.value = snapVoltsPerDivision(Number((event.target as HTMLSelectElement).value))
@@ -322,6 +417,90 @@ function onVoltsPerDivisionChange(event: Event) {
     <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       Data points are drawn only where the window is tight enough for the chart to hold real samples
       — a marker on a min/max column would mark the column, not a sample.
+    </p>
+  </CollapsibleSection>
+
+
+  <CollapsibleSection title="Cursors" size="xs">
+    <!-- A cursor is a transient reading that belongs to the session, not a note that belongs to the
+         measurement - so none of this is in params_json, and none of it is in a report. -->
+    <label class="tb-check-row">
+      <input
+        :checked="cursors.timeOn"
+        type="checkbox"
+        class="tb-check"
+        title="Two vertical cursors reading the time between them and its reciprocal. While they are on, the Measurements panel reads the stretch of the record between them instead of the whole window."
+        @change="toggleTimeCursors(($event.target as HTMLInputElement).checked)"
+      />
+      Time cursors
+    </label>
+    <div v-if="cursors.timeOn" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        A ({{ boxScale.label }})
+        <input
+          :value="cursorABoxValue"
+          type="number"
+          :step="boxStep"
+          class="tb-input"
+          @change="onCursorTimeChange($event, 'timeAS')"
+        />
+      </label>
+      <label class="tb-field">
+        B ({{ boxScale.label }})
+        <input
+          :value="cursorBBoxValue"
+          type="number"
+          :step="boxStep"
+          class="tb-input"
+          @change="onCursorTimeChange($event, 'timeBS')"
+        />
+      </label>
+    </div>
+
+    <label class="tb-check-row">
+      <input
+        :checked="cursors.voltOn"
+        type="checkbox"
+        class="tb-check"
+        title="Two horizontal cursors reading the level difference between them. They read levels only and do not gate the measurements - a pair of levels names no stretch of the record."
+        @change="toggleVoltCursors(($event.target as HTMLInputElement).checked)"
+      />
+      Level cursors
+    </label>
+    <div v-if="cursors.voltOn" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        A (V)
+        <input
+          :value="cursors.voltAV"
+          type="number"
+          :step="cursorVoltStep"
+          class="tb-input"
+          @change="onCursorVoltChange($event, 'voltAV')"
+        />
+      </label>
+      <label class="tb-field">
+        B (V)
+        <input
+          :value="cursors.voltBV"
+          type="number"
+          :step="cursorVoltStep"
+          class="tb-input"
+          @change="onCursorVoltChange($event, 'voltBV')"
+        />
+      </label>
+    </div>
+
+    <table v-if="cursorRows.length > 0" class="w-full text-left text-[11px]">
+      <tbody>
+        <tr v-for="row in cursorRows" :key="row.label">
+          <td class="pr-2" :title="row.title">{{ row.label }}</td>
+          <td class="font-mono tabular-nums">{{ row.value }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      Switch a pair on and drag the lettered grips on the chart - time along the bottom, level down
+      the left.
     </p>
   </CollapsibleSection>
 

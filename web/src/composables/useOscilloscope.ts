@@ -6,6 +6,7 @@ import {
   type ResponsePhaseName,
   type ScopeRecordResponse,
 } from '../api/client'
+import type { CursorGate } from '../scope/cursors'
 import type { ScopeTimeWindow } from '../scope/timeAxis'
 
 /**
@@ -56,6 +57,17 @@ const window = shallowRef<ScopeTimeWindow | null>(null)
 const maxColumns = ref(1600)
 
 /**
+ * The cursor window the measurements are gated to, or null for the whole drawn window.
+ *
+ * <p>Here beside the display window rather than with the cursors themselves, because it is the
+ * other thing a fetch is keyed on: it rides on the <em>same</em> request as the slice, so the
+ * figures and the picture they qualify can never come from two different records. Moving a cursor
+ * therefore re-fetches, which is also the point — gating client-side over min/max columns would be
+ * a reading of the decimation rather than a measurement.</p>
+ */
+const gate = shallowRef<CursorGate | null>(null)
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -88,7 +100,8 @@ async function fetchRecord(force = false): Promise<void> {
 
   const token = ++fetchToken
   try {
-    const next = await api.getOscilloscopeRecord(window.value ?? undefined, maxColumns.value)
+    const next = await api.getOscilloscopeRecord(
+      window.value ?? undefined, maxColumns.value, gate.value ?? undefined)
     if (token !== fetchToken) return
     record.value = next
     fetchedFor = taken
@@ -177,6 +190,19 @@ export function useOscilloscope() {
     if (status.value.hasRecord) await fetchRecord(true)
   }
 
+  /**
+   * Gates the measurements to a window of the record — the cursor pair — or to nothing.
+   *
+   * <p>Re-fetches at once rather than waiting for the next poll, because a stopped scope has no
+   * next poll and dragging a cursor on a held record is the commonest way this is used.</p>
+   */
+  async function setGate(next: CursorGate | null): Promise<void> {
+    const before = gate.value
+    if (before?.fromS === next?.fromS && before?.toS === next?.toS) return
+    gate.value = next
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -227,6 +253,7 @@ export function useOscilloscope() {
     record,
     error,
     window,
+    gate,
     running,
     phase,
     hasRecord,
@@ -243,6 +270,7 @@ export function useOscilloscope() {
     refresh,
     fetchRecord,
     setWindow,
+    setGate,
     start,
     retune,
     cancel,

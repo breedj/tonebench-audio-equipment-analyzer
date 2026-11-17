@@ -41,7 +41,7 @@ function slice(channel: number, min: number[], max: number[], measured: Partial<
     acRmsV: 0,
     ...measured,
   }
-  return { channel, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements }
+  return { channel, x0: -0.005, dx: 1e-5, raw: false, samples: null, min, max, measurements, gated: null }
 }
 
 function record(channels: ScopeChannelSlice[], extra: Partial<ScopeRecordResponse> = {}): ScopeRecordResponse {

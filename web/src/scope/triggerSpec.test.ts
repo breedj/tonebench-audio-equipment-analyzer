@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SCOPE_TRIGGER,
@@ -150,5 +151,40 @@ describe('suggestedHysteresis', () => {
   it('is null on a flat trace, which has no span to take a fraction of', () => {
     expect(suggestedHysteresis(1, 1)).toBeNull()
     expect(suggestedHysteresis(Number.NaN, -1)).toBeNull()
+  })
+})
+
+describe('the trigger panel binds its voltages without v-model', () => {
+  // A defineModel with a listener on it does not take the value assigned to it -- it emits, and the
+  // value arrives as a prop on the parent's next render. ScopeConfigPanel assigns during *setup*,
+  // restoring a measurement's saved settings, so its first render still draws the old value; and
+  // vModelText writes the element from a *mounted* directive hook, which Vue defers to the
+  // post-flush queue. The update carrying 0.25 is patched first and writes it into the element, and
+  // the deferred mount hook then puts the first render's 0 straight back. So a saved trigger level
+  // and hysteresis read zero on the first selection of a measurement, with the chart's trigger line
+  // sitting correctly at 0.25 beside them (reported and reproduced 2026-11-17).
+  //
+  // vModelSelect carries an `updated` hook as well, and the two are deferred in order, so Mode and
+  // Source were never affected -- which is why two of the six controls were wrong and four were not.
+  //
+  // Nothing here is reachable from a unit test: it is a .vue against a real DOM, and this suite runs
+  // on `environment: 'node'`. So this reads the component as text, the way annotationNumbersDefault
+  // and storedDisplayDefaults do.
+  const source = readFileSync(new URL('../components/ScopeConfigPanel.vue', import.meta.url), 'utf8')
+
+  const boxes = source.match(/<input\b[\s\S]*?\/>/g) ?? []
+  const numbers = boxes.filter((box) => /type="number"/.test(box))
+
+  it('has no v-model on a number box', () => {
+    // A <select> is deliberately left alone: vModelSelect has the updated hook that saves it.
+    expect(numbers.length).toBeGreaterThanOrEqual(5)
+    expect(numbers.filter((box) => /v-model/.test(box))).toEqual([])
+  })
+
+  it('answers every number box with a change handler instead', () => {
+    for (const box of numbers) {
+      expect(box).toMatch(/@change=/)
+      expect(box).toMatch(/:value=|\s:?value="/)
+    }
   })
 })

@@ -20,11 +20,13 @@ export const VERTICAL_DIVISIONS = 8
  * <p>The top rung is set by the hardware rather than by taste: the QA403's widest input range is
  * 42 dBV, i.e. about 126 V rms and 178 V peak, which is 22 V a division over eight of them. 50 V/div
  * is therefore the first rung that can hold anything the analyzer is able to measure, and nothing
- * above it is reachable. The bottom rung is 100 µV/div, a little under the analyzer's own noise
- * floor on its most sensitive range, so the ladder runs out at the point where there is nothing
- * left to magnify.</p>
+ * above it is reachable. The bottom rung is 10 µV/div — 80 µV across the whole graticule, which is
+ * under the analyzer's own noise floor on its most sensitive range, so what is drawn down there is
+ * the floor itself. That is the point of having it: a scope is how a noise floor is <em>looked
+ * at</em>, and a ladder that stopped where the signal stopped could not show one.</p>
  */
 export const VOLTS_PER_DIVISION_LADDER: readonly number[] = Object.freeze([
+  0.00001, 0.00002, 0.00005,
   0.0001, 0.0002, 0.0005,
   0.001, 0.002, 0.005,
   0.01, 0.02, 0.05,
@@ -122,12 +124,24 @@ export function fitVoltWindow(maxV: number, minV: number): VoltFit {
 export function formatVolts(volts: number, voltsPerDivision: number, withUnit = true): string {
   if (!Number.isFinite(volts)) return '—'
   const vpd = Number.isFinite(voltsPerDivision) && voltsPerDivision > 0 ? voltsPerDivision : 1
-  const milli = vpd < 0.1
-  const value = milli ? volts * 1000 : volts
-  const decimals = (milli ? vpd * 1000 : vpd) >= 1 ? 2 : 3
-  const text = value.toFixed(decimals)
+  const { scale, unit } = voltUnitFor(vpd)
+  const decimals = vpd * scale >= 1 ? 2 : 3
+  const text = (volts * scale).toFixed(decimals)
   const cleaned = /^-0(\.0*)?$/.test(text) ? text.slice(1) : text
-  return withUnit ? `${cleaned} ${milli ? 'mV' : 'V'}` : cleaned
+  return withUnit ? `${cleaned} ${unit}` : cleaned
+}
+
+/**
+ * The unit a graticule of this many volts a division is read in.
+ *
+ * <p>One table rather than a branch in each formatter, so a tick label, a cursor readout and the
+ * V/div label itself cannot end up in different units on the same picture — which is the whole
+ * point of taking the unit from the division rather than from the value.</p>
+ */
+function voltUnitFor(voltsPerDivision: number): { scale: number; unit: string } {
+  if (voltsPerDivision < 0.001) return { scale: 1e6, unit: 'µV' }
+  if (voltsPerDivision < 0.1) return { scale: 1000, unit: 'mV' }
+  return { scale: 1, unit: 'V' }
 }
 
 /**
@@ -158,9 +172,7 @@ export function roundVoltsForWindow(volts: number, spanV: number): number {
 /** The per-division figure the status line quotes — "500 mV/div". */
 export function formatVoltsPerDivision(voltsPerDivision: number): string {
   if (!Number.isFinite(voltsPerDivision) || voltsPerDivision <= 0) return '—'
-  if (voltsPerDivision < 0.1) {
-    const mv = voltsPerDivision * 1000
-    return `${mv >= 1 ? mv.toFixed(0) : mv.toFixed(1)} mV/div`
-  }
-  return `${voltsPerDivision >= 1 ? voltsPerDivision.toFixed(0) : voltsPerDivision.toFixed(1)} V/div`
+  const { scale, unit } = voltUnitFor(voltsPerDivision)
+  const value = voltsPerDivision * scale
+  return `${value >= 1 ? value.toFixed(0) : value.toFixed(1)} ${unit}/div`
 }

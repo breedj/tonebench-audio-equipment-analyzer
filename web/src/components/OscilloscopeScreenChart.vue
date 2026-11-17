@@ -771,6 +771,36 @@ const recordNote = computed(() => {
   return parts.join(' · ')
 })
 
+/**
+ * The one thing about this record that the picture cannot say for itself — a badge, not a sentence.
+ *
+ * <p>Both of these make an ordinary-looking trace mean something else, so they have to be on the
+ * chart and not only in the Measurements panel. They were a paragraph above the plot, and a
+ * paragraph that comes and goes <b>resizes the chart</b>: the height is the view less this card's
+ * own furniture, so two lines appearing took two lines off the canvas — and in Auto, where a record
+ * is forced only when nothing crossed, that happened per capture. A badge on the header row costs
+ * no height at all, that row already being <code>min-h-6</code> and taller than the badge.</p>
+ *
+ * <p>The sentence is not lost: it is this badge's tooltip, and the Measurements panel prints it in
+ * full under the readings it qualifies.</p>
+ */
+const recordFlag = computed(() => {
+  const record = props.record
+  if (record?.spliced)
+    return {
+      label: 'Spliced',
+      detail:
+        'This record spans a dropped chunk or block — two pieces of the stream sit side by side in it, so an edge in the middle may be the splice rather than the signal.',
+    }
+  if (record?.forced)
+    return {
+      label: 'Untriggered',
+      detail:
+        'Nothing crossed the trigger level within the timeout, so this record was taken anyway and is aligned to nothing. Drag the trigger line onto the trace, or switch to Roll.',
+    }
+  return null
+})
+
 /** The window in the one place a reader needs it spelled out — what fromChartMs is for. */
 const windowNote = computed(
   () =>
@@ -786,6 +816,12 @@ const windowNote = computed(
     <ExpandToggle class="absolute right-3 top-3" :target="root" />
     <div class="min-h-6 pr-9 flex items-center justify-between gap-3 text-xs text-neutral-500 dark:text-neutral-400">
       <span class="shrink-0">Oscilloscope</span>
+      <span
+        v-if="recordFlag"
+        class="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+        :title="recordFlag.detail"
+        >{{ recordFlag.label }}</span
+      >
       <span class="truncate">
         {{ timebaseLabel }} · {{ verticalLabel }} · {{ windowNote }} · {{ recordNote }}
       </span>
@@ -801,18 +837,6 @@ const windowNote = computed(
       />
       <span v-if="!zoomed" class="shrink-0">Drag to zoom · double-click to reset</span>
     </div>
-
-    <!-- Two warnings a reader has to see on the picture itself, because both make a trace that
-         looks ordinary mean something else. A spliced record holds two non-adjacent pieces side by
-         side; an untriggered one is aligned to nothing. -->
-    <p v-if="record?.spliced" class="text-xs text-amber-600 dark:text-amber-400">
-      This record spans a dropped chunk or block — two pieces of the stream sit side by side in it,
-      so an edge in the middle may be the splice rather than the signal.
-    </p>
-    <p v-else-if="record?.forced" class="text-xs text-amber-600 dark:text-amber-400">
-      Nothing crossed the trigger level within the timeout, so this record was taken anyway and is
-      aligned to nothing. Drag the trigger line onto the trace, or switch to Roll.
-    </p>
 
     <div class="relative" :class="annotationArmed ? 'cursor-crosshair' : ''">
       <div ref="container" class="w-full"></div>

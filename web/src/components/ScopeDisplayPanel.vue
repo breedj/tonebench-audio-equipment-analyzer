@@ -210,12 +210,15 @@ function onVoltsPerDivisionChange(event: Event) {
       </label>
       <label class="tb-field">
         Centre (V)
+        <!-- One press of the spinner is one division, which is how a scope's vertical position
+             knob is read: "bring it down two squares". A fixed step is a different distance at
+             every V/div, and at the bottom of the ladder it is 10 000 of them. -->
         <input
           :value="voltOffsetV"
           type="number"
-          step="0.1"
+          :step="voltsPerDivision"
           class="tb-input"
-          title="Where the middle of the graticule sits. A DUT with a DC offset is brought back on screen with this rather than by widening the V/div."
+          title="Where the middle of the graticule sits. A DUT with a DC offset is brought back on screen with this rather than by widening the V/div. The arrows move it one division at a time."
           @change="onOffsetChange"
         />
       </label>

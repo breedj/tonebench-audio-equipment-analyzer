@@ -202,6 +202,19 @@ function setFiftyPercent() {
   triggerLevelV.value = ((props.measuredMaxV as number) + (props.measuredMinV as number)) / 2
 }
 
+/**
+ * Ground.
+ *
+ * <p>The one level that needs no measurement — which is also why it is here beside the 50 % button
+ * rather than instead of it: 50 % is disabled until something has been captured, so on an empty
+ * scope, or after a drag has left the line somewhere odd, this is the only way back to a level
+ * worth starting from. Zero is where an AC-coupled signal crosses, so on most benches it is where
+ * the trigger belongs anyway.</p>
+ */
+function setZero() {
+  triggerLevelV.value = 0
+}
+
 const sourceProblem = computed(() => triggerSourceProblem(triggerSource.value, form.processLeft, form.processRight))
 
 const invalid = computed(() => {
@@ -318,6 +331,46 @@ watch(
 )
 
 defineExpose({ run, flushRetune, invalid, buildParamsJson })
+
+/**
+ * The two voltages are bound <code>:value</code> + <code>@change</code> and <b>not</b> with
+ * <code>v-model</code>, which is not a style choice and must not be tidied into one.
+ *
+ * <p>A <code>defineModel</code> with a listener on it does not take the value assigned to it: it
+ * emits, and the new value arrives as a prop on the parent's next render. <code>applyStoredParams</code>
+ * assigns during <em>setup</em>, so this panel's first render still draws the old value — and
+ * <code>vModelText</code> writes the element in a <b>mounted</b> directive hook, which Vue defers
+ * to the post-flush queue. The update carrying the stored value is patched first and writes
+ * <code>0.25</code> into the element; the deferred mount hook then runs with the binding from that
+ * first render and puts <code>0</code> straight back. So a saved trigger level and hysteresis read
+ * zero on the first selection of a measurement, with the chart's own trigger line sitting correctly
+ * at the stored level beside them — reported 2026-11-17 and reproduced every time.</p>
+ *
+ * <p><code>vModelSelect</code> has an <code>updated</code> hook as well as a mounted one, and both
+ * are deferred in order, so the update wins and Mode and Source restore correctly. That difference
+ * is the whole of why two of the six controls were wrong and four were not.</p>
+ *
+ * <p>A plain <code>:value</code> binding is patched synchronously with the element's other props,
+ * at mount and on every update, so there is no deferred hook to overwrite it. It is also what every
+ * other number box in this panel and in the display rail already does.</p>
+ */
+function onLevelChange(event: Event) {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(typed)) triggerLevelV.value = typed
+  else (event.target as HTMLInputElement).value = String(triggerLevelV.value)
+}
+
+function onHysteresisChange(event: Event) {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed)) {
+    ;(event.target as HTMLInputElement).value = String(triggerHysteresisV.value)
+    return
+  }
+  // A negative band is the one figure this control cannot mean; clamped rather than refused, so the
+  // spinner stops at zero instead of putting the run's own refusal on screen.
+  triggerHysteresisV.value = clampNumberField(typed, 0)
+  ;(event.target as HTMLInputElement).value = String(triggerHysteresisV.value)
+}
 
 function onRecordChange(event: Event) {
   const typed = Number((event.target as HTMLInputElement).value)
@@ -443,14 +496,23 @@ function onAutoTimeoutChange(event: Event) {
     <!-- The level's box is the precise fallback; the line on the chart is how it is normally set. -->
     <label class="tb-field">
       Level (V)
-      <div class="flex gap-1.5">
+      <div class="flex items-center gap-1.5">
         <input
-          v-model.number="triggerLevelV"
+          :value="triggerLevelV"
           type="number"
           step="0.01"
-          class="tb-input flex-1"
+          class="tb-input w-24 shrink-0"
           title="Drag the dashed line on the chart to set this. The box is here for a figure you already know."
+          @change="onLevelChange"
         />
+        <button
+          type="button"
+          class="btn-chip shrink-0"
+          title="Zero volts, which needs nothing to have been captured — where an AC-coupled signal crosses, and the way back after a drag has left the line somewhere odd."
+          @click="setZero"
+        >
+          0 V
+        </button>
         <button
           type="button"
           class="btn-chip shrink-0"
@@ -467,11 +529,12 @@ function onAutoTimeoutChange(event: Event) {
       <label class="tb-field">
         Hysteresis (V)
         <input
-          v-model.number="triggerHysteresisV"
+          :value="triggerHysteresisV"
           type="number"
           step="0.01"
           class="tb-input"
           title="The noise-reject band, drawn around the level on the chart. Raise it when the trace will not stand still."
+          @change="onHysteresisChange"
         />
       </label>
       <label class="tb-field">

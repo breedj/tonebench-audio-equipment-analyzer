@@ -30,6 +30,14 @@ describe('the ladder', () => {
     expect(20 * VERTICAL_DIVISIONS).toBeLessThan(178)
   })
 
+  it('reaches down to the analyzer own noise floor, which is what a scope is for', () => {
+    // 10 uV/div is 80 uV across the graticule -- under the floor on the most sensitive range, so
+    // what is drawn there is the floor itself. The three rungs below 100 uV were asked for
+    // 2026-11-17 for exactly that.
+    expect(VOLTS_PER_DIVISION_LADDER[0]).toBeCloseTo(0.00001, 12)
+    expect(VOLTS_PER_DIVISION_LADDER.slice(0, 3)).toEqual([0.00001, 0.00002, 0.00005])
+  })
+
   it('has eight divisions, the near-universal convention', () => {
     expect(VERTICAL_DIVISIONS).toBe(8)
   })
@@ -143,6 +151,15 @@ describe('formatVolts', () => {
     expect(formatVolts(0.0012, 0.001)).toBe('1.20 mV')
   })
 
+  it('reads a microvolt graticule in microvolts', () => {
+    // The unit follows the division, so the trigger readout and the axis ticks are in uV together
+    // or not at all -- which is the whole point of taking it from the division.
+    expect(formatVolts(0.0000123, 0.00001)).toBe('12.30 µV')
+    expect(formatVolts(0.0005, 0.0001)).toBe('500.00 µV')
+    // One rung up is the boundary, and it stays in millivolts.
+    expect(formatVolts(0.0005, 0.001)).toBe('0.50 mV')
+  })
+
   it('writes a negative zero as zero', () => {
     expect(formatVolts(-0.00001, 0.5)).toBe('0.000 V')
   })
@@ -157,7 +174,15 @@ describe('formatVoltsPerDivision', () => {
     expect(formatVoltsPerDivision(0.5)).toBe('0.5 V/div')
     expect(formatVoltsPerDivision(2)).toBe('2 V/div')
     expect(formatVoltsPerDivision(0.05)).toBe('50 mV/div')
-    expect(formatVoltsPerDivision(0.0002)).toBe('0.2 mV/div')
+    expect(formatVoltsPerDivision(0.001)).toBe('1 mV/div')
+  })
+
+  it('reads a sub-millivolt division in microvolts rather than in fractions of a millivolt', () => {
+    // "0.2 mV/div" and "0.01 mV/div" were what the mV-only formatter gave the bottom of the ladder,
+    // and the second of those is a division nobody can count in.
+    expect(formatVoltsPerDivision(0.0002)).toBe('200 µV/div')
+    expect(formatVoltsPerDivision(0.00001)).toBe('10 µV/div')
+    expect(formatVoltsPerDivision(0.00005)).toBe('50 µV/div')
   })
 
   it('answers a nonsense setting with a dash', () => {

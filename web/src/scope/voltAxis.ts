@@ -109,7 +109,13 @@ export function fitVoltWindow(maxV: number, minV: number): VoltFit {
   const half = (hi - lo) / 2
 
   const voltsPerDivision = snapVoltsPerDivision(half / (FIT_DIVISIONS / 2))
-  const offsetV = Math.abs(centre) <= voltsPerDivision * ZERO_SNAP_DIVISIONS ? 0 : centre
+  // Rounded against the graticule it is the centre of, for the reason the drag and the trigger's
+  // 50 % button are: a midpoint of two measured extremes carries every digit the arithmetic
+  // produced, and the Centre box then reads nine significant figures of a microvolt.
+  const offsetV =
+    Math.abs(centre) <= voltsPerDivision * ZERO_SNAP_DIVISIONS
+      ? 0
+      : roundVoltsForWindow(centre, voltsPerDivision * VERTICAL_DIVISIONS)
   return { voltsPerDivision, offsetV }
 }
 

@@ -134,6 +134,16 @@ describe('fitVoltWindow', () => {
     expect(fit.offsetV).toBeCloseTo(1, 12)
   })
 
+  it('rounds the centre against the graticule it is the centre of', () => {
+    // An autofit on a quiet input lands on the bottom of the ladder, and the midpoint of two
+    // measured extremes there carried nine significant figures into the Centre box
+    // ("-9.06877499e-6", seen in the app). Rounded to a thousandth of the window, as a dragged
+    // trigger level is rounded against the window it was read from.
+    const fit = fitVoltWindow(3.0e-5, -4.81375499e-5)
+    expect(fit.voltsPerDivision).toBe(0.00002)
+    expect(fit.offsetV).toBe(-0.0000091)
+  })
+
   it('gives a flat trace the most magnified rung', () => {
     expect(fitVoltWindow(0, 0).voltsPerDivision).toBe(VOLTS_PER_DIVISION_LADDER[0])
   })

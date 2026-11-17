@@ -26,6 +26,16 @@ export interface ScopeDisplay {
   showTriggerLevel: boolean
   /** Whether a finished capture fits both axes to itself. */
   autofitOnDone: boolean
+  /**
+   * Whether each captured input is drawn.
+   *
+   * <p>Separate from the Acquisition panel's own Left and Right boxes, which decide what is
+   * <em>captured</em> — a channel that is not captured has no samples to hide. This pair is a
+   * scope's per-channel display button: a second trace can be taken out of the way while it goes
+   * on being captured, and while it goes on being the trigger source.</p>
+   */
+  showLeft: boolean
+  showRight: boolean
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -65,6 +75,8 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   showDataPoints: false,
   showTriggerLevel: true,
   autofitOnDone: true,
+  showLeft: true,
+  showRight: true,
   annotations: [],
 })
 
@@ -125,6 +137,8 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartShowDataPoints === 'boolean') display.showDataPoints = stored.chartShowDataPoints
   if (typeof stored.chartShowTriggerLevel === 'boolean') display.showTriggerLevel = stored.chartShowTriggerLevel
   if (typeof stored.chartAutofitOnDone === 'boolean') display.autofitOnDone = stored.chartAutofitOnDone
+  if (typeof stored.chartShowLeft === 'boolean') display.showLeft = stored.chartShowLeft
+  if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
 
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
@@ -146,5 +160,7 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartShowDataPoints: display.showDataPoints,
     chartShowTriggerLevel: display.showTriggerLevel,
     chartAutofitOnDone: display.autofitOnDone,
+    chartShowLeft: display.showLeft,
+    chartShowRight: display.showRight,
   }
 }

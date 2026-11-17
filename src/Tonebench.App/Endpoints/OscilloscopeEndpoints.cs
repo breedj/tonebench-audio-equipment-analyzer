@@ -146,6 +146,9 @@ public static class OscilloscopeEndpoints
             var channels = new List<ScopeChannelSlice>(record.ChannelCount);
             for (int ch = 0; ch < record.ChannelCount; ch++)
             {
+                if (!WasCaptured(runner.LastRequest, ch))
+                    continue;
+
                 var slice = fromS is { } from && toS is { } to
                     ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
                     : ScopeFrameBuilder.Overview(record, ch, columns);
@@ -171,6 +174,28 @@ public static class OscilloscopeEndpoints
                 channels));
         });
     }
+
+    /// <summary>
+    /// Whether the measurement asked for this channel — the Acquisition panel's Left and Right
+    /// boxes, which are a scope's CH1/CH2 buttons.
+    ///
+    /// <para><b>Filtered here rather than at the capture.</b> The record keeps both inputs: the
+    /// buffer holds them, the trigger may watch either, and what is <c>capture.pcm</c> is what the
+    /// analyzer saw — a CSV column headed <c>right_volt</c> has to be the right input, which a
+    /// record cut down to one unlabelled channel could not promise. What the <i>screen</i> is
+    /// about is this request, and drawing an input the measurement does not capture is how an
+    /// orange trace came to sit under a left-only capture (reported 2026-11-17). Whether a captured
+    /// channel is <i>drawn</i> is a display matter and lives in the display rail.</para>
+    ///
+    /// <para>No request — a record parked by a measurement this runner has since been handed away
+    /// from — answers for every channel, since nothing here knows better.</para>
+    /// </summary>
+    internal static bool WasCaptured(OscilloscopeRequest? request, int channel) => request switch
+    {
+        null => true,
+        { ProcessLeft: false, ProcessRight: false } => true,
+        _ => channel == 1 ? request.ProcessRight : request.ProcessLeft,
+    };
 
     /// <summary>
     /// The four enums a start or a retune carries, parsed once. Shared rather than copied because

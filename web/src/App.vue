@@ -2032,6 +2032,8 @@ const scopeThickLines = ref(DEFAULT_SCOPE_DISPLAY.thickLines)
 const scopeShowDataPoints = ref(DEFAULT_SCOPE_DISPLAY.showDataPoints)
 const scopeShowTriggerLevel = ref(DEFAULT_SCOPE_DISPLAY.showTriggerLevel)
 const scopeAutofitOnDone = ref(DEFAULT_SCOPE_DISPLAY.autofitOnDone)
+const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
+const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
 
 /**
  * The five settings the chart needs as well as the panel.
@@ -2081,6 +2083,8 @@ function currentScopeDisplay() {
     showDataPoints: scopeShowDataPoints.value,
     showTriggerLevel: scopeShowTriggerLevel.value,
     autofitOnDone: scopeAutofitOnDone.value,
+    showLeft: scopeShowLeft.value,
+    showRight: scopeShowRight.value,
   }
 }
 
@@ -2100,6 +2104,8 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeShowDataPoints.value = display.showDataPoints
   scopeShowTriggerLevel.value = display.showTriggerLevel
   scopeAutofitOnDone.value = display.autofitOnDone
+  scopeShowLeft.value = display.showLeft
+  scopeShowRight.value = display.showRight
   void nextTick(() => {
     scopeDisplayRestoring = false
   })
@@ -2126,14 +2132,27 @@ watch(
     scopeShowDataPoints,
     scopeShowTriggerLevel,
     scopeAutofitOnDone,
+    scopeShowLeft,
+    scopeShowRight,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
   },
 )
 
-/** The extremes of the record on screen, for the trigger's 50 % button. See scope/measurements.ts. */
-const scopeExtremes = computed(() => recordExtremes(scopeRecord.value?.channels))
+/**
+ * The extremes of the <b>trigger source's own</b> channel, for the trigger's 50 % button.
+ *
+ * <p>Not the record's: a level half way between two channels' extremes sits on neither trace, which
+ * is what 50 % did with both inputs captured (reported 2026-11-17 — the level landed in the gap
+ * between the blue trace and the orange one). The trigger watches one channel, so the midpoint it
+ * wants is that channel's, and <code>TriggerAutoLevel.FiftyPercent</code> says the same thing one
+ * layer down.</p>
+ */
+const scopeExtremes = computed(() => {
+  const channel = scopeTriggerSource.value === 'ChannelB' ? 1 : 0
+  return recordExtremes((scopeRecord.value?.channels ?? []).filter((slice) => slice.channel === channel))
+})
 
 async function runOscilloscope(request: import('./api/client').OscilloscopeStartRequest) {
   try {
@@ -5688,6 +5707,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :volts-per-division="scopeVoltsPerDivision"
                   :time-from-s="scopeTimeFromS"
                   :time-to-s="scopeTimeToS"
+                  :show-left="scopeShowLeft"
+                  :show-right="scopeShowRight"
                 />
               </template>
 
@@ -5727,6 +5748,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :record-seconds="scopeRecordSeconds"
                   :pre-trigger-fraction="scopePreTriggerFraction"
                   :running="scopeRunning"
+                  :show-left="scopeShowLeft"
+                  :show-right="scopeShowRight"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
@@ -5748,6 +5771,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:show-data-points="scopeShowDataPoints"
                   v-model:show-trigger-level="scopeShowTriggerLevel"
                   v-model:autofit-on-done="scopeAutofitOnDone"
+                  v-model:show-left="scopeShowLeft"
+                  v-model:show-right="scopeShowRight"
                 />
 
                 <MeasurementChecklist @error="reportError" />

@@ -30,6 +30,8 @@ const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
 const showTriggerLevel = defineModel<boolean>('showTriggerLevel', { required: true })
 const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
+const showLeft = defineModel<boolean>('showLeft', { required: true })
+const showRight = defineModel<boolean>('showRight', { required: true })
 
 const props = defineProps<{
   /** The record the settings ask for, so the window can be fitted before anything is captured. */
@@ -120,8 +122,33 @@ function onOffsetChange(event: Event) {
   else (event.target as HTMLInputElement).value = String(voltOffsetV.value)
 }
 
-/** The extremes of the record on screen — exact even on a decimated slice. See scope/measurements.ts. */
-const extremes = computed(() => recordExtremes(record.value?.channels))
+/**
+ * Which inputs the record on hand carries — what the measurement is capturing.
+ *
+ * <p>A channel the Acquisition panel is not capturing has nothing to show, so its box here says so
+ * and is disabled rather than being a tick that does nothing. Before the first capture there is no
+ * record to ask, and both are offered.</p>
+ */
+const captured = computed(() => {
+  const channels = record.value?.channels
+  if (!channels?.length) return { left: true, right: true }
+  return {
+    left: channels.some((c) => c.channel === 0),
+    right: channels.some((c) => c.channel === 1),
+  }
+})
+
+/**
+ * The extremes of what is <b>drawn</b> — exact even on a decimated slice. See scope/measurements.ts.
+ *
+ * <p>Only the visible channels, because this is what Autofit frames: fitting a hidden trace would
+ * leave the one on screen in a corner of a window sized for something the reader cannot see.</p>
+ */
+const extremes = computed(() =>
+  recordExtremes(
+    (record.value?.channels ?? []).filter((slice) => (slice.channel === 1 ? showRight.value : showLeft.value)),
+  ),
+)
 
 function autofitVolts() {
   const measured = extremes.value
@@ -261,6 +288,30 @@ function onVoltsPerDivisionChange(event: Event) {
     <label class="tb-check-row">
       <input v-model="showTriggerLevel" type="checkbox" class="tb-check" /> Trigger level
     </label>
+    <div class="tb-field">
+      <span class="tb-group">Channels</span>
+      <label class="tb-check-row">
+        <input
+          v-model="showLeft"
+          type="checkbox"
+          class="tb-check"
+          :disabled="!captured.left"
+          :title="captured.left ? 'Draw the left input.' : 'Not being captured — tick Left under Acquisition ▸ Channels.'"
+        />
+        Left
+      </label>
+      <label class="tb-check-row">
+        <input
+          v-model="showRight"
+          type="checkbox"
+          class="tb-check"
+          :disabled="!captured.right"
+          :title="captured.right ? 'Draw the right input.' : 'Not being captured — tick Right under Acquisition ▸ Channels.'"
+        />
+        Right
+      </label>
+    </div>
+
     <div class="tb-field">
       <span class="tb-group">Style</span>
       <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>

@@ -1615,6 +1615,9 @@ export interface OscilloscopeParameters {
   chartShowDataPoints?: boolean | null
   chartShowTriggerLevel?: boolean | null
   chartAutofitOnDone?: boolean | null
+  /** Whether each captured input is drawn — the display rail's own pair, not the Acquisition boxes. */
+  chartShowLeft?: boolean | null
+  chartShowRight?: boolean | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null

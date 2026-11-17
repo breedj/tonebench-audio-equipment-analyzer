@@ -21,17 +21,30 @@ import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis
  * scope/measurements.ts.</p>
  */
 
-const props = defineProps<{
-  /** What the vertical readings are written in, so a column of them stays in one unit. */
-  voltsPerDivision: number
-  timeFromS: number
-  timeToS: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** What the vertical readings are written in, so a column of them stays in one unit. */
+    voltsPerDivision: number
+    timeFromS: number
+    timeToS: number
+    /**
+     * Which inputs are drawn — the display rail's own pair.
+     *
+     * <p>The readings follow the picture, as a bench scope's do: a channel taken off the screen
+     * takes its measurements with it. What a hidden channel reads is still in the record, and
+     * ticking it back brings both back together.</p>
+     */
+    showLeft?: boolean
+    showRight?: boolean
+  }>(),
+  { showLeft: true, showRight: true },
+)
 
 const { record, spliced, forced } = useOscilloscope()
 
 const blocks = computed(() =>
   (record.value?.channels ?? [])
+    .filter((slice) => (slice.channel === 1 ? props.showRight : props.showLeft))
     .map((slice) => ({
       channel: slice.channel,
       label: slice.channel === 0 ? 'Left' : 'Right',

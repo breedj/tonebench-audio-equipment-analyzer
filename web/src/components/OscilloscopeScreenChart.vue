@@ -9,6 +9,7 @@ import ExpandToggle from './ExpandToggle.vue'
 import ChartZoomControls from './ChartZoomControls.vue'
 import { useAppTheme } from '../composables/useAppTheme'
 import { useZoomBounds } from '../composables/useZoomBounds'
+import type { ZoomWindow } from '../charts/zoomHistory'
 import type { AnnotationStyle, ChartAnnotation } from '../measurements/chartAnnotations'
 import { useAnnotationOverlay } from '../charts/useAnnotationOverlay'
 import { annotationTheme } from '../charts/annotationPainter'
@@ -90,7 +91,10 @@ const props = withDefaults(defineProps<{
   preTriggerFraction: number
   /** True while the run is armed or capturing — what makes the trace read as live rather than held. */
   running?: boolean
-}>(), { annotationNumbers: true, running: false })
+  /** Whether each captured input is drawn. The display rail's pair; see scope/display.ts. */
+  showLeft?: boolean
+  showRight?: boolean
+}>(), { annotationNumbers: true, running: false, showLeft: true, showRight: true })
 
 const emit = defineEmits<{
   axisWindow: [window: ScopeAxisWindow]
@@ -174,11 +178,17 @@ function sliceLength(slice: ScopeChannelSlice): number {
  */
 const series = computed(() => {
   const record = props.record
-  if (!record?.channels.length) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+  // Only the inputs the display rail is showing. What arrives is already only what the measurement
+  // captures — the record endpoint answers for those alone — so this is the second of the two
+  // gates and the one a reader turns.
+  const drawn = (record?.channels ?? []).filter((slice) =>
+    slice.channel === 1 ? props.showRight : props.showLeft,
+  )
+  if (!drawn.length) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
 
   let longest: ScopeChannelSlice | null = null
   let count = 0
-  for (const slice of record.channels) {
+  for (const slice of drawn) {
     const length = sliceLength(slice)
     if (length > count) {
       count = length
@@ -188,7 +198,7 @@ const series = computed(() => {
   if (!longest || count === 0) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
 
   const xMs = sliceXMs(longest, count)
-  const channels: ChannelSeries[] = record.channels.map((slice) => {
+  const channels: ChannelSeries[] = drawn.map((slice) => {
     const length = sliceLength(slice)
     const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
       const out = new Array<number | null>(count).fill(null)
@@ -387,7 +397,7 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
   }
 }
 
-const { zoomed, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
+const { zoomed, isZoomedNow, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot.value,
   () => ({
     xMin: xWindowMs.value.min,
@@ -483,6 +493,8 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
           setScale: [
             (u: uPlot, key: string) => {
               noteScale(u)
+              // The committed window, which is the one a gesture has really left on screen.
+              if (key === 'x' || key === 'y') heldWindow.value = isZoomedNow(u) ? currentWindow() : null
               // The indicator and its handle are positioned against the window on screen, so a
               // zoom has to move them -- uPlot's scales are mutated in place and Vue sees nothing.
               plotWindowTick.value++
@@ -640,8 +652,6 @@ function rebuild() {
   // columns and raw samples -- are *consequences* of a zoom. Rebuilding back to the panel's window
   // would undo the gesture that caused the rebuild, report the whole record, and be handed the
   // overview again, which is a loop rather than a lost zoom.
-  const keep = zoomed.value ? currentWindow() : null
-
   plot.value?.destroy()
   const width = el.getBoundingClientRect().width || 600
   // One empty array per declared series. Empty construction then setData is also what makes the x
@@ -652,12 +662,28 @@ function rebuild() {
   attachAnnotationListeners(plot.value, annotationOverlay)
   syncBoxDragMode(plot.value, annotationOverlay.armedForBox.value, DRAG_RESTING)
   plot.value.over.addEventListener('dblclick', resetZoom)
+  // refresh() puts the held window back by itself, which is the point of holding it rather than
+  // reading it off the plot: a slice flipping between min/max columns and raw samples *is* a
+  // rebuild, and a zoom is what causes that flip.
   refresh()
-  if (keep) {
-    plot.value.setScale('x', { min: keep.xMin, max: keep.xMax })
-    plot.value.setScale('y', { min: keep.yMin, max: keep.yMax })
-  }
 }
+
+/**
+ * The window a gesture put on screen, or null while the chart is showing the display panel's.
+ *
+ * <p><b>Held here rather than read back off the plot</b>, and that is what makes a zoom survive a
+ * run. uPlot commits a scale on a microtask, so between a <code>setScale</code> and its commit the
+ * plot still reports the old window — or none at all, on one just constructed. Every refresh that
+ * landed in such a gap concluded the chart was not zoomed and wrote the panel's window over the
+ * held one, and during a run refreshes arrive several times a second: a zoom lasted about one
+ * capture (reported 2026-11-17). With the window kept here each refresh <em>asserts</em> it rather
+ * than guessing from a plot that has not caught up, so the order of the two stops mattering.</p>
+ *
+ * <p>Written by the <code>setScale</code> hook, which is where a real gesture lands and which sees
+ * the committed window: a drag sets it, and anything that returns the chart to the panel's window
+ * — Reset zoom, the last step of Back, a typed box — clears it.</p>
+ */
+const heldWindow = ref<ZoomWindow | null>(null)
 
 /**
  * New data, and the window it is drawn in.
@@ -672,13 +698,27 @@ function refresh(force = false) {
   const p = plot.value
   if (!p) return
 
+  // A panel edit is an instruction, and it is what ends a zoom.
+  if (force) heldWindow.value = null
+
   const { xMs, channels } = series.value
   // `false`: setData's default is to autoscale x to the *data's* own span, and a slice cut to a
   // zoom window is data whose span is that window -- so the default both fights the window being
   // held and, on the tick where the previous record is still in hand, snaps the axis to the old
-  // one. Every window this chart shows is set deliberately, below or by a drag.
+  // one. Every window this chart shows is set deliberately, just below.
   p.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData, false)
-  if (force || !zoomed.value) {
+
+  // One of the two windows, always written: `setData` with its scale reset turned off does not
+  // commit, so without a setScale after it uPlot never repaints — a zoomed chart went on drawing
+  // the previous record until something else forced it, which a Display checkbox did because it
+  // rebuilds (reported 2026-11-17, "when zoomed in and the scope is running, the data is not
+  // updated"). setData has already dropped the cached paths, so this redraws from the new samples
+  // whether or not the window moved.
+  const held = heldWindow.value
+  if (held) {
+    p.setScale('x', { min: held.xMin, max: held.xMax })
+    p.setScale('y', { min: held.yMin, max: held.yMax })
+  } else {
     p.setScale('x', xWindowMs.value)
     p.setScale('y', { min: yWindow.value.bottomV, max: yWindow.value.topV })
   }

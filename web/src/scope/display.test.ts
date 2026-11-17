@@ -136,3 +136,29 @@ describe('scopeDisplayToParams', () => {
     expect(back).toEqual({ ...display, annotations: [] })
   })
 })
+
+describe('the per-channel display pair', () => {
+  it('draws both inputs until a measurement says otherwise', () => {
+    expect(DEFAULT_SCOPE_DISPLAY.showLeft).toBe(true)
+    expect(DEFAULT_SCOPE_DISPLAY.showRight).toBe(true)
+    // A measurement saved before the pair existed states neither, and reads as both -- the other
+    // half of "a changed default seeds new measurements and re-reads a stored null".
+    const stored = scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.2 }))
+    expect(stored.showLeft).toBe(true)
+    expect(stored.showRight).toBe(true)
+  })
+
+  it('keeps a channel that was deliberately taken off the screen', () => {
+    const stored = scopeDisplayFromParams(JSON.stringify({ chartShowLeft: true, chartShowRight: false }))
+    expect(stored.showLeft).toBe(true)
+    expect(stored.showRight).toBe(false)
+  })
+
+  it('round-trips through the params it is written to', () => {
+    const display = { ...DEFAULT_SCOPE_DISPLAY, showLeft: false, showRight: true }
+    const params = scopeDisplayToParams(display)
+    expect(params.chartShowLeft).toBe(false)
+    expect(params.chartShowRight).toBe(true)
+    expect(scopeDisplayFromParams(JSON.stringify(params)).showLeft).toBe(false)
+  })
+})

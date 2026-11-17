@@ -1269,6 +1269,13 @@ public sealed record OscilloscopeParameters(
     bool? ChartShowDataPoints = null,
     bool? ChartShowTriggerLevel = null,
     bool? ChartAutofitOnDone = null,
+    /// <summary>
+    /// Whether each captured input was drawn. The display rail's own pair, not the Acquisition
+    /// panel's Left and Right — those decide what is captured, and a channel that is not captured
+    /// has no samples to hide. Null on anything saved before the pair existed, which reads as both.
+    /// </summary>
+    bool? ChartShowLeft = null,
+    bool? ChartShowRight = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

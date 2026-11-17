@@ -198,9 +198,36 @@ const spanMs = computed(() => Math.abs(xWindowMs.value.max - xWindowMs.value.min
 /** The two ends of the volts axis, derived from the V/div and the centre. See scope/voltAxis.ts. */
 const yWindow = computed(() => voltWindow(props.voltsPerDivision, props.voltOffsetV))
 
+/**
+ * Bumped whenever the plot's own scales move, so anything derived from them recomputes.
+ *
+ * <p>uPlot's scales are not reactive — they are mutated in place on the instance — so a drag-zoom
+ * changes what is on screen without Vue noticing. Everything that reads the <em>panel's</em> window
+ * is fine, but the trigger indicator must read the window the plot is really showing or it clamps
+ * against the wrong one: measured in the app, a level dragged to 0.6 V and then zoomed to a window
+ * topping out at 0.1 V kept its "on screen" marker and left its handle at a stale height.</p>
+ */
+const plotWindowTick = ref(0)
+
+/**
+ * The volts window on screen: the plot's own after a zoom, the panel's otherwise.
+ *
+ * <p>The panel's is the fallback rather than the source, because between a rebuild and the first
+ * `setScale` the instance has no window yet — and a window of `undefined` would put the indicator
+ * in the middle of the plot and call it on screen.</p>
+ */
+const liveYWindow = computed(() => {
+  void plotWindowTick.value
+  const scale = plot.value?.scales.y
+  if (scale && Number.isFinite(scale.min ?? Number.NaN) && Number.isFinite(scale.max ?? Number.NaN)) {
+    return { topV: scale.max as number, bottomV: scale.min as number }
+  }
+  return yWindow.value
+})
+
 /** Where the trigger line goes, and whether the level is really there. */
 const indicator = computed(() =>
-  triggerIndicator(triggerLevelV.value, yWindow.value.topV, yWindow.value.bottomV, props.triggerHysteresisV),
+  triggerIndicator(triggerLevelV.value, liveYWindow.value.topV, liveYWindow.value.bottomV, props.triggerHysteresisV),
 )
 
 /** Which trace the trigger watches — the line is drawn in that channel's own colour. */
@@ -431,7 +458,15 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
     legend: { show: false },
     hooks: interactive
       ? {
-          setScale: [(u: uPlot) => noteScale(u)],
+          setScale: [
+            (u: uPlot) => {
+              noteScale(u)
+              // The indicator and its handle are positioned against the window on screen, so a
+              // zoom has to move them -- uPlot's scales are mutated in place and Vue sees nothing.
+              plotWindowTick.value++
+              syncHandle()
+            },
+          ],
           setSelect: [(u: uPlot) => noteZoomGesture(u)],
         }
       : {},
@@ -505,7 +540,14 @@ function onHandlePointerMove(event: PointerEvent) {
   // Written live rather than on release, so the line and the setting cannot disagree mid-drag. The
   // *re-arm* waits for the release -- re-arming per pointer move would throw away a capture per
   // pixel.
-  triggerLevelV.value = volts
+  //
+  // Rounded to a thousandth of the window on screen, which is far below one pixel of the plot and
+  // so cannot be seen in the line's position -- but is the difference between the trigger panel's
+  // box reading "0.602" and reading "0.6017391304347828", which is what a drag's arithmetic
+  // actually produces (seen in the app before this).
+  const span = Math.abs(liveYWindow.value.topV - liveYWindow.value.bottomV)
+  const step = span > 0 ? span / 1000 : 0
+  triggerLevelV.value = step > 0 ? Math.round(volts / step) * step : volts
 }
 
 function onHandlePointerUp(event: PointerEvent) {

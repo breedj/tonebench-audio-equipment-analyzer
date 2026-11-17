@@ -61,6 +61,21 @@ import AcImpedanceImportDialog from './components/AcImpedanceImportDialog.vue'
 import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
+import OscilloscopeScreenChart from './components/OscilloscopeScreenChart.vue'
+import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
+import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
+import ScopeMeasurementsPanel from './components/ScopeMeasurementsPanel.vue'
+import { useOscilloscope } from './composables/useOscilloscope'
+import {
+  DEFAULT_SCOPE_DISPLAY,
+  scopeDisplayFromParams,
+  scopeDisplayToParams,
+  type ScopeAxisWindow,
+} from './scope/display'
+import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
+import { clampWindow, recordWindow } from './scope/timeAxis'
+import { fitVoltWindow } from './scope/voltAxis'
+import { recordExtremes } from './scope/measurements'
 import SaveAsDialog from './components/SaveAsDialog.vue'
 import OverlayList from './components/OverlayList.vue'
 import MetricPickerDialog from './components/MetricPickerDialog.vue'
@@ -188,6 +203,7 @@ import {
   isSweepKind as isSweepKindName,
   isImpedanceKind,
   isCrosstalkKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   THD_VS_AMPLITUDE_KIND,
   THD_VS_FREQUENCY_KIND,
@@ -993,6 +1009,7 @@ const isCrosstalk = computed(() => isCrosstalkKind(currentType.value?.kind))
 // runner, the two-pass flow with its pause, the readings and the settings are its own — so, like
 // impedance and crosstalk, it keys off its own flag.
 const isOutputImpedance = computed(() => isOutputImpedanceKind(currentType.value?.kind))
+const isOscilloscope = computed(() => isOscilloscopeKind(currentType.value?.kind))
 
 const {
   running: outputImpedanceRunning,
@@ -1999,6 +2016,181 @@ watch(
   },
 )
 
+// ---------------------------------------------------------------------------
+// Oscilloscope
+// ---------------------------------------------------------------------------
+
+/**
+ * The scope chart's display preferences, through scope/display.ts so a report restores a stored
+ * type the way the screen does.
+ */
+const scopeVoltsPerDivision = ref(DEFAULT_SCOPE_DISPLAY.voltsPerDivision)
+const scopeVoltOffsetV = ref(DEFAULT_SCOPE_DISPLAY.voltOffsetV)
+const scopeTimeFromS = ref(DEFAULT_SCOPE_DISPLAY.timeFromS)
+const scopeTimeToS = ref(DEFAULT_SCOPE_DISPLAY.timeToS)
+const scopeThickLines = ref(DEFAULT_SCOPE_DISPLAY.thickLines)
+const scopeShowDataPoints = ref(DEFAULT_SCOPE_DISPLAY.showDataPoints)
+const scopeShowTriggerLevel = ref(DEFAULT_SCOPE_DISPLAY.showTriggerLevel)
+const scopeAutofitOnDone = ref(DEFAULT_SCOPE_DISPLAY.autofitOnDone)
+
+/**
+ * The five settings the chart needs as well as the panel.
+ *
+ * <p>Here rather than inside `ScopeConfigPanel` because the chart <b>writes</b> the trigger level —
+ * dragging the dashed line is how a level is set, and the panel's box is the precise fallback — and
+ * because the chart draws the other four, including before anything has been captured, where the
+ * axis it shows is the one the settings ask for.</p>
+ */
+const scopeTriggerLevelV = ref(DEFAULT_SCOPE_TRIGGER.levelV)
+const scopeTriggerHysteresisV = ref(DEFAULT_SCOPE_TRIGGER.hysteresisV)
+const scopeTriggerSource = ref<import('./api/client').ScopeTriggerSource>(DEFAULT_SCOPE_TRIGGER.source)
+const scopeRecordSeconds = ref(0.02)
+const scopePreTriggerFraction = ref(0.25)
+const scopeMode = ref<import('./api/client').ScopeRunMode>('Auto')
+
+const scopeConfigPanel = ref<InstanceType<typeof ScopeConfigPanel> | null>(null)
+const scopeChart = ref<InstanceType<typeof OscilloscopeScreenChart> | null>(null)
+
+const {
+  record: scopeRecord,
+  running: scopeRunning,
+  phase: scopePhase,
+  error: scopeError,
+  runError: scopeRunError,
+  progressLabel: scopeProgressLabel,
+  recordsTaken: scopeRecordsTaken,
+  recordBounds: scopeRecordBounds,
+  start: startOscilloscope,
+  cancel: cancelOscilloscopeRun,
+  clear: clearOscilloscopeRun,
+  switchOwner: switchOscilloscopeOwner,
+  refresh: refreshOscilloscope,
+  setWindow: setOscilloscopeWindow,
+} = useOscilloscope()
+
+function currentScopeDisplay() {
+  return {
+    annotations: liveAnnotations.value,
+    voltsPerDivision: scopeVoltsPerDivision.value,
+    voltOffsetV: scopeVoltOffsetV.value,
+    timeFromS: scopeTimeFromS.value,
+    timeToS: scopeTimeToS.value,
+    thickLines: scopeThickLines.value,
+    showDataPoints: scopeShowDataPoints.value,
+    showTriggerLevel: scopeShowTriggerLevel.value,
+    autofitOnDone: scopeAutofitOnDone.value,
+  }
+}
+
+let scopeDisplayRestoring = false
+
+function applyStoredScopeDisplay(paramsJson: string) {
+  scopeDisplayRestoring = true
+  // One argument. Handing it `currentScopeDisplay()` is how a new measurement comes to open wearing
+  // the outgoing one's view -- see storedDisplayDefaults.test.ts, which reads this file as text.
+  const display = scopeDisplayFromParams(paramsJson)
+  applyLoadedAnnotations(display.annotations)
+  scopeVoltsPerDivision.value = display.voltsPerDivision
+  scopeVoltOffsetV.value = display.voltOffsetV
+  scopeTimeFromS.value = display.timeFromS
+  scopeTimeToS.value = display.timeToS
+  scopeThickLines.value = display.thickLines
+  scopeShowDataPoints.value = display.showDataPoints
+  scopeShowTriggerLevel.value = display.showTriggerLevel
+  scopeAutofitOnDone.value = display.autofitOnDone
+  void nextTick(() => {
+    scopeDisplayRestoring = false
+  })
+}
+
+// Kind-gated like the impedance and crosstalk watchers, and for the same reason: this file applies
+// every kind's display restore from one watcher, so an ungated one would overwrite whichever
+// screen's state had just been restored from its own params.
+watch(
+  () => (isOscilloscope.value ? currentType.value?.paramsJson : undefined),
+  (paramsJson) => {
+    if (paramsJson) applyStoredScopeDisplay(paramsJson)
+  },
+  { immediate: true },
+)
+
+watch(
+  [
+    scopeVoltsPerDivision,
+    scopeVoltOffsetV,
+    scopeTimeFromS,
+    scopeTimeToS,
+    scopeThickLines,
+    scopeShowDataPoints,
+    scopeShowTriggerLevel,
+    scopeAutofitOnDone,
+  ],
+  () => {
+    if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
+  },
+)
+
+/** The extremes of the record on screen, for the trigger's 50 % button. See scope/measurements.ts. */
+const scopeExtremes = computed(() => recordExtremes(scopeRecord.value?.channels))
+
+async function runOscilloscope(request: import('./api/client').OscilloscopeStartRequest) {
+  try {
+    await startOscilloscope(request)
+  } catch {
+    // The composable has already put the refusal on `scopeError`, which the screen prints.
+  }
+}
+
+/**
+ * Re-arms after the trigger line has been dragged.
+ *
+ * <p>Only while something is running, and only in the two modes that re-arm themselves: in Single
+ * the level decides what the <em>next</em> press of Single does, and interrupting a held capture to
+ * apply it would throw away the record on screen. Debounced to the release rather than written per
+ * pointer move -- re-arming per pixel would throw away a capture per pixel.</p>
+ */
+async function onScopeTriggerLevelCommitted() {
+  if (!scopeRunning.value) return
+  if (scopeMode.value === 'Single') return
+  scopeConfigPanel.value?.run()
+}
+
+/** "Set axis" from the chart: the window on screen written back into the display panel's boxes. */
+function onScopeAxisWindow(window: ScopeAxisWindow) {
+  const bounds = scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopePreTriggerFraction.value)
+  const clamped = clampWindow({ fromS: window.fromS, toS: window.toS }, bounds)
+  scopeTimeFromS.value = clamped.fromS
+  scopeTimeToS.value = clamped.toS
+  // The vertical pair is V/div and a centre, so a dragged window is turned back into a rung rather
+  // than written as two ends -- which is the whole reason the graticule stays countable.
+  const fit = fitVoltWindow(window.topV, window.bottomV)
+  scopeVoltsPerDivision.value = fit.voltsPerDivision
+  scopeVoltOffsetV.value = fit.offsetV
+}
+
+/**
+ * Asks the server for the slice the window now covers.
+ *
+ * <p>Debounced, because the window moves per pointer move while a box is dragged and each fetch is
+ * the whole slice. The *token* inside the composable is what stops a late answer winning; this is
+ * only about not asking a hundred times.</p>
+ */
+let scopeWindowHandle: ReturnType<typeof setTimeout> | null = null
+watch([scopeTimeFromS, scopeTimeToS], () => {
+  if (!isOscilloscope.value) return
+  if (scopeWindowHandle !== null) clearTimeout(scopeWindowHandle)
+  scopeWindowHandle = setTimeout(() => {
+    scopeWindowHandle = null
+    const bounds = scopeRecordBounds.value
+    if (!bounds) return
+    const whole = scopeTimeFromS.value <= bounds.fromS && scopeTimeToS.value >= bounds.toS
+    void setOscilloscopeWindow(whole ? null : { fromS: scopeTimeFromS.value, toS: scopeTimeToS.value }).catch(
+      () => undefined,
+    )
+  }, 150)
+})
+
+
 // Output-impedance chart display preferences — the crosstalk arrangement, through
 // outputImpedance/display.ts so the report restores a stored type the way the screen does.
 const outputImpedanceZTopOhms = ref(DEFAULT_OUTPUT_IMPEDANCE_DISPLAY.zTopOhms)
@@ -2752,6 +2944,7 @@ function chartOnScreen() {
     return activeResponseProjection.value === 'SPlane' ? responseSPlaneChart.value : responsePolarChart.value
   }
   if (isCrosstalk.value) return responseChart.value
+  if (isOscilloscope.value) return scopeChart.value
   if (isOutputImpedance.value) return outputImpedanceChart.value
   if (isSweepKind.value) return sweepChart.value
   if (isImpulseResponse.value) {
@@ -2788,6 +2981,10 @@ function chartOnScreen() {
 const screenshotAvailable = computed(() => {
   if (isFrequencyResponse.value) return responseTraces.value.length > 0 || visibleResponseOverlays.value.length > 0
   if (isCrosstalk.value) return responseTraces.value.length > 0 || visibleCrosstalkOverlays.value.length > 0
+  // No overlay arm: a scope measurement's results are waveforms in `capture.pcm` rather than curves
+  // in `response_trace`, so nothing can be checked onto this chart yet (curveOverlayScreen answers
+  // null for the kind). The live record is the whole of what there is to photograph.
+  if (isOscilloscope.value) return scopeRecord.value !== null
   if (isOutputImpedance.value)
     return outputImpedanceTrace.value !== null || visibleOutputImpedanceOverlays.value.length > 0
   if (isSweepKind.value) return sweepPoints.value.length > 0 || visibleSweepOverlays.value.length > 0
@@ -3138,7 +3335,8 @@ const anythingLive = computed(
     responseRunning.value ||
     impedanceRunning.value ||
     impulseRunning.value ||
-    outputImpedanceRunning.value,
+    outputImpedanceRunning.value ||
+    scopeRunning.value,
 )
 
 // Stamps the open measurement as the owner of whatever is now being filled -- one watcher rather
@@ -3289,6 +3487,7 @@ const PARKED_LIVE_STORES: Partial<
   impedance: { switch: switchImpedanceOwner, reread: refreshImpedance },
   impulse: { switch: switchImpulseOwner, reread: refreshImpulse },
   outputImpedance: { switch: switchOutputImpedanceOwner, reread: refreshOutputImpedance },
+  scope: { switch: switchOscilloscopeOwner, reread: refreshOscilloscope },
 }
 
 /**
@@ -4008,6 +4207,12 @@ function buildTypeParamsJsonCore(): string | undefined {
     return JSON.stringify({ ...JSON.parse(base), ...outputImpedanceDisplayToParams(currentOutputImpedanceDisplay()) })
   }
 
+  if (isOscilloscope.value) {
+    const base = scopeConfigPanel.value?.buildParamsJson()
+    if (!base) return undefined
+    return JSON.stringify({ ...JSON.parse(base), ...scopeDisplayToParams(currentScopeDisplay()) })
+  }
+
   if (isCrosstalk.value) {
     const base = crosstalkConfigPanel.value?.buildParamsJson()
     if (!base) return undefined
@@ -4451,7 +4656,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
               Save as…
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance && !isOscilloscope"
               type="button"
               class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
@@ -4462,12 +4667,34 @@ onBeforeUnmount(() => stopLoadPolling?.())
               Save measurement result
             </button>
             <button
-              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance"
+              v-if="!isSweepKind && !isFrequencyResponse && !isImpulseResponse && !isImpedance && !isCrosstalk && !isOutputImpedance && !isOscilloscope"
               type="button"
               class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
               :disabled="status?.acquiring"
               title="Clears the currently displayed spectrum, oscilloscope trace and meters — stop acquisition first. Does not delete anything saved to History."
               @click="clearMeasurement"
+            >
+              <ToolbarIcon name="clear" tone="red" />
+              Clear
+            </button>
+            <button
+              v-if="isOscilloscope"
+              type="button"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
+              :disabled="scopeRunning || !scopeRecord"
+              title="Saves the captured waveform as a new measurement result — every sample of it, not the decimated trace on screen."
+              @click="openSaveDialog"
+            >
+              <ToolbarIcon name="save-result" tone="green" />
+              Save waveform
+            </button>
+            <button
+              v-if="isOscilloscope"
+              type="button"
+              class="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-100 dark:hover:bg-neutral-800"
+              :disabled="scopeRunning"
+              title="Throws the captured record away. Does not delete anything saved to History."
+              @click="clearOscilloscopeRun"
             >
               <ToolbarIcon name="clear" tone="red" />
               Clear
@@ -5347,6 +5574,131 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:delay-top-us="responseDelayTopUs"
                   v-model:delay-bottom-us="responseDelayBottomUs"
                   v-model:autofit-on-done="responseAutofitOnDone"
+                />
+
+                <MeasurementChecklist @error="reportError" />
+              </template>
+            </MeasurementLayout>
+          </template>
+
+          <template v-else-if="isOscilloscope">
+            <MeasurementLayout>
+              <template #rail>
+                <!-- RUN / SINGLE / STOP. Run arms in whatever mode is staged -- Auto and Normal
+                     re-arm themselves, Roll never triggers at all -- and SINGLE captures one record
+                     and holds it whatever the Mode dropdown says, which is how a bench scope's own
+                     Single button behaves. -->
+                <div class="flex gap-3">
+                  <button
+                    type="button"
+                    class="btn-run-go"
+                    :disabled="scopeRunning || !!scopeConfigPanel?.invalid"
+                    :title="scopeConfigPanel?.invalid ?? 'Arms the trigger in the staged mode and keeps capturing.'"
+                    @click="scopeConfigPanel?.run()"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l14 8-14 8V4z" /></svg>
+                    Run
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-run-single"
+                    :disabled="scopeRunning || !!scopeConfigPanel?.invalid"
+                    :title="scopeConfigPanel?.invalid ?? 'Captures one record and holds it, whatever the Mode dropdown says.'"
+                    @click="scopeConfigPanel?.run(true)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7" /></svg>
+                    Single
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-run-stop"
+                    :disabled="!scopeRunning"
+                    title="Stops the run and silences the generator. Whatever was last captured stays on screen."
+                    @click="cancelOscilloscopeRun"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
+                    Stop
+                  </button>
+                </div>
+
+                <ScopeConfigPanel
+                  ref="scopeConfigPanel"
+                  :running="scopeRunning"
+                  :ranges="ranges"
+                  :measured-max-v="scopeExtremes?.maxV ?? null"
+                  :measured-min-v="scopeExtremes?.minV ?? null"
+                  v-model:trigger-level-v="scopeTriggerLevelV"
+                  v-model:trigger-hysteresis-v="scopeTriggerHysteresisV"
+                  v-model:trigger-source="scopeTriggerSource"
+                  v-model:record-seconds="scopeRecordSeconds"
+                  v-model:pre-trigger-fraction="scopePreTriggerFraction"
+                  v-model:mode="scopeMode"
+                  @run="runOscilloscope"
+                />
+
+                <ScopeMeasurementsPanel
+                  :volts-per-division="scopeVoltsPerDivision"
+                  :time-from-s="scopeTimeFromS"
+                  :time-to-s="scopeTimeToS"
+                />
+              </template>
+
+              <template #status>
+                <MeasurementStatusBar
+                  :tone="responseRunToneByName(scopePhase)"
+                  :label="scopeProgressLabel"
+                  :done="scopeRecordsTaken"
+                  :total="0"
+                >
+                  <span v-if="scopeRecord">
+                    <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ scopeRecord.frameCount.toLocaleString() }}</span>
+                    samples
+                  </span>
+                </MeasurementStatusBar>
+              </template>
+
+              <template #default>
+                <p v-if="scopeRunError" class="text-xs text-red-600 dark:text-red-400">{{ scopeRunError }}</p>
+                <p v-else-if="scopeError" class="text-xs text-red-600 dark:text-red-400">{{ scopeError }}</p>
+
+                <OscilloscopeScreenChart
+                  ref="scopeChart"
+                  v-model:annotations="shownAnnotations"
+                  v-model:annotation-armed="annotationArmed"
+                  v-model:trigger-level-v="scopeTriggerLevelV"
+                  :record="scopeRecord"
+                  :volts-per-division="scopeVoltsPerDivision"
+                  :volt-offset-v="scopeVoltOffsetV"
+                  :time-from-s="scopeTimeFromS"
+                  :time-to-s="scopeTimeToS"
+                  :thick-lines="scopeThickLines"
+                  :show-data-points="scopeShowDataPoints"
+                  :show-trigger-level="scopeShowTriggerLevel"
+                  :trigger-hysteresis-v="scopeTriggerHysteresisV"
+                  :trigger-source="scopeTriggerSource"
+                  :record-seconds="scopeRecordSeconds"
+                  :pre-trigger-fraction="scopePreTriggerFraction"
+                  :running="scopeRunning"
+                  @axis-window="onScopeAxisWindow"
+                  @trigger-level-committed="onScopeTriggerLevelCommitted"
+                />
+
+                <MeasurementNotesPanel />
+                <MeasurementHistoryPanel @error="reportError" @report="openReport" />
+              </template>
+
+              <template #aside>
+                <ScopeDisplayPanel
+                  :record-seconds="scopeRecordSeconds"
+                  :pre-trigger-fraction="scopePreTriggerFraction"
+                  v-model:volts-per-division="scopeVoltsPerDivision"
+                  v-model:volt-offset-v="scopeVoltOffsetV"
+                  v-model:time-from-s="scopeTimeFromS"
+                  v-model:time-to-s="scopeTimeToS"
+                  v-model:thick-lines="scopeThickLines"
+                  v-model:show-data-points="scopeShowDataPoints"
+                  v-model:show-trigger-level="scopeShowTriggerLevel"
+                  v-model:autofit-on-done="scopeAutofitOnDone"
                 />
 
                 <MeasurementChecklist @error="reportError" />

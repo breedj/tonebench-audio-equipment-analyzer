@@ -5,7 +5,7 @@ import { useProjects } from '../composables/useProjects'
 import { useMeasurements } from '../composables/useMeasurements'
 import { useAnnotations } from '../composables/useAnnotations'
 import { isCrosstalkKind, isFrequencyResponseKind, isImpedanceKind, isOutputImpedanceKind,
-  isImpulseResponseKind, isImdSweepKind, isSweepKind } from '../measurements/kinds'
+  isImpulseResponseKind, isImdSweepKind, isOscilloscopeKind, isSweepKind } from '../measurements/kinds'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -16,7 +16,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 // itself does; the project is the one the server has open.
 const { currentProject, types, currentTypeId, typeNotes } = useProjects()
 const { save, saveSweep, saveImdSweep, saveResponse, saveImpulse,
-    saveImpedance, saveCrosstalk, saveOutputImpedance, error } = useMeasurements()
+    saveImpedance, saveCrosstalk, saveOscilloscope, saveOutputImpedance, error } = useMeasurements()
 
 const currentType = computed(() => types.value.find((t) => t.id === currentTypeId.value) ?? null)
 
@@ -68,7 +68,8 @@ async function onSave() {
   // points, a response's is its runner's curves, an FFT's is the pipeline's single retained
   // spectrum. Same dialog either way — the name/notes it collects are all the difference the user
   // cares about.
-  if (isImpedanceKind(currentType.value.kind)) await saveImpedance(req)
+  if (isOscilloscopeKind(currentType.value.kind)) await saveOscilloscope(req)
+  else if (isImpedanceKind(currentType.value.kind)) await saveImpedance(req)
   else if (isCrosstalkKind(currentType.value.kind)) await saveCrosstalk(req)
   else if (isOutputImpedanceKind(currentType.value.kind)) await saveOutputImpedance(req)
   else if (isImpulseResponseKind(currentType.value.kind)) await saveImpulse(req)

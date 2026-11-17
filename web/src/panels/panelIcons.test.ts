@@ -83,6 +83,12 @@ describe('panelIconFor', () => {
       'Weighting',
       'Advanced',
       'Annotations',
+      'Acquisition',
+      'Trigger',
+      'Vertical',
+      'Time window (ms)',
+      'Time window (µs)',
+      'Time window (s)',
     ]
     const missed = titles.filter((t) => panelIconFor(t) === PANEL_ICON_FALLBACK)
     expect(missed).toEqual([])

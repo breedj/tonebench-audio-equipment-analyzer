@@ -56,6 +56,8 @@ const GLYPHS = {
   sine: { paths: ['M2 12c2-6 4.5-6 6 0s3.5 6 6 0 4-6 6 0'] },
   /** A gate or window: two brackets around what is kept. */
   gate: { paths: ['M7 4H4v16h3M17 4h3v16h-3M10 9v6M14 9v6'] },
+  /** A rising edge crossing a level, with the crossing marked -- a trigger, as a scope draws it. */
+  trigger: { paths: ['M3 18h6V6h6', 'M2 12h20'], circles: [{ cx: 9, cy: 12, r: 2 }] },
   /** A fixture: a reference resistor in line. */
   resistor: { paths: ['M2 12h3l1.5-5 3 10 3-10 1.5 5h8'] },
   /** Calibration: a crosshair on a target. */
@@ -138,6 +140,14 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   'stepped sweep': { icon: 'steps', tone: 'orange' },
   'crosstalk sweep': { icon: 'steps', tone: 'orange' },
   'fft settings': { icon: 'sliders', tone: 'orange' },
+  // The oscilloscope's two run sections. Acquisition is the orange run family like every other
+  // settings block; the trigger earns its own glyph and the red the critical readings use,
+  // because it is the one setting that decides whether anything is captured at all.
+  acquisition: { icon: 'waveform', tone: 'orange' },
+  trigger: { icon: 'trigger', tone: 'red' },
+  // The scope's vertical pair is V/div and a centre rather than a range, so it matches no
+  // pattern -- and it is the same axis every `range` title lands on.
+  vertical: { icon: 'rangeY', tone: 'violet' },
   generator: { icon: 'sine', tone: 'orange' },
   advanced: { icon: 'sliders', tone: 'amber' },
   'weighting': { icon: 'sliders', tone: 'cyan' },
@@ -178,6 +188,9 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
 const BY_PATTERN: { test: RegExp; spec: PanelIconSpec }[] = [
   { test: /\bdelay (range|axis)\b/, spec: { icon: 'stopwatch', tone: 'red' } },
   { test: /\bfrequency (range|axis)\b/, spec: { icon: 'rangeX', tone: 'cyan' } },
+  // The oscilloscope's horizontal window. A pattern rather than a row, because its title
+  // carries the unit the record is read in -- us, ms or s.
+  { test: /\btime window\b/, spec: { icon: 'rangeX', tone: 'cyan' } },
   { test: /^pole\/zero range/, spec: { icon: 'rangeX', tone: 'cyan' } },
   { test: /\b(range|axis)\b/, spec: { icon: 'rangeY', tone: 'violet' } },
   // "Left: Harmonics", "Right: Intermodulation", "Left: Other peaks", "Right: Multitone".

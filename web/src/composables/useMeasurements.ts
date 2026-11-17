@@ -444,6 +444,18 @@ export function useMeasurements() {
     }
   }
 
+  async function saveOscilloscope(req: SaveRunRequest) {
+    try {
+      const result = await api.saveOscilloscope(req)
+      await load()
+      error.value = null
+      return result
+    } catch (e) {
+      error.value = (e as Error).message
+      throw e
+    }
+  }
+
   async function saveImpedance(req: SaveRunRequest) {
     try {
       const result = await api.saveImpedance(req)
@@ -732,7 +744,7 @@ export function useMeasurements() {
   // with nothing to show it on. MeasurementHistoryPanel loads on mount and on every type change,
   // which covers every screen the list is shown on.
 
-  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOutputImpedance,
+  return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOscilloscope, saveOutputImpedance,
     update, remove,
     addOverlay, reloadOverlay, removeOverlay, pruneOverlaysToTypes, clearOverlays, setOverlayVisible, setOverlayWindow,
     visibleOverlayCount, canShowMoreOverlays }

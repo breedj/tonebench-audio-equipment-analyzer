@@ -24,7 +24,7 @@ import { resolve } from 'node:path'
 
 const appSource = readFileSync(resolve(import.meta.dirname, '..', 'App.vue'), 'utf8')
 
-/** The six restores, named as App.vue spells them. */
+/** The seven restores, named as App.vue spells them. */
 const RESTORES = [
   'sweepDisplayFromParams',
   'responseDisplayFromParams',
@@ -32,6 +32,7 @@ const RESTORES = [
   'crosstalkDisplayFromParams',
   'outputImpedanceDisplayFromParams',
   'impulseDisplayFromParams',
+  'scopeDisplayFromParams',
 ] as const
 
 /** Every argument list App.vue passes to `fn`, as written. */
@@ -40,7 +41,7 @@ function callsIn(fn: string): string[] {
 }
 
 describe('App.vue restoring a measurement type s display', () => {
-  it('calls every one of the six restores, so the assertions below are not vacuous', () => {
+  it('calls every one of the seven restores, so the assertions below are not vacuous', () => {
     // A guard on the guard: a rename that made the search find nothing would otherwise leave
     // every expectation here passing over an empty list.
     for (const fn of RESTORES) expect(callsIn(fn), fn).toHaveLength(1)

@@ -20,6 +20,7 @@ import {
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   isSweepKind,
 } from '../measurements/kinds'
@@ -57,6 +58,7 @@ export function annotationViewsForKind(kind: string | null | undefined): string[
   if (kind === FFT_SPECTRUM_KIND) {
     return [SPECTRUM_ANNOTATION_VIEW, SPECTROGRAM_ANNOTATION_VIEW, OSCILLOSCOPE_ANNOTATION_VIEW]
   }
+  if (isOscilloscopeKind(kind)) return [OSCILLOSCOPE_ANNOTATION_VIEW]
   if (isSweepKind(kind)) return [SWEEP_ANNOTATION_VIEW]
   if (isFrequencyResponseKind(kind)) {
     return [
@@ -126,6 +128,10 @@ export function annotationViewLabel(view: string): string {
 export function storedAnnotationFrame(kind: string | null | undefined): AnnotationFrame {
   const view = defaultAnnotationView(kind)
   if (kind === FFT_SPECTRUM_KIND) return { view, xQuantity: 'hz', yQuantity: 'dbv' }
+  // Milliseconds and volts, the same pair the impulse screen uses -- see the chart's own
+  // ANNOTATION_AXES for why its x scale is in milliseconds rather than in the seconds the
+  // window is stored in.
+  if (isOscilloscopeKind(kind)) return { view, xQuantity: 'ms', yQuantity: 'volt' }
   if (isSweepKind(kind)) return { view, xQuantity: 'hz', yQuantity: 'pct' }
   if (isFrequencyResponseKind(kind)) return { view, xQuantity: 'hz', yQuantity: 'dbv' }
   if (isImpulseResponseKind(kind)) return { view, xQuantity: 'ms', yQuantity: 'volt' }

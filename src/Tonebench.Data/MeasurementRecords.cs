@@ -1326,6 +1326,11 @@ public sealed record OscilloscopeParameters(
     double? ChartFilterHz = null,
     double? ChartFilterQ = null,
     int? ChartFilterOrder = null,
+    /// <summary>
+    /// How the chart joined one sample to the next — <c>Linear</c>, <c>Sinc</c> (the band-limited
+    /// reconstruction) or <c>Dots</c>. A display preference; the samples are what they are.
+    /// </summary>
+    string? ChartDrawing = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

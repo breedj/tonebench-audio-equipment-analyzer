@@ -7,6 +7,7 @@ import {
 } from './persistence'
 import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
 import { SCOPE_VIEWS, type ScopeView } from './xy'
+import { SCOPE_DRAWINGS, type ScopeDrawing } from './interpolation'
 import {
   DEFAULT_SCOPE_FILTER,
   MAX_FILTER_Q,
@@ -102,6 +103,15 @@ export interface ScopeDisplay {
    * scope/filters.ts.</p>
    */
   filter: ScopeFilterSettings
+  /**
+   * How the chart joins one sample to the next — lines, the band-limited reconstruction, or
+   * nothing at all. See scope/interpolation.ts.
+   *
+   * <p>Only reaches the picture where the window is tight enough for the analyzer to have sent the
+   * samples themselves: which values fell where inside a column is exactly what decimation throws
+   * away, so on a wide window the other two fall back to lines.</p>
+   */
+  drawing: ScopeDrawing
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -160,6 +170,11 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   chartView: 'Waveform',
   /** DC and no filter: a scope shows what arrived until somebody asks it not to. */
   filter: { ...DEFAULT_SCOPE_FILTER },
+  /**
+   * Lines, which is what a scope has always drawn — and the reconstruction is what a reader turns
+   * on when they are looking at something near the top of the band, where lines stop being true.
+   */
+  drawing: 'Linear',
   annotations: [],
 })
 
@@ -258,6 +273,8 @@ export function scopeDisplayFromParams(
     display.filter.q = stored.chartFilterQ
   if (typeof stored.chartFilterOrder === 'number' && SCOPE_FILTER_ORDERS.includes(stored.chartFilterOrder))
     display.filter.order = stored.chartFilterOrder
+  if (typeof stored.chartDrawing === 'string' && SCOPE_DRAWINGS.some((d) => d.value === stored.chartDrawing))
+    display.drawing = stored.chartDrawing as ScopeDrawing
 
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
@@ -292,5 +309,6 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartFilterHz: display.filter.frequencyHz,
     chartFilterQ: display.filter.q,
     chartFilterOrder: display.filter.order,
+    chartDrawing: display.drawing,
   }
 }

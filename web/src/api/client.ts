@@ -1800,6 +1800,8 @@ export interface OscilloscopeParameters {
   chartFilterHz?: number | null
   chartFilterQ?: number | null
   chartFilterOrder?: number | null
+  /** How the chart joined its samples — `Linear`, `Sinc` or `Dots`. See scope/interpolation.ts. */
+  chartDrawing?: string | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null

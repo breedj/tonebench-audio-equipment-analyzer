@@ -48,6 +48,13 @@ import {
   type ScopePersistence,
 } from '../scope/persistence'
 import type { DecayPalette } from '../api/client'
+import {
+  drawingJoins,
+  drawingNeedsSamples,
+  sincResample,
+  sincResampleX,
+  type ScopeDrawing,
+} from '../scope/interpolation'
 import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
 import {
   formatMathValue,
@@ -140,6 +147,8 @@ const props = withDefaults(defineProps<{
    * record. Shown as a badge, because a filter changes every reading beside it.
    */
   filterNote?: string | null
+  /** How one sample is joined to the next. See scope/interpolation.ts. */
+  drawing?: ScopeDrawing
   /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
    * practice the open measurement. It joins the signature rather than being watched for, so a
@@ -156,6 +165,7 @@ const props = withDefaults(defineProps<{
   intensityPalette: 'Jet',
   mathOperation: 'Off',
   filterNote: null,
+  drawing: 'Linear',
   persistenceKey: 0,
 })
 
@@ -367,8 +377,30 @@ const series = computed(() => {
     })
   }
 
+  // The band-limited reconstruction, applied last so every trace on the chart -- the waveforms,
+  // the residual, the math channel -- lands on one x array. Only where the slice is raw: on
+  // min/max columns the samples are gone, and which values fell where inside a column is exactly
+  // what the decimation left out, so there is nothing to reconstruct from.
+  if (drawingNeedsSamples(props.drawing) && channels.length > 0 && channels.every((c) => c.raw)) {
+    return {
+      xMs: sincResampleX(xMs),
+      channels: channels.map((channel) => ({ ...channel, line: sincResample(channel.line) })),
+    }
+  }
+
   return { xMs, channels }
 })
+
+/**
+ * Whether the chart is drawing the samples alone.
+ *
+ * <p>Only where it has them: on a decimated slice a "sample" is a column's extreme, so a dotted
+ * picture of one would be a picture of the decimation. There the mode falls back to lines and the
+ * rail says so.</p>
+ */
+const dotsOnly = computed(
+  () => props.drawing === 'Dots' && !drawingJoins(props.drawing) && props.record?.channels?.[0]?.raw === true,
+)
 
 /**
  * Whether a math trace is on the chart.
@@ -951,9 +983,15 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         // weight would read as a second waveform.
         width: channel.residual ? 1 : props.thickLines ? 2 : 1,
         dash: channel.residual ? [4, 3] : undefined,
+        // Dots: the samples and nothing joining them, which is the one mode that can never draw
+        // something the analyzer did not measure. uPlot takes a null path builder for that.
+        paths: dotsOnly.value ? () => null : undefined,
         // Markers only on a raw slice: a point drawn on a min/max column marks the column's
         // maximum rather than a sample, which is a reading of the decimation.
-        points: { show: props.showDataPoints && channel.raw && !channel.residual, size: 4 },
+        points: {
+          show: (props.showDataPoints || dotsOnly.value) && channel.raw && !channel.residual,
+          size: dotsOnly.value ? 3 : 4,
+        },
       })),
     ],
     // Last: whatever draws after the annotations paints over their labels.
@@ -1485,6 +1523,9 @@ watch(
     // the way the time axis's unit is -- two operations both drawn would otherwise keep the first
     // one's label.
     () => `${mathDrawn.value}:${props.mathOperation}`,
+    // The drawing mode, because Dots replaces the series' own path builder, which uPlot reads at
+    // construction -- a mode changed without a rebuild ticks and does nothing.
+    () => props.drawing,
     () => series.value.channels.map((c) => `${c.index}:${c.raw}:${c.residual === true}:${c.math === true}`).join(','),
   ],
   rebuild,

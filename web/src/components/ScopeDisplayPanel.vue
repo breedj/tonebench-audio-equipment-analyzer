@@ -42,6 +42,7 @@ import {
   type ScopeFilterSettings,
 } from '../scope/filters'
 import { api, type ScopeFilterResponse } from '../api/client'
+import { SCOPE_DRAWINGS, drawingNeedsSamples, type ScopeDrawing } from '../scope/interpolation'
 import { clampNumberField } from '../numberField'
 import {
   SCOPE_MATH_OPERATIONS,
@@ -78,6 +79,16 @@ const intensityMode = defineModel<ScopeIntensityMode>('intensityMode', { require
 const intensityPalette = defineModel<DecayPalette>('intensityPalette', { required: true })
 const mathOperation = defineModel<ScopeMathOperation>('mathOperation', { required: true })
 const chartView = defineModel<ScopeView>('chartView', { required: true })
+const drawing = defineModel<ScopeDrawing>('drawing', { required: true })
+
+/**
+ * Whether the chosen drawing is actually reaching the picture.
+ *
+ * <p>Both of the interesting modes need the samples, and a wide window has none — the analyzer
+ * sends both extremes of each column instead. So the rail says when the setting is not in force
+ * rather than leaving a control that silently does nothing.</p>
+ */
+const drawingInForce = computed(() => !drawingNeedsSamples(drawing.value) || record.value?.channels?.[0]?.raw === true)
 
 /**
  * The display path — one model, because it is one thing: the analyzer applies the coupling and the
@@ -610,6 +621,19 @@ function onVoltsPerDivisionChange(event: Event) {
 
     <div class="tb-field">
       <span class="tb-group">Style</span>
+      <label class="tb-field">
+        Drawing
+        <select v-model="drawing" class="tb-input">
+          <option v-for="option in SCOPE_DRAWINGS" :key="option.value" :value="option.value" :title="option.title">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <p v-if="!drawingInForce" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+        Lines for now: this window is wide enough that the analyzer is sending both extremes of
+        each column rather than the samples, and which values fell where inside one is what that
+        leaves out. Zoom in until the header says every sample is drawn.
+      </p>
       <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
       <label class="tb-check-row">
         <input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points

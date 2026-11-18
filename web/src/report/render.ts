@@ -577,6 +577,7 @@ export async function renderView(
           // The record handed to a report has already been through the display path, so the
           // picture is right by construction; what the page needs is the words for it.
           filterNote: pathSummary(display.filter),
+          drawing: display.drawing,
           triggerLevelV: data.triggerLevelV,
           triggerHysteresisV: data.triggerHysteresisV,
           triggerSource: data.triggerSource,

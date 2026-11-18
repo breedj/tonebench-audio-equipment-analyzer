@@ -2067,6 +2067,8 @@ const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
 /** The display path — the coupling and the in-path filter. One ref, because it is one thing. */
 const scopeFilter = ref<ScopeFilterSettings>({ ...DEFAULT_SCOPE_FILTER })
+/** How the chart joins one sample to the next. See scope/interpolation.ts. */
+const scopeDrawing = ref(DEFAULT_SCOPE_DISPLAY.drawing)
 
 /** What is in the path, for the chart's badge and the measurements panel's note. */
 const scopeFilterNote = computed(() => pathSummary(scopeFilter.value))
@@ -2195,6 +2197,7 @@ function currentScopeDisplay() {
     mathOperation: scopeMathOperation.value,
     chartView: scopeChartView.value,
     filter: { ...scopeFilter.value },
+    drawing: scopeDrawing.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2226,6 +2229,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeMathOperation.value = display.mathOperation
   scopeChartView.value = display.chartView
   scopeFilter.value = { ...display.filter }
+  scopeDrawing.value = display.drawing
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2263,6 +2267,7 @@ watch(
     scopeMathOperation,
     scopeChartView,
     scopeFilter,
+    scopeDrawing,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -6087,6 +6092,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :intensity-palette="scopeIntensityPalette"
                   :math-operation="scopeMathOperation"
                   :filter-note="scopeFilterNote"
+                  :drawing="scopeDrawing"
                   :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
@@ -6119,6 +6125,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:math-operation="scopeMathOperation"
                   v-model:chart-view="scopeChartView"
                   v-model:filter="scopeFilter"
+                  v-model:drawing="scopeDrawing"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

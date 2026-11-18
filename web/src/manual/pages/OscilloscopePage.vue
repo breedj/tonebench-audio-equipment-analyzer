@@ -212,6 +212,15 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Drawing</td>
+          <td>
+            How one sample is joined to the next — <strong>Lines</strong>, <strong>sin(x)/x</strong>
+            or <strong>Dots</strong>. See <strong>How the trace is drawn</strong> below. The last
+            two need the samples themselves, so they apply only where the window is tight enough
+            for the header to read <em>every sample drawn</em>.
+          </td>
+        </tr>
+        <tr>
           <td>Signal path</td>
           <td>
             The coupling and an in-path filter — see <strong>The signal path</strong> below. Both
@@ -265,6 +274,45 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <h2>How the trace is drawn</h2>
+    <p>
+      <strong>Lines</strong> is what a scope has always drawn and is exact wherever there are
+      plenty of samples a cycle. Near the top of the band it stops being true: a sampled waveform
+      is band-limited by the analyzer’s own filter, so between any two samples there is exactly one
+      signal it could have been — and that is not the straight line.
+    </p>
+    <p>
+      At 48 kS/s a 1 kHz tone has 48 samples a period and the difference is invisible. A 20 kHz
+      tone has 2.4, the samples land on a different part of every cycle, and lines between them
+      draw a jagged shape whose peak wanders from cycle to cycle. That reads as amplitude
+      modulation or as a dirty generator, and it is neither. <strong>sin(x)/x</strong> draws the
+      band-limited waveform instead: measured on a tone at 2.37 samples a period, straight lines
+      are out by about a third of full scale and the reconstruction by under one per cent.
+    </p>
+    <p>
+      <strong>Dots</strong> draws the samples and nothing joining them — the honest picture when
+      what you are reading is where the samples fell, and the one that can never show something the
+      analyzer did not measure.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>It is reconstruction, not resolution.</strong> sin(x)/x adds no information: it
+        draws the one waveform consistent with the samples <em>and</em> with the band limit the
+        hardware already imposes. It is right because that band limit is real — the ADC cannot pass
+        anything above Nyquist — and it would be just as wrong as the straight lines, in a
+        different direction, for a signal that broke it.
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>Both need the samples, and a wide window has none.</strong> Past a couple of samples
+        a column the analyzer sends both extremes of each column instead of the samples, and which
+        values fell where inside one is exactly what that leaves out. So on a wide window the two
+        fall back to lines and the rail says so. Zoom in until the chart header reads <em>every
+        sample drawn</em>.
+      </p>
+    </div>
 
     <h2>The signal path</h2>
     <p>

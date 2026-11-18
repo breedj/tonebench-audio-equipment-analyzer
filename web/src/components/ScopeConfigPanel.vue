@@ -81,6 +81,29 @@ const recordSeconds = defineModel<number>('recordSeconds', { required: true })
 const preTriggerFraction = defineModel<number>('preTriggerFraction', { required: true })
 const mode = defineModel<ScopeRunMode>('mode', { required: true })
 /**
+ * Whether the records are combined, and over how many — see scope/acquisition.ts.
+ *
+ * <p>Measurement settings, not display ones: they decide what the analyzer <em>does</em> with each
+ * capture, so they are stored with the measurement and sent on the run request.</p>
+ *
+ * <p><b>Up here with the other models, and that is load-bearing rather than tidy.</b> They sat
+ * below the watchers until 2026-11-18, where a <code>const</code> leaves them in the temporal dead
+ * zone for the whole of setup — and two things that run during setup read them:
+ * <code>applyStoredParams</code> assigns both while restoring a measurement, and the dirty watcher
+ * names both in its source. So selecting a measurement whose <code>params_json</code> carries an
+ * <code>accumulation</code> field (every one a current build saves) threw <em>ReferenceError:
+ * Cannot access 'accumulation' before initialization</em>. Vue catches that, so nothing on screen
+ * said so; what it cost was everything in <code>applyStoredParams</code> <em>after</em> those two
+ * lines — the trigger level, its kind, its source and the second bound, the dropout and
+ * pulse-width settings, the mode, the record length and the pre-trigger fraction — and
+ * <code>restoring</code> left true for ever, since the microtask that clears it is at the end of
+ * the same function. A permanently true <code>restoring</code> suppresses the dirty watcher for
+ * the life of the panel, so no scope setting marked the measurement dirty again. A model is this
+ * panel's input; everything that reads one has to run after it.</p>
+ */
+const accumulation = defineModel<ScopeAccumulation>('accumulation', { default: 'Normal' })
+const averageCount = defineModel<number>('averageCount', { default: DEFAULT_SCOPE_AVERAGE_COUNT })
+/**
  * The staged capture rate, read by the generator panel in the same rail: it decides whether the
  * analyzer could play what is composed there at all (384 kHz is capture-only on a QA403), and it
  * is the rate a generator-only stream should come up at. Kept in step with the form below, like
@@ -327,15 +350,6 @@ watch(
  * switching back to a triggered mode, and leaving them live offers four controls that do nothing.</p>
  */
 const rolling = computed(() => mode.value === 'Roll')
-
-/**
- * Whether the records are combined, and over how many — see scope/acquisition.ts.
- *
- * <p>Measurement settings, not display ones: they decide what the analyzer <em>does</em> with each
- * capture, so they are stored with the measurement and sent on the run request.</p>
- */
-const accumulation = defineModel<ScopeAccumulation>('accumulation', { default: 'Normal' })
-const averageCount = defineModel<number>('averageCount', { default: DEFAULT_SCOPE_AVERAGE_COUNT })
 
 /** Disabled under Single and Roll, which produce no records to combine. */
 const canAccumulate = computed(() => modeCanAccumulate(mode.value))

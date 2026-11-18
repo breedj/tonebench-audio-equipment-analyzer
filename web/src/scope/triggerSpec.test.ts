@@ -203,6 +203,42 @@ describe('the trigger panel binds its voltages without v-model', () => {
   })
 })
 
+describe('the panel declares its models before anything reads them', () => {
+  // A `const` is in the temporal dead zone until its own line runs, and two things in this panel's
+  // setup read a model: applyStoredParams assigns one while restoring a measurement, and the dirty
+  // watcher names one in its source. The accumulation pair was declared *below* both until
+  // 2026-11-18, so selecting a measurement whose params_json carries an `accumulation` field --
+  // every one a current build saves -- threw `ReferenceError: Cannot access 'accumulation' before
+  // initialization`. Vue catches an error thrown inside a watcher, so nothing on screen said so,
+  // and it cost two things at once: everything in applyStoredParams after those two lines (the
+  // trigger level, its kind, its source, the second bound, the dropout and pulse-width settings,
+  // the mode, the record length) and `restoring` left true for ever, which suppresses the dirty
+  // watcher for the life of the panel.
+  //
+  // A .vue against a real DOM again, so this is a text read like the block above it.
+  const source = readFileSync(new URL('../components/ScopeConfigPanel.vue', import.meta.url), 'utf8')
+
+  // A declaration, not the prose that names one: this file's own doc comments write
+  // <code>defineModel</code> twice, and a bare name would count both of those as models
+  // declared at the very top -- which is to say the audit would pass whatever the order is.
+  const models = [...source.matchAll(/\bconst \w+ = defineModel</g)].map((m) => m.index ?? -1)
+  // The first top-level watcher, found at column 0 so a `watch(` inside a comment or nested in a
+  // function cannot stand in for it.
+  const firstWatcher = /^watch\(/m.exec(source)?.index ?? -1
+  const readers = [source.indexOf('function applyStoredParams'), firstWatcher]
+
+  it('finds the models and the things that read them', () => {
+    // Guards the audit itself: a renamed function or a model spelled another way would otherwise
+    // make every assertion below vacuously true.
+    expect(models.length).toBeGreaterThanOrEqual(8)
+    for (const reader of readers) expect(reader).toBeGreaterThan(0)
+  })
+
+  it('declares every model above applyStoredParams and above the first watcher', () => {
+    expect(Math.max(...models)).toBeLessThan(Math.min(...readers))
+  })
+})
+
 describe('the trigger kinds', () => {
   it('offers every kind the server implements', () => {
     expect(SCOPE_TRIGGER_KINDS.map((k) => k.value)).toEqual([

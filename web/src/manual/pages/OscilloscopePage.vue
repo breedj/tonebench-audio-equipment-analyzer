@@ -32,6 +32,122 @@ const { showPage } = useManual()
       as one that is entirely future. It also means the trigger is software, so it can be moved,
       re-levelled and re-armed on a capture already running without restarting anything.
     </p>
+    <p>
+      What a capture is <em>not</em> is a continuous recording cut into lengths. Each record is
+      found and taken on its own: the trigger is walked over the samples as they arrive, the record
+      is whole once its post-trigger half has landed, and only then does the search for the next
+      event begin. The stream between one record and the next carries on and is not captured by
+      anything.
+    </p>
+
+    <figure class="manual-figure">
+      <svg viewBox="0 0 520 176" role="img" aria-label="A timeline in three rows. The top row is the continuous stream, divided into blocks of 4096 frames. The middle row shows three triggered records taken out of it, each shorter than the spacing between them, with shaded pre-trigger history before each trigger and unrecorded stream in the gaps between them. The bottom row shows that only one of the three records reaches the chart.">
+        <!-- The block grid, drawn again across the records row so a record is visibly not aligned
+             to it. Two segments rather than one full-height line: the band between them carries
+             the labels, and a guide through them strikes the words out. -->
+        <line x1="138" y1="20" x2="138" y2="40" class="dashed tap" />
+        <line x1="226" y1="20" x2="226" y2="40" class="dashed tap" />
+        <line x1="314" y1="20" x2="314" y2="40" class="dashed tap" />
+        <line x1="402" y1="20" x2="402" y2="40" class="dashed tap" />
+        <line x1="138" y1="98" x2="138" y2="128" class="dashed tap" />
+        <line x1="226" y1="98" x2="226" y2="128" class="dashed tap" />
+        <line x1="314" y1="98" x2="314" y2="128" class="dashed tap" />
+        <line x1="402" y1="98" x2="402" y2="128" class="dashed tap" />
+        <!-- The stream -->
+        <text x="50" y="12" class="muted">One continuous stream, delivered a block at a time</text>
+        <rect x="50" y="20" width="440" height="20" />
+        <line x1="50" y1="52" x2="138" y2="52" class="tap" />
+        <line x1="50" y1="48" x2="50" y2="56" class="tap" />
+        <line x1="138" y1="48" x2="138" y2="56" class="tap" />
+        <text x="144" y="56" class="muted">one block &mdash; 4096 frames, 21.3 ms at 192 kS/s</text>
+        <!-- The records -->
+        <text x="50" y="78" class="muted">A record is a triggered window out of it &mdash; 3840 frames for 20 ms</text>
+        <text x="90" y="94" text-anchor="middle" class="muted">trigger</text>
+        <text x="191" y="94" text-anchor="middle" class="muted">not captured</text>
+        <line x1="191" y1="98" x2="191" y2="112" class="dashed tap" />
+        <line x1="152" y1="112" x2="230" y2="112" class="dashed tap" />
+        <rect x="70" y="100" width="20" height="26" fill="currentColor" fill-opacity="0.12" stroke="none" />
+        <rect x="230" y="100" width="20" height="26" fill="currentColor" fill-opacity="0.12" stroke="none" />
+        <rect x="330" y="100" width="20" height="26" fill="currentColor" fill-opacity="0.12" stroke="none" />
+        <rect x="70" y="100" width="82" height="26" />
+        <rect x="230" y="100" width="82" height="26" />
+        <rect x="330" y="100" width="82" height="26" />
+        <line x1="90" y1="96" x2="90" y2="130" />
+        <line x1="250" y1="96" x2="250" y2="130" />
+        <line x1="350" y1="96" x2="350" y2="130" />
+        <!-- What reaches the chart -->
+        <text x="271" y="142" text-anchor="middle" class="muted">replaced</text>
+        <text x="371" y="142" text-anchor="middle" class="muted">replaced</text>
+        <line x1="111" y1="130" x2="111" y2="148" />
+        <line x1="107" y1="143" x2="111" y2="148" />
+        <line x1="115" y1="143" x2="111" y2="148" />
+        <rect x="70" y="150" width="82" height="18" />
+        <text x="160" y="163" class="muted">one record on the chart, about eight a second</text>
+      </svg>
+      <figcaption>
+        The trigger is found as the samples go past, so the shaded pre-trigger history was already
+        in hand when it fired. A record straddles the block grid freely &mdash; but no more than one
+        of them can be finished per block.
+      </figcaption>
+    </figure>
+
+    <p>
+      Three things decide how often the picture changes, and the first is the one nobody expects.
+      Samples arrive a <strong>block</strong> at a time, and the capture advances once per block, so
+      <strong>at most one record is finished per block</strong>. The block is not a setting on this
+      screen and nothing here changes it: it is a fixed number of frames belonging to the device,
+      <strong>4096</strong> on a QA403 and <strong>1024</strong> on a sound card. What moves it in
+      time is the sample rate alone.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Sample rate</th>
+          <th>QA403 &mdash; 4096 frames</th>
+          <th>Sound card &mdash; 1024 frames</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>48 kS/s</td><td>85.3 ms &mdash; 12 records a second</td><td>21.3 ms &mdash; 47 a second</td></tr>
+        <tr><td>96 kS/s</td><td>42.7 ms &mdash; 23 a second</td><td>10.7 ms &mdash; 94 a second</td></tr>
+        <tr><td>192 kS/s</td><td>21.3 ms &mdash; 47 a second</td><td>5.3 ms &mdash; 188 a second</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Those are ceilings rather than rates, and the right-hand column is one nothing downstream
+      keeps up with: the run looks for a finished record every 10 ms, so it cannot collect more
+      than about a hundred a second however fast the trigger fires. Past that the engine replaces
+      a record before it has been collected, and one that is never collected is neither counted nor
+      averaged &mdash; reachable only on a sound card at a high rate with a record of a few
+      milliseconds.
+    </p>
+    <p>
+      So a <em>lower</em> sample rate gives a slower update, not a faster one. Whether you reach
+      that ceiling at all depends on the record, and at a long one you never come close. A record
+      shorter than a block usually finishes inside the block its trigger landed in; a 20 ms record
+      at 192 kS/s is nearly a whole block long and takes one or two of them; and a
+      <strong>500 ms</strong> record is about twenty-three blocks long, so what governs is the time
+      it takes to fill rather than the block at all &mdash; roughly 400 ms between records, two or
+      three a second, and the chart then collects every one of them.
+    </p>
+    <p>
+      At that length the gaps in the figure above close up and <em>invert</em>. The next trigger
+      comes about 400 ms after the last one, but the record it starts reaches 125 ms back for its
+      pre-trigger history &mdash; so it begins before the previous record ended, and consecutive
+      captures <strong>overlap</strong> rather than leaving stream uncaptured between them. Dead
+      time is what you get when the record is short against the block; it is not a rule.
+    </p>
+    <p>
+      Then only one finished record is kept at a time &mdash; a new one replaces whatever had not
+      been collected &mdash; and the chart asks for one about <strong>eight times a second</strong>.
+      So most of what is captured is replaced before anybody sees it. The <strong>record</strong>
+      count under the chart is what the run <em>collected</em>; the trace in front of you is the
+      last one that was asked for. Nothing keeps the ones in between: the capture buffer holds about twice
+      the record length, so there is no history to scroll back into, and a one-off event is caught
+      by arming <strong>Single</strong> rather than by watching a running trace go by.
+      <strong>Roll</strong> (below) is the one exception to all of this &mdash; no trigger, and the
+      record is simply the newest window.
+    </p>
 
     <h2>Acquisition</h2>
     <table>

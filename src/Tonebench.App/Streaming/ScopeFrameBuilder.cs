@@ -62,6 +62,38 @@ public sealed record ScopeResidual(
     double? ResidualPercent);
 
 /// <summary>
+/// The math channel over one window — a waveform derived from the two captured ones, on the
+/// slice's own geometry.
+///
+/// <para><b>It rides on the slice for the residual's reason</b>: the two traces are drawn against
+/// one x array, so the math trace is raw exactly where the waveform is raw and has the same column
+/// count where it is not. What it carries beyond the picture is the whole reading set — Vpp of
+/// A − B is precisely what a differential probe is for — and the <b>unit</b> those readings are in,
+/// which for everything but the additive operations is not volts.</para>
+/// </summary>
+/// <param name="Operation">What was computed.</param>
+/// <param name="Unit">What its numbers are in. See <see cref="WaveformMathUnit"/>.</param>
+/// <param name="Columns">Min/max per column, or null when the window is served raw.</param>
+/// <param name="Samples">The derived waveform itself, or null when it is decimated.</param>
+/// <param name="Measurements">
+/// Every reading of it, measured on the derived samples at full resolution — not on the columns,
+/// and not combined from the two channels' own readings, which would be a different quantity
+/// altogether (the difference of two maxima is not the maximum of the difference).
+/// </param>
+/// <param name="ClampedSamples">
+/// How many samples <see cref="WaveformOperation.ADivB"/> railed on. Zero for every other
+/// operation, and reported rather than hidden: a ratio trace that spends most of its time at the
+/// limit is one whose reader has to be told.
+/// </param>
+public sealed record ScopeMath(
+    WaveformOperation Operation,
+    WaveformMathUnit Unit,
+    MinMax[]? Columns,
+    float[]? Samples,
+    ScopeSliceMeasurements Measurements,
+    int ClampedSamples);
+
+/// <summary>
 /// Cuts a <see cref="ScopeRecord"/> down to what a chart needs.
 ///
 /// <para><b>The whole record always goes out as columns</b>, because the zoom bar's overview strip
@@ -178,6 +210,90 @@ public static class ScopeFrameBuilder
         var columns = new MinMax[slice.Columns!.Length];
         SpectrumDecimator.DecimateLinear(residual, columns);
         return new ScopeResidual(columns, Samples: null, fit.FreqHz, fit.AmplitudeVpk, fit.OffsetV, rms, percent);
+    }
+
+    /// <summary>
+    /// The math channel on the geometry of <paramref name="slice"/>.
+    ///
+    /// <para><b>Computed from the record's samples, never from the slice's columns</b>, and that is
+    /// arithmetic rather than tidiness: a column carries the min and the max of what it covers, and
+    /// the difference of two envelopes is not the envelope of a difference — the two extremes need
+    /// not even fall at the same sample. On a differential pair, which is what A − B is for, the two
+    /// channels are nearly equal and the small difference between them is the entire reading, so an
+    /// envelope subtraction would draw zero where the signal is.</para>
+    ///
+    /// <para><b>Null when the operation has no channel to read.</b> A measurement that captures one
+    /// input has no second waveform to combine with, and an absent trace with a reason beside it is
+    /// the honest answer — computing against an array of zeros would draw A itself and label it
+    /// A − B.</para>
+    /// </summary>
+    public static ScopeMath? MathTrace(
+        ScopeRecord record, ScopeFrameSlice slice, WaveformOperation operation, int maxColumns = DefaultMaxColumns)
+    {
+        var (values, clamped) = Combine(record, operation, slice.FirstFrame, slice.FrameCount);
+        if (values is null)
+            return null;
+
+        var measurements = ScopeSliceMeasurements.Of(values, record.SampleRateHz);
+        var unit = WaveformMath.UnitOf(operation);
+
+        // The same shape as the slice by construction rather than by repeating its own test: two
+        // traces on one x array cannot be one raw and the other decimated.
+        if (slice.IsRaw)
+        {
+            var samples = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+                samples[i] = (float)values[i];
+            return new ScopeMath(operation, unit, Columns: null, samples, measurements, clamped);
+        }
+
+        var columns = new MinMax[slice.Columns!.Length];
+        SpectrumDecimator.DecimateLinear(values, columns);
+        return new ScopeMath(operation, unit, columns, Samples: null, measurements, clamped);
+    }
+
+    /// <summary>
+    /// The math channel's readings over a gate and nothing else — <see cref="Measure"/>'s
+    /// counterpart, and absent on a window that names nothing for the same reason.
+    /// </summary>
+    public static ScopeSliceMeasurements? MathGate(
+        ScopeRecord record, WaveformOperation operation, double fromS, double toS)
+    {
+        if (FrameRange(record, fromS, toS) is not { } range)
+            return null;
+
+        var (values, _) = Combine(record, operation, range.First, range.Count);
+        if (values is null)
+            return null;
+
+        return ScopeSliceMeasurements.Of(values, record.SampleRateHz);
+    }
+
+    /// <summary>
+    /// Runs the operation over one range of the record. Shared by the slice and the gate so the two
+    /// cannot disagree about what a math trace is — a gated figure computed a second way is the
+    /// plausible disagreement nothing on screen would flag.
+    /// </summary>
+    private static (double[]? Values, int Clamped) Combine(
+        ScopeRecord record, WaveformOperation operation, int firstFrame, int frameCount)
+    {
+        if (frameCount <= 0)
+            return (null, 0);
+        if (WaveformMath.NeedsA(operation) && record.ChannelCount < 1)
+            return (null, 0);
+        if (WaveformMath.NeedsB(operation) && record.ChannelCount < 2)
+            return (null, 0);
+
+        var a = WaveformMath.NeedsA(operation)
+            ? record.Channels[0].AsSpan(firstFrame, frameCount)
+            : ReadOnlySpan<double>.Empty;
+        var b = WaveformMath.NeedsB(operation)
+            ? record.Channels[1].AsSpan(firstFrame, frameCount)
+            : ReadOnlySpan<double>.Empty;
+
+        var values = new double[frameCount];
+        int clamped = WaveformMath.Apply(operation, a, b, record.SampleRateHz, values);
+        return (values, clamped);
     }
 
     /// <summary>Cuts the whole record, for the overview a chart and the zoom strip both draw.</summary>

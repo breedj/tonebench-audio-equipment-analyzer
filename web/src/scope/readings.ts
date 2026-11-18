@@ -1,7 +1,13 @@
-import type { ScopeChannelSlice, ScopeResidualSlice, ScopeSliceMeasurements } from '../api/client'
+import type {
+  ScopeChannelSlice,
+  ScopeMathSlice,
+  ScopeResidualSlice,
+  ScopeSliceMeasurements,
+} from '../api/client'
 import { formatHz } from '../response/format'
 import { formatScopeTime, toChartMs } from './timeAxis'
 import { formatVolts } from './voltAxis'
+import { formatMathValue, mathLabel, mathUnitOf, type ScopeMathOperation } from './math'
 
 /**
  * One channel's readings as the Measurements panel and the report both print them — one function,
@@ -39,10 +45,20 @@ function percent(value: number): string {
 export function scopeReadings(
   measurements: ScopeSliceMeasurements | null | undefined,
   voltsPerDivision: number,
+  /**
+   * How to write a level, where it is not a level in volts.
+   *
+   * <p>Only the math channel passes one, and it has to: every field of the measurements record is
+   * named <code>...V</code> because for a waveform it is one, and for A × B, A / B, a derivative or
+   * an integral it is not. A figure written in volts on a scale that is not volts is exactly the
+   * plausible wrong answer this app's rules exist to prevent, so the unit travels with the trace
+   * and arrives here as a formatter.</p>
+   */
+  format?: (value: number) => string,
 ): ScopeReading[] {
   if (!measurements) return []
   const m = measurements
-  const volts = (v: number) => formatVolts(v, voltsPerDivision)
+  const volts = format ?? ((v: number) => formatVolts(v, voltsPerDivision))
   const rows: ScopeReading[] = []
   const add = (label: string, value: string | null, title: string) => {
     if (value !== null) rows.push({ label, value, title })
@@ -125,6 +141,38 @@ function formatCursorHz(hz: number): string {
   if (!Number.isFinite(hz)) return '—'
   if (hz >= 1_000) return `${(hz / 1000).toFixed(4)} kHz`
   return `${hz.toFixed(3)} Hz`
+}
+
+/**
+ * The math channel's readings — the same set every waveform gets, written in <b>its own unit</b>.
+ *
+ * <p>The whole set, because a derived waveform is a waveform: the peak-to-peak of A − B is exactly
+ * what a differential probe is for, and its period, duty and rise time are as meaningful as any
+ * channel's. What changes is only how the numbers are written, which is why this is a wrapper
+ * around <code>scopeReadings</code> rather than a second list — one definition of what a scope
+ * reads, so the math trace cannot come to report a different set from the traces beside it.</p>
+ *
+ * <p>One row's wording does change. The Mean row's note is about this hardware's AC coupling, which
+ * is apt for a difference of two inputs and not for an integral or a ratio, so a derived trace gets
+ * a note about itself instead.</p>
+ */
+export function mathReadings(
+  math: ScopeMathSlice | null | undefined,
+  source: ScopeReadingSource = 'window',
+): ScopeReading[] {
+  if (!math) return []
+  const unit = mathUnitOf(math.operation as ScopeMathOperation)
+  const measurements = source === 'gate' ? math.gated : math.measurements
+  const rows = scopeReadings(measurements, 1, (value) => formatMathValue(value, unit))
+
+  return rows.map((row) =>
+    row.label === 'Mean'
+      ? {
+          ...row,
+          title: `The average of the derived trace over the window, in ${mathLabel(math.operation as ScopeMathOperation)}'s own unit.`,
+        }
+      : row,
+  )
 }
 
 /**

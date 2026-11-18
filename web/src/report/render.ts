@@ -556,6 +556,9 @@ export async function renderView(
           showTriggerLevel: display.showTriggerLevel,
           showLeft: display.showLeft,
           showRight: display.showRight,
+          // The math trace is on the record, so a report draws whichever one was fetched -- no
+          // second flag to keep in step, the way the residual needs none.
+          mathOperation: display.mathOperation,
           triggerLevelV: data.triggerLevelV,
           triggerHysteresisV: data.triggerHysteresisV,
           triggerSource: data.triggerSource,

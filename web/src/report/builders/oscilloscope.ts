@@ -1,5 +1,6 @@
 import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordResponse } from '../../api/client'
-import { scopeChannelReadings } from '../../scope/readings'
+import { mathReadings, scopeChannelReadings } from '../../scope/readings'
+import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -130,6 +131,29 @@ export function scopeMeasurementSections(
         ...blocks.map((b) => b.readings.find((r) => r.label === label)?.value ?? '—'),
       ]),
     })
+  }
+
+  // The math channel is a table of its own rather than a column beside the channels', because its
+  // numbers are frequently not in the same unit: A × B is V² and a derivative V/s, so a shared
+  // "Reading" column would put three units in one row. Its heading carries the expression and the
+  // unit, which is where a reader of the paper finds that out.
+  const math = record.math
+  if (math) {
+    const readings = mathReadings(math)
+    if (readings.length > 0) {
+      sections.push({
+        kind: 'table',
+        title: `Math — ${mathAxisLabel(math.operation as ScopeMathOperation)}`,
+        headers: ['Reading', 'Value'],
+        cells: readings.map((reading) => [reading.label, reading.value]),
+      })
+      if (math.clampedSamples > 0) {
+        sections.push({
+          kind: 'paragraph',
+          text: `${math.clampedSamples.toLocaleString()} samples of the ratio railed at ±1000, where the denominator passes through zero — so every figure in that table is a reading of the clamp as much as of the ratio.`,
+        })
+      }
+    }
   }
 
   const facts: ReportRow[] = [

@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import ReadingValue from './ReadingValue.vue'
 import { useOscilloscope } from '../composables/useOscilloscope'
-import { residualReadings, scopeChannelReadings } from '../scope/readings'
+import { mathReadings, residualReadings, scopeChannelReadings } from '../scope/readings'
+import { mathAxisLabel, type ScopeMathOperation } from '../scope/math'
 import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
@@ -82,6 +83,24 @@ const residualBlocks = computed(() =>
     .filter((block) => block.readings.length > 0),
 )
 
+/**
+ * The math channel's readings, and what to call them.
+ *
+ * <p>The <b>gated</b> set when the cursors are gating, unlike the residual's: a difference, a
+ * product or an integral over a stretch of the record is a reading of that stretch the same way a
+ * channel's own is, where the residual's fit belongs to the whole drawn window.</p>
+ *
+ * <p>The heading carries the expression <i>and</i> its unit, because that is where a reader finds
+ * out these figures are not volts.</p>
+ */
+const mathBlock = computed(() => {
+  const math = record.value?.math
+  if (!math) return null
+  const readings = mathReadings(math, gated.value ? 'gate' : 'window')
+  if (!readings.length) return null
+  return { label: mathAxisLabel(math.operation as ScopeMathOperation), clamped: math.clampedSamples, readings }
+})
+
 /** The gate as the heading quotes it, so the reader can see which stretch the figures are of. */
 const gateNote = computed(() => {
   const window = gate.value
@@ -143,6 +162,27 @@ const recordFacts = computed(() => {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div
+        v-if="mathBlock"
+        class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800"
+      >
+        <div class="mb-1 text-[11px] font-medium text-violet-600 dark:text-violet-400">
+          {{ mathBlock.label }}
+        </div>
+        <table class="w-full text-left text-[11px]">
+          <tbody>
+            <tr v-for="reading in mathBlock.readings" :key="`math-${reading.label}`">
+              <td class="pr-2" :title="reading.title">{{ reading.label }}</td>
+              <td><ReadingValue :text="reading.value" /></td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="mathBlock.clamped > 0" class="mt-1 text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+          {{ mathBlock.clamped.toLocaleString() }} samples railed at ±1000, so every figure above is
+          a reading of the clamp as much as of the ratio.
+        </p>
       </div>
 
       <div v-if="recordFacts" class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">

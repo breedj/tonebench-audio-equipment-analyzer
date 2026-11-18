@@ -139,14 +139,28 @@ public static class OscilloscopeEndpoints
             double? gateFromS,
             double? gateToS,
             bool? residual,
+            string? math,
             int? maxColumns) =>
         {
             if (runner.Record is not { } record)
                 return Results.NoContent();
 
+            // Asked for by name rather than always computed, like the residual: a math trace costs
+            // a pass over the window per fetch, and Off is both the default and the commonest
+            // state. An unknown name is a bad request rather than a silent Off -- a trace quietly
+            // absent is exactly how a display setting comes to look broken.
+            WaveformOperation? operation = null;
+            if (!string.IsNullOrWhiteSpace(math) && !math.Equals("Off", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!EnumParsing.TryParse(math, WaveformOperation.AMinusB, out var parsed, out var mathError))
+                    return Results.BadRequest(mathError);
+                operation = parsed;
+            }
+
             int columns = Math.Clamp(maxColumns ?? ScopeFrameBuilder.DefaultMaxColumns, 1, 4096);
 
             var channels = new List<ScopeChannelSlice>(record.ChannelCount);
+            ScopeFrameSlice? geometry = null;
             for (int ch = 0; ch < record.ChannelCount; ch++)
             {
                 if (!WasCaptured(runner.LastRequest, ch))
@@ -155,6 +169,7 @@ public static class OscilloscopeEndpoints
                 var slice = fromS is { } from && toS is { } to
                     ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
                     : ScopeFrameBuilder.Overview(record, ch, columns);
+                geometry ??= slice;
 
                 // The gate rides on the same fetch as the picture it qualifies, which is the
                 // point of it being a parameter here rather than a second route: two round trips
@@ -191,6 +206,33 @@ public static class OscilloscopeEndpoints
                             left.ResidualPercent)));
             }
 
+            // One math trace per record rather than one per channel, because it is not a channel:
+            // it combines them. Built off the first drawn slice's geometry, which is every slice's
+            // -- the server cuts them all from one window -- so the derived trace shares the x
+            // array the waveforms are drawn against.
+            ScopeMathSlice? mathSlice = null;
+            if (operation is { } op && geometry is { } reference)
+            {
+                bool haveA = !WaveformMath.NeedsA(op) || WasCaptured(runner.LastRequest, 0);
+                bool haveB = !WaveformMath.NeedsB(op) || WasCaptured(runner.LastRequest, 1);
+                var built = haveA && haveB ? ScopeFrameBuilder.MathTrace(record, reference, op, columns) : null;
+
+                if (built is not null)
+                {
+                    mathSlice = new ScopeMathSlice(
+                        built.Operation.ToString(),
+                        built.Unit.ToString(),
+                        built.Samples,
+                        built.Columns?.Select(c => (float)c.Min).ToArray(),
+                        built.Columns?.Select(c => (float)c.Max).ToArray(),
+                        built.Measurements,
+                        gateFromS is { } mathGateFrom && gateToS is { } mathGateTo
+                            ? ScopeFrameBuilder.MathGate(record, op, mathGateFrom, mathGateTo)
+                            : null,
+                        built.ClampedSamples);
+                }
+            }
+
             return Results.Ok(new ScopeRecordResponse(
                 record.SampleRateHz,
                 record.FrameCount,
@@ -199,7 +241,8 @@ public static class OscilloscopeEndpoints
                 record.Span.ToS,
                 record.Spliced,
                 record.Forced,
-                channels));
+                channels,
+                mathSlice));
         });
     }
 
@@ -324,6 +367,12 @@ public sealed record ScopeResidualSlice(
 /// <param name="Spliced">The record spans a dropped chunk or block.</param>
 /// <param name="Forced">Auto's timeout took it; nothing crossed the level.</param>
 /// <param name="Channels">One slice per captured channel.</param>
+/// <param name="Math">
+/// The math channel, when the request asked for one — a waveform derived from the two captured
+/// ones, on the same geometry as the slices above. Null when it asked for none, and null when the
+/// operation needs a channel this measurement does not capture, which the screen says in words
+/// rather than drawing a trace against nothing.
+/// </param>
 public sealed record ScopeRecordResponse(
     double SampleRateHz,
     int FrameCount,
@@ -332,7 +381,35 @@ public sealed record ScopeRecordResponse(
     double ToS,
     bool Spliced,
     bool Forced,
-    IReadOnlyList<ScopeChannelSlice> Channels);
+    IReadOnlyList<ScopeChannelSlice> Channels,
+    ScopeMathSlice? Math = null);
+
+/// <summary>
+/// The math channel as the client draws it: the same raw-or-columns shape as the slices beside it,
+/// so every trace on the chart shares one x array.
+///
+/// <para><b>Its numbers are not necessarily volts</b>, which is why the unit travels with it. Every
+/// field of <see cref="ScopeSliceMeasurements"/> is named <c>...V</c> and for A − B that is right;
+/// for A × B, A / B, a derivative or an integral it is not, and a figure labelled volts on a scale
+/// that is not volts is the plausible wrong answer this app's rules exist to prevent.</para>
+/// </summary>
+/// <param name="Operation">Which operation, as its enum name.</param>
+/// <param name="Unit">What the numbers are in, as <see cref="WaveformMathUnit"/> spells it.</param>
+/// <param name="Samples">The derived waveform, or null when the window is decimated.</param>
+/// <param name="Min">Both extremes of every column, as the waveforms own are sent.</param>
+/// <param name="Max">The other one.</param>
+/// <param name="Measurements">Every reading of it, measured on the derived samples at full resolution.</param>
+/// <param name="Gated">The same over the cursor gate, or null when none was asked for or it named nothing.</param>
+/// <param name="ClampedSamples">How many samples A / B railed on; zero for every other operation.</param>
+public sealed record ScopeMathSlice(
+    string Operation,
+    string Unit,
+    float[]? Samples,
+    float[]? Min,
+    float[]? Max,
+    ScopeSliceMeasurements Measurements,
+    ScopeSliceMeasurements? Gated,
+    int ClampedSamples);
 
 /// <summary>
 /// The wire shape of a start. Mapped into <see cref="OscilloscopeRequest"/> field by field in

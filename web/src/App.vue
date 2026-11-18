@@ -76,6 +76,7 @@ import {
   type ScopeAxisWindow,
 } from './scope/display'
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
+import { mathQueryValue } from './scope/math'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2058,6 +2059,7 @@ const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
 const scopePersistence = ref(DEFAULT_SCOPE_DISPLAY.persistence)
 const scopeIntensityMode = ref(DEFAULT_SCOPE_DISPLAY.intensityMode)
 const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
+const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
 
 /**
  * The cursors — <b>session state, and deliberately not part of the display record</b>.
@@ -2155,6 +2157,7 @@ const {
   setWindow: setOscilloscopeWindow,
   setGate: setOscilloscopeGate,
   setResidual: setOscilloscopeResidual,
+  setMath: setOscilloscopeMath,
 } = useOscilloscope()
 
 function currentScopeDisplay() {
@@ -2172,6 +2175,7 @@ function currentScopeDisplay() {
     persistence: scopePersistence.value,
     intensityMode: scopeIntensityMode.value,
     intensityPalette: scopeIntensityPalette.value,
+    mathOperation: scopeMathOperation.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2200,6 +2204,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopePersistence.value = display.persistence
   scopeIntensityMode.value = display.intensityMode
   scopeIntensityPalette.value = display.intensityPalette
+  scopeMathOperation.value = display.mathOperation
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2234,6 +2239,7 @@ watch(
     scopePersistence,
     scopeIntensityMode,
     scopeIntensityPalette,
+    scopeMathOperation,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -2251,6 +2257,21 @@ watch(
   scopeShowResidual,
   (on) => {
     if (isOscilloscope.value) void setOscilloscopeResidual(on).catch(() => undefined)
+  },
+  { immediate: true },
+)
+
+/**
+ * And so is the math channel — the derived trace is computed server-side on the window being
+ * drawn and arrives on the same slice, so picking an operation is a fetch as well as a preference.
+ *
+ * <p><code>mathQueryValue</code> rather than the raw ref, so Off asks for nothing at all and the
+ * request is byte-identical to the one before any of this existed.</p>
+ */
+watch(
+  scopeMathOperation,
+  (operation) => {
+    if (isOscilloscope.value) void setOscilloscopeMath(mathQueryValue(operation)).catch(() => undefined)
   },
   { immediate: true },
 )
@@ -5969,6 +5990,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :persistence="scopePersistence"
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
+                  :math-operation="scopeMathOperation"
                   :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
@@ -5998,6 +6020,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:persistence="scopePersistence"
                   v-model:intensity-mode="scopeIntensityMode"
                   v-model:intensity-palette="scopeIntensityPalette"
+                  v-model:math-operation="scopeMathOperation"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

@@ -22,6 +22,14 @@ import {
   type ScopePersistence,
 } from '../scope/persistence'
 import { PALETTE_NAMES } from '../measurements/decay'
+import {
+  SCOPE_MATH_OPERATIONS,
+  mathDraws,
+  mathMissingChannels,
+  mathOption,
+  type ScopeMathOperation,
+  type ScopeMathOption,
+} from '../scope/math'
 import type { DecayPalette } from '../api/client'
 
 /**
@@ -47,6 +55,7 @@ const showResidual = defineModel<boolean>('showResidual', { required: true })
 const persistence = defineModel<ScopePersistence>('persistence', { required: true })
 const intensityMode = defineModel<ScopeIntensityMode>('intensityMode', { required: true })
 const intensityPalette = defineModel<DecayPalette>('intensityPalette', { required: true })
+const mathOperation = defineModel<ScopeMathOperation>('mathOperation', { required: true })
 
 /** The colour controls only mean something once something is being kept. */
 const persistenceOn = computed(() => persistenceDraws(persistence.value))
@@ -168,6 +177,43 @@ const captured = computed(() => {
     right: channels.some((c) => c.channel === 1),
   }
 })
+
+
+/** The entry for the chosen operation, which carries its own label, unit and explanation. */
+const math = computed(() => mathOption(mathOperation.value))
+
+/** The groups, in the table's own order, so twelve entries read as four short lists. */
+const mathGroups = computed(() => {
+  const groups: { name: string; options: ScopeMathOption[] }[] = []
+  for (const option of SCOPE_MATH_OPERATIONS) {
+    if (!option.group) continue
+    const last = groups.at(-1)
+    if (last && last.name === option.group) last.options.push(option)
+    else groups.push({ name: option.group, options: [option] })
+  }
+  return groups
+})
+
+/**
+ * Which inputs the chosen operation needs and is not getting.
+ *
+ * <p>The server answers with no trace at all in that case, which is the honest result — an
+ * operation computed against an array of zeros would draw A itself and label it A − B — but an
+ * absent trace with nothing beside it reads as a broken setting, so the rail says which box to
+ * tick.</p>
+ */
+const mathMissing = computed(() =>
+  mathMissingChannels(mathOperation.value, captured.value.left, captured.value.right),
+)
+
+/**
+ * How many samples A ÷ B railed on, when it did.
+ *
+ * <p>Reported rather than hidden, which is the whole reason the count comes back from the server:
+ * a ratio trace spends every zero crossing of its denominator at the limit, so one that is mostly
+ * at ±1000 is a picture of the clamp and its reader has to be told.</p>
+ */
+const mathClamped = computed(() => record.value?.math?.clampedSamples ?? 0)
 
 /**
  * The extremes of what is <b>drawn</b> — exact even on a decimated slice. See scope/measurements.ts.
@@ -446,6 +492,42 @@ function onVoltsPerDivisionChange(event: Event) {
     </p>
   </CollapsibleSection>
 
+
+  <CollapsibleSection title="Math" size="xs">
+    <!-- The derived waveform is computed server-side on the samples, never on the drawn columns:
+         the difference of two envelopes is not the envelope of a difference, and on a differential
+         pair that error is the entire reading. See scope/math.ts. -->
+    <label class="tb-field">
+      Channel
+      <select v-model="mathOperation" class="tb-input" :title="math.title">
+        <option value="Off">Off</option>
+        <optgroup v-for="group in mathGroups" :key="group.name" :label="group.name">
+          <option v-for="option in group.options" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </optgroup>
+      </select>
+    </label>
+
+    <template v-if="mathDraws(mathOperation)">
+      <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        A is the left input and B the right. {{ math.title }}
+      </p>
+      <p v-if="mathMissing.length" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+        Nothing to draw: this needs the {{ mathMissing.join(' and the ') }} input, which this
+        measurement is not capturing. Tick it under Acquisition ▸ Channels.
+      </p>
+      <p v-else-if="mathClamped > 0" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+        {{ mathClamped.toLocaleString() }} samples railed at ±1000 — the denominator passes through
+        zero there. A ratio is only meaningful where B is a settled level; for a transfer function
+        use the frequency-response measurement.
+      </p>
+      <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        Drawn in violet against its own axis on the right, because a derived quantity is frequently
+        not in volts and, even when it is, routinely far smaller than what it came from.
+      </p>
+    </template>
+  </CollapsibleSection>
 
   <CollapsibleSection title="Persistence" size="xs">
     <!-- A history of a *display*, not of a capture: the setting is stored with the measurement, and

@@ -92,6 +92,16 @@ const gate = shallowRef<CursorGate | null>(null)
 const wantResidual = ref(false)
 
 /**
+ * Which math channel the fetch asks for, or null for none.
+ *
+ * <p>The fourth thing a fetch is keyed on, and here for the gate's and the residual's reason: the
+ * derived trace rides on the <em>same</em> request as the waveforms it was derived from, so the
+ * math trace on screen is always of the record under it. Off is null rather than the string, so
+ * the commonest state asks for nothing.</p>
+ */
+const wantMath = shallowRef<string | null>(null)
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -128,7 +138,7 @@ async function fetchRecord(force = false): Promise<void> {
   const token = ++fetchToken
   try {
     const next = await api.getOscilloscopeRecord(
-      window.value ?? undefined, maxColumns.value, gate.value ?? undefined, wantResidual.value)
+      window.value ?? undefined, maxColumns.value, gate.value ?? undefined, wantResidual.value, wantMath.value)
     if (token !== fetchToken) return
     record.value = next
     fetchedFor = taken
@@ -259,6 +269,20 @@ export function useOscilloscope() {
     await fetchRecord(true)
   }
 
+  /**
+   * Picks the math channel, or null for none, and re-fetches so the derived trace arrives with the
+   * record it was derived from.
+   *
+   * <p>Re-fetches at once for the gate's reason: a stopped scope has no next poll, and changing
+   * the operation on a held record is the commonest way this is used.</p>
+   */
+  async function setMath(operation: string | null): Promise<void> {
+    const next = operation || null
+    if (wantMath.value === next) return
+    wantMath.value = next
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -328,6 +352,7 @@ export function useOscilloscope() {
     fetchRecord,
     setWindow,
     setGate,
+    setMath,
     setResidual,
     start,
     retune,

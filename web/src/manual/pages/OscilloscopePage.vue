@@ -212,6 +212,13 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Math</td>
+          <td>
+            A waveform derived from the two captured ones — see <strong>The math channel</strong>
+            below. Drawn in violet against its own axis on the right.
+          </td>
+        </tr>
+        <tr>
           <td>Persistence</td>
           <td>
             How many records the chart keeps — see <strong>Persistence</strong> below. Off draws
@@ -317,6 +324,117 @@ const { showPage } = useManual()
         Measure DC with a multimeter.
       </p>
     </div>
+
+    <h2>The math channel</h2>
+    <p>
+      <strong>Math</strong> draws one more trace, computed from the two captured waveforms. A is the
+      left input and B the right. The derived trace is violet and has <strong>its own axis on the
+      right</strong>, which is not a nicety: a differential reading is routinely a thousandth of
+      what it came from — the millivolts of difference between two ten-volt signals — and on the
+      waveforms’ own axis that is a flat line on zero. Several of the operations are not in volts at
+      all, and the axis says which unit it is in.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Operation</th>
+          <th>Unit</th>
+          <th>What it is for</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A − B, B − A</td>
+          <td>V</td>
+          <td>
+            A <strong>software differential probe</strong>, and the one most of this exists for:
+            what is across a transformer winding, a bridged output, a current shunt or a ground
+            loop, with neither end of it at ground. Both polarities are offered because a
+            differential reading has a sign and there is no second operation to chain.
+          </td>
+        </tr>
+        <tr>
+          <td>A + B</td>
+          <td>V</td>
+          <td>Twice the common-mode part of a differential pair, and the sum of a push-pull stage’s two halves.</td>
+        </tr>
+        <tr>
+          <td>A × B</td>
+          <td>V²</td>
+          <td>
+            Instantaneous power, where one channel measures a voltage and the other the current
+            through a shunt — divide by the shunt’s ohms to read watts. The trace itself is in V²,
+            because this screen does not know that one of your inputs is a current.
+          </td>
+        </tr>
+        <tr>
+          <td>A ÷ B</td>
+          <td>—</td>
+          <td>
+            A ratio, <strong>railed at ±1000</strong>. Only meaningful where B is a settled level:
+            against two AC waveforms the denominator passes through zero every cycle and the trace
+            rails there, which the rail counts and reports. For a transfer function use the
+            frequency-response measurement, which is the right tool for it.
+          </td>
+        </tr>
+        <tr>
+          <td>−A, −B</td>
+          <td>V</td>
+          <td>One input inverted, for comparing an inverting stage against its own input.</td>
+        </tr>
+        <tr>
+          <td>dA/dt, dB/dt</td>
+          <td>V/s</td>
+          <td>
+            The slope — a <strong>slew-rate trace</strong>, written in V/µs at anything a real
+            amplifier does. Read the caveat below before quoting a figure off it.
+          </td>
+        </tr>
+        <tr>
+          <td>∫A dt, ∫B dt</td>
+          <td>V·s</td>
+          <td>
+            The running integral, which is a flux or a charge. The window’s mean is removed first,
+            so the trace starts at zero and is the AC part’s integral rather than an absolute one.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      The <strong>Measurements</strong> panel gives the derived trace the same reading set every
+      waveform gets — peak to peak, RMS, period, rise time and the rest — written in its own unit.
+      Peak to peak of A − B is exactly what a differential probe is for.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>A derivative is honest about the analyzer, not about the DUT.</strong>
+        Differentiation lifts the top of the band by 6 dB per octave, which at 192 kS/s is some
+        73 dB over 20 Hz — so on a quiet signal the trace is a picture of the quantisation noise
+        rather than of the waveform. And the fastest edge this analyzer can produce rises in about
+        4 µs against a 5.2 µs sample interval, so a slope read off a fast edge is <em>its</em> slew
+        rate unless the DUT is slower than roughly 1 V/µs. For a real figure, drive the DUT and the
+        right input from the same generator and compare, or use the power-bandwidth method on
+        <strong>THD vs frequency</strong>, where slew limiting reads as distortion climbing as
+        roughly f².
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>The derived waveform is computed on the samples, never on what is drawn.</strong>
+        Where a window is wide the chart draws both extremes of each column rather than every
+        sample, and the difference of two <em>envelopes</em> is not the envelope of a difference —
+        the two extremes need not even fall at the same instant. Measured on a pair of 1 V sines a
+        millivolt apart, subtracting the envelopes gives a flat −1 mV where the real difference is
+        a 3 kHz sine of ±1 mV: the wrong sign, the wrong shape, and no minimum at all. So the whole
+        operation is run on the analyzer over the window’s own samples, and the figures beside it
+        are measurements of that.
+      </p>
+    </div>
+    <p>
+      An operation that needs an input the measurement is not capturing draws nothing and says so,
+      rather than computing against silence and labelling the result A − B. Tick the input under
+      <strong>Acquisition ▸ Channels</strong>.
+    </p>
 
     <h2>Persistence</h2>
     <p>

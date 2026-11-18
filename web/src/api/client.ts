@@ -1485,6 +1485,33 @@ export interface ScopeResidualSlice {
   residualPercent: number | null
 }
 
+/**
+ * The math channel as the chart draws it — a waveform derived from the two captured ones.
+ *
+ * <p>Mirrors <code>Tonebench.App.Endpoints.ScopeMathSlice</code>, and like the residual it carries
+ * no geometry of its own: the <code>x0</code>, <code>dx</code> and raw-or-columns shape are the
+ * slices', which is what keeps every trace on one x array.</p>
+ *
+ * <p><b>Its numbers are not necessarily volts</b>, which is why the unit travels with it. The
+ * readings arrive in the same record every channel's do, whose fields are all named
+ * <code>...V</code> — right for A − B and wrong for A × B, A / B, a derivative or an integral.</p>
+ */
+export interface ScopeMathSlice {
+  /** The operation, as its server-side name: AMinusB, ATimesB, DerivativeA and the rest. */
+  operation: string
+  /** Volt, VoltSquared, Ratio, VoltPerSecond or VoltSecond. */
+  unit: string
+  samples: number[] | null
+  min: number[] | null
+  max: number[] | null
+  /** Every reading of it, measured on the derived samples at full resolution. */
+  measurements: ScopeSliceMeasurements
+  /** The same over the cursor gate, or null when none was asked for or it named nothing. */
+  gated: ScopeSliceMeasurements | null
+  /** How many samples A / B railed on at ±1000; zero for every other operation. */
+  clampedSamples: number
+}
+
 export interface ScopeChannelSlice {
   channel: number
   /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
@@ -1535,6 +1562,15 @@ export interface ScopeRecordResponse {
   spliced: boolean
   forced: boolean
   channels: ScopeChannelSlice[]
+  /**
+   * The math channel, when the fetch asked for one.
+   *
+   * <p>One per record rather than one per channel, because it is not a channel: it combines them.
+   * Null when the fetch asked for none, and null when the operation needs an input this
+   * measurement does not capture — which the display rail says in words rather than leaving a
+   * trace quietly absent.</p>
+   */
+  math?: ScopeMathSlice | null
 }
 
 export interface CrosstalkStarted {
@@ -1705,6 +1741,8 @@ export interface OscilloscopeParameters {
   chartPersistence?: string | null
   chartIntensityMode?: string | null
   chartIntensityPalette?: string | null
+  /** Which math channel the chart drew — a WaveformOperation name, or Off. See scope/math.ts. */
+  chartMathOperation?: string | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null
@@ -4833,6 +4871,7 @@ export const api = {
     maxColumns?: number,
     gate?: { fromS: number; toS: number },
     residual?: boolean,
+    math?: string | null,
   ) => {
     const query = new URLSearchParams()
     if (window) {
@@ -4847,6 +4886,9 @@ export const api = {
     }
     // Asked for rather than always sent: it costs a least-squares sine fit per channel per fetch.
     if (residual) query.set('residual', 'true')
+    // The same, and Off is absent rather than the string "Off", so the commonest state puts
+    // nothing on the query at all.
+    if (math) query.set('math', math)
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 
     const suffix = query.size > 0 ? `?${query}` : ''

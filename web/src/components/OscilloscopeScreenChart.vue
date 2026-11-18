@@ -49,6 +49,14 @@ import {
 } from '../scope/persistence'
 import type { DecayPalette } from '../api/client'
 import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
+import {
+  formatMathValue,
+  mathAxisLabel,
+  mathDraws,
+  mathLabel,
+  mathUnitOf,
+  type ScopeMathOperation,
+} from '../scope/math'
 
 /**
  * The oscilloscope screen's chart — a waveform on a <b>linear</b> time axis with the trigger at
@@ -120,6 +128,14 @@ const props = withDefaults(defineProps<{
   intensityMode?: ScopeIntensityMode
   intensityPalette?: DecayPalette
   /**
+   * Which math channel to draw, and the derived trace itself. See scope/math.ts.
+   *
+   * <p>The operation decides the axis label and how the readings are written; the trace arrives on
+   * the record, built server-side on the same geometry as the waveforms so every series on the
+   * chart shares one x array.</p>
+   */
+  mathOperation?: ScopeMathOperation
+  /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
    * practice the open measurement. It joins the signature rather than being watched for, so a
    * switch cannot be forgotten at a call site.
@@ -133,6 +149,7 @@ const props = withDefaults(defineProps<{
   persistence: 'Off',
   intensityMode: 'Single',
   intensityPalette: 'Jet',
+  mathOperation: 'Off',
   persistenceKey: 0,
 })
 
@@ -204,6 +221,20 @@ interface ChannelSeries {
   raw: boolean
   /** True for the residual, which is drawn thinner and dashed so it is never read as a trace. */
   residual?: boolean
+  /**
+   * Which y scale it is drawn against. The waveforms and the residual share <code>y</code>, the
+   * volts axis; the math trace has <b>its own</b>, and that is a decision rather than a
+   * convenience.
+   *
+   * <p>Two reasons, and either alone settles it. A derived quantity is frequently not in volts at
+   * all — A × B is V², a derivative V/s — so drawing it against a volts axis would put a figure
+   * on a scale that means something else. And even in volts it is routinely orders smaller than
+   * what it came from: a differential probe's whole point is the millivolts of difference between
+   * two ten-volt signals, which on the waveforms' own axis is a flat line on zero.</p>
+   */
+  scale?: string
+  /** True for the math trace, which is excluded from the haze and from the band's volts reading. */
+  math?: boolean
 }
 
 /**
@@ -214,6 +245,19 @@ interface ChannelSeries {
  * dashing is what says it is derived rather than measured.</p>
  */
 const RESIDUAL_COLORS = ['#93c5fd', '#fdba74'] as const
+
+/**
+ * The math trace's colour.
+ *
+ * <p>A third hue rather than a shade of either channel's, because it belongs to neither — A − B
+ * is as much the right input's as the left's, and painting it blue would read as a second left
+ * trace. Violet is the app's own third accent, and the one the phase curves already use for a
+ * quantity drawn against its own axis.</p>
+ */
+const MATH_COLOR = '#a855f7'
+
+/** The scale the math trace is drawn against, which is its own. See ChannelSeries.scale. */
+const MATH_SCALE = 'm'
 
 /** The x array every series shares, in the milliseconds this chart plots. */
 function sliceXMs(slice: ScopeChannelSlice, count: number): number[] {
@@ -294,8 +338,41 @@ const series = computed(() => {
     }
   }
 
+  // The math trace last, so it draws over the waveforms it was derived from -- and on its own
+  // scale, which is what keeps a millivolt difference between two ten-volt signals visible.
+  const math = record?.math
+  if (math && mathDraws(props.mathOperation)) {
+    const length = math.samples?.length ?? Math.min(math.max?.length ?? 0, math.min?.length ?? 0)
+    const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
+      const out = new Array<number | null>(count).fill(null)
+      for (let i = 0; i < Math.min(length, count); i++) out[i] = values?.[i] ?? null
+      return out
+    }
+    const raw = math.samples !== null
+    channels.push({
+      index: -1,
+      label: mathLabel(props.mathOperation),
+      color: MATH_COLOR,
+      line: raw ? pad(math.samples) : pad(math.max),
+      band: raw ? null : pad(math.min),
+      raw,
+      scale: MATH_SCALE,
+      math: true,
+    })
+  }
+
   return { xMs, channels }
 })
+
+/**
+ * Whether a math trace is on the chart.
+ *
+ * <p>Both halves: the rail has to ask for one <em>and</em> the server has to have been able to
+ * build it — it answers null where the operation needs an input this measurement does not
+ * capture. So the axis appears with the trace rather than with the setting, and an axis labelled
+ * for a quantity nothing is drawing never takes 72 px off the plot.</p>
+ */
+const mathDrawn = computed(() => mathDraws(props.mathOperation) && !!props.record?.math)
 
 /** The window the chart shows, in the milliseconds it plots. */
 const xWindowMs = computed(() => ({ min: toChartMs(props.timeFromS), max: toChartMs(props.timeToS) }))
@@ -376,8 +453,10 @@ function minMaxBandPlugin(): uPlot.Plugin {
               const hi = channel.line[i]
               if (lo === null || hi === null) continue
               const x = u.valToPos(xMs[i], 'x', true)
-              path.moveTo(x, u.valToPos(lo, 'y', true))
-              path.lineTo(x, u.valToPos(hi, 'y', true))
+              // The channel's own scale: the math trace is not on the volts axis, and reading its
+              // band against that one would draw it somewhere the trace is not.
+              path.moveTo(x, u.valToPos(lo, channel.scale ?? 'y', true))
+              path.lineTo(x, u.valToPos(hi, channel.scale ?? 'y', true))
             }
 
             ctx.strokeStyle = channel.color
@@ -647,9 +726,11 @@ function accumulateIntensity() {
   const signature = currentIntensitySignature(u)
   const { xMs, channels } = series.value
 
-  // The residual is a derived trace and is left out: accumulating it would put a second, fainter
-  // waveform into a picture whose whole subject is how often the measured one passes somewhere.
-  const measured = channels.filter((channel) => !channel.residual)
+  // The residual and the math trace are derived and are left out: accumulating one would put a
+  // second, fainter waveform into a picture whose whole subject is how often the measured one
+  // passes somewhere -- and the math trace is not even on the volts scale this reads positions
+  // against, so its hits would land at the wrong heights.
+  const measured = channels.filter((channel) => !channel.residual && !channel.math)
   if (!measured.length || !xMs.length) return
 
   let layers = intensityLayers.value
@@ -809,6 +890,11 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       // an x scale that fallback is dead code, since uPlot only passes null with no data yet.
       x: { time: false, auto: false, range: (_u, min, max) => [min ?? xWindowMs.value.min, max ?? xWindowMs.value.max] },
       y: { auto: false, range: (_u, min, max) => [min ?? yWindow.value.bottomV, max ?? yWindow.value.topV] },
+      // The math trace auto-ranges, which is the honest answer for a derived quantity whose
+      // magnitude nobody knows in advance -- and unlike the volts axis there is no V/div ladder it
+      // could be a rung of. uPlot ranges an auto scale over what is visible in x, so it follows a
+      // zoom the way a scope's own math channel does.
+      [MATH_SCALE]: { auto: true },
     },
     axes: [
       {
@@ -828,11 +914,31 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         ticks: { stroke: t.grid, width: t.gridWidth },
         values: (_u, splits) => splits.map((v) => formatVolts(v, props.voltsPerDivision)),
       },
+      // The math axis, on the right and only while there is a trace on it -- an axis labelled for
+      // a quantity nothing is drawing takes 64 px off the plot and says nothing.
+      ...(mathDrawn.value
+        ? [
+            {
+              scale: MATH_SCALE,
+              side: 1 as const,
+              label: mathAxisLabel(props.mathOperation),
+              size: 72,
+              stroke: MATH_COLOR,
+              // No grid of its own: a second set of horizontals over the first would make both
+              // unreadable, and the graticule belongs to the volts axis the waveforms are on.
+              grid: { show: false },
+              ticks: { stroke: t.grid, width: t.gridWidth },
+              values: (_u: uPlot, splits: number[]) =>
+                splits.map((v) => formatMathValue(v, mathUnitOf(props.mathOperation))),
+            },
+          ]
+        : []),
     ],
     series: [
       { label: 'Time' },
       ...channels.map((channel) => ({
         label: channel.label,
+        scale: channel.scale,
         stroke: channel.color,
         // Thinner and dashed for the residual: it is derived from the trace beside it rather than
         // measured, and at a quiet DUT it sits on the zero line where a solid line of the same
@@ -1369,7 +1475,11 @@ watch(
     () => props.thickLines,
     () => props.showDataPoints,
     () => scopeTimeScale(spanMs.value).unit,
-    () => series.value.channels.map((c) => `${c.index}:${c.raw}:${c.residual === true}`).join(','),
+    // The math operation, because its axis label and tick formatter are baked in at construction
+    // the way the time axis's unit is -- two operations both drawn would otherwise keep the first
+    // one's label.
+    () => `${mathDrawn.value}:${props.mathOperation}`,
+    () => series.value.channels.map((c) => `${c.index}:${c.raw}:${c.residual === true}:${c.math === true}`).join(','),
   ],
   rebuild,
 )

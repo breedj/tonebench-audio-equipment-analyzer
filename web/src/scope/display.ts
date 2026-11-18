@@ -5,6 +5,7 @@ import {
   type ScopeIntensityMode,
   type ScopePersistence,
 } from './persistence'
+import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
 import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
@@ -64,6 +65,14 @@ export interface ScopeDisplay {
   intensityMode: ScopeIntensityMode
   /** Which colour map, when it is one — the decay surfaces' own palettes, so a colour means one thing app-wide. */
   intensityPalette: import('../api/client').DecayPalette
+  /**
+   * Which math channel is drawn — a waveform derived from the two captured ones. See scope/math.ts.
+   *
+   * <p>A display preference rather than part of the measurement, so it is stored with the type and
+   * the derived trace is recomputed whenever the record is drawn: that is what lets the operation
+   * be changed on a reopened capture, where a stored derived waveform could not be.</p>
+   */
+  mathOperation: ScopeMathOperation
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -113,6 +122,11 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   persistence: 'Off',
   intensityMode: 'Single',
   intensityPalette: 'Jet',
+  /**
+   * Off by default, and asked for rather than always sent: a math trace is a pass over the window
+   * on every fetch, and most of what a scope is pointed at wants the two waveforms themselves.
+   */
+  mathOperation: 'Off',
   annotations: [],
 })
 
@@ -191,6 +205,11 @@ export function scopeDisplayFromParams(
     (PALETTE_NAMES as string[]).includes(stored.chartIntensityPalette)
   )
     display.intensityPalette = stored.chartIntensityPalette as import('../api/client').DecayPalette
+  if (
+    typeof stored.chartMathOperation === 'string' &&
+    SCOPE_MATH_OPERATIONS.some((o) => o.value === stored.chartMathOperation)
+  )
+    display.mathOperation = stored.chartMathOperation as ScopeMathOperation
 
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
@@ -218,5 +237,6 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartPersistence: display.persistence,
     chartIntensityMode: display.intensityMode,
     chartIntensityPalette: display.intensityPalette,
+    chartMathOperation: display.mathOperation,
   }
 }

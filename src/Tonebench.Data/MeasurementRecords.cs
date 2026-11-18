@@ -1293,6 +1293,18 @@ public sealed record OscilloscopeParameters(
     string? ChartIntensityMode = null,
     /// <summary>Which colour map, when it is one. The decay surfaces' own palette names.</summary>
     string? ChartIntensityPalette = null,
+    /// <summary>
+    /// The math channel the chart drew — a waveform derived from the two captured ones, named by
+    /// its <c>WaveformOperation</c> (<c>AMinusB</c> and the rest), or <c>Off</c>.
+    ///
+    /// <para>A display preference like the pair above, so it is stored with the measurement and not
+    /// with a result: the derived trace is recomputed from the stored samples whenever it is drawn,
+    /// which is what lets the operation be changed on a reopened capture. <b>Its numbers are not
+    /// necessarily volts</b> — A × B is V², A / B a ratio, a derivative V/s and an integral V·s —
+    /// so the unit is derived from the operation rather than stored beside it, and there is one
+    /// definition of which is which.</para>
+    /// </summary>
+    string? ChartMathOperation = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

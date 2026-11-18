@@ -210,6 +210,44 @@ const { showPage } = useManual()
       position, a Clear, or a new run.
     </p>
 
+    <h3>Records are aligned between samples before they are combined</h3>
+
+    <p>
+      The trigger is interpolated — the analyzer reports where the crossing really was, to a
+      fraction of a sample — but a record has to <em>start</em> on a whole sample, so every capture
+      ends up with its trigger a different fraction of a sample from its own first frame. One record
+      does not care. Combining them does, and nothing about the symptom points at the cause: a
+      residual offset spread over half a sample attenuates a sinusoid by
+      <strong>0.9 dB at a quarter of the sample rate and 3.6 dB at 0.95 of Nyquist</strong>, which
+      reads as a <em>smaller</em> waveform rather than a misaligned one.
+    </p>
+
+    <p>
+      So each record after the first is read across onto the first one's fractional grid, with the
+      same windowed-sinc reconstruction the <strong>sin(x)/x</strong> drawing uses. Measured on a
+      60 kHz tone at 192 kS/s — three and a bit samples a period — averaging sixteen records costs
+      <strong>0.013 dB</strong> of amplitude, where without the alignment it would cost 1.44. Two consequences
+      worth knowing: the <strong>first</strong> record of an accumulation is used exactly as
+      captured, so a single capture is never interpolated and its figures are readings of the
+      samples themselves; and the correction leaves a small error in the sixteen samples at each
+      <em>end</em> of an averaged record, where there is no signal outside to read — the same fact
+      the filter's padding is about. Keep an edge you are timing away from the very edges of the
+      window.
+    </p>
+
+    <p>
+      <strong>This is the useful half of equivalent-time sampling, and the other half would buy
+      nothing here.</strong> A bench scope interleaves records taken at different fractional offsets
+      to synthesise a sample rate above its own, which works because its sampler is slower than its
+      front end. On this analyzer the band limit <em>is</em> the ADC's own decimation filter, applied
+      before the samples exist — so there is nothing between the samples that the samples do not
+      already determine, and nothing above Nyquist left to recover. Interleaving would add noise
+      averaging that plain averaging already gives, and no information at all. Measured: reading one
+      record between its samples agrees with a record genuinely taken at that offset to within 1 %
+      of full scale at 3.2 samples a period, which is the reconstruction's own residue that close to
+      Nyquist.
+    </p>
+
     <h3>An envelope is not a waveform</h3>
 
     <p>

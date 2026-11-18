@@ -74,6 +74,16 @@ public sealed class OscilloscopeRunner(
     private RecordAccumulator? _accumulator;
 
     /// <summary>
+    /// Puts every record of an accumulation on one fractional sample grid — see
+    /// <see cref="RecordAligner"/> for why an average needs that and what it costs without it.
+    ///
+    /// <para>Always present rather than null under <see cref="RecordAccumulation.Normal"/>, because
+    /// it is a no-op there: nothing asks it to align anything, and the first record of any
+    /// accumulation is handed back untouched either way.</para>
+    /// </summary>
+    private readonly RecordAligner _aligner = new();
+
+    /// <summary>
     /// Armed or capturing. A pure function of the phase field and nothing else — the mechanical
     /// coverage test builds an uninitialized runner and sets that field by reflection, so anything
     /// here that touched another field (or took a lock) would throw rather than answer.
@@ -299,6 +309,7 @@ public sealed class OscilloscopeRunner(
                 _accumulator = request.Accumulation == RecordAccumulation.Normal
                     ? null
                     : new RecordAccumulator(request.Accumulation, request.AverageCount);
+                _aligner.Reset();
             }
 
             _recordFrames = recordFrames;
@@ -358,6 +369,7 @@ public sealed class OscilloscopeRunner(
             // So the next run starts its average or its envelope from nothing, rather than from a
             // band swept before the user said to forget what was on screen.
             _accumulator = null;
+            _aligner.Reset();
         }
     }
 
@@ -437,7 +449,9 @@ public sealed class OscilloscopeRunner(
         _recordsTaken = 0;
         _mode = ScopeRunMode.Single;
         _accumulator = null;
+        _aligner.Reset();
     }
+
 
     private async Task RunAsync(OscilloscopeRequest request, int recordFrames, int preTriggerFrames, CancellationToken ct)
     {
@@ -496,6 +510,7 @@ public sealed class OscilloscopeRunner(
                 _accumulator = request.Accumulation == RecordAccumulation.Normal
                     ? null
                     : new RecordAccumulator(request.Accumulation, request.AverageCount);
+                _aligner.Reset();
             }
 
             engine.Arm(
@@ -516,7 +531,7 @@ public sealed class OscilloscopeRunner(
                         // assumption the whole accumulation rests on.
                         if (_accumulator is { } accumulator && !record.Spliced)
                         {
-                            var (channels, lower) = accumulator.Fold(record.Channels);
+                            var (channels, lower) = accumulator.Fold(_aligner.Align(record.Channels, record.TriggerPosition - record.FirstIndex));
                             record = record with
                             {
                                 Channels = channels,

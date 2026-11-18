@@ -62,6 +62,7 @@ import ChartDisplayPanel from './components/ChartDisplayPanel.vue'
 import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import OscilloscopeScreenChart from './components/OscilloscopeScreenChart.vue'
+import ScopeXyChart from './components/ScopeXyChart.vue'
 import ScopeOverviewStrip from './components/ScopeOverviewStrip.vue'
 import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
@@ -77,6 +78,7 @@ import {
 } from './scope/display'
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
 import { mathQueryValue } from './scope/math'
+import { scopeViewIsXy } from './scope/xy'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2060,6 +2062,10 @@ const scopePersistence = ref(DEFAULT_SCOPE_DISPLAY.persistence)
 const scopeIntensityMode = ref(DEFAULT_SCOPE_DISPLAY.intensityMode)
 const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
 const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
+const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
+
+/** True while the goniometer is the picture on screen rather than the waveforms. */
+const scopeXyShowing = computed(() => scopeViewIsXy(scopeChartView.value))
 
 /**
  * The cursors — <b>session state, and deliberately not part of the display record</b>.
@@ -2136,6 +2142,8 @@ function applyScopeGeneratorLive() {
   })
 }
 const scopeChart = ref<InstanceType<typeof OscilloscopeScreenChart> | null>(null)
+/** The goniometer, mounted only while it is the view on screen. See scope/xy.ts. */
+const scopeXyChart = ref<InstanceType<typeof ScopeXyChart> | null>(null)
 
 const {
   record: scopeRecord,
@@ -2158,6 +2166,7 @@ const {
   setGate: setOscilloscopeGate,
   setResidual: setOscilloscopeResidual,
   setMath: setOscilloscopeMath,
+  setXy: setOscilloscopeXy,
 } = useOscilloscope()
 
 function currentScopeDisplay() {
@@ -2176,6 +2185,7 @@ function currentScopeDisplay() {
     intensityMode: scopeIntensityMode.value,
     intensityPalette: scopeIntensityPalette.value,
     mathOperation: scopeMathOperation.value,
+    chartView: scopeChartView.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2205,6 +2215,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeIntensityMode.value = display.intensityMode
   scopeIntensityPalette.value = display.intensityPalette
   scopeMathOperation.value = display.mathOperation
+  scopeChartView.value = display.chartView
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2240,6 +2251,7 @@ watch(
     scopeIntensityMode,
     scopeIntensityPalette,
     scopeMathOperation,
+    scopeChartView,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -2272,6 +2284,19 @@ watch(
   scopeMathOperation,
   (operation) => {
     if (isOscilloscope.value) void setOscilloscopeMath(mathQueryValue(operation)).catch(() => undefined)
+  },
+  { immediate: true },
+)
+
+/**
+ * And so is the X–Y figure, which is the costliest of the three: it is the one slice that cannot
+ * be summarised, so it carries sample pairs rather than columns and only the view that draws it
+ * asks for it.
+ */
+watch(
+  scopeXyShowing,
+  (on) => {
+    if (isOscilloscope.value) void setOscilloscopeXy(on).catch(() => undefined)
   },
   { immediate: true },
 )
@@ -2424,6 +2449,9 @@ function onScopeAxisWindow(window: ScopeAxisWindow) {
  * already showing whenever a record arrives in it. The *token* inside the composable is what stops
  * a late answer winning; this is only about not asking.</p>
  */
+/** What the X-Y view asks for, the waveform chart's own width deciding it everywhere else. */
+const SCOPE_DEFAULT_COLUMNS = 1600
+
 let scopeWindowHandle: ReturnType<typeof setTimeout> | null = null
 let scopeWindowAsked: string | null = null
 
@@ -2438,6 +2466,30 @@ function requestScopeSlice(window: { fromS: number; toS: number } | null, column
     void setOscilloscopeWindow(window, columns).catch(() => undefined)
   }, 120)
 }
+
+/**
+ * The X–Y view's own window, which is the display rail's Time window and nothing else.
+ *
+ * <p>That is forced rather than chosen: the goniometer has no time axis, so it has no drag-zoom and
+ * no zoom bar, and <code>onScopeViewport</code> — the one thing that moves the fetch's window while
+ * the waveform is on screen — belongs to a chart that is not mounted. Without this the slice stays
+ * at whatever the waveform view last asked for and the rail's boxes do nothing, which reads as a
+ * broken control rather than as a missing one.</p>
+ *
+ * <p>So entering the view also <b>clears any zoom</b>: a drag belongs to the waveform, and leaving
+ * it set would make the boxes and the picture disagree about which stretch is drawn.</p>
+ */
+watch(
+  () => [scopeXyShowing.value, scopeTimeFromS.value, scopeTimeToS.value] as const,
+  ([showing, fromS, toS]) => {
+    if (!isOscilloscope.value || !showing) return
+    scopeViewWindow.value = null
+    const bounds = scopeRecordBounds.value
+    const whole = !bounds || (fromS <= bounds.fromS && toS >= bounds.toS)
+    requestScopeSlice(whole ? null : { fromS, toS }, SCOPE_DEFAULT_COLUMNS)
+  },
+  { immediate: true },
+)
 
 function onScopeViewport(view: import('./components/OscilloscopeScreenChart.vue').ScopeViewport) {
   if (!isOscilloscope.value) return
@@ -3204,7 +3256,7 @@ function chartOnScreen() {
     return activeResponseProjection.value === 'SPlane' ? responseSPlaneChart.value : responsePolarChart.value
   }
   if (isCrosstalk.value) return responseChart.value
-  if (isOscilloscope.value) return scopeChart.value
+  if (isOscilloscope.value) return scopeXyShowing.value ? scopeXyChart.value : scopeChart.value
   if (isOutputImpedance.value) return outputImpedanceChart.value
   if (isSweepKind.value) return sweepChart.value
   if (isImpulseResponse.value) {
@@ -5957,7 +6009,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 <p v-if="scopeRunError" class="text-xs text-red-600 dark:text-red-400">{{ scopeRunError }}</p>
                 <p v-else-if="scopeError" class="text-xs text-red-600 dark:text-red-400">{{ scopeError }}</p>
 
+                <!-- The zoom bar navigates a time axis, which the X-Y view does not have. -->
                 <ScopeOverviewStrip
+                  v-if="!scopeXyShowing"
                   :overview="scopeOverview"
                   :window="scopeStripWindow"
                   :bounds="scopeStripBounds"
@@ -5966,7 +6020,20 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @update:window="onScopeStripWindow"
                 />
 
+                <ScopeXyChart
+                  v-if="scopeXyShowing"
+                  ref="scopeXyChart"
+                  :record="scopeRecord"
+                  :volts-per-division="scopeVoltsPerDivision"
+                  :running="scopeRunning"
+                  :persistence="scopePersistence"
+                  :intensity-mode="scopeIntensityMode"
+                  :intensity-palette="scopeIntensityPalette"
+                  :persistence-key="currentTypeId ?? 0"
+                />
+
                 <OscilloscopeScreenChart
+                  v-else
                   ref="scopeChart"
                   v-model:annotations="shownAnnotations"
                   v-model:annotation-armed="annotationArmed"
@@ -6021,6 +6088,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:intensity-mode="scopeIntensityMode"
                   v-model:intensity-palette="scopeIntensityPalette"
                   v-model:math-operation="scopeMathOperation"
+                  v-model:chart-view="scopeChartView"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

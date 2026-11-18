@@ -102,6 +102,15 @@ const wantResidual = ref(false)
 const wantMath = shallowRef<string | null>(null)
 
 /**
+ * Whether the fetch asks for the X–Y figure.
+ *
+ * <p>The fifth thing a fetch is keyed on, and the one that costs the most: it is the only slice
+ * that cannot be summarised, so it carries sample pairs rather than columns. Asked for only by the
+ * view that draws it.</p>
+ */
+const wantXy = ref(false)
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -138,7 +147,13 @@ async function fetchRecord(force = false): Promise<void> {
   const token = ++fetchToken
   try {
     const next = await api.getOscilloscopeRecord(
-      window.value ?? undefined, maxColumns.value, gate.value ?? undefined, wantResidual.value, wantMath.value)
+      window.value ?? undefined,
+      maxColumns.value,
+      gate.value ?? undefined,
+      wantResidual.value,
+      wantMath.value,
+      wantXy.value,
+    )
     if (token !== fetchToken) return
     record.value = next
     fetchedFor = taken
@@ -283,6 +298,19 @@ export function useOscilloscope() {
     await fetchRecord(true)
   }
 
+  /**
+   * Turns the X–Y figure on or off, and re-fetches so it arrives with the record it is of.
+   *
+   * <p>Switching <em>to</em> the goniometer on a held record has to fetch at once: a stopped scope
+   * has no next poll, and a view that came up empty until the next capture would read as a broken
+   * one.</p>
+   */
+  async function setXy(on: boolean): Promise<void> {
+    if (wantXy.value === on) return
+    wantXy.value = on
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -353,6 +381,7 @@ export function useOscilloscope() {
     setWindow,
     setGate,
     setMath,
+    setXy,
     setResidual,
     start,
     retune,

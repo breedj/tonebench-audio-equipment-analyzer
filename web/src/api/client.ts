@@ -1512,6 +1512,32 @@ export interface ScopeMathSlice {
   clampedSamples: number
 }
 
+/**
+ * The X–Y figure as the chart draws it — one channel against the other, with time thrown away.
+ *
+ * <p>Mirrors <code>Tonebench.App.Endpoints.ScopeXySlice</code>. <b>Pairs of samples, never
+ * columns</b>: a min/max per column throws away which value of the left input went with which of
+ * the right, which is the whole of what this picture is.</p>
+ */
+export interface ScopeXySlice {
+  /** The left input's samples — the horizontal axis. */
+  x: number[]
+  /** The right input's — the vertical one. */
+  y: number[]
+  /** How many pairs are here. */
+  frameCount: number
+  /** How many the window held; more than frameCount when the figure was truncated. */
+  windowFrameCount: number
+  /** What the pairs drawn cover, in seconds. */
+  spanS: number
+  /** Pearson's r over them, about each channel's own mean. The one figure here that is always meaningful. */
+  correlation: number
+  /** How far the right input lags the left, signed, or null where no single number is this figure's phase. */
+  phaseDeg: number | null
+  /** The right input's AC RMS over the left's. */
+  amplitudeRatio: number | null
+}
+
 export interface ScopeChannelSlice {
   channel: number
   /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
@@ -1571,6 +1597,14 @@ export interface ScopeRecordResponse {
    * trace quietly absent.</p>
    */
   math?: ScopeMathSlice | null
+  /**
+   * The X–Y figure, when the fetch asked for one.
+   *
+   * <p>Null when it asked for none, and null when the measurement captures one input — there is
+   * no second axis to plot against, and a figure against an array of zeros would be a horizontal
+   * line that looks like a measurement.</p>
+   */
+  xy?: ScopeXySlice | null
 }
 
 export interface CrosstalkStarted {
@@ -1743,6 +1777,8 @@ export interface OscilloscopeParameters {
   chartIntensityPalette?: string | null
   /** Which math channel the chart drew — a WaveformOperation name, or Off. See scope/math.ts. */
   chartMathOperation?: string | null
+  /** Which picture the chart drew — `Waveform` or `XY`. See scope/xy.ts. */
+  chartView?: string | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null
@@ -4872,6 +4908,7 @@ export const api = {
     gate?: { fromS: number; toS: number },
     residual?: boolean,
     math?: string | null,
+    xy?: boolean,
   ) => {
     const query = new URLSearchParams()
     if (window) {
@@ -4889,6 +4926,9 @@ export const api = {
     // The same, and Off is absent rather than the string "Off", so the commonest state puts
     // nothing on the query at all.
     if (math) query.set('math', math)
+    // And the same again: the X-Y figure is the one slice that cannot be summarised, so it is the
+    // one that costs real bytes. Only the view that draws it asks for it.
+    if (xy) query.set('xy', 'true')
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 
     const suffix = query.size > 0 ? `?${query}` : ''

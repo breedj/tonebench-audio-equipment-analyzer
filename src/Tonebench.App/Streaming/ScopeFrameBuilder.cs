@@ -94,6 +94,40 @@ public sealed record ScopeMath(
     int ClampedSamples);
 
 /// <summary>
+/// The X–Y figure — one channel against the other, with time thrown away. A goniometer, a
+/// vectorscope, a Lissajous figure; the same picture under three names.
+///
+/// <para><b>It is pairs of samples, and it cannot be anything else.</b> Every other slice this
+/// builder cuts may be summarised as a min and a max per column, because a waveform is a function
+/// of time and a column is a stretch of it. An X–Y figure is not a function of anything: what it
+/// draws is which <i>pairs</i> (A[i], B[i]) occurred, and a min/max per column throws the pairing
+/// away — four numbers that say two channels each reached these extremes somewhere in this
+/// stretch, from which no figure can be recovered. So this carries the samples themselves, and the
+/// cap below is what keeps that affordable.</para>
+/// </summary>
+/// <param name="X">Channel A's samples — the horizontal axis.</param>
+/// <param name="Y">Channel B's — the vertical one.</param>
+/// <param name="FirstFrame">Index into the record of the first pair.</param>
+/// <param name="FrameCount">How many pairs are here.</param>
+/// <param name="WindowFrameCount">How many the window held, which is more when it was truncated.</param>
+/// <param name="Correlation">Pearson's r over the pairs drawn. The stereo meter's own reading.</param>
+/// <param name="PhaseDeg">How far B lags A, signed, or null where no single number is the figure's phase.</param>
+/// <param name="AmplitudeRatio">B's AC RMS over A's; 1 for a balanced pair.</param>
+public sealed record ScopeXy(
+    float[] X,
+    float[] Y,
+    int FirstFrame,
+    int FrameCount,
+    int WindowFrameCount,
+    double Correlation,
+    double? PhaseDeg,
+    double? AmplitudeRatio)
+{
+    /// <summary>The window held more pairs than the cap, so this is the first stretch of it.</summary>
+    public bool Truncated => FrameCount < WindowFrameCount;
+}
+
+/// <summary>
 /// Cuts a <see cref="ScopeRecord"/> down to what a chart needs.
 ///
 /// <para><b>The whole record always goes out as columns</b>, because the zoom bar's overview strip
@@ -294,6 +328,74 @@ public static class ScopeFrameBuilder
         var values = new double[frameCount];
         int clamped = WaveformMath.Apply(operation, a, b, record.SampleRateHz, values);
         return (values, clamped);
+    }
+
+    /// <summary>
+    /// How many pairs of samples an X–Y figure is drawn from, at most.
+    ///
+    /// <para>8192, which is 43 ms at 192 kS/s and 171 ms at 48 — dozens of periods of anything in
+    /// the audio band, and 64 kB on the wire. The cap exists because the alternative at the top of
+    /// this app's range is a megabyte and a half: the rule the frame builder is built around.</para>
+    /// </summary>
+    public const int MaxXyPoints = 8192;
+
+    /// <summary>
+    /// The X–Y figure over the window <paramref name="slice"/> names.
+    ///
+    /// <para><b>Taken from the record's own samples, never from the slice's columns</b>, for the
+    /// reason <see cref="ScopeXy"/> gives: a min/max pair per column throws away which value of A
+    /// went with which value of B, which is the whole of what this picture is.</para>
+    ///
+    /// <para><b>A contiguous run from the start of the window, not every n-th pair.</b> Striding is
+    /// the obvious way to fit a long window under the cap and it is the one that produces a
+    /// plausible wrong picture: a stride near a whole number of periods collapses a figure onto a
+    /// handful of points, so an ellipse becomes a line and a reader concludes the channels are in
+    /// phase. A contiguous run is always a true figure of a real stretch of the record, and the
+    /// reader can narrow the window to move it. <see cref="ScopeXy.Truncated"/> says when the
+    /// window held more, and the readings are of the stretch drawn rather than of the window, so
+    /// the figures under the picture are figures of the picture.</para>
+    ///
+    /// <para>Null on a record with one channel — there is no second axis to plot against, and a
+    /// figure against an array of zeros would be a horizontal line that looks like a measurement.</para>
+    /// </summary>
+    public static ScopeXy? XyFigure(ScopeRecord record, ScopeFrameSlice slice, int maxPoints = MaxXyPoints)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPoints, 1);
+
+        if (record.ChannelCount < 2 || slice.FrameCount <= 0)
+            return null;
+
+        int count = Math.Min(slice.FrameCount, maxPoints);
+        var a = record.Channels[0].AsSpan(slice.FirstFrame, count);
+        var b = record.Channels[1].AsSpan(slice.FirstFrame, count);
+
+        var x = new float[count];
+        var y = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            x[i] = (float)a[i];
+            y[i] = (float)b[i];
+        }
+
+        // Measured on the same stretch that is drawn, and with each channel's own frequency from
+        // the same measurement set the panel shows -- so a phase quoted here is a phase of this
+        // figure rather than of some other window of the record.
+        var readings = ChannelCorrelation.Measure(
+            a,
+            b,
+            record.SampleRateHz,
+            ScopeSliceMeasurements.Of(a, record.SampleRateHz).FrequencyHz,
+            ScopeSliceMeasurements.Of(b, record.SampleRateHz).FrequencyHz);
+
+        return new ScopeXy(
+            x,
+            y,
+            slice.FirstFrame,
+            count,
+            slice.FrameCount,
+            readings.Correlation,
+            readings.PhaseDeg,
+            readings.AmplitudeRatio);
     }
 
     /// <summary>Cuts the whole record, for the overview a chart and the zoom strip both draw.</summary>

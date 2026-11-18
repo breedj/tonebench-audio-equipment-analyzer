@@ -140,6 +140,7 @@ public static class OscilloscopeEndpoints
             double? gateToS,
             bool? residual,
             string? math,
+            bool? xy,
             int? maxColumns) =>
         {
             if (runner.Record is not { } record)
@@ -233,6 +234,28 @@ public static class OscilloscopeEndpoints
                 }
             }
 
+            // The X-Y figure, when the chart is in that view. Asked for by name like the two
+            // above, and for a reason of its own: it is the one slice that cannot be summarised,
+            // so it is the one that costs real bytes -- see ScopeFrameBuilder.MaxXyPoints.
+            ScopeXySlice? xySlice = null;
+            if (xy == true && geometry is { } xyReference)
+            {
+                bool both = WasCaptured(runner.LastRequest, 0) && WasCaptured(runner.LastRequest, 1);
+                var figure = both ? ScopeFrameBuilder.XyFigure(record, xyReference) : null;
+                if (figure is not null)
+                {
+                    xySlice = new ScopeXySlice(
+                        figure.X,
+                        figure.Y,
+                        figure.FrameCount,
+                        figure.WindowFrameCount,
+                        figure.FrameCount / record.SampleRateHz,
+                        figure.Correlation,
+                        figure.PhaseDeg,
+                        figure.AmplitudeRatio);
+                }
+            }
+
             return Results.Ok(new ScopeRecordResponse(
                 record.SampleRateHz,
                 record.FrameCount,
@@ -242,7 +265,8 @@ public static class OscilloscopeEndpoints
                 record.Spliced,
                 record.Forced,
                 channels,
-                mathSlice));
+                mathSlice,
+                xySlice));
         });
     }
 
@@ -373,6 +397,10 @@ public sealed record ScopeResidualSlice(
 /// operation needs a channel this measurement does not capture, which the screen says in words
 /// rather than drawing a trace against nothing.
 /// </param>
+/// <param name="Xy">
+/// The X–Y figure, when the request asked for one. Null when it did not, and null when the
+/// measurement captures one input — there is no second axis to plot against.
+/// </param>
 public sealed record ScopeRecordResponse(
     double SampleRateHz,
     int FrameCount,
@@ -382,7 +410,8 @@ public sealed record ScopeRecordResponse(
     bool Spliced,
     bool Forced,
     IReadOnlyList<ScopeChannelSlice> Channels,
-    ScopeMathSlice? Math = null);
+    ScopeMathSlice? Math = null,
+    ScopeXySlice? Xy = null);
 
 /// <summary>
 /// The math channel as the client draws it: the same raw-or-columns shape as the slices beside it,
@@ -410,6 +439,32 @@ public sealed record ScopeMathSlice(
     ScopeSliceMeasurements Measurements,
     ScopeSliceMeasurements? Gated,
     int ClampedSamples);
+
+/// <summary>
+/// The X–Y figure as the client draws it: one channel against the other, with time thrown away.
+///
+/// <para><b>Pairs of samples, never columns</b> — see <see cref="ScopeXy"/>. A min/max per column
+/// throws away which value of A went with which value of B, which is the whole of what this
+/// picture is.</para>
+/// </summary>
+/// <param name="X">Channel A's samples — the horizontal axis.</param>
+/// <param name="Y">Channel B's — the vertical one.</param>
+/// <param name="FrameCount">How many pairs are here.</param>
+/// <param name="WindowFrameCount">How many the window held; more than <paramref name="FrameCount"/> when it was truncated.</param>
+/// <param name="SpanS">What the pairs drawn cover, in seconds.</param>
+/// <param name="Correlation">Pearson's r over them — the stereo meter's own reading, and the one figure here that is always meaningful.</param>
+/// <param name="PhaseDeg">How far B lags A, signed, or null where no single number is this figure's phase.</param>
+/// <param name="AmplitudeRatio">B's AC RMS over A's.</param>
+public sealed record ScopeXySlice(
+    float[] X,
+    float[] Y,
+    int FrameCount,
+    int WindowFrameCount,
+    double SpanS,
+    double Correlation,
+    double? PhaseDeg,
+    double? AmplitudeRatio);
+
 
 /// <summary>
 /// The wire shape of a start. Mapped into <see cref="OscilloscopeRequest"/> field by field in

@@ -191,6 +191,65 @@ export class ScopeIntensityBuffer {
   }
 
   /**
+   * Adds one record's segment between two arbitrary points — what the X–Y figure is made of.
+   *
+   * <p><b>A line and not a point, which is the whole difference between a goniometer and a cloud
+   * of dots.</b> A Lissajous figure is traced out in order, and at any sample rate worth using the
+   * consecutive pairs are many pixels apart wherever the locus is moving quickly — so plotting the
+   * pairs alone draws a dashed figure whose gaps are exactly where the signal is fastest, which
+   * reads as a dropout rather than as the sampling it is.</p>
+   *
+   * <p>Bresenham rather than a stroked path, because a cell is a count and a canvas stroke is
+   * coverage: anti-aliasing would spread one pass over two cells and make a steady figure read as
+   * two faint ones. <b>Each cell is counted at most once per call</b>, so a slow stretch of the
+   * locus does not light up more brightly than a fast one within the same record — across-record
+   * frequency is what this buffer measures, and dwell within a record is a different quantity that
+   * would quietly mix into it.</p>
+   */
+  addLine(x0: number, y0: number, x1: number, y1: number): void {
+    if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) return
+
+    // Clipped to the buffer before it is walked, rather than walked and tested per cell. A
+    // Lissajous drawn at a V/div far too sensitive runs a long way off screen, and stepping that
+    // whole distance one cell at a time to write nothing is work proportional to the signal rather
+    // than to the picture. Clipping first makes the cost the plot's size, whatever arrives.
+    const clipped = clipSegment(x0, y0, x1, y1, this.width - 1, this.height - 1)
+    if (!clipped) return
+
+    let x = Math.round(clipped.x0)
+    let y = Math.round(clipped.y0)
+    const ex = Math.round(clipped.x1)
+    const ey = Math.round(clipped.y1)
+
+    const dx = Math.abs(ex - x)
+    const dy = -Math.abs(ey - y)
+    const sx = x < ex ? 1 : -1
+    const sy = y < ey ? 1 : -1
+    let error = dx + dy
+
+    for (;;) {
+      this.hit(x, y)
+      if (x === ex && y === ey) return
+      const twice = 2 * error
+      if (twice >= dy) {
+        error += dy
+        x += sx
+      }
+      if (twice <= dx) {
+        error += dx
+        y += sy
+      }
+    }
+  }
+
+  /** One cell, counted once. Out of bounds is dropped rather than clamped — a clamped hit would pile the whole off-screen locus onto the edge. */
+  private hit(x: number, y: number): void {
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return
+    const value = (this.data[y * this.width + x] += 1)
+    if (value > this.max) this.max = value
+  }
+
+  /**
    * Keeps the counts from growing without bound under infinite persistence.
    *
    * <p>Only the ratios are ever read, so scaling the whole buffer changes nothing on screen — but a
@@ -200,6 +259,56 @@ export class ScopeIntensityBuffer {
   renormalise(ceiling = 1e6): void {
     if (this.max <= ceiling) return
     this.decay(1 / this.max)
+  }
+}
+
+/**
+ * Liang-Barsky: the part of a segment that falls inside `0..maxX` by `0..maxY`, or null.
+ *
+ * <p>Here rather than inside the buffer because it is pure arithmetic with four easy sign mistakes
+ * in it, and because the buffer's own job is counting.</p>
+ */
+function clipSegment(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  maxX: number,
+  maxY: number,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  const dx = x1 - x0
+  const dy = y1 - y0
+  let enter = 0
+  let leave = 1
+
+  // Each edge as p*t <= q: a zero p is a segment parallel to it, which is outside only when q < 0.
+  const edges: [number, number][] = [
+    [-dx, x0 - 0],
+    [dx, maxX - x0],
+    [-dy, y0 - 0],
+    [dy, maxY - y0],
+  ]
+
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return null
+      continue
+    }
+    const t = q / p
+    if (p < 0) {
+      if (t > leave) return null
+      if (t > enter) enter = t
+    } else {
+      if (t < enter) return null
+      if (t < leave) leave = t
+    }
+  }
+
+  return {
+    x0: x0 + enter * dx,
+    y0: y0 + enter * dy,
+    x1: x0 + leave * dx,
+    y1: y0 + leave * dy,
   }
 }
 

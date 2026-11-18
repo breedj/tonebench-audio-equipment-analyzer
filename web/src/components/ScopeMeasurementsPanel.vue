@@ -5,6 +5,7 @@ import ReadingValue from './ReadingValue.vue'
 import { useOscilloscope } from '../composables/useOscilloscope'
 import { mathReadings, residualReadings, scopeChannelReadings } from '../scope/readings'
 import { mathAxisLabel, type ScopeMathOperation } from '../scope/math'
+import { correlationDescription, xyReadings } from '../scope/xy'
 import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
@@ -101,6 +102,22 @@ const mathBlock = computed(() => {
   return { label: mathAxisLabel(math.operation as ScopeMathOperation), clamped: math.clampedSamples, readings }
 })
 
+/**
+ * The X–Y figure's own readings, when one was fetched.
+ *
+ * <p>Shown whenever the record carries a figure rather than only while that view is on screen: the
+ * fetch already asked for it, the three numbers are about the pair of channels rather than about
+ * the picture, and a correlation worth seeing is worth seeing next to the waveforms that produced
+ * it.</p>
+ */
+const xyBlock = computed(() => {
+  const figure = record.value?.xy
+  if (!figure) return null
+  const readings = xyReadings(figure)
+  if (!readings.length) return null
+  return { description: correlationDescription(figure.correlation), readings }
+})
+
 /** The gate as the heading quotes it, so the reader can see which stretch the figures are of. */
 const gateNote = computed(() => {
   const window = gate.value
@@ -183,6 +200,23 @@ const recordFacts = computed(() => {
           {{ mathBlock.clamped.toLocaleString() }} samples railed at ±1000, so every figure above is
           a reading of the clamp as much as of the ratio.
         </p>
+      </div>
+
+      <div
+        v-if="xyBlock"
+        class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800"
+      >
+        <div class="mb-1 text-[11px] font-medium text-teal-700 dark:text-teal-300">
+          X–Y · {{ xyBlock.description }}
+        </div>
+        <table class="w-full text-left text-[11px]">
+          <tbody>
+            <tr v-for="reading in xyBlock.readings" :key="`xy-${reading.label}`">
+              <td class="pr-2" :title="reading.title">{{ reading.label }}</td>
+              <td><ReadingValue :text="reading.value" /></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div v-if="recordFacts" class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">

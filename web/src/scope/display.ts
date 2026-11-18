@@ -6,6 +6,7 @@ import {
   type ScopePersistence,
 } from './persistence'
 import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
+import { SCOPE_VIEWS, type ScopeView } from './xy'
 import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
@@ -73,6 +74,14 @@ export interface ScopeDisplay {
    * be changed on a reopened capture, where a stored derived waveform could not be.</p>
    */
   mathOperation: ScopeMathOperation
+  /**
+   * Which picture the chart draws — the waveforms against time, or one channel against the other.
+   *
+   * <p>A scope's own mode button rather than two charts side by side: the two are the same record
+   * drawn two ways and only one of them can be read at a time, so a toggle keeps the chart its
+   * full height. See scope/xy.ts.</p>
+   */
+  chartView: ScopeView
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -127,6 +136,8 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
    * on every fetch, and most of what a scope is pointed at wants the two waveforms themselves.
    */
   mathOperation: 'Off',
+  /** The waveform, which is what a scope is for; X–Y is a view a reader switches to on purpose. */
+  chartView: 'Waveform',
   annotations: [],
 })
 
@@ -210,6 +221,8 @@ export function scopeDisplayFromParams(
     SCOPE_MATH_OPERATIONS.some((o) => o.value === stored.chartMathOperation)
   )
     display.mathOperation = stored.chartMathOperation as ScopeMathOperation
+  if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
+    display.chartView = stored.chartView as ScopeView
 
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
@@ -238,5 +251,6 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartIntensityMode: display.intensityMode,
     chartIntensityPalette: display.intensityPalette,
     chartMathOperation: display.mathOperation,
+    chartView: display.chartView,
   }
 }

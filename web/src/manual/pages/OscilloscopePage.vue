@@ -212,6 +212,14 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>View</td>
+          <td>
+            Which picture the chart draws — <strong>Y–T</strong>, the waveforms against time, or
+            <strong>X–Y</strong>, one input against the other. See <strong>The X–Y view</strong>
+            below.
+          </td>
+        </tr>
+        <tr>
           <td>Math</td>
           <td>
             A waveform derived from the two captured ones — see <strong>The math channel</strong>
@@ -250,6 +258,98 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <h2>The X–Y view</h2>
+    <p>
+      <strong>View ▸ X–Y</strong> throws the time axis away and plots the left input against the
+      right: a goniometer, a vectorscope, a Lissajous figure — the same picture under three names.
+      Two channels become a <em>shape</em> rather than two traces, and the shape is read at a
+      glance where the same information on a time axis is "two traces that look similar".
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>What you see</th>
+          <th>What it means</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A straight line up to the right, at 45°</td>
+          <td>A matched pair, in phase. The dashed diagonals are drawn for exactly this comparison.</td>
+        </tr>
+        <tr>
+          <td>A straight line at some other angle</td>
+          <td>In phase, but one channel is louder — the <strong>Right / left</strong> row says by how much.</td>
+        </tr>
+        <tr>
+          <td>A straight line up to the <em>left</em></td>
+          <td>Out of phase: one lead is inverted, or the pair is wired the wrong way round. Correlation reads −1.</td>
+        </tr>
+        <tr>
+          <td>A circle</td>
+          <td>A quarter period apart — 90°, which is what a single reactance does.</td>
+        </tr>
+        <tr>
+          <td>An ellipse</td>
+          <td>Everything in between; the fatter it is, the nearer 90°.</td>
+        </tr>
+        <tr>
+          <td>A loop with a kink, or a bowtie</td>
+          <td>A nonlinearity between the two — a crossover region, a clipping stage, a magnetic hysteresis loop.</td>
+        </tr>
+        <tr>
+          <td>A fuzzy cloud</td>
+          <td>The two are unrelated, or one of them is noise.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Three readings travel with the figure and appear in <strong>Measurements</strong>.
+      <strong>Correlation</strong> is Pearson’s r over the pairs drawn — +1 when the two move
+      together, 0 when they are unrelated or a quarter period apart, −1 when they are mirror
+      images — and it is the one figure here that is always meaningful. <strong>Phase</strong> is
+      how far the right input lags the left, <em>signed</em>, and is quoted only when both channels
+      carry one common tone: on two different tones the figure is a knot and no single number is
+      its phase. <strong>Right / left</strong> is the amplitude ratio, written both as a ratio and
+      in decibels.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>Both axes take the same V/div, and the plot is square.</strong> The first reading
+        anyone takes off this picture is whether the line sits at 45°, and different scales on the
+        two axes would tilt it by an amount no axis label reveals — a matched pair would read as a
+        mismatched one. So the <strong>Vertical</strong> section’s V/div sets both, over eight
+        divisions, and the centre offset does not apply here.
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>Turn Persistence on.</strong> A single record’s figure is a thin loop; a goniometer
+        is read as a <em>density</em>, and that is what makes a wandering phase, an intermittent
+        channel or a once-in-a-while glitch visible at all. See <strong>Persistence</strong> below —
+        it works the same way here, and this is where it earns the most.
+      </p>
+    </div>
+    <p>
+      The figure is drawn from <strong>pairs of samples</strong>, which is why it carries its own
+      sample count: everywhere else this screen can summarise a wide window as both extremes of
+      each column, and here it cannot — a column’s minimum and maximum say that the two channels
+      each reached these levels somewhere in that stretch, and throw away which value of one went
+      with which of the other, which is the whole of what this picture is. So a long window is
+      drawn from its <em>first</em> 8192 pairs and the panel says so. Narrow the window to move the
+      stretch. Taking every n-th pair instead would be the obvious way to cover the whole window
+      and is the one that lies: a stride near a whole number of periods collapses an ellipse onto a
+      line, and you would read a phase error as a matched pair.
+    </p>
+    <p>
+      Which stretch of the record the figure is drawn from is the <strong>Time window</strong>
+      section’s From and To, exactly as it is for the waveform. The zoom bar is hidden here — it
+      navigates a time axis, which this picture does not have — and because there is no drag to
+      zoom with, those two boxes are the only control: switching to X–Y therefore ends any zoom the
+      waveform view was holding, so the boxes and the picture always agree. The trigger line, the
+      cursors and the notes belong to the waveform view and come back with it.
+    </p>
 
     <h2>Measurements</h2>
     <p>

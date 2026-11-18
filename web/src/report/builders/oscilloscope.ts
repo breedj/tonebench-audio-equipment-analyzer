@@ -1,6 +1,7 @@
 import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordResponse } from '../../api/client'
 import { mathReadings, scopeChannelReadings } from '../../scope/readings'
 import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
+import { xyReadings, xyTruncationNote } from '../../scope/xy'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -153,6 +154,24 @@ export function scopeMeasurementSections(
           text: `${math.clampedSamples.toLocaleString()} samples of the ratio railed at ±1000, where the denominator passes through zero — so every figure in that table is a reading of the clamp as much as of the ratio.`,
         })
       }
+    }
+  }
+
+  // The X-Y figure's readings, when one was taken. Its own table for the math channel's reason:
+  // a correlation, a phase and a ratio are not the channels' own readings and would put three
+  // units into one "Reading" column.
+  const xy = record.xy
+  if (xy) {
+    const readings = xyReadings(xy)
+    if (readings.length > 0) {
+      sections.push({
+        kind: 'table',
+        title: 'X–Y figure',
+        headers: ['Reading', 'Value'],
+        cells: readings.map((reading) => [reading.label, reading.value]),
+      })
+      const truncation = xyTruncationNote(xy)
+      if (truncation) sections.push({ kind: 'paragraph', text: truncation })
     }
   }
 

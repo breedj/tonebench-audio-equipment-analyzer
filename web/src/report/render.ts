@@ -12,6 +12,7 @@ import ImpulseHarmonicsChart from '../components/ImpulseHarmonicsChart.vue'
 import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
 import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import OscilloscopeScreenChart from '../components/OscilloscopeScreenChart.vue'
+import ScopeXyChart from '../components/ScopeXyChart.vue'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
@@ -541,6 +542,19 @@ export async function renderView(
     case 'scope': {
       if (!data.record || view !== 'Oscilloscope') return null
       const { record, display } = data
+
+      // Paper draws whichever view the measurement was read in, the way the decay chapters do —
+      // one stored field decides both, so the page and the screen cannot disagree about which
+      // picture this measurement is.
+      if (display.chartView === 'XY') {
+        const figure = await renderChartPng(
+          ScopeXyChart,
+          { record, voltsPerDivision: display.voltsPerDivision, running: false },
+          options,
+        )
+        return { png: figure, caption: 'The left input against the right, with time thrown away' }
+      }
+
       const png = await renderChartPng(
         OscilloscopeScreenChart,
         {

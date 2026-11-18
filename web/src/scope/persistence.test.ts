@@ -245,6 +245,95 @@ describe('intensityPixels', () => {
   })
 })
 
+describe('ScopeIntensityBuffer.addLine', () => {
+  function cells(buffer: ScopeIntensityBuffer): number[][] {
+    const rows: number[][] = []
+    for (let y = 0; y < buffer.height; y++) {
+      const row: number[] = []
+      for (let x = 0; x < buffer.width; x++) row.push(buffer.data[y * buffer.width + x])
+      rows.push(row)
+    }
+    return rows
+  }
+
+  // A line and not a point is the whole difference between a goniometer and a cloud of dots: at
+  // any usable sample rate the consecutive pairs of an X-Y figure are pixels apart wherever the
+  // locus moves quickly, so plotting the pairs alone leaves gaps exactly where the signal is
+  // fastest -- which reads as a dropout rather than as the sampling it is.
+  it('lights every cell between its two ends', () => {
+    const buffer = new ScopeIntensityBuffer(5, 1)
+    buffer.addLine(0, 0, 4, 0)
+
+    expect(cells(buffer)[0]).toEqual([1, 1, 1, 1, 1])
+  })
+
+  it('walks a diagonal without skipping a cell', () => {
+    const buffer = new ScopeIntensityBuffer(4, 4)
+    buffer.addLine(0, 0, 3, 3)
+
+    expect(cells(buffer)).toEqual([
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1],
+    ])
+  })
+
+  it('runs in either direction and is the same line', () => {
+    const forward = new ScopeIntensityBuffer(6, 4)
+    const backward = new ScopeIntensityBuffer(6, 4)
+    forward.addLine(0, 3, 5, 0)
+    backward.addLine(5, 0, 0, 3)
+
+    expect(cells(backward)).toEqual(cells(forward))
+  })
+
+  // Across-record frequency is what this buffer measures. Counting a cell twice within one call
+  // would let a slow stretch of the locus outshine a fast one inside the same record, which is a
+  // different quantity quietly mixed into the one on screen.
+  it('counts each cell at most once per call', () => {
+    const buffer = new ScopeIntensityBuffer(3, 3)
+    buffer.addLine(1, 1, 1, 1)
+
+    expect(buffer.peak).toBe(1)
+    expect(cells(buffer)[1][1]).toBe(1)
+  })
+
+  it('counts a cell once per call and so builds up across records', () => {
+    const buffer = new ScopeIntensityBuffer(3, 1)
+    buffer.addLine(0, 0, 2, 0)
+    buffer.addLine(0, 0, 2, 0)
+
+    expect(cells(buffer)[0]).toEqual([2, 2, 2])
+    expect(buffer.peak).toBe(2)
+  })
+
+  // Dropped rather than clamped: a clamped hit would pile the whole off-screen stretch of the
+  // locus onto one edge cell, which draws a bright line along the frame that is not a measurement.
+  it('drops what falls outside rather than piling it on the edge', () => {
+    const buffer = new ScopeIntensityBuffer(3, 3)
+    buffer.addLine(-10, 1, 10, 1)
+
+    expect(cells(buffer)[1]).toEqual([1, 1, 1])
+    expect(buffer.peak).toBe(1)
+  })
+
+  it('writes nothing at all for a segment wholly outside', () => {
+    const buffer = new ScopeIntensityBuffer(3, 3)
+    buffer.addLine(-50, -50, -40, -40)
+
+    expect(buffer.peak).toBe(0)
+  })
+
+  it('ignores a segment that is not a pair of numbers, rather than throwing on a draw path', () => {
+    const buffer = new ScopeIntensityBuffer(3, 3)
+    buffer.addLine(Number.NaN, 0, 1, 1)
+    buffer.addLine(0, 0, Number.POSITIVE_INFINITY, 1)
+
+    expect(buffer.peak).toBe(0)
+  })
+})
+
 describe('hexRgb', () => {
   it('reads the channel colours the chart draws with', () => {
     expect(hexRgb('#3b82f6')).toEqual([0x3b, 0x82, 0xf6])

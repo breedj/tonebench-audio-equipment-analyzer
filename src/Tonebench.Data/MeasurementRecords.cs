@@ -1305,6 +1305,12 @@ public sealed record OscilloscopeParameters(
     /// definition of which is which.</para>
     /// </summary>
     string? ChartMathOperation = null,
+    /// <summary>
+    /// Which picture the chart drew — <c>Waveform</c> (the trace against time) or <c>XY</c> (the
+    /// goniometer, one input against the other). A display preference like the rest, so the view a
+    /// measurement was last read in is the one it reopens in.
+    /// </summary>
+    string? ChartView = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

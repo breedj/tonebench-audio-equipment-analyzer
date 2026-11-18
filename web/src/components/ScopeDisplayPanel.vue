@@ -22,6 +22,8 @@ import {
   type ScopePersistence,
 } from '../scope/persistence'
 import { PALETTE_NAMES } from '../measurements/decay'
+import SegmentedToggle from './SegmentedToggle.vue'
+import { SCOPE_VIEWS, scopeViewIsXy, type ScopeView } from '../scope/xy'
 import {
   SCOPE_MATH_OPERATIONS,
   mathDraws,
@@ -56,6 +58,10 @@ const persistence = defineModel<ScopePersistence>('persistence', { required: tru
 const intensityMode = defineModel<ScopeIntensityMode>('intensityMode', { required: true })
 const intensityPalette = defineModel<DecayPalette>('intensityPalette', { required: true })
 const mathOperation = defineModel<ScopeMathOperation>('mathOperation', { required: true })
+const chartView = defineModel<ScopeView>('chartView', { required: true })
+
+/** True while the goniometer is the picture on screen, which hides the controls it has no axes for. */
+const xyOn = computed(() => scopeViewIsXy(chartView.value))
 
 /** The colour controls only mean something once something is being kept. */
 const persistenceOn = computed(() => persistenceDraws(persistence.value))
@@ -178,6 +184,9 @@ const captured = computed(() => {
   }
 })
 
+
+/** An X–Y figure needs both inputs; one of them draws a horizontal line that looks like a measurement. */
+const bothCaptured = computed(() => captured.value.left && captured.value.right)
 
 /** The entry for the chosen operation, which carries its own label, unit and explanation. */
 const math = computed(() => mathOption(mathOperation.value))
@@ -381,6 +390,22 @@ function onVoltsPerDivisionChange(event: Event) {
   >
     Autofit
   </button>
+
+  <CollapsibleSection title="View" size="xs">
+    <!-- A scope's mode button, not two charts: the two are the same record drawn two ways and only
+         one of them can be read at a time, so a toggle keeps the chart its full height. -->
+    <SegmentedToggle
+      v-model="chartView"
+      group-label="Chart view"
+      :options="SCOPE_VIEWS.map((v) => ({ value: v.value, label: v.label, title: v.title }))"
+    />
+    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      {{ SCOPE_VIEWS.find((v) => v.value === chartView)?.title }}
+    </p>
+    <p v-if="xyOn && !bothCaptured" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+      Nothing to draw: an X–Y figure needs both inputs. Tick them under Acquisition ▸ Channels.
+    </p>
+  </CollapsibleSection>
 
   <CollapsibleSection title="Vertical" size="xs">
     <div class="grid grid-cols-2 gap-2.5">

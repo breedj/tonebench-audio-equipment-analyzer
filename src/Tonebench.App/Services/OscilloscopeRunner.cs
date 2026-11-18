@@ -631,6 +631,13 @@ public sealed class OscilloscopeRunner(
             request.TriggerSlope,
             request.TriggerLevelV,
             request.TriggerHysteresisV,
+            request.TriggerLevelLowV,
+            request.PulseWidthLoSeconds,
+
+            // Null on the request means unbounded above -- an infinity cannot ride on JSON -- and
+            // the scanner's own unbounded case is a non-finite upper bound, so this is where the
+            // one becomes the other.
+            request.PulseWidthHiSeconds ?? double.PositiveInfinity,
             HoldoffFrames: (int)Math.Round(request.HoldoffSeconds * request.SampleRateHz));
 
         return new ScopeCaptureSpec(

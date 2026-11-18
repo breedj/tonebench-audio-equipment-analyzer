@@ -4,13 +4,22 @@ import {
   DEFAULT_SCOPE_TRIGGER,
   SCOPE_RUN_MODES,
   SCOPE_RUN_MODE_HINTS,
+  SCOPE_PULSE_CONDITIONS,
+  SCOPE_TRIGGER_KINDS,
+  SCOPE_TRIGGER_KIND_HINTS,
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SOURCES,
   fiftyPercentLevel,
+  pulseConditionFor,
+  pulseWidthBounds,
+  pulseWidthFor,
+  pulseWidthProblem,
   suggestedHysteresis,
   triggerChannel,
   triggerIndicator,
   triggerSourceProblem,
+  windowIndicator,
+  windowLevelsProblem,
 } from './triggerSpec'
 
 describe('the dropdowns', () => {
@@ -186,5 +195,120 @@ describe('the trigger panel binds its voltages without v-model', () => {
       expect(box).toMatch(/@change=/)
       expect(box).toMatch(/:value=|\s:?value="/)
     }
+  })
+})
+
+describe('the trigger kinds', () => {
+  it('offers only the kinds the server implements', () => {
+    // A dropdown entry whose only outcome is a refusal is worse than no entry -- the same rule the
+    // two unimplemented sources follow.
+    expect(SCOPE_TRIGGER_KINDS.map((k) => k.value)).toEqual(['Edge', 'PulseWidth', 'Window'])
+  })
+
+  it('has a hint for every kind on the wire, including the two it does not offer', () => {
+    // So a kind restored from a measurement saved by a later build still has something to say for
+    // itself rather than rendering an empty tooltip.
+    for (const kind of ['Edge', 'PulseWidth', 'Window', 'Dropout', 'Runt'] as const)
+      expect(typeof SCOPE_TRIGGER_KIND_HINTS[kind]).toBe('string')
+  })
+
+  it('names Edge first, which is what a scope does unless told otherwise', () => {
+    expect(SCOPE_TRIGGER_KINDS[0].value).toBe('Edge')
+  })
+})
+
+describe('the width condition', () => {
+  it('maps shorter-than onto an upper bound alone', () => {
+    expect(pulseWidthBounds('ShorterThan', 50e-6, 0)).toEqual({ loS: 0, hiS: 50e-6 })
+  })
+
+  it('maps longer-than onto a lower bound and no upper one at all', () => {
+    // Null rather than a large number: a bound standing in for "no bound" would quietly stop firing
+    // on the pulse that never ends, which is the fault this condition exists for.
+    expect(pulseWidthBounds('LongerThan', 50e-6, 0)).toEqual({ loS: 50e-6, hiS: null })
+  })
+
+  it('maps between onto both', () => {
+    expect(pulseWidthBounds('Between', 30e-6, 120e-6)).toEqual({ loS: 30e-6, hiS: 120e-6 })
+  })
+
+  it('reads a stored pair back as the condition it was set with', () => {
+    // Or a measurement saved as "shorter than 50 us" reopens as "between 0 and 50", which is the
+    // same capture described in a way nobody typed.
+    expect(pulseConditionFor(0, 50e-6)).toBe('ShorterThan')
+    expect(pulseConditionFor(50e-6, null)).toBe('LongerThan')
+    expect(pulseConditionFor(30e-6, 120e-6)).toBe('Between')
+  })
+
+  it('reads an absent pair as longer-than, which is the only condition with no upper bound', () => {
+    expect(pulseConditionFor(null, null)).toBe('LongerThan')
+    expect(pulseConditionFor(undefined, undefined)).toBe('LongerThan')
+  })
+
+  it('round-trips every condition through the bounds and back', () => {
+    for (const condition of SCOPE_PULSE_CONDITIONS.map((c) => c.value)) {
+      const { loS, hiS } = pulseWidthBounds(condition, 30e-6, 120e-6)
+      expect(pulseConditionFor(loS, hiS)).toBe(condition)
+      expect(pulseWidthFor(condition, loS, hiS)).toBe(30e-6)
+    }
+  })
+
+  it('refuses an upper bound narrower than one sample, which can never fire', () => {
+    // Perfectly reasonable to type and arithmetically impossible: at 192 kS/s a sample arrives
+    // every 5.2 us, so no pulse in any record is 2 us wide.
+    const interval = 1 / 192_000
+    expect(pulseWidthProblem('ShorterThan', 2e-6, 0, interval)).toMatch(/shorter than one sample/)
+    expect(pulseWidthProblem('ShorterThan', 50e-6, 0, interval)).toBeNull()
+  })
+
+  it('does not refuse a lower bound longer than the record, which fires mid-pulse', () => {
+    // The scanner is state over the stream rather than a search inside a window, so "longer than"
+    // fires as soon as the width passes the bound whether or not the pulse fits in a record.
+    expect(pulseWidthProblem('LongerThan', 10, 0, 1 / 192_000)).toBeNull()
+  })
+
+  it('refuses a range the wrong way round, and a width of nothing', () => {
+    expect(pulseWidthProblem('Between', 120e-6, 30e-6, 1 / 192_000)).toMatch(/cannot be below/)
+    expect(pulseWidthProblem('ShorterThan', 0, 0, 1 / 192_000)).toMatch(/positive time/)
+  })
+})
+
+describe('the window trigger band', () => {
+  it('draws the band between the two levels', () => {
+    const { high, low, band } = windowIndicator(0.5, -0.5, 1, -1)
+
+    expect(high.levelV).toBeCloseTo(0.5, 12)
+    expect(low.levelV).toBeCloseTo(-0.5, 12)
+    expect(band).toEqual({ topV: 0.5, bottomV: -0.5 })
+  })
+
+  it('sorts the pair, so typing them the other way round draws the same band', () => {
+    // The scanner sorts them too: a picture that disagreed with the capture would be worse than no
+    // picture.
+    expect(windowIndicator(-0.5, 0.5, 1, -1)).toEqual(windowIndicator(0.5, -0.5, 1, -1))
+  })
+
+  it('clamps a level off the window to the edge and marks which way it lies', () => {
+    const { high, low } = windowIndicator(4, -0.5, 1, -1)
+
+    expect(high.levelV).toBe(1)
+    expect(high.offWindow).toBe('above')
+    expect(low.offWindow).toBeNull()
+  })
+
+  it('clips the band to the window rather than suppressing it', () => {
+    // Half a band hanging off the top still says where the other half is.
+    expect(windowIndicator(4, 0.25, 1, -1).band).toEqual({ topV: 1, bottomV: 0.25 })
+  })
+
+  it('draws no band at all when none of it is on screen', () => {
+    // Clamping it would paint a hairline on the edge and claim the band was there.
+    expect(windowIndicator(4, 3, 1, -1).band).toBeNull()
+  })
+
+  it('refuses two equal levels, which is no band rather than a narrow one', () => {
+    expect(windowLevelsProblem(0.5, 0.5)).toMatch(/two different levels/)
+    expect(windowLevelsProblem(0.5, -0.5)).toBeNull()
+    expect(windowLevelsProblem(Number.NaN, -0.5)).toMatch(/voltages/)
   })
 })

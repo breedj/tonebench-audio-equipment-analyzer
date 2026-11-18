@@ -180,9 +180,19 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
             throw new ArgumentOutOfRangeException(nameof(spec), spec.SampleRateHz, "The sample rate must be positive.");
     }
 
+    /// <summary>
+    /// The scanner for a kind.
+    ///
+    /// <para>The width-based kinds are handed <c>spec.SampleRateHz</c>, which is the one place that
+    /// conversion happens: a width is set in seconds -- the only unit that means the same thing at
+    /// every sample rate -- and compared against sample indices, so something has to convert it, and
+    /// doing it here means no scanner carries a rate it could get out of step with.</para>
+    /// </summary>
     private static IScanTrigger BuildScanner(ScopeCaptureSpec spec) => spec.Trigger.Kind switch
     {
         TriggerKind.Edge => new EdgeTrigger(spec.Trigger),
+        TriggerKind.PulseWidth => new PulseWidthTrigger(spec.Trigger, spec.SampleRateHz),
+        TriggerKind.Window => new WindowTrigger(spec.Trigger),
         _ => throw new NotSupportedException($"The {spec.Trigger.Kind} trigger is not implemented yet."),
     };
 

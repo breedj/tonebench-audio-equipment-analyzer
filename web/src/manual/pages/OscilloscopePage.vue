@@ -110,12 +110,25 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>Kind</td>
+          <td>
+            <strong>Edge</strong>, <strong>Pulse width</strong> or <strong>Window</strong> — what the
+            analyzer is looking for. See <strong>The advanced triggers</strong> below. Edge is what a
+            scope does unless you tell it otherwise.
+          </td>
+        </tr>
+        <tr>
           <td>Source</td>
           <td>Which channel the trigger watches. It must be one of the captured channels.</td>
         </tr>
         <tr>
           <td>Slope</td>
-          <td>Rising, falling or either.</td>
+          <td>
+            Rising, falling or either — and <em>what</em> that selects depends on the kind. On an
+            edge trigger it is the direction through the level; on a pulse-width trigger it decides
+            which stretch is the pulse (rising measures the stretch <em>above</em> the level); on a
+            window trigger it chooses between entering and leaving the band.
+          </td>
         </tr>
         <tr>
           <td>Level (V)</td>
@@ -125,6 +138,23 @@ const { showPage } = useManual()
             needs nothing to have been captured, and <strong>50 %</strong> puts it half way between
             the extremes of the record on screen — the trigger source's own extremes, not both
             channels', since a level between two traces is a level on neither.
+          </td>
+        </tr>
+        <tr>
+          <td>Second level (V)</td>
+          <td>
+            The window trigger's other bound. The order does not matter — the chart and the capture
+            both sort the pair, so typing the higher figure in either box gives the same band. Shown
+            only on that kind.
+          </td>
+        </tr>
+        <tr>
+          <td>Condition, Width (µs)</td>
+          <td>
+            The pulse-width trigger's condition — <strong>shorter than</strong>,
+            <strong>longer than</strong> or <strong>between</strong> — and the width or widths it is
+            set by. Microseconds, because that is the scale this control is for. Shown only on that
+            kind.
           </td>
         </tr>
         <tr>
@@ -151,6 +181,72 @@ const { showPage } = useManual()
       running, so nothing here needs a stop and a start: the settings are handed to the capture in
       flight, within one record. The only exception is the sample rate, which re-clocks the
       analyzer and therefore restarts the run.
+    </p>
+
+    <h2>The advanced triggers</h2>
+
+    <p>
+      An edge trigger fires on <em>every</em> crossing, so a fault that happens once in a thousand
+      cycles is one trace in a thousand and is never on screen when you look at it. The other two
+      kinds select the fault itself.
+    </p>
+
+    <h3>Pulse width — the glitch trigger</h3>
+
+    <p>
+      A pulse here is a stretch on one side of the level: with <strong>Slope</strong> rising, the
+      stretch <em>above</em> it, measured from the crossing up to the crossing back down. Set a
+      width condition and the analyzer fires on a pulse that meets it and on nothing else. A
+      crossover notch is a pulse far narrower than the half-cycle around it; an output that has
+      latched is one far wider; neither can be picked out by a level alone.
+    </p>
+
+    <p>
+      <strong>Both crossings are interpolated</strong>, so a width is measured to a fraction of a
+      sample rather than to the nearest one — at 192 kS/s a sample is 5.2 µs, which on a 50 µs
+      glitch would be a tenth of the figure. What no interpolation can do is show a pulse narrower
+      than one sample: there is no such pulse in any record, so a <strong>shorter than</strong>
+      condition below the sample interval is refused rather than left to never fire. Raising the
+      sample rate is the lever there.
+    </p>
+
+    <p>
+      <strong>When it fires depends on which bound you set, and that is deliberate.</strong> With an
+      upper bound — "shorter than 50 µs" — the width is not known until the pulse ends, so it fires
+      on the pulse's <em>trailing</em> edge. With a lower bound alone — "longer than 50 µs" — it
+      fires as soon as the pulse has lasted that long, without waiting for an end, because a level
+      that has stuck never produces one and that is exactly the fault the condition is set for. With
+      100&nbsp;% pre-trigger the record then shows what led up to it.
+    </p>
+
+    <h3>Window — in and out of a band</h3>
+
+    <p>
+      Two levels make a band, and the trigger fires on the signal <strong>entering</strong> it
+      (Slope rising), <strong>leaving</strong> it (falling) or both (either). It is the trigger for
+      something that is supposed to stay put: set the band around a bias point or a rail and trigger
+      on leaving, and the capture is of the moment it misbehaved.
+    </p>
+
+    <p>
+      The band is drawn on the chart between the two lines, in the trigger source's own colour — it
+      is to this kind what the hysteresis band is to an edge trigger, the one thing that makes two
+      numbers in the rail aimable at a signal. A level off the vertical window is clamped to the
+      edge and drawn solid rather than dashed, the way a single level is.
+    </p>
+
+    <p>
+      <strong>A signal that jumps clean through the band in one sample does not fire.</strong> Each
+      sample is either inside or outside and only a transition counts, so a step from below the band
+      to above it is outside-to-outside: nothing was ever observed inside. That is also the honest
+      answer, since a band narrower than one sample's worth of slew cannot be seen to have been
+      entered — and it is why a very tight band simply never fires rather than firing on every edge.
+    </p>
+
+    <p>
+      <strong>Dropout</strong> and <strong>runt</strong> are not implemented. They are on the wire
+      and the dropdown does not offer them, because a control whose only outcome is a refusal is
+      worse than no control.
     </p>
 
     <h2>Averaging and envelope</h2>

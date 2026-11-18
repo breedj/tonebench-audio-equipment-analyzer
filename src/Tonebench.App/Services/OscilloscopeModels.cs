@@ -16,12 +16,28 @@ namespace Tonebench.App.Services;
 /// <param name="RecordSeconds">The whole record, pre- and post-trigger together.</param>
 /// <param name="PreTriggerFraction">How much of it sits before the trigger, 0 to 1. One is 100 % pre-trigger.</param>
 /// <param name="Mode">Single, Normal, Auto or Roll.</param>
-/// <param name="TriggerKind">Which scanner to build. Only <see cref="Tonebench.Dsp.TriggerKind.Edge"/> is implemented so far.</param>
+/// <param name="TriggerKind">Which scanner to build.</param>
 /// <param name="TriggerSource">Which channel the scanner watches.</param>
 /// <param name="TriggerSlope">Which direction qualifies.</param>
 /// <param name="TriggerLevelV">The threshold, in DUT volts — the same volts the trace is drawn in.</param>
 /// <param name="TriggerHysteresisV">The noise-reject band. Zero is a plain crossing test.</param>
 /// <param name="HoldoffSeconds">How long after a hit the trigger refuses to fire again.</param>
+/// <param name="TriggerLevelLowV">
+/// The second level, read only by <see cref="Tonebench.Dsp.TriggerKind.Window"/>: the band's other
+/// bound, in either order with <paramref name="TriggerLevelV"/>.
+/// </param>
+/// <param name="PulseWidthLoSeconds">
+/// For <see cref="Tonebench.Dsp.TriggerKind.PulseWidth"/>: the shortest width that qualifies. Zero
+/// means nothing bounds it below.
+/// </param>
+/// <param name="PulseWidthHiSeconds">
+/// For <see cref="Tonebench.Dsp.TriggerKind.PulseWidth"/>: the longest width that qualifies.
+///
+/// <para><b>Null means unbounded, and it is nullable for that reason rather than carrying
+/// <c>double.PositiveInfinity</c></b>: an infinity is not a JSON number, and
+/// <c>System.Text.Json</c> finds that out part way through writing the response -- the rule that
+/// truncates a 200 and takes the whole status with it.</para>
+/// </param>
 /// <param name="AutoTimeoutSeconds">For <see cref="ScopeRunMode.Auto"/>: how long to wait before forcing a record.</param>
 /// <param name="Accumulation">What to do with the records after the first: replace, average or envelope.</param>
 /// <param name="AverageCount">How many records an average combines. Ignored under Normal.</param>
@@ -42,6 +58,9 @@ public sealed record OscilloscopeRequest(
     double TriggerLevelV,
     double TriggerHysteresisV = 0.0,
     double HoldoffSeconds = 0.0,
+    double TriggerLevelLowV = 0.0,
+    double PulseWidthLoSeconds = 0.0,
+    double? PulseWidthHiSeconds = null,
     double AutoTimeoutSeconds = 0.5,
     RecordAccumulation Accumulation = RecordAccumulation.Normal,
     int AverageCount = 16,
@@ -121,8 +140,49 @@ public sealed record OscilloscopeRequest(
                 nameof(Accumulation));
         }
 
-        if (TriggerKind != TriggerKind.Edge)
-            throw new ArgumentOutOfRangeException(nameof(TriggerKind), TriggerKind, "Only the edge trigger is implemented so far.");
+        if (TriggerKind is TriggerKind.Dropout or TriggerKind.Runt)
+            throw new ArgumentOutOfRangeException(nameof(TriggerKind), TriggerKind, "That trigger is not implemented yet.");
+
+        if (TriggerKind == TriggerKind.Window)
+        {
+            if (!double.IsFinite(TriggerLevelLowV))
+                throw new ArgumentOutOfRangeException(nameof(TriggerLevelLowV), TriggerLevelLowV, "The second trigger level must be a finite voltage.");
+
+            // The band is what the trigger is about, so two equal bounds are not a narrow window --
+            // they are no window, and nothing can ever be inside one. Named by the control rather
+            // than by the field, since the two boxes are what a reader has in front of them.
+            if (TriggerLevelLowV == TriggerLevelV)
+            {
+                throw new ArgumentException(
+                    "The window trigger's two levels must differ. Set one above the other to make a band.",
+                    nameof(TriggerLevelLowV));
+            }
+        }
+
+        if (TriggerKind == TriggerKind.PulseWidth)
+        {
+            if (!(PulseWidthLoSeconds >= 0.0) || !double.IsFinite(PulseWidthLoSeconds))
+                throw new ArgumentOutOfRangeException(nameof(PulseWidthLoSeconds), PulseWidthLoSeconds, "The shorter width must be zero or a positive time.");
+            if (PulseWidthHiSeconds is { } hi && (!(hi > 0.0) || !double.IsFinite(hi)))
+                throw new ArgumentOutOfRangeException(nameof(PulseWidthHiSeconds), PulseWidthHiSeconds, "The longer width must be a positive time, or absent for no upper bound.");
+            if (PulseWidthHiSeconds is { } bound && bound < PulseWidthLoSeconds)
+            {
+                throw new ArgumentException(
+                    "The longer width cannot be below the shorter one.",
+                    nameof(PulseWidthHiSeconds));
+            }
+
+            // Both bounds absent means every pulse qualifies, which is an edge trigger that fires on
+            // trailing edges instead -- not what anybody reaches for this kind to get, and silent if
+            // it were allowed. The message names the two controls rather than the condition, because
+            // the panel offers "shorter than", "longer than" and "between" over this one pair.
+            if (PulseWidthLoSeconds <= 0.0 && PulseWidthHiSeconds is null)
+            {
+                throw new ArgumentException(
+                    "A pulse-width trigger needs a width condition: set the shorter bound, the longer bound, or both.",
+                    nameof(PulseWidthLoSeconds));
+            }
+        }
 
         if (!(RecordSeconds >= MinRecordSeconds) || RecordSeconds > MaxRecordSeconds)
         {

@@ -7,6 +7,7 @@ import type {
   ReportRow,
   ResponsePhaseKindName,
   ScopeRecordResponse,
+  ScopeTriggerKind,
   ScopeTriggerSource,
   ThdMethodName,
   ThdSweepPoint,
@@ -167,6 +168,9 @@ export type ReportSubjectData =
       triggerLevelV: number
       triggerHysteresisV: number
       triggerSource: ScopeTriggerSource
+      /** The kind, and the window trigger's other bound, so a page draws the band the screen drew. */
+      triggerKind?: ScopeTriggerKind
+      triggerLevelLowV?: number
       /** What the settings ask for, which is the axis an empty chart draws. */
       recordSeconds: number
       preTriggerFraction: number

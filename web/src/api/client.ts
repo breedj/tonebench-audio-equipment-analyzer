@@ -1383,6 +1383,18 @@ export interface OscilloscopeStartRequest {
   triggerLevelV: number
   /** The noise-reject band, drawn around the level. Zero is a plain crossing test. */
   triggerHysteresisV?: number
+  /** The window trigger's other bound, in either order with `triggerLevelV`. Read by that kind alone. */
+  triggerLevelLowV?: number
+  /** The pulse-width trigger's shorter bound, in seconds. Zero means nothing bounds it below. */
+  pulseWidthLoSeconds?: number
+  /**
+   * Its longer bound, in seconds.
+   *
+   * <p><b>Absent means unbounded above</b> — the "longer than T" condition — rather than a missing
+   * figure, which is why it is optional rather than carrying an infinity: an infinity is not a JSON
+   * number, and the server finds that out part way through writing a response.</p>
+   */
+  pulseWidthHiSeconds?: number
   holdoffSeconds?: number
   autoTimeoutSeconds?: number
   /** Normal, Average or Envelope — see scope/acquisition.ts. */
@@ -1846,6 +1858,12 @@ export interface OscilloscopeParameters {
   triggerSlope: ScopeTriggerSlope
   triggerLevelV: number
   triggerHysteresisV: number
+  /** The window trigger's other bound. Null on every other kind, and on anything saved before the kind existed. */
+  triggerLevelLowV?: number | null
+  /** The pulse-width trigger's shorter bound in seconds, or null where nothing bounded it below. */
+  pulseWidthLoSeconds?: number | null
+  /** Its longer bound, or null where nothing bounded it above. */
+  pulseWidthHiSeconds?: number | null
   holdoffSeconds: number
   processLeft: boolean
   processRight: boolean

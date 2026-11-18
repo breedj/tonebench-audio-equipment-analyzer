@@ -323,13 +323,124 @@ public class OscilloscopeRunnerTests
         Assert.Throws<ArgumentException>(request.Validate);
     }
 
-    [Fact]
-    public void AnUnimplementedTriggerKind_IsRefusedWithItsOwnMessage()
+    [Theory]
+    [InlineData(TriggerKind.Dropout)]
+    [InlineData(TriggerKind.Runt)]
+    public void AnUnimplementedTriggerKind_IsRefusedWithItsOwnMessage(TriggerKind kind)
     {
-        var request = Request() with { TriggerKind = TriggerKind.Runt };
+        var request = Request() with { TriggerKind = kind };
 
         var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
-        Assert.Contains("edge trigger", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not implemented", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AWindowTriggerNeedsTwoDifferentLevels()
+    {
+        // Two equal bounds are not a narrow window -- they are no window, and nothing can ever be
+        // inside one. The message names the control rather than the field.
+        var request = Request() with { TriggerKind = TriggerKind.Window, TriggerLevelV = 0.5, TriggerLevelLowV = 0.5 };
+
+        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Contains("two levels must differ", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        (request with { TriggerLevelLowV = -0.5 }).Validate();
+    }
+
+    [Fact]
+    public void APulseWidthTriggerNeedsAWidthCondition()
+    {
+        // Neither bound set means every pulse qualifies, which is an edge trigger firing on
+        // trailing edges instead -- and silent if it were allowed.
+        var request = Request() with { TriggerKind = TriggerKind.PulseWidth };
+
+        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Contains("width condition", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Either bound on its own is a condition.
+        (request with { PulseWidthHiSeconds = 50e-6 }).Validate();
+        (request with { PulseWidthLoSeconds = 50e-6 }).Validate();
+    }
+
+    [Fact]
+    public void APulseWidthRangeTheWrongWayRound_IsRefused()
+    {
+        var request = Request() with
+        {
+            TriggerKind = TriggerKind.PulseWidth,
+            PulseWidthLoSeconds = 120e-6,
+            PulseWidthHiSeconds = 30e-6,
+        };
+
+        Assert.Throws<ArgumentException>(request.Validate);
+    }
+
+    [Fact]
+    public async Task APulseWidthRun_CapturesARecord()
+    {
+        // The seam, end to end: the width in seconds on the request has to reach the scanner as
+        // frames, which happens in two places -- the runner's BuildSpec and the engine's
+        // BuildScanner -- and both are private. A run that commits a record is what proves they
+        // agree; a request mapped into a spec that dropped the bounds would refuse at validation or
+        // fire on every crossing, and neither shows up in a unit test of either half.
+        //
+        // The generator plays a 1 kHz tone, so the stretch above zero is 500 us: "longer than
+        // 100 us" fires mid-pulse, which is also the branch no edge trigger has.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var request = Request() with
+            {
+                TriggerKind = TriggerKind.PulseWidth,
+                PulseWidthLoSeconds = 100e-6,
+            };
+
+            await bench.Runner.StartAsync(request, CancellationToken.None);
+
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            var status = bench.Runner.Status;
+            Assert.Equal(FrequencyResponsePhase.Finished, status.Phase);
+            Assert.Null(status.Error);
+            Assert.Equal(1, status.RecordsTaken);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task AWindowRun_CapturesARecord()
+    {
+        // The same seam for the other kind: both bounds have to reach the scanner, and a spec that
+        // carried only one would make a band of (level, 0) and still capture something plausible.
+        // The tone swings +/-0.5 V at -6 dBV, so a band of +/-0.1 V is entered twice a cycle.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var request = Request() with
+            {
+                TriggerKind = TriggerKind.Window,
+                TriggerLevelV = 0.1,
+                TriggerLevelLowV = -0.1,
+            };
+
+            await bench.Runner.StartAsync(request, CancellationToken.None);
+
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            var status = bench.Runner.Status;
+            Assert.Equal(FrequencyResponsePhase.Finished, status.Phase);
+            Assert.Null(status.Error);
+            Assert.Equal(1, status.RecordsTaken);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
     }
 
     [Fact]

@@ -2133,6 +2133,15 @@ const scopeCursors = ref<ScopeCursors>({ ...DEFAULT_SCOPE_CURSORS })
 const scopeTriggerLevelV = ref(DEFAULT_SCOPE_TRIGGER.levelV)
 const scopeTriggerHysteresisV = ref(DEFAULT_SCOPE_TRIGGER.hysteresisV)
 const scopeTriggerSource = ref<import('./api/client').ScopeTriggerSource>(DEFAULT_SCOPE_TRIGGER.source)
+/**
+ * The staged trigger kind, and the window trigger's other bound.
+ *
+ * <p>Here rather than inside the panel because the <em>chart</em> draws them: a window trigger's
+ * band is what makes two numbers in a rail aimable at a signal, the way the hysteresis band is for
+ * an edge trigger.</p>
+ */
+const scopeTriggerKind = ref<import('./api/client').ScopeTriggerKind>(DEFAULT_SCOPE_TRIGGER.kind)
+const scopeTriggerLevelLowV = ref(0)
 const scopeRecordSeconds = ref(0.02)
 const scopePreTriggerFraction = ref(0.25)
 const scopeMode = ref<import('./api/client').ScopeRunMode>('Auto')
@@ -3654,6 +3663,8 @@ function buildLiveSubject(): ReportSubject | null {
       triggerLevelV: scopeTriggerLevelV.value,
       triggerHysteresisV: scopeTriggerHysteresisV.value,
       triggerSource: scopeTriggerSource.value,
+      triggerKind: scopeTriggerKind.value,
+      triggerLevelLowV: scopeTriggerLevelLowV.value,
       recordSeconds: scopeRecordSeconds.value,
       preTriggerFraction: scopePreTriggerFraction.value,
     }
@@ -6122,6 +6133,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:trigger-level-v="scopeTriggerLevelV"
                   v-model:trigger-hysteresis-v="scopeTriggerHysteresisV"
                   v-model:trigger-source="scopeTriggerSource"
+                  v-model:trigger-kind="scopeTriggerKind"
+                  v-model:trigger-level-low-v="scopeTriggerLevelLowV"
                   v-model:record-seconds="scopeRecordSeconds"
                   v-model:pre-trigger-fraction="scopePreTriggerFraction"
                   v-model:mode="scopeMode"
@@ -6213,6 +6226,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :show-trigger-level="scopeShowTriggerLevel"
                   :trigger-hysteresis-v="scopeTriggerHysteresisV"
                   :trigger-source="scopeTriggerSource"
+                  :trigger-kind="scopeTriggerKind"
+                  :trigger-level-low-v="scopeTriggerLevelLowV"
                   :record-seconds="scopeRecordSeconds"
                   :pre-trigger-fraction="scopeDisplayPreTriggerFraction"
                   :running="scopeRunning"

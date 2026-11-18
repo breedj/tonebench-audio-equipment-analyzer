@@ -596,6 +596,8 @@ export async function renderView(
           triggerLevelV: data.triggerLevelV,
           triggerHysteresisV: data.triggerHysteresisV,
           triggerSource: data.triggerSource,
+          triggerKind: data.triggerKind,
+          triggerLevelLowV: data.triggerLevelLowV,
           recordSeconds: data.recordSeconds,
           preTriggerFraction: data.preTriggerFraction,
           running: false,

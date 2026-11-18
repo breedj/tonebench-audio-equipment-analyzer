@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerSource } from '../api/client'
+import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerKind, ScopeTriggerSource } from '../api/client'
 import type { OverlayEntry } from '../composables/useMeasurements'
 import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
 import { runTint } from '../charts/runTint'
@@ -41,7 +41,7 @@ import {
 } from '../scope/timeAxis'
 import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
 import type { ScopeAxisWindow } from '../scope/display'
-import { triggerChannel, triggerIndicator } from '../scope/triggerSpec'
+import { triggerChannel, triggerIndicator, windowIndicator } from '../scope/triggerSpec'
 import {
   hexRgb,
   intensityPixels,
@@ -127,6 +127,16 @@ const props = withDefaults(defineProps<{
   showTriggerLevel: boolean
   triggerHysteresisV: number
   triggerSource: ScopeTriggerSource
+  /**
+   * The staged trigger kind, and the window trigger's other bound.
+   *
+   * <p>The chart needs the kind to know <em>what</em> to draw at the level: an edge trigger's line
+   * with its hysteresis band around it, or a window trigger's band between its two bounds. Both
+   * default, so a caller that has no trigger to describe — a report of a measurement saved before
+   * the advanced kinds existed — still draws the line it always did.</p>
+   */
+  triggerKind?: ScopeTriggerKind
+  triggerLevelLowV?: number
   /** The record the settings ask for, so an empty chart can draw the axis the next capture lands on. */
   recordSeconds: number
   preTriggerFraction: number
@@ -545,6 +555,24 @@ const indicator = computed(() =>
   triggerIndicator(triggerLevelV.value, liveYWindow.value.topV, liveYWindow.value.bottomV, props.triggerHysteresisV),
 )
 
+/**
+ * The window trigger's two bounds and the band between them, or null on every other kind.
+ *
+ * <p>The band <b>replaces</b> the hysteresis band rather than joining it: two translucent bands
+ * over each other, one of them a few millivolts tall, is unreadable — and on this kind the band
+ * between the bounds is the setting, where the hysteresis is only a noise reject on its edges.</p>
+ */
+const windowBand = computed(() =>
+  props.triggerKind === 'Window'
+    ? windowIndicator(
+        triggerLevelV.value,
+        props.triggerLevelLowV ?? 0,
+        liveYWindow.value.topV,
+        liveYWindow.value.bottomV,
+      )
+    : null,
+)
+
 /** The cursors' own colour, for their grips — the chart paints the lines in it through `theme()`. */
 const cursorColor = computed(() => theme().cursor)
 
@@ -662,11 +690,43 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
           // Never on a rolling record: nothing triggered, so a line at the trigger level would
           // be read as the thing that placed this window.
           if (!props.showTriggerLevel || props.record?.rolled === true) return
-          const { levelV, band, offWindow } = indicator.value
 
           const ctx = u.ctx
           const left = u.bbox.left
           const right = u.bbox.left + u.bbox.width
+
+          // A window trigger has two bounds and a band between them, which is a different picture
+          // from a level with a noise-reject band around it -- so it is drawn as its own thing
+          // rather than by passing the level twice through the one above.
+          if (windowBand.value) {
+            const { high, low, band: filled } = windowBand.value
+            ctx.save()
+
+            if (filled) {
+              const top = u.valToPos(filled.topV, 'y', true)
+              const bottom = u.valToPos(filled.bottomV, 'y', true)
+              ctx.fillStyle = color
+              ctx.globalAlpha = 0.12
+              ctx.fillRect(left, Math.min(top, bottom), u.bbox.width, Math.abs(bottom - top))
+              ctx.globalAlpha = 1
+            }
+
+            ctx.strokeStyle = color
+            ctx.lineWidth = 1
+            for (const bound of [high, low]) {
+              const y = u.valToPos(bound.levelV, 'y', true)
+              ctx.setLineDash(bound.offWindow ? [] : [6, 4])
+              ctx.beginPath()
+              ctx.moveTo(left, y)
+              ctx.lineTo(right, y)
+              ctx.stroke()
+            }
+
+            ctx.restore()
+            return
+          }
+
+          const { levelV, band, offWindow } = indicator.value
           ctx.save()
 
           if (band) {
@@ -1573,7 +1633,17 @@ watch(
 // The trigger line and its band are draw-hook state too, so moving the level is a redraw and the
 // handle follows it. A rebuild here would discard the zoom on every pixel of a drag.
 watch(
-  () => [triggerLevelV.value, props.triggerHysteresisV, props.showTriggerLevel, triggerColor.value] as const,
+  () =>
+    [
+      triggerLevelV.value,
+      props.triggerHysteresisV,
+      props.showTriggerLevel,
+      triggerColor.value,
+      // Or switching to the window kind, or typing its other bound, leaves the old line on screen
+      // until something else happens to redraw -- which reads as a control that does nothing.
+      props.triggerKind,
+      props.triggerLevelLowV,
+    ] as const,
   () => {
     plot.value?.redraw()
     syncHandle()

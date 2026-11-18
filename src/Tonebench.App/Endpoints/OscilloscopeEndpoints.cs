@@ -693,6 +693,9 @@ public sealed record OscilloscopeStartRequest(
     double TriggerLevelV,
     double? TriggerHysteresisV,
     double? HoldoffSeconds,
+    double? TriggerLevelLowV,
+    double? PulseWidthLoSeconds,
+    double? PulseWidthHiSeconds,
     double? AutoTimeoutSeconds,
     string? Accumulation,
     int? AverageCount,
@@ -720,6 +723,12 @@ public sealed record OscilloscopeStartRequest(
             TriggerLevelV,
             TriggerHysteresisV ?? 0.0,
             HoldoffSeconds ?? 0.0,
+            TriggerLevelLowV ?? 0.0,
+            PulseWidthLoSeconds ?? 0.0,
+
+            // Carried through as a null, not defaulted: null is the upper bound being absent, which
+            // is a condition of its own ("longer than T") rather than a missing figure.
+            PulseWidthHiSeconds,
             AutoTimeoutSeconds ?? 0.5,
             accumulation,
             AverageCount ?? 16,

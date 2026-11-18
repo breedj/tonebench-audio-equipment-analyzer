@@ -77,6 +77,101 @@ export const SCOPE_TRIGGER_SLOPES: readonly ScopeOption<ScopeTriggerSlope>[] = O
 ])
 
 /**
+ * The trigger kinds this build implements, in the order a bench instrument offers them.
+ *
+ * <p><code>Dropout</code> and <code>Runt</code> exist on the wire and are deliberately not offered:
+ * the server refuses them by name, and a dropdown entry whose only outcome is a refusal is worse
+ * than no entry — the same rule the two unimplemented sources follow above.</p>
+ */
+export const SCOPE_TRIGGER_KINDS: readonly ScopeOption<ScopeTriggerKind>[] = Object.freeze([
+  { value: 'Edge', label: 'Edge' },
+  { value: 'PulseWidth', label: 'Pulse width' },
+  { value: 'Window', label: 'Window' },
+])
+
+/**
+ * What each kind is for, for the control's tooltip.
+ *
+ * <p>Each one says what it <em>finds</em> rather than how it works, because the reason to reach past
+ * Edge is always a fault an edge trigger cannot pick out of the signal around it.</p>
+ */
+export const SCOPE_TRIGGER_KIND_HINTS: Readonly<Record<ScopeTriggerKind, string>> = Object.freeze({
+  Edge: 'Fires on a crossing of the level. What a scope does unless you tell it otherwise.',
+  PulseWidth:
+    'Fires on a pulse whose width qualifies, and on nothing else. The glitch trigger: a crossover notch or a stuck output is one pulse among thousands that an edge trigger cannot pick out.',
+  Window:
+    'Fires when the signal enters or leaves a voltage band. For watching something that is supposed to stay put — a bias point, a rail, a mute.',
+  Dropout: 'Not implemented.',
+  Runt: 'Not implemented.',
+})
+
+/** Which slope means what, per kind: the word is the same and the thing it selects is not. */
+export const SCOPE_TRIGGER_SLOPE_HINTS: Readonly<Record<ScopeTriggerKind, string>> = Object.freeze({
+  Edge: 'Which direction through the level qualifies.',
+  PulseWidth:
+    'Which stretch is the pulse: Rising measures the stretch above the level, Falling the stretch below it. Either watches both.',
+  Window: 'Rising fires on entering the band, Falling on leaving it, Either on both.',
+  Dropout: '',
+  Runt: '',
+})
+
+/**
+ * How a width condition is spelled on screen.
+ *
+ * <p>Three conditions over one pair of bounds, because that is how a reader thinks about it — a
+ * glitch is "shorter than", a stuck level is "longer than" — where the pair on the wire is a range
+ * and says neither. <code>pulseWidthBounds</code> is the mapping, and
+ * <code>pulseConditionFor</code> reads it back, so a stored measurement reopens on the condition it
+ * was set with rather than always on "between".</p>
+ */
+export type ScopePulseCondition = 'ShorterThan' | 'LongerThan' | 'Between'
+
+export const SCOPE_PULSE_CONDITIONS: readonly ScopeOption<ScopePulseCondition>[] = Object.freeze([
+  { value: 'ShorterThan', label: 'Shorter than' },
+  { value: 'LongerThan', label: 'Longer than' },
+  { value: 'Between', label: 'Between' },
+])
+
+/** The two bounds a condition comes to, in seconds. Null for the upper one means unbounded above. */
+export function pulseWidthBounds(
+  condition: ScopePulseCondition,
+  widthS: number,
+  widthHiS: number,
+): { loS: number; hiS: number | null } {
+  switch (condition) {
+    case 'ShorterThan':
+      return { loS: 0, hiS: widthS }
+    case 'LongerThan':
+      // Null rather than a large number: "longer than" has no upper bound at all, and a bound
+      // chosen to stand in for one would quietly stop firing on the pulse that never ends, which
+      // is the fault this condition exists for.
+      return { loS: widthS, hiS: null }
+    case 'Between':
+      return { loS: widthS, hiS: widthHiS }
+  }
+}
+
+/**
+ * Which condition a stored pair of bounds was set as.
+ *
+ * <p>A pair with no upper bound can only have been "longer than", and one with no lower bound only
+ * "shorter than". Both present is "between" — including the case where they are equal, which is a
+ * band of zero width and is the user's business rather than this function's.</p>
+ */
+export function pulseConditionFor(loS: number | null | undefined, hiS: number | null | undefined): ScopePulseCondition {
+  const lo = typeof loS === 'number' && Number.isFinite(loS) ? loS : 0
+  const hi = typeof hiS === 'number' && Number.isFinite(hiS) ? hiS : null
+  if (hi === null) return 'LongerThan'
+  if (lo <= 0) return 'ShorterThan'
+  return 'Between'
+}
+
+/** The width the box shows for a condition — the bound that condition is set by. */
+export function pulseWidthFor(condition: ScopePulseCondition, loS: number, hiS: number | null): number {
+  return condition === 'ShorterThan' ? (hiS ?? 0) : loS
+}
+
+/**
  * The trigger sources this build implements.
  *
  * <p><code>Math</code> and <code>Stimulus</code> exist on the wire and are deliberately not offered:
@@ -160,6 +255,104 @@ export function triggerIndicator(
   }
 
   return { levelV: drawn, offWindow, band }
+}
+
+/** Where a window trigger's two lines go, and whether either of them is really there. */
+export interface WindowIndicator {
+  /** The upper bound, clamped to the window the way a single level is. */
+  high: { levelV: number; offWindow: 'above' | 'below' | null }
+  /** The lower bound. */
+  low: { levelV: number; offWindow: 'above' | 'below' | null }
+  /** The band between them, clipped to the window, or null where none of it is on screen. */
+  band: { topV: number; bottomV: number } | null
+}
+
+/**
+ * Where to draw a window trigger's band over a window running from <code>bottomV</code> to
+ * <code>topV</code>.
+ *
+ * <p><b>The band is the control.</b> A window trigger's two levels are what it fires on, and two
+ * numbers in a settings rail say nothing about where they sit against the signal — so the band is
+ * to this kind what the hysteresis band is to the edge trigger: the one thing that makes an
+ * invisible setting aimable. It replaces the hysteresis band rather than joining it, because two
+ * translucent bands over each other, one of them a few millivolts tall, is unreadable.</p>
+ *
+ * <p>The pair is <b>sorted</b>, as the scanner sorts it, so typing the high figure in the low box
+ * draws the same band the capture will use — a picture that disagreed with the trigger would be
+ * worse than no picture. Each line is clamped to the edge and marked when it is off the window,
+ * which is <code>triggerIndicator</code>'s own rule and for its own reason.</p>
+ */
+export function windowIndicator(
+  levelV: number,
+  levelLowV: number,
+  topV: number,
+  bottomV: number,
+): WindowIndicator {
+  const hi = Math.max(topV, bottomV)
+  const lo = Math.min(topV, bottomV)
+  const middle = (hi + lo) / 2
+
+  const place = (v: number) =>
+    Number.isFinite(v)
+      ? { levelV: Math.min(Math.max(v, lo), hi), offWindow: (v > hi ? 'above' : v < lo ? 'below' : null) as 'above' | 'below' | null }
+      : { levelV: middle, offWindow: null }
+
+  const bandHigh = Math.max(levelV, levelLowV)
+  const bandLow = Math.min(levelV, levelLowV)
+  const high = place(bandHigh)
+  const low = place(bandLow)
+
+  let band: WindowIndicator['band'] = null
+  if (Number.isFinite(bandHigh) && Number.isFinite(bandLow)) {
+    const clippedTop = Math.min(bandHigh, hi)
+    const clippedBottom = Math.max(bandLow, lo)
+    // A band entirely off the window has nothing left to draw, and clamping it would paint a
+    // hairline on the edge and claim the band was there.
+    if (clippedTop > clippedBottom) band = { topV: clippedTop, bottomV: clippedBottom }
+  }
+
+  return { high, low, band }
+}
+
+/**
+ * Why a window trigger's two levels will not do, or null.
+ *
+ * <p>The server refuses the same thing and names it; this is the client saying so before a run is
+ * attempted, which is <code>triggerSourceProblem</code>'s arrangement one kind along.</p>
+ */
+export function windowLevelsProblem(levelV: number, levelLowV: number): string | null {
+  if (!Number.isFinite(levelV) || !Number.isFinite(levelLowV)) return 'Both window levels must be voltages.'
+  if (levelV === levelLowV) return 'The window trigger needs two different levels. Set one above the other to make a band.'
+  return null
+}
+
+/**
+ * Why a width condition will not do, or null.
+ *
+ * <p>Two of these three are arithmetic the user cannot see. <b>A pulse narrower than one sample
+ * cannot exist in the record</b>, so "shorter than 2 µs" at 192 kS/s — where a sample arrives every
+ * 5.2 µs — is a condition that is perfectly reasonable to type and can never fire, which is the
+ * worst way for a control to be wrong. And a condition with no bound at all fires on every pulse
+ * while claiming to select one.</p>
+ */
+export function pulseWidthProblem(
+  condition: ScopePulseCondition,
+  widthS: number,
+  widthHiS: number,
+  sampleIntervalS: number,
+): string | null {
+  if (!Number.isFinite(widthS) || widthS <= 0) return 'The pulse width must be a positive time.'
+  if (condition === 'Between') {
+    if (!Number.isFinite(widthHiS) || widthHiS <= 0) return 'The longer width must be a positive time.'
+    if (widthHiS < widthS) return 'The longer width cannot be below the shorter one.'
+  }
+
+  const upper = condition === 'ShorterThan' ? widthS : condition === 'Between' ? widthHiS : null
+  if (upper !== null && Number.isFinite(sampleIntervalS) && sampleIntervalS > 0 && upper < sampleIntervalS) {
+    return `A pulse shorter than one sample cannot be captured. At this rate a sample arrives every ${(sampleIntervalS * 1e6).toFixed(2)} µs.`
+  }
+
+  return null
 }
 
 /**

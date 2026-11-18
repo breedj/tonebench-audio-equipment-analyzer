@@ -1254,6 +1254,16 @@ public sealed record OscilloscopeParameters(
     double HoldoffSeconds,
     bool ProcessLeft,
     bool ProcessRight,
+    /// <summary>
+    /// The window trigger's second level. Null on every other kind, and on anything saved before
+    /// the kind existed — which is why it is nullable rather than zero: on a window trigger zero is
+    /// a perfectly ordinary bound, so a default of zero could not be told from one that was set.
+    /// </summary>
+    double? TriggerLevelLowV = null,
+    /// <summary>The pulse-width trigger's shorter bound, in seconds. Null where nothing bounds it below.</summary>
+    double? PulseWidthLoSeconds = null,
+    /// <summary>The pulse-width trigger's longer bound, in seconds. Null where nothing bounds it above.</summary>
+    double? PulseWidthHiSeconds = null,
     bool Spliced = false,
     bool Forced = false,
     bool Rolled = false,

@@ -5,6 +5,7 @@ import type {
   OscilloscopeParameters,
   OscilloscopeStartRequest,
   ScopeRunMode,
+  ScopeTriggerKind,
   ScopeTriggerSlope,
   ScopeTriggerSource,
 } from '../api/client'
@@ -27,11 +28,21 @@ import {
 } from '../scope/acquisition'
 import {
   DEFAULT_SCOPE_TRIGGER,
+  SCOPE_PULSE_CONDITIONS,
   SCOPE_RUN_MODES,
   SCOPE_RUN_MODE_HINTS,
+  SCOPE_TRIGGER_KINDS,
+  SCOPE_TRIGGER_KIND_HINTS,
   SCOPE_TRIGGER_SLOPES,
+  SCOPE_TRIGGER_SLOPE_HINTS,
   SCOPE_TRIGGER_SOURCES,
+  pulseConditionFor,
+  pulseWidthBounds,
+  pulseWidthFor,
+  pulseWidthProblem,
   triggerSourceProblem,
+  windowLevelsProblem,
+  type ScopePulseCondition,
 } from '../scope/triggerSpec'
 import { formatScopeTime } from '../scope/timeAxis'
 import { roundVoltsForWindow } from '../scope/voltAxis'
@@ -54,6 +65,13 @@ import { roundVoltsForWindow } from '../scope/voltAxis'
 
 const triggerLevelV = defineModel<number>('triggerLevelV', { required: true })
 const triggerHysteresisV = defineModel<number>('triggerHysteresisV', { required: true })
+/**
+ * The kind, and the window trigger's other bound — models rather than internal state because the
+ * <em>chart</em> draws them: a window trigger's band is to that kind what the hysteresis band is to
+ * the edge trigger, the one thing that makes two numbers in a rail aimable at a signal.
+ */
+const triggerKind = defineModel<ScopeTriggerKind>('triggerKind', { default: 'Edge' })
+const triggerLevelLowV = defineModel<number>('triggerLevelLowV', { default: 0 })
 const triggerSource = defineModel<ScopeTriggerSource>('triggerSource', { required: true })
 const recordSeconds = defineModel<number>('recordSeconds', { required: true })
 const preTriggerFraction = defineModel<number>('preTriggerFraction', { required: true })
@@ -110,6 +128,17 @@ const form = reactive({
   slope: DEFAULT_SCOPE_TRIGGER.slope as ScopeTriggerSlope,
   holdoffMs: 0,
   autoTimeoutMs: 500,
+  /**
+   * The width condition, and its one or two bounds in microseconds.
+   *
+   * <p>Microseconds because that is the scale this control is for: a crossover notch or a switching
+   * glitch is tens of them, and one sample is 5.2 µs at 192 kS/s — a box in milliseconds would ask
+   * for 0.042 and lose a decimal point. The panel's own sample-interval readout is in µs for the
+   * same reason.</p>
+   */
+  pulseCondition: 'ShorterThan' as ScopePulseCondition,
+  pulseWidthUs: 50,
+  pulseWidthHiUs: 200,
 })
 
 /** The rates this analyzer can capture at, newest-first as the device reports them. */
@@ -174,6 +203,26 @@ function applyStoredParams(paramsJson: string) {
     triggerHysteresisV.value = stored.triggerHysteresisV
   if (stored.triggerSource === 'ChannelA' || stored.triggerSource === 'ChannelB')
     triggerSource.value = stored.triggerSource
+  if (SCOPE_TRIGGER_KINDS.some((k) => k.value === stored.triggerKind))
+    triggerKind.value = stored.triggerKind as ScopeTriggerKind
+  if (typeof stored.triggerLevelLowV === 'number' && Number.isFinite(stored.triggerLevelLowV))
+    triggerLevelLowV.value = stored.triggerLevelLowV
+
+  // The condition is read back from the pair of bounds rather than stored on its own, so there is
+  // one statement of what the capture did and the panel cannot disagree with it. A measurement saved
+  // as "shorter than 50 us" reopens saying that, not "between 0 and 50".
+  if (stored.triggerKind === 'PulseWidth') {
+    const condition = pulseConditionFor(stored.pulseWidthLoSeconds, stored.pulseWidthHiSeconds)
+    form.pulseCondition = condition
+    const width = pulseWidthFor(
+      condition,
+      typeof stored.pulseWidthLoSeconds === 'number' ? stored.pulseWidthLoSeconds : 0,
+      typeof stored.pulseWidthHiSeconds === 'number' ? stored.pulseWidthHiSeconds : null,
+    )
+    if (width > 0) form.pulseWidthUs = width * 1e6
+    if (condition === 'Between' && typeof stored.pulseWidthHiSeconds === 'number' && stored.pulseWidthHiSeconds > 0)
+      form.pulseWidthHiUs = stored.pulseWidthHiSeconds * 1e6
+  }
   if (SCOPE_RUN_MODES.some((m) => m.value === stored.mode)) mode.value = stored.mode as ScopeRunMode
   if (typeof stored.recordSeconds === 'number' && stored.recordSeconds > 0)
     recordSeconds.value = stored.recordSeconds
@@ -232,6 +281,10 @@ watch(
       // change is discarded on the next measurement switch without a word.
       accumulation.value,
       averageCount.value,
+      // And so do these two, for the same reason: bound outside `form`, so a kind switched or a
+      // second level typed would be discarded on the next measurement switch without a word.
+      triggerKind.value,
+      triggerLevelLowV.value,
     ] as const,
   () => {
     if (!restoring) markDirty()
@@ -308,6 +361,35 @@ function setZero() {
 
 const sourceProblem = computed(() => triggerSourceProblem(triggerSource.value, form.processLeft, form.processRight))
 
+/** Which extra controls the staged kind needs. */
+const kindIsWindow = computed(() => triggerKind.value === 'Window')
+const kindIsPulse = computed(() => triggerKind.value === 'PulseWidth')
+
+/**
+ * The width condition as the two bounds the wire carries, in seconds.
+ *
+ * <p>One computed read by the request, the params and the validation, so the figure that is checked
+ * is the figure that is sent.</p>
+ */
+const pulseBounds = computed(() =>
+  pulseWidthBounds(form.pulseCondition, form.pulseWidthUs / 1e6, form.pulseWidthHiUs / 1e6),
+)
+
+const windowProblem = computed(() =>
+  kindIsWindow.value ? windowLevelsProblem(triggerLevelV.value, triggerLevelLowV.value) : null,
+)
+
+const pulseProblem = computed(() =>
+  kindIsPulse.value
+    ? pulseWidthProblem(
+        form.pulseCondition,
+        form.pulseWidthUs / 1e6,
+        form.pulseWidthHiUs / 1e6,
+        sampleIntervalUs.value / 1e6,
+      )
+    : null,
+)
+
 const invalid = computed(() => {
   if (!(form.recordMs >= MIN_RECORD_MS) || form.recordMs > MAX_RECORD_MS)
     return `The record must be between ${MIN_RECORD_MS} ms and ${MAX_RECORD_MS} ms.`
@@ -316,7 +398,7 @@ const invalid = computed(() => {
   if (!(triggerHysteresisV.value >= 0)) return 'The hysteresis must be zero or a positive voltage.'
   if (!(form.holdoffMs >= 0)) return 'The holdoff must be zero or a positive time.'
   if (mode.value === 'Auto' && !(form.autoTimeoutMs > 0)) return 'Auto mode needs a timeout above zero.'
-  return sourceProblem.value
+  return windowProblem.value ?? pulseProblem.value ?? sourceProblem.value
 })
 
 /**
@@ -333,11 +415,17 @@ function buildParamsJson(): string {
     recordSeconds: form.recordMs / 1000,
     preTriggerFraction: form.preTriggerPercent / 100,
     mode: mode.value,
-    triggerKind: 'Edge',
+    triggerKind: triggerKind.value,
     triggerSource: triggerSource.value,
     triggerSlope: form.slope,
     triggerLevelV: triggerLevelV.value,
     triggerHysteresisV: triggerHysteresisV.value,
+    // Only the kind that reads each one, which is what the server's own save does: a stored window
+    // level on an edge-triggered measurement would reopen showing a band the trigger never had.
+    // Undefined rather than null, so JSON.stringify leaves the field out altogether.
+    triggerLevelLowV: kindIsWindow.value ? triggerLevelLowV.value : undefined,
+    pulseWidthLoSeconds: kindIsPulse.value ? pulseBounds.value.loS : undefined,
+    pulseWidthHiSeconds: kindIsPulse.value ? (pulseBounds.value.hiS ?? undefined) : undefined,
     holdoffSeconds: form.holdoffMs / 1000,
     processLeft: form.processLeft,
     processRight: form.processRight,
@@ -352,11 +440,16 @@ function buildRequest(single = false): OscilloscopeStartRequest {
     recordSeconds: form.recordMs / 1000,
     preTriggerFraction: form.preTriggerPercent / 100,
     mode: single ? 'Single' : mode.value,
-    triggerKind: 'Edge',
+    triggerKind: triggerKind.value,
     triggerSource: triggerSource.value,
     triggerSlope: form.slope,
     triggerLevelV: triggerLevelV.value,
     triggerHysteresisV: triggerHysteresisV.value,
+    triggerLevelLowV: kindIsWindow.value ? triggerLevelLowV.value : undefined,
+    pulseWidthLoSeconds: kindIsPulse.value ? pulseBounds.value.loS : undefined,
+    // Left out entirely where the condition has no upper bound: absent is "longer than", which is a
+    // condition of its own rather than a missing figure -- and an infinity cannot ride on JSON.
+    pulseWidthHiSeconds: kindIsPulse.value ? (pulseBounds.value.hiS ?? undefined) : undefined,
     holdoffSeconds: form.holdoffMs / 1000,
     autoTimeoutSeconds: form.autoTimeoutMs / 1000,
     // Normal where the staged mode cannot produce records to combine, so the Single button never
@@ -428,6 +521,8 @@ watch(
       // change is discarded on the next measurement switch without a word.
       accumulation.value,
       averageCount.value,
+      triggerKind.value,
+      triggerLevelLowV.value,
     ] as const,
   () => {
     if (restoring || !props.running) return
@@ -468,6 +563,43 @@ function onLevelChange(event: Event) {
   const typed = Number((event.target as HTMLInputElement).value)
   if (Number.isFinite(typed)) triggerLevelV.value = typed
   else (event.target as HTMLInputElement).value = String(triggerLevelV.value)
+}
+
+function onSecondLevelChange(event: Event) {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(typed)) triggerLevelLowV.value = typed
+  else (event.target as HTMLInputElement).value = String(triggerLevelLowV.value)
+}
+
+/**
+ * A width box.
+ *
+ * <p>Clamped to a positive time on the way in, which is the one figure neither condition can mean:
+ * a pulse of zero width is not a pulse. <code>clampNumberField</code> for the reason every number
+ * box in this app uses it — the step grid is anchored on <code>min</code>, so a floor that is not a
+ * multiple of the step makes the spinner offer absurd values, and the floor has to live here
+ * instead.</p>
+ */
+function onPulseWidthChange(event: Event) {
+  form.pulseWidthUs = readWidthUs(event, form.pulseWidthUs)
+}
+
+function onPulseWidthHiChange(event: Event) {
+  form.pulseWidthHiUs = readWidthUs(event, form.pulseWidthHiUs)
+}
+
+/** A typed width, clamped to a positive time, with the box put back where it cannot be read. */
+function readWidthUs(event: Event, current: number): number {
+  const box = event.target as HTMLInputElement
+  const typed = Number(box.value)
+  if (!Number.isFinite(typed)) {
+    box.value = String(current)
+    return current
+  }
+
+  const clamped = clampNumberField(typed, 0.01)
+  box.value = String(clamped)
+  return clamped
 }
 
 function onHysteresisChange(event: Event) {
@@ -633,6 +765,14 @@ function onAutoTimeoutChange(event: Event) {
 
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
+        Kind
+        <select v-model="triggerKind" class="tb-input" :disabled="rolling" :title="SCOPE_TRIGGER_KIND_HINTS[triggerKind]">
+          <option v-for="option in SCOPE_TRIGGER_KINDS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label class="tb-field">
         Source
         <select v-model="triggerSource" class="tb-input" :disabled="rolling">
           <option v-for="option in SCOPE_TRIGGER_SOURCES" :key="option.value" :value="option.value">
@@ -640,15 +780,25 @@ function onAutoTimeoutChange(event: Event) {
           </option>
         </select>
       </label>
-      <label class="tb-field">
-        Slope
-        <select v-model="form.slope" class="tb-input" :disabled="rolling">
-          <option v-for="option in SCOPE_TRIGGER_SLOPES" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
     </div>
+
+    <p v-if="triggerKind !== 'Edge'" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      {{ SCOPE_TRIGGER_KIND_HINTS[triggerKind] }}
+    </p>
+
+    <label class="tb-field">
+      Slope
+      <!--
+        The word is the same for every kind and the thing it selects is not: on a pulse-width
+        trigger it decides which stretch IS the pulse, and on a window trigger whether entering or
+        leaving fires. Hence the title rather than three dropdowns.
+      -->
+      <select v-model="form.slope" class="tb-input" :disabled="rolling" :title="SCOPE_TRIGGER_SLOPE_HINTS[triggerKind]">
+        <option v-for="option in SCOPE_TRIGGER_SLOPES" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
 
     <!-- The level's box is the precise fallback; the line on the chart is how it is normally set. -->
     <label class="tb-field">
@@ -683,6 +833,68 @@ function onAutoTimeoutChange(event: Event) {
         </button>
       </div>
     </label>
+
+    <!--
+      The window's other bound. Beside the level rather than inside it, because the two are a pair
+      of bounds in either order and the chart draws the band between them whichever way round they
+      are typed.
+    -->
+    <label v-if="kindIsWindow" class="tb-field">
+      Second level (V)
+      <input
+        :value="triggerLevelLowV"
+        type="number"
+        step="0.01"
+        class="tb-input"
+        :disabled="rolling"
+        title="The band's other bound. The order does not matter — the chart and the capture both sort the pair."
+        @change="onSecondLevelChange"
+      />
+    </label>
+
+    <template v-if="kindIsPulse">
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="tb-field">
+          Condition
+          <select v-model="form.pulseCondition" class="tb-input" :disabled="rolling">
+            <option v-for="option in SCOPE_PULSE_CONDITIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label class="tb-field">
+          {{ form.pulseCondition === 'Between' ? 'From (µs)' : 'Width (µs)' }}
+          <input
+            :value="form.pulseWidthUs"
+            type="number"
+            step="1"
+            class="tb-input"
+            :disabled="rolling"
+            :title="`Microseconds. One sample is ${sampleIntervalUs.toFixed(2)} µs at this rate, which is the narrowest pulse any record can hold.`"
+            @change="onPulseWidthChange"
+          />
+        </label>
+      </div>
+      <label v-if="form.pulseCondition === 'Between'" class="tb-field">
+        To (µs)
+        <input
+          :value="form.pulseWidthHiUs"
+          type="number"
+          step="1"
+          class="tb-input"
+          :disabled="rolling"
+          title="The longer bound of the range that qualifies."
+          @change="onPulseWidthHiChange"
+        />
+      </label>
+      <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+        {{
+          form.pulseCondition === 'LongerThan'
+            ? 'Fires as soon as the pulse has lasted this long, without waiting for it to end — so a level that has stuck still triggers.'
+            : 'Fires on the pulse’s trailing edge, where its width becomes known.'
+        }}
+      </p>
+    </template>
 
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">

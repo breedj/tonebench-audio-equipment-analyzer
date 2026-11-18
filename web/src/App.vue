@@ -82,7 +82,7 @@ import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
-import { DEFAULT_SCOPE_FILTER, filterQuery, pathSummary, type ScopeFilterSettings } from './scope/filters'
+import { DEFAULT_SCOPE_PATH, pathQuery, pathSummary, type ScopeSignalPathSettings } from './scope/signalPath'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2088,12 +2088,12 @@ const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
 /** The display path — the coupling and the in-path filter. One ref, because it is one thing. */
-const scopeFilter = ref<ScopeFilterSettings>({ ...DEFAULT_SCOPE_FILTER })
+const scopePath = ref<ScopeSignalPathSettings>({ ...DEFAULT_SCOPE_PATH })
 /** How the chart joins one sample to the next. See scope/interpolation.ts. */
 const scopeDrawing = ref(DEFAULT_SCOPE_DISPLAY.drawing)
 
 /** What is in the path, for the chart's badge and the measurements panel's note. */
-const scopeFilterNote = computed(() => pathSummary(scopeFilter.value))
+const scopePathNote = computed(() => pathSummary(scopePath.value))
 
 /** True while the goniometer is the picture on screen rather than the waveforms. */
 const scopeXyShowing = computed(() => scopeViewIsXy(scopeChartView.value))
@@ -2297,7 +2297,7 @@ function currentScopeDisplay() {
     intensityPalette: scopeIntensityPalette.value,
     mathOperation: scopeMathOperation.value,
     chartView: scopeChartView.value,
-    filter: { ...scopeFilter.value },
+    path: { ...scopePath.value },
     drawing: scopeDrawing.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
@@ -2329,7 +2329,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeIntensityPalette.value = display.intensityPalette
   scopeMathOperation.value = display.mathOperation
   scopeChartView.value = display.chartView
-  scopeFilter.value = { ...display.filter }
+  scopePath.value = { ...display.path }
   scopeDrawing.value = display.drawing
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
@@ -2367,7 +2367,7 @@ watch(
     scopeIntensityPalette,
     scopeMathOperation,
     scopeChartView,
-    scopeFilter,
+    scopePath,
     scopeDrawing,
     // What the analyzer does with the records is a measurement setting, so a change to it is a
     // change to the measurement -- and both are bound here rather than inside the panel's form.
@@ -2440,15 +2440,15 @@ watch(
  * slicing, so the picture and every figure beside it are of one filtered waveform.
  */
 watch(
-  scopeFilter,
+  scopePath,
   (settings) => {
     if (!isOscilloscope.value) return
-    void setOscilloscopePath(filterQuery(settings)).catch(() => undefined)
+    void setOscilloscopePath(pathQuery(settings)).catch(() => undefined)
     // And the references, which have to be read through the same path or the comparison is of two
     // different things. The path alone: this watcher is `immediate`, so it runs during setup, where
     // `scopeViewWindow` and `SCOPE_DEFAULT_COLUMNS` are declared further down and still in their
     // temporal dead zone — reading either threw out of setup and left every ref below unassigned.
-    void setScopeOverlayPath(filterQuery(settings)).catch(() => undefined)
+    void setScopeOverlayPath(pathQuery(settings)).catch(() => undefined)
   },
   { immediate: true, deep: true },
 )
@@ -2620,7 +2620,7 @@ function requestScopeSlice(window: { fromS: number; toS: number } | null, column
     // path: a stored capture cut to a different window is of a different moment, and one read
     // through a different filter is a comparison of two different things. Asked for here rather
     // than watched, so the live slice and the references are requested from one place.
-    void setScopeOverlayWindow(window, columns, filterQuery(scopeFilter.value)).catch(() => undefined)
+    void setScopeOverlayWindow(window, columns, pathQuery(scopePath.value)).catch(() => undefined)
   }, 120)
 }
 
@@ -6152,7 +6152,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :time-to-s="scopeTimeToS"
                   :show-left="scopeShowLeft"
                   :show-right="scopeShowRight"
-                  :filter-note="scopeFilterNote"
+                  :path-note="scopePathNote"
                 />
               </template>
 
@@ -6238,7 +6238,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
                   :math-operation="scopeMathOperation"
-                  :filter-note="scopeFilterNote"
+                  :path-note="scopePathNote"
                   :drawing="scopeDrawing"
                   :references="visibleScopeOverlays"
                   :accumulation="scopeAccumulation"
@@ -6274,7 +6274,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:intensity-palette="scopeIntensityPalette"
                   v-model:math-operation="scopeMathOperation"
                   v-model:chart-view="scopeChartView"
-                  v-model:filter="scopeFilter"
+                  v-model:path="scopePath"
                   v-model:drawing="scopeDrawing"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"

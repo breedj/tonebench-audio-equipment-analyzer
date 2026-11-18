@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
@@ -26,25 +26,11 @@ import { PALETTE_NAMES } from '../measurements/decay'
 import SegmentedToggle from './SegmentedToggle.vue'
 import { SCOPE_VIEWS, scopeViewIsXy, type ScopeView } from '../scope/xy'
 import {
-  DEFAULT_PREVIEW_BOX,
-  MAX_FILTER_Q,
-  MIN_FILTER_Q,
   SCOPE_COUPLINGS,
-  SCOPE_FILTER_KINDS,
-  SCOPE_FILTER_ORDERS,
-  filterCurveDecades,
-  filterCurvePath,
-  filterCurveX,
-  filterDraws,
-  filterQuery,
-  filterUsesOrder,
-  filterUsesQ,
   pathSummary,
-  type ScopeFilterSettings,
-} from '../scope/filters'
-import { api, type ScopeFilterResponse } from '../api/client'
+  type ScopeSignalPathSettings,
+} from '../scope/signalPath'
 import { SCOPE_DRAWINGS, drawingNeedsSamples, type ScopeDrawing } from '../scope/interpolation'
-import { clampNumberField } from '../numberField'
 import {
   SCOPE_MATH_OPERATIONS,
   mathDraws,
@@ -92,89 +78,14 @@ const drawing = defineModel<ScopeDrawing>('drawing', { required: true })
 const drawingInForce = computed(() => !drawingNeedsSamples(drawing.value) || record.value?.channels?.[0]?.raw === true)
 
 /**
- * The display path — one model, because it is one thing: the analyzer applies the coupling and the
- * filter together to the whole record before anything is drawn.
- */
-const filter = defineModel<ScopeFilterSettings>('filter', { required: true })
-
-/** The preview box's own geometry, so the template and the arithmetic agree about it. */
-const previewBox = DEFAULT_PREVIEW_BOX
-
-/**
- * The filter's response, <b>from the analyzer</b>.
+ * The display path, applied by the analyzer to the whole record before anything is drawn.
  *
- * <p>Asked for rather than computed here, which is the same rule every reading on this screen
- * follows: two implementations of one filter drift, and a preview that is not the filter is worse
- * than no preview. Debounced, because a dragged corner would otherwise ask once per keystroke.</p>
+ * <p>One field today. The in-path filter stood beside the coupling here until 2026-11-18 and
+ * will again; see scope/signalPath.ts for what the first one got wrong.</p>
  */
-const filterResponse = ref<ScopeFilterResponse | null>(null)
-let responseHandle: ReturnType<typeof setTimeout> | null = null
+const path = defineModel<ScopeSignalPathSettings>('path', { required: true })
 
-watch(
-  () => [filterQuery(filter.value), sampleRateHz.value] as const,
-  ([query, rate]) => {
-    if (responseHandle !== null) clearTimeout(responseHandle)
-    if (!filterDraws(filter.value)) {
-      filterResponse.value = null
-      return
-    }
-    responseHandle = setTimeout(() => {
-      responseHandle = null
-      void api
-        .getOscilloscopeFilterResponse(query, rate)
-        .then((response) => {
-          filterResponse.value = response
-        })
-        .catch(() => {
-          filterResponse.value = null
-        })
-    }, 150)
-  },
-  { immediate: true, deep: true },
-)
-
-onBeforeUnmount(() => {
-  if (responseHandle !== null) clearTimeout(responseHandle)
-})
-
-const filterCurve = computed(() =>
-  filterResponse.value
-    ? filterCurvePath(filterResponse.value.frequenciesHz, filterResponse.value.magnitudesDb, previewBox)
-    : '',
-)
-
-const filterDecades = computed(() =>
-  filterResponse.value ? filterCurveDecades(filterResponse.value.frequenciesHz, previewBox) : [],
-)
-
-const filterCornerX = computed(() =>
-  filterResponse.value ? filterCurveX(filter.value.frequencyHz, filterResponse.value.frequenciesHz, previewBox) : null,
-)
-
-const pathNote = computed(() => pathSummary(filter.value))
-
-/** The two shape controls, each shown only for the kinds that read it. */
-const showsQ = computed(() => filterUsesQ(filter.value.kind))
-const showsOrder = computed(() => filterUsesOrder(filter.value.kind))
-
-/**
- * The two typed boxes, clamped on change.
- *
- * <p>Clamped here rather than bounded by a `min` attribute, which is this app's own rule: HTML
- * anchors a number input's step grid on `min`, so a floor that is not a multiple of the step makes
- * the spinner offer absurd values. See numberField.ts.</p>
- */
-function onFilterHz(event: Event) {
-  const typed = Number((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(typed)) return
-  filter.value = { ...filter.value, frequencyHz: clampNumberField(typed, 0.1) }
-}
-
-function onFilterQ(event: Event) {
-  const typed = Number((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(typed)) return
-  filter.value = { ...filter.value, q: clampNumberField(typed, MIN_FILTER_Q, MAX_FILTER_Q) }
-}
+const pathNote = computed(() => pathSummary(path.value))
 
 /** True while the goniometer is the picture on screen, which hides the controls it has no axes for. */
 const xyOn = computed(() => scopeViewIsXy(chartView.value))
@@ -201,7 +112,7 @@ const props = defineProps<{
   preTriggerFraction: number
 }>()
 
-const { record, recordBounds, running, sampleRateHz } = useOscilloscope()
+const { record, recordBounds, running } = useOscilloscope()
 
 /**
  * The bounds a window is clamped to: the record's own span, or — before anything is captured — the
@@ -641,15 +552,16 @@ function onVoltsPerDivisionChange(event: Event) {
 
 
   <CollapsibleSection title="Signal path" size="xs">
-    <!-- Both run on the analyzer, over the whole record, before anything is drawn or measured: a
-         filter applied on the client would change the picture and leave every reading describing
-         something else. See scope/filters.ts. -->
+    <!-- It runs on the analyzer, over the whole record, before anything is drawn or measured:
+         doing it on the client would change the picture and leave every reading describing
+         something else. See scope/signalPath.ts, which also records what the in-path filter that
+         stood here until 2026-11-18 got wrong, and what rebuilding it properly needs. -->
     <label class="tb-field">
       Coupling
       <select
         class="tb-input"
-        :value="filter.coupling"
-        @change="filter = { ...filter, coupling: ($event.target as HTMLSelectElement).value as ScopeFilterSettings['coupling'] }"
+        :value="path.coupling"
+        @change="path = { ...path, coupling: ($event.target as HTMLSelectElement).value as ScopeSignalPathSettings['coupling'] }"
       >
         <option v-for="option in SCOPE_COUPLINGS" :key="option.value" :value="option.value" :title="option.title">
           {{ option.label }}
@@ -657,86 +569,12 @@ function onVoltsPerDivisionChange(event: Event) {
       </select>
     </label>
 
-    <label class="tb-field">
-      Filter
-      <select
-        class="tb-input"
-        :value="filter.kind"
-        @change="filter = { ...filter, kind: ($event.target as HTMLSelectElement).value as ScopeFilterSettings['kind'] }"
-      >
-        <option v-for="option in SCOPE_FILTER_KINDS" :key="option.value" :value="option.value" :title="option.title">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
-
-    <template v-if="filterDraws(filter)">
-      <div class="grid grid-cols-2 gap-2">
-        <label class="tb-field">
-          {{ showsQ ? 'Centre (Hz)' : 'Corner (Hz)' }}
-          <input class="tb-input" type="number" step="10" :value="filter.frequencyHz" @change="onFilterHz" />
-        </label>
-        <label v-if="showsQ" class="tb-field">
-          Q
-          <input class="tb-input" type="number" step="0.5" :value="filter.q" @change="onFilterQ" />
-        </label>
-        <label v-else-if="showsOrder" class="tb-field">
-          Order
-          <select
-            class="tb-input"
-            :value="filter.order"
-            @change="filter = { ...filter, order: Number(($event.target as HTMLSelectElement).value) }"
-          >
-            <option v-for="order in SCOPE_FILTER_ORDERS" :key="order" :value="order">{{ order }}</option>
-          </select>
-        </label>
-      </div>
-
-      <!-- The response the trace really gets, drawn from the analyzer's own figures. -->
-      <svg
-        v-if="filterCurve"
-        class="w-full"
-        :viewBox="`0 0 ${previewBox.width} ${previewBox.height}`"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="The filter's magnitude response"
-      >
-        <line
-          v-for="line in filterDecades"
-          :key="line.label"
-          :x1="line.x"
-          :x2="line.x"
-          y1="0"
-          :y2="previewBox.height"
-          class="stroke-neutral-300 dark:stroke-neutral-700"
-          stroke-width="1"
-        />
-        <line
-          v-if="filterCornerX !== null"
-          :x1="filterCornerX"
-          :x2="filterCornerX"
-          y1="0"
-          :y2="previewBox.height"
-          class="stroke-amber-500"
-          stroke-width="1"
-          stroke-dasharray="3 3"
-        />
-        <path :d="filterCurve" fill="none" class="stroke-blue-500 dark:stroke-blue-400" stroke-width="1.5" />
-      </svg>
-      <p v-if="filterDecades.length" class="flex justify-between text-[10px] text-neutral-500 dark:text-neutral-400">
-        <span v-for="line in filterDecades" :key="`label-${line.label}`">{{ line.label }}</span>
-      </p>
-    </template>
-
     <p v-if="pathNote" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-      In the path: {{ pathNote }}. Every reading below is of the filtered trace — a low-pass lowers
-      a peak to peak and lengthens a rise time, a notch removes what the RMS was counting. What is
-      <strong>stored</strong> is always the unfiltered capture.
+      In the path: {{ pathNote }}. Every level reading below is of the coupled trace, moved by the
+      record's own mean. What is <strong>stored</strong> is always the capture as it arrived.
     </p>
     <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Nothing in the path: the trace is the record. A filter here runs on the analyzer, over the
-      whole record, before anything is drawn or measured — and it runs forward and backward, so it
-      adds no delay and the waveform stays on the edge it triggered on.
+      Nothing in the path: the trace is the record, standing offset and all.
     </p>
   </CollapsibleSection>
 

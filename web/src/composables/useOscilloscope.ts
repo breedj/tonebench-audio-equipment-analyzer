@@ -119,11 +119,11 @@ const wantXy = ref(false)
 const wantEye = ref(false)
 
 /**
- * The display path the fetch asks for — the coupling and the in-path filter, as query parameters.
+ * The display path the fetch asks for, as query parameters.
  *
  * <p>The sixth thing a fetch is keyed on, and the one that changes the <em>trace</em> rather than
  * adding to it: the analyzer applies it to the whole record before slicing, so the picture and
- * every figure beside it are of the same filtered waveform. See scope/filters.ts.</p>
+ * every figure beside it are of the same processed waveform. See scope/signalPath.ts.</p>
  */
 const wantPath = shallowRef<Record<string, string>>({})
 

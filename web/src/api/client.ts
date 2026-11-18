@@ -1702,20 +1702,13 @@ export interface ScopeRecordResponse {
    */
   averagesTaken?: number
   /**
-   * Something in the display path changed the trace — the coupling, the filter, or both.
+   * The display path changed the trace.
    *
-   * <p>Carried so the chart and the panel can say so where the figures are: a filter changes every
-   * one of them, and a reading taken through one is of the filtered trace rather than of the
-   * capture. See scope/filters.ts.</p>
+   * <p>Carried so the chart and the panel can say so where the figures are: AC coupling moves every
+   * level reading by the record's own mean, so a figure taken through it is of the coupled trace
+   * rather than of the capture. See scope/signalPath.ts.</p>
    */
   filtered?: boolean
-}
-
-/** One filter's magnitude response, as the display rail's preview draws it. See scope/filters.ts. */
-export interface ScopeFilterResponse {
-  sampleRateHz: number
-  frequenciesHz: number[]
-  magnitudesDb: number[]
 }
 
 export interface CrosstalkStarted {
@@ -1904,12 +1897,13 @@ export interface OscilloscopeParameters {
   chartMathOperation?: string | null
   /** Which picture the chart drew — `Waveform` or `XY`. See scope/xy.ts. */
   chartView?: string | null
-  /** The display path the trace was read through — see scope/filters.ts. */
+  /**
+   * The display path the trace was read through — see scope/signalPath.ts.
+   *
+   * <p>The four <code>chartFilter*</code> fields that stood beside it went with the in-path filter
+   * on 2026-11-18. A measurement saved before that still carries them; nothing reads them.</p>
+   */
   chartCoupling?: string | null
-  chartFilterKind?: string | null
-  chartFilterHz?: number | null
-  chartFilterQ?: number | null
-  chartFilterOrder?: number | null
   /** How the chart joined its samples — `Linear`, `Sinc` or `Dots`. See scope/interpolation.ts. */
   chartDrawing?: string | null
   captureDelayMs?: number | null
@@ -5068,7 +5062,7 @@ export const api = {
     // trace. See ScopeFrameBuilder.MaxEyeFolds for what bounds it.
     if (eye) query.set('eye', 'true')
     // The coupling and the in-path filter, which run on the analyzer over the whole record before
-    // anything is drawn or measured. See scope/filters.ts.
+    // anything is drawn or measured. See scope/signalPath.ts.
     for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 
@@ -5109,13 +5103,6 @@ export const api = {
     for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)
     const suffix = query.size > 0 ? `?${query}` : ''
     return request<ScopeRecordResponse | null>(`/measurements/${resultId}/scope-record${suffix}`)
-  },
-
-  getOscilloscopeFilterResponse: (path: Record<string, string>, sampleRateHz?: number) => {
-    const query = new URLSearchParams(path)
-    if (sampleRateHz !== undefined && sampleRateHz > 0) query.set('sampleRateHz', String(sampleRateHz))
-    const suffix = query.size > 0 ? `?${query}` : ''
-    return request<ScopeFilterResponse>(`/oscilloscope/filter-response${suffix}`)
   },
 
   // The impulse response. The same five verbs as the two response measurements above, plus the

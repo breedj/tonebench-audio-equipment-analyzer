@@ -75,8 +75,8 @@ public static class FractionalDelay
     /// would be a step at each edge, and wrapping would put the end of the capture before its
     /// start. Holding the first and last sample is the one choice that invents no feature — and the
     /// error it leaves is confined to <see cref="Taps"/> samples at each end, which is why a caller
-    /// that measures an edge should keep it away from them. The same fact
-    /// <c>WaveformFilters</c>' padding rule is about.</para>
+    /// that measures an edge should keep it away from them — the same "a record has no signal
+    /// outside itself" fact the scope's removed in-path filter had to pad around.</para>
     /// </summary>
     public static void Shift(ReadOnlySpan<double> source, Span<double> destination, double shiftSamples)
     {

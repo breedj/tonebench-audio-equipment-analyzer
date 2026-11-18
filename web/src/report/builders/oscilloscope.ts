@@ -2,7 +2,7 @@ import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordRespo
 import { mathReadings, scopeChannelReadings } from '../../scope/readings'
 import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
 import { xyReadings, xyTruncationNote } from '../../scope/xy'
-import { pathSummary } from '../../scope/filters'
+import { pathSummary } from '../../scope/signalPath'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -103,7 +103,7 @@ export function scopeMeasurementSections(
   showLeft: boolean,
   showRight: boolean,
   /** What the display path was doing, in the rail's own words, or null for a bare record. */
-  filterNote: string | null = null,
+  pathNote: string | null = null,
 ): ReportSection[] {
   if (!record || record.channels.length === 0) {
     return [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing captured.' }]
@@ -192,10 +192,10 @@ export function scopeMeasurementSections(
   sections.push({ kind: 'keyValues', title: 'The record', rows: facts })
 
   // Paper has no tooltip, so what qualifies every figure above has to be a sentence of its own.
-  if (filterNote) {
+  if (pathNote) {
     sections.push({
       kind: 'paragraph',
-      text: `Read through the display path: ${filterNote}. Every figure above is of the filtered trace — a low-pass lowers a peak to peak and lengthens a rise time, a notch removes a component the RMS was counting. What is stored is always the unfiltered capture.`,
+      text: `Read through the display path: ${pathNote}. Every level figure above is of the coupled trace, moved by the record’s own mean. What is stored is always the capture as it arrived.`,
     })
   }
 
@@ -228,7 +228,7 @@ export function scopeSections(subject: ReportSubject, elements: readonly ReportE
         display.voltsPerDivision,
         display.showLeft,
         display.showRight,
-        pathSummary(display.filter),
+        pathSummary(display.path),
       ),
     )
   }

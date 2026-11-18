@@ -1328,20 +1328,19 @@ public sealed record OscilloscopeParameters(
     /// </summary>
     string? ChartView = null,
     /// <summary>
-    /// The display path the trace was read through — the coupling (<c>Dc</c> or <c>Ac</c>) and the
-    /// in-path filter (<c>None</c>, <c>LowPass</c>, <c>HighPass</c>, <c>BandPass</c>, <c>Notch</c>)
-    /// with its corner, its Q and its order.
+    /// The coupling the trace was read through — <c>Dc</c>, or <c>Ac</c> for the record's own mean
+    /// removed.
     ///
-    /// <para>Display preferences, so the <b>stored samples are never filtered</b>: a filter is a
-    /// way of looking at a capture rather than a property of it, and a saved result can be
-    /// reopened and read through a different one, or none. What is stored is what the analyzer
-    /// saw.</para>
+    /// <para>A display preference, so the <b>stored samples are never processed</b>: the display
+    /// path is a way of looking at a capture rather than a property of it, and a saved result can
+    /// be reopened and read a different way, or raw. What is stored is what the analyzer saw.</para>
+    ///
+    /// <para>The in-path filter that stood beside it was removed on 2026-11-18, to be rebuilt
+    /// later; a measurement saved with <c>ChartFilterKind</c> and its three companions keeps them
+    /// in its <c>params_json</c>, where nothing reads them — the <c>ChartDecayLightAzimuthDeg</c>
+    /// precedent.</para>
     /// </summary>
     string? ChartCoupling = null,
-    string? ChartFilterKind = null,
-    double? ChartFilterHz = null,
-    double? ChartFilterQ = null,
-    int? ChartFilterOrder = null,
     /// <summary>
     /// How the chart joined one sample to the next — <c>Linear</c>, <c>Sinc</c> (the band-limited
     /// reconstruction) or <c>Dots</c>. A display preference; the samples are what they are.

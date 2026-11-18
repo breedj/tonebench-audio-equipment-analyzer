@@ -163,9 +163,9 @@ const props = withDefaults(defineProps<{
   mathOperation?: ScopeMathOperation
   /**
    * What the display path is doing to the trace, in the words the rail uses — or null for a bare
-   * record. Shown as a badge, because a filter changes every reading beside it.
+   * record. Shown as a badge, because the path changes what every reading beside it means.
    */
-  filterNote?: string | null
+  pathNote?: string | null
   /** How one sample is joined to the next. See scope/interpolation.ts. */
   drawing?: ScopeDrawing
   /** Which accumulation the run asked for — what the badge is about. See scope/acquisition.ts. */
@@ -196,7 +196,7 @@ const props = withDefaults(defineProps<{
   intensityMode: 'Single',
   intensityPalette: 'Jet',
   mathOperation: 'Off',
-  filterNote: null,
+  pathNote: null,
   drawing: 'Linear',
   accumulation: 'Normal',
   averageCount: 1,
@@ -1460,7 +1460,7 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
 
     const record = props.record
     const detail = record
-      ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${props.filterNote ? ` · ${props.filterNote}` : ''}${
+      ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${props.pathNote ? ` · ${props.pathNote}` : ''}${
           record.spliced ? ' · spliced' : ''
         }${record.forced ? ' · untriggered' : ''}${record.rolled ? ' · rolling' : ''}`
       : ''
@@ -1868,10 +1868,10 @@ const windowNote = computed(
       <!-- A badge rather than a line, for recordFlag's reason: a note that comes and goes above the
            plot takes its height off the canvas every time it appears. -->
       <span
-        v-if="filterNote"
+        v-if="pathNote"
         class="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300"
         title="Something in the display path is changing this trace, so every reading beside it is of the filtered waveform. What is stored is always the unfiltered capture."
-        >{{ filterNote }}</span
+        >{{ pathNote }}</span
       >
       <span class="truncate">
         {{ timebaseLabel }} · {{ verticalLabel }} · {{ windowNote }} · {{ recordNote }}

@@ -9,16 +9,11 @@ import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
 import { SCOPE_VIEWS, type ScopeView } from './xy'
 import { SCOPE_DRAWINGS, type ScopeDrawing } from './interpolation'
 import {
-  DEFAULT_SCOPE_FILTER,
-  MAX_FILTER_Q,
-  MIN_FILTER_Q,
+  DEFAULT_SCOPE_PATH,
   SCOPE_COUPLINGS,
-  SCOPE_FILTER_KINDS,
-  SCOPE_FILTER_ORDERS,
   type ScopeCoupling,
-  type ScopeFilterKind,
-  type ScopeFilterSettings,
-} from './filters'
+  type ScopeSignalPathSettings,
+} from './signalPath'
 import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
@@ -95,14 +90,14 @@ export interface ScopeDisplay {
    */
   chartView: ScopeView
   /**
-   * The display path the trace is read through — the coupling and the in-path filter.
+   * The display path the trace is read through.
    *
    * <p>A display preference, so it is stored with the measurement and the <b>stored samples are
-   * never filtered</b>: a filter is a way of looking at a capture rather than a property of it, and
-   * a saved result can be reopened and read through a different one, or none. See
-   * scope/filters.ts.</p>
+   * never processed</b>: the path is a way of looking at a capture rather than a property of it,
+   * and a saved result can be reopened and read a different way, or raw. See
+   * scope/signalPath.ts, which also records what the removed in-path filter got wrong.</p>
    */
-  filter: ScopeFilterSettings
+  path: ScopeSignalPathSettings
   /**
    * How the chart joins one sample to the next — lines, the band-limited reconstruction, or
    * nothing at all. See scope/interpolation.ts.
@@ -168,8 +163,8 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   mathOperation: 'Off',
   /** The waveform, which is what a scope is for; X–Y is a view a reader switches to on purpose. */
   chartView: 'Waveform',
-  /** DC and no filter: a scope shows what arrived until somebody asks it not to. */
-  filter: { ...DEFAULT_SCOPE_FILTER },
+  /** DC: a scope shows what arrived until somebody asks it not to. */
+  path: { ...DEFAULT_SCOPE_PATH },
   /**
    * Lines, which is what a scope has always drawn — and the reconstruction is what a reader turns
    * on when they are looking at something near the top of the band, where lines stop being true.
@@ -196,7 +191,7 @@ export function scopeDisplayFromParams(
   paramsJson: string | null | undefined,
   base: Readonly<ScopeDisplay> = DEFAULT_SCOPE_DISPLAY,
 ): ScopeDisplay {
-  const display: ScopeDisplay = { ...base, annotations: [...base.annotations], filter: { ...base.filter } }
+  const display: ScopeDisplay = { ...base, annotations: [...base.annotations], path: { ...base.path } }
   if (!paramsJson) return display
 
   let stored: Partial<OscilloscopeParameters>
@@ -261,18 +256,10 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
     display.chartView = stored.chartView as ScopeView
 
-  // Validated against the tables rather than cast, like the palettes: a name from a newer build,
-  // or a hand-edited one, would otherwise reach the analyzer as a filter that does not exist.
+  // Validated against the table rather than cast, like the palettes: a name from a newer build,
+  // or a hand-edited one, would otherwise reach the analyzer as a coupling that does not exist.
   if (typeof stored.chartCoupling === 'string' && SCOPE_COUPLINGS.some((c) => c.value === stored.chartCoupling))
-    display.filter.coupling = stored.chartCoupling as ScopeCoupling
-  if (typeof stored.chartFilterKind === 'string' && SCOPE_FILTER_KINDS.some((k) => k.value === stored.chartFilterKind))
-    display.filter.kind = stored.chartFilterKind as ScopeFilterKind
-  if (typeof stored.chartFilterHz === 'number' && stored.chartFilterHz > 0)
-    display.filter.frequencyHz = stored.chartFilterHz
-  if (typeof stored.chartFilterQ === 'number' && stored.chartFilterQ >= MIN_FILTER_Q && stored.chartFilterQ <= MAX_FILTER_Q)
-    display.filter.q = stored.chartFilterQ
-  if (typeof stored.chartFilterOrder === 'number' && SCOPE_FILTER_ORDERS.includes(stored.chartFilterOrder))
-    display.filter.order = stored.chartFilterOrder
+    display.path.coupling = stored.chartCoupling as ScopeCoupling
   if (typeof stored.chartDrawing === 'string' && SCOPE_DRAWINGS.some((d) => d.value === stored.chartDrawing))
     display.drawing = stored.chartDrawing as ScopeDrawing
 
@@ -304,11 +291,7 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartIntensityPalette: display.intensityPalette,
     chartMathOperation: display.mathOperation,
     chartView: display.chartView,
-    chartCoupling: display.filter.coupling,
-    chartFilterKind: display.filter.kind,
-    chartFilterHz: display.filter.frequencyHz,
-    chartFilterQ: display.filter.q,
-    chartFilterOrder: display.filter.order,
+    chartCoupling: display.path.coupling,
     chartDrawing: display.drawing,
   }
 }

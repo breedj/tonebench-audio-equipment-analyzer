@@ -105,46 +105,6 @@ public static class OscilloscopeEndpoints
             }
         });
 
-        // The in-path filter's own magnitude response, for the display rail's preview.
-        //
-        // Asked of the analyzer rather than recomputed on the client, for the reason every reading
-        // on this screen is: two implementations of one filter drift, and a preview that is not
-        // the filter is worse than no preview. It is a pure function of the spec and the rate, so
-        // it needs no record and answers before anything has been captured.
-        group.MapGet("/filter-response", (
-            OscilloscopeRunner runner,
-            string? filter,
-            double? filterHz,
-            double? filterQ,
-            int? filterOrder,
-            double? sampleRateHz,
-            int? points) =>
-        {
-            if (!TryParsePath(coupling: null, filter, filterHz, filterQ, filterOrder, out var path, out var error))
-                return Results.BadRequest(error);
-
-            double rate = sampleRateHz is { } asked && asked > 0.0
-                ? asked
-                : runner.Status.SampleRateHz > 0.0
-                    ? runner.Status.SampleRateHz
-                    : 192_000.0;
-
-            int count = Math.Clamp(points ?? 256, 8, 2_048);
-            double top = rate * WaveformFilters.ResponseTopFraction;
-            var frequencies = new double[count];
-            var magnitudes = new double[count];
-            for (int i = 0; i < count; i++)
-            {
-                // Logarithmic from 1 Hz, which is the axis a filter response is read on.
-                double t = count == 1 ? 1.0 : (double)i / (count - 1);
-                double f = Math.Pow(10.0, Math.Log10(1.0) + (t * (Math.Log10(top) - Math.Log10(1.0))));
-                frequencies[i] = f;
-                magnitudes[i] = WaveformFilters.ResponseDb(path.Filter, f, rate);
-            }
-
-            return Results.Ok(new ScopeFilterResponse(rate, frequencies, magnitudes));
-        });
-
         group.MapPost("/owner", (RunOwnerRequest request, OscilloscopeRunner runner) =>
             Results.Ok(runner.SwitchOwner(request.Normalized)));
 
@@ -183,21 +143,17 @@ public static class OscilloscopeEndpoints
             bool? xy,
             bool? eye,
             string? coupling,
-            string? filter,
-            double? filterHz,
-            double? filterQ,
-            int? filterOrder,
             int? maxColumns) =>
         {
             if (runner.Record is not { } raw)
                 return Results.NoContent();
 
-            if (!TryParsePath(coupling, filter, filterHz, filterQ, filterOrder, out var path, out var pathError))
+            if (!TryParsePath(coupling, out var path, out var pathError))
                 return Results.BadRequest(pathError);
 
             // The display path, applied once to the whole record: everything below works from the
             // result, so the picture, the readings, the math channel and the X-Y figure cannot
-            // disagree about whether they are of the filtered trace.
+            // disagree about which trace they are of.
             var record = path.Apply(raw);
 
             // Asked for by name rather than always computed, like the residual: a math trace costs
@@ -391,26 +347,18 @@ public static class OscilloscopeEndpoints
     /// <summary>
     /// The same parse, for the stored-record route in MeasurementsEndpoints.
     ///
-    /// <para>Shared rather than copied so a reference trace is read through exactly the filter the
-    /// live trace is — two parsers would be two filters, and a comparison of two different
+    /// <para>Shared rather than copied so a reference trace is read through exactly the path the
+    /// live trace is — two parsers would be two paths, and a comparison of two different
     /// things.</para>
     /// </summary>
     internal static bool TryParseStoredPath(
         string? coupling,
-        string? filter,
-        double? filterHz,
-        double? filterQ,
-        int? filterOrder,
         out ScopeSignalPath path,
         out string? error) =>
-        TryParsePath(coupling, filter, filterHz, filterQ, filterOrder, out path, out error);
+        TryParsePath(coupling, out path, out error);
 
     private static bool TryParsePath(
         string? coupling,
-        string? filter,
-        double? filterHz,
-        double? filterQ,
-        int? filterOrder,
         out ScopeSignalPath path,
         out string? error)
     {
@@ -418,25 +366,8 @@ public static class OscilloscopeEndpoints
 
         if (!EnumParsing.TryParse(coupling, ScopeCoupling.Dc, out var parsedCoupling, out error))
             return false;
-        if (!EnumParsing.TryParse(filter, ScopeFilterKind.None, out var kind, out error))
-            return false;
 
-        double frequency = filterHz ?? 0.0;
-        if (kind != ScopeFilterKind.None && !(frequency > 0.0))
-        {
-            error = "A filter needs a frequency above zero.";
-            return false;
-        }
-
-        // Clamped rather than refused: the two shape controls have no wrong answer, only a range,
-        // and a run stopped because a Q box was dragged past its end would be the worse failure.
-        var spec = new ScopeFilterSpec(
-            kind,
-            frequency,
-            Math.Clamp(filterQ ?? 0.707, WaveformFilters.MinQ, WaveformFilters.MaxQ),
-            WaveformFilters.NormalisedOrder(filterOrder ?? WaveformFilters.MinOrder));
-
-        path = new ScopeSignalPath(parsedCoupling, spec);
+        path = new ScopeSignalPath(parsedCoupling);
         error = null;
         return true;
     }
@@ -572,20 +503,6 @@ public sealed record ScopeRecordResponse(
     int AveragesTaken = 1);
 
 /// <summary>
-/// One filter's magnitude response, as the display rail's preview draws it.
-///
-/// <para>It is the response the trace really gets, which is the <b>squared</b> one: the filter runs
-/// forward and then backward so that it adds no delay, and a magnitude applied twice is a response
-/// of twice the decibels. See <see cref="WaveformFilters"/>.</para>
-/// </summary>
-/// <param name="SampleRateHz">What it was computed at — a digital filter's shape depends on it.</param>
-/// <param name="FrequenciesHz">Logarithmically spaced from 1 Hz to a fraction of the rate.</param>
-/// <param name="MagnitudesDb">The response at each of them.</param>
-public sealed record ScopeFilterResponse(
-    double SampleRateHz,
-    double[] FrequenciesHz,
-    double[] MagnitudesDb);
-
 /// <summary>
 /// The math channel as the client draws it: the same raw-or-columns shape as the slices beside it,
 /// so every trace on the chart shares one x array.

@@ -1,5 +1,3 @@
-using Tonebench.Dsp;
-
 namespace Tonebench.App.Streaming;
 
 /// <summary>What the coupling control does to the trace before anything else sees it.</summary>
@@ -13,37 +11,44 @@ public enum ScopeCoupling
 }
 
 /// <summary>
-/// The display path: the coupling and the in-path filter, applied to a record before it is sliced,
-/// measured, combined or plotted against itself.
+/// The display path, applied to a record before it is sliced, measured, combined or plotted against
+/// itself.
 ///
 /// <para><b>It is applied to the whole record once, and everything downstream works from the
-/// result.</b> Not per slice: a window moved along the record would otherwise be filtered from a
+/// result.</b> Not per slice: a window moved along the record would otherwise be processed from a
 /// different starting state each time, so the trace would change as it was scrolled; and the
-/// readings, the math channel and the X–Y figure would be of the filtered trace or the raw one
-/// depending on which of them happened to do the filtering.</para>
+/// readings, the math channel and the X–Y figure would be of the processed trace or the raw one
+/// depending on which of them happened to do the work.</para>
 ///
-/// <para><b>It changes what every reading says, and nothing hides that.</b> A low-pass lowers a
-/// peak-to-peak and lengthens a rise time; a notch removes a component the RMS was counting. The
-/// figures are of the trace on screen, which is the only arrangement that is not a lie — and the
-/// panel says a filter is in the path.</para>
+/// <para><b>What is stored is never processed.</b> The samples go into <c>capture.pcm</c> as the
+/// analyzer saw them, because the display path is a way of <i>looking</i> at a capture rather than
+/// a property of it: a saved result can be reopened and read a different way, or raw, which a
+/// processed-at-save record could not be.</para>
 ///
-/// <para><b>What is stored is never filtered.</b> The samples go into <c>capture.pcm</c> as the
-/// analyzer saw them, because a filter is a way of <i>looking</i> at a capture rather than a
-/// property of it: a saved result can be reopened and read through a different filter, or none,
-/// which a filtered-at-save record could not be.</para>
+/// <para><b>The in-path filter was removed on 2026-11-18</b> (low-pass / high-pass / band-pass /
+/// notch, with its own order, Q and response preview), to be rebuilt properly later. It was
+/// zero-phase — run forward and then backward, so it added no delay and an edge stayed where it
+/// happened — and that is what made its one real fault unavoidable rather than a bug: filtering a
+/// sample needs signal on both sides of it, a record has none outside itself, and the mirror pad
+/// that stood in for the missing signal left the first and last period of the corner reading up to
+/// a third of full scale wrong. Measured on a tone sitting on the corner: the first millisecond
+/// overshot the settled amplitude by 69 %. What would remove that rather than bound it is filtering
+/// <i>in context</i> — keeping a margin of real samples either side of the record when it is taken
+/// — which is a change to the capture path and the reason the rebuild is its own piece of work. The
+/// arithmetic is in git: <c>Tonebench.Dsp/WaveformFilters.cs</c> and its 18 tests, deleted in the
+/// same commit as this note.</para>
 /// </summary>
 /// <param name="Coupling">DC, or the mean removed.</param>
-/// <param name="Filter">The in-path filter, or <see cref="ScopeFilterSpec.Off"/>.</param>
-public readonly record struct ScopeSignalPath(ScopeCoupling Coupling, ScopeFilterSpec Filter)
+public readonly record struct ScopeSignalPath(ScopeCoupling Coupling)
 {
-    public static ScopeSignalPath Direct { get; } = new(ScopeCoupling.Dc, ScopeFilterSpec.Off);
+    public static ScopeSignalPath Direct { get; } = new(ScopeCoupling.Dc);
 
     /// <summary>Whether this path would change the record at all.</summary>
-    public bool Changes => Coupling == ScopeCoupling.Ac || Filter.Filters;
+    public bool Changes => Coupling == ScopeCoupling.Ac;
 
     /// <summary>
-    /// The record as the screen sees it. The same instance when nothing is asked for, so an
-    /// unfiltered fetch costs exactly what it did before this existed.
+    /// The record as the screen sees it. The same instance when nothing is asked for, so a DC-coupled
+    /// fetch costs exactly what it did before this existed.
     ///
     /// <para><b>AC coupling is the record's mean subtracted, not a high-pass</b>, and on this
     /// hardware that is the more correct operation rather than the cheaper one. Both the QA403 and
@@ -52,9 +57,7 @@ public readonly record struct ScopeSignalPath(ScopeCoupling Coupling, ScopeFilte
     /// −4.5 mV on the left input — which is a constant, and subtracting the mean removes a constant
     /// <i>exactly</i>, with no corner to choose, no settling and nothing to ring. A software
     /// high-pass would do the same job approximately and add a transient to the start of the record,
-    /// which is where a pre-trigger view is read. A genuine low-frequency roll-off, for a drift or a
-    /// rumble <i>within</i> the record, is what the high-pass filter is for and is a separate
-    /// control.</para>
+    /// which is where a pre-trigger view is read.</para>
     ///
     /// <para>The mean is the <b>record's</b> and not the window's, so scrolling a window along the
     /// record does not move the trace up and down: the offset being removed is a property of the
@@ -71,21 +74,13 @@ public readonly record struct ScopeSignalPath(ScopeCoupling Coupling, ScopeFilte
             var source = record.Channels[ch];
             var target = new double[source.Length];
 
-            if (Coupling == ScopeCoupling.Ac)
-            {
-                double sum = 0.0;
-                for (int i = 0; i < source.Length; i++)
-                    sum += source[i];
-                double mean = sum / source.Length;
-                for (int i = 0; i < source.Length; i++)
-                    target[i] = source[i] - mean;
-            }
-            else
-            {
-                source.CopyTo(target, 0);
-            }
+            double sum = 0.0;
+            for (int i = 0; i < source.Length; i++)
+                sum += source[i];
+            double mean = sum / source.Length;
+            for (int i = 0; i < source.Length; i++)
+                target[i] = source[i] - mean;
 
-            WaveformFilters.Apply(Filter, target, record.SampleRateHz, target);
             channels[ch] = target;
         }
 

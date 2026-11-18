@@ -171,10 +171,6 @@ public static class MeasurementsEndpoints
             double? fromS,
             double? toS,
             string? coupling,
-            string? filter,
-            double? filterHz,
-            double? filterQ,
-            int? filterOrder,
             int? maxColumns,
             CancellationToken ct) =>
         {
@@ -188,7 +184,7 @@ public static class MeasurementsEndpoints
             if (pcm is null || pcm.Channels.Length == 0 || pcm.Channels[0].Length == 0)
                 return Results.NoContent();
 
-            if (!OscilloscopeEndpoints.TryParseStoredPath(coupling, filter, filterHz, filterQ, filterOrder, out var path, out var pathError))
+            if (!OscilloscopeEndpoints.TryParseStoredPath(coupling, out var path, out var pathError))
                 return Results.BadRequest(pathError);
 
             // Read once, used four times -- and the one read is what decides where t = 0 is, so

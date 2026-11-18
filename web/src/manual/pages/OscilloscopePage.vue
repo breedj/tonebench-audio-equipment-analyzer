@@ -418,9 +418,8 @@ const { showPage } = useManual()
       worth knowing: the <strong>first</strong> record of an accumulation is used exactly as
       captured, so a single capture is never interpolated and its figures are readings of the
       samples themselves; and the correction leaves a small error in the sixteen samples at each
-      <em>end</em> of an averaged record, where there is no signal outside to read — the same fact
-      the filter's padding is about. Keep an edge you are timing away from the very edges of the
-      window.
+      <em>end</em> of an averaged record, where there is no signal outside to read. Keep an edge you
+      are timing away from the very edges of the window.
     </p>
 
     <p>
@@ -474,8 +473,9 @@ const { showPage } = useManual()
 
     <p>
       <strong>High resolution</strong> — averaging adjacent samples to trade bandwidth for vertical
-      detail — is the <strong>Signal path</strong>’s low-pass filter, which does the same thing where
-      you can see its corner and its slope rather than behind a single button.
+      detail — is what an in-path low-pass would do, where you could see its corner and its slope
+      rather than hiding it behind a single button. That filter has been taken out for now; see
+      <strong>The signal path</strong> below.
     </p>
 
     <h2>Roll</h2>
@@ -599,8 +599,8 @@ const { showPage } = useManual()
         <tr>
           <td>Signal path</td>
           <td>
-            The coupling and an in-path filter — see <strong>The signal path</strong> below. Both
-            run on the analyzer before anything is drawn or measured.
+            The coupling — see <strong>The signal path</strong> below. It runs on the analyzer
+            before anything is drawn or measured.
           </td>
         </tr>
         <tr>
@@ -700,9 +700,9 @@ const { showPage } = useManual()
 
     <h2>The signal path</h2>
     <p>
-      Two controls that change the <em>trace</em> rather than adding to it: a coupling and one
-      filter. Both run on the analyzer, over the whole record, before anything is drawn, measured,
-      combined or plotted — so the picture and every figure beside it are of the same waveform.
+      One control that changes the <em>trace</em> rather than adding to it. It runs on the analyzer,
+      over the whole record, before anything is drawn, measured, combined or plotted — so the
+      picture and every figure beside it are of the same waveform.
     </p>
     <table>
       <thead>
@@ -719,50 +719,8 @@ const { showPage } = useManual()
             mean — see the note below, which is why it is a mean and not a filter.
           </td>
         </tr>
-        <tr>
-          <td>Filter</td>
-          <td>
-            Off, or a <strong>low-pass</strong> (a bandwidth limit — a bench scope’s “20 MHz”
-            button, and real noise reduction on a quiet DUT), a <strong>high-pass</strong> (for a
-            drift or a rumble inside the record), a <strong>band-pass</strong> (to look at one
-            component of a busy trace) or a <strong>notch</strong> (what mains hum is taken out
-            with).
-          </td>
-        </tr>
-        <tr>
-          <td>Corner / Centre</td>
-          <td>Where it acts, in hertz.</td>
-        </tr>
-        <tr>
-          <td>Order</td>
-          <td>
-            How steep a low- or high-pass is: a Butterworth of 2, 4, 6 or 8 poles — and then
-            <em>doubled</em>, because the filter runs twice. Order 2 is 24 dB an octave on the
-            trace, not 12.
-          </td>
-        </tr>
-        <tr>
-          <td>Q</td>
-          <td>How narrow a band-pass or a notch is. A notch at Q 8 is about an eighth of its centre wide.</td>
-        </tr>
       </tbody>
     </table>
-    <p>
-      The small chart under the controls is the filter’s own magnitude response, drawn from the
-      analyzer’s own figures rather than from a second copy of the filter here — so it is the
-      response the trace really gets, with the corner marked. It is the <em>squared</em> response,
-      which is why the corner reads −6 dB and not −3.
-    </p>
-    <div class="manual-note">
-      <p>
-        <strong>The filter adds no delay, and that is why the corner is −6 dB.</strong> This
-        screen’s x axis is time relative to the trigger, so an ordinary filter would slide the
-        waveform off the very edge it fired on and a rise time measured from there would be of an
-        edge that is no longer where it happened. Running the filter forward and then backward over
-        the record cancels the delay exactly — and applies the magnitude twice, which doubles both
-        the corner attenuation and the skirt.
-      </p>
-    </div>
     <div class="manual-note">
       <p>
         <strong>AC coupling here is the mean, not a high-pass, and that is the more correct
@@ -770,29 +728,30 @@ const { showPage } = useManual()
         hardware, with a corner near 0.2 Hz — so what reaches a capture is the front end’s own
         standing offset, measured at about −4.5 mV on the left input. That is a constant, and
         subtracting the mean removes a constant <em>exactly</em>: no corner to choose, no settling,
-        and nothing to ring at the start of the record where the pre-trigger view is read. For a
-        genuine low-frequency roll-off — a drift or a rumble <em>inside</em> the record — use the
-        high-pass.
+        and nothing to ring at the start of the record where the pre-trigger view is read.
       </p>
     </div>
     <div class="manual-note">
       <p>
-        <strong>The first and last few cycles of the corner are the filter’s own assumption.</strong>
-        A record is a window of a stream that has since moved on, so nothing in it says what came
-        next, and a filter has to assume something about it. What is drawn at the very ends is that
-        assumption rather than a measurement — bounded, and never more than about a fifth of full
-        scale, but visible on a short record. The middle of the record is exact. If an edge matters,
-        widen the record so the part you are reading is not at its end.
+        <strong>The in-path filter has been taken out for now.</strong> A low-pass, high-pass,
+        band-pass and notch used to sit beside the coupling. They were removed on 18 November 2026,
+        to be rebuilt properly later. The arithmetic was not the problem: the filter ran forward and
+        then backward so that it added no delay, and in the middle of a record it was exact. The
+        ends were not. Filtering a sample needs signal on <em>both</em> sides of it, a record has
+        none outside itself, and what stood in for the missing signal left the first and last period
+        of the corner reading up to a third of full scale wrong — measured on a tone sitting on the
+        corner, the first millisecond overshot the settled amplitude by 69&nbsp;%. Bounding that is
+        not the same as removing it; removing it means filtering the record <em>in context</em>,
+        with a margin of real samples either side, which is a change to how a capture is taken.
       </p>
     </div>
     <div class="manual-note">
       <p>
-        <strong>Every reading is of the filtered trace, and what is stored never is.</strong> A
-        low-pass lowers a peak to peak and lengthens a rise time; a notch removes a component the
-        RMS was counting. None of that is wrong — the figures are of what is on screen, which is the
-        only honest arrangement — and the Measurements panel says which trace that is. The samples
-        that go into a saved result are always the unfiltered capture, so a result can be reopened
-        and read through a different filter, or none.
+        <strong>Every reading is of the trace on screen, and what is stored is not.</strong> AC
+        coupling moves every level figure by the record’s own mean. That is not wrong — the figures
+        are of what is on screen, which is the only honest arrangement — and the Measurements panel
+        says which trace that is. The samples that go into a saved result are always the capture as
+        it arrived, so a result can be reopened and read a different way, or raw.
       </p>
     </div>
 
@@ -1208,8 +1167,8 @@ const { showPage } = useManual()
       its own full length beside a 1 ms zoom would be two pictures of different stretches of time
       laid over each other. Zoom in and the references come back cut to the zoom; drag the zoom bar
       and they follow it. They are read through the <strong>signal path</strong> too — the same
-      coupling and the same filter as the live trace — because a reference read through a different
-      filter is a comparison of two different things rather than of two measurements.
+      coupling as the live trace — because a reference read a different way is a comparison of two
+      different things rather than of two measurements.
     </p>
 
     <p>

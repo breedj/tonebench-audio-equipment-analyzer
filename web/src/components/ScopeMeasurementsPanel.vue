@@ -48,9 +48,9 @@ const props = withDefaults(
      * None of that is wrong — the figures are of the trace on screen, which is the only honest
      * arrangement — but nothing else here would say which trace that is.</p>
      */
-    filterNote?: string | null
+    pathNote?: string | null
   }>(),
-  { showLeft: true, showRight: true, filterNote: null },
+  { showLeft: true, showRight: true, pathNote: null },
 )
 
 const { record, spliced, forced, gate } = useOscilloscope()
@@ -306,10 +306,10 @@ const recordFacts = computed(() => {
 
       <!-- Both of these make an ordinary-looking trace mean something else, so they are said here as
            well as on the chart. -->
-      <p v-if="filterNote" class="mt-2 text-[11px] leading-snug text-blue-600 dark:text-blue-400">
-        Read through the display path: {{ filterNote }}. Every figure above is of the filtered
-        trace. What is stored is always the unfiltered capture, so a saved result can be reopened
-        and read through a different filter, or none.
+      <p v-if="pathNote" class="mt-2 text-[11px] leading-snug text-blue-600 dark:text-blue-400">
+        Read through the display path: {{ pathNote }}. Every level figure above is of the coupled
+        trace, moved by the record’s own mean. What is stored is always the capture as it
+        arrived, so a saved result can be reopened and read a different way, or raw.
       </p>
 
       <p v-if="spliced" class="mt-2 text-[11px] text-amber-600 dark:text-amber-400">

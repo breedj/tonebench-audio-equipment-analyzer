@@ -14,7 +14,7 @@ import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import OscilloscopeScreenChart from '../components/OscilloscopeScreenChart.vue'
 import ScopeXyChart from '../components/ScopeXyChart.vue'
 import ScopeEyeChart from '../components/ScopeEyeChart.vue'
-import { pathSummary } from '../scope/filters'
+import { pathSummary } from '../scope/signalPath'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
@@ -591,7 +591,7 @@ export async function renderView(
           mathOperation: display.mathOperation,
           // The record handed to a report has already been through the display path, so the
           // picture is right by construction; what the page needs is the words for it.
-          filterNote: pathSummary(display.filter),
+          pathNote: pathSummary(display.path),
           drawing: display.drawing,
           triggerLevelV: data.triggerLevelV,
           triggerHysteresisV: data.triggerHysteresisV,

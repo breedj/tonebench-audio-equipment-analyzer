@@ -334,13 +334,21 @@ public class ScopeTriggerEngineTests
         Assert.Empty(Feed(engine, blocks: 4));
     }
 
+    /// <summary>
+    /// Roll arms into its own state and commits nothing through the triggered hand-off — its
+    /// record is the newest window, built when it is asked for. See <c>ScopeRollModeTests</c> for
+    /// what it does do; this is only the half that says it does not scan.
+    ///
+    /// <para>It read <see cref="ScopeEngineState.Idle"/> here until 2026-11-18, which is what the
+    /// mode actually did: idle means nothing is coming, so a Roll run produced no record ever.</para>
+    /// </summary>
     [Fact]
-    public void Roll_NeverArms()
+    public void Roll_NeverScansForATrigger()
     {
         var (_, engine) = NewEngine();
         engine.Arm(Spec(mode: ScopeRunMode.Roll), droppedTotal: 0);
 
-        Assert.Equal(ScopeEngineState.Idle, engine.State);
+        Assert.Equal(ScopeEngineState.Rolling, engine.State);
         Assert.Empty(Feed(engine, blocks: 4));
     }
 

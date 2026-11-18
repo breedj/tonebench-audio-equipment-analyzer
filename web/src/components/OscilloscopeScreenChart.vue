@@ -600,6 +600,11 @@ function triggerPositionPlugin(t: Theme): uPlot.Plugin {
     hooks: {
       drawAxes: [
         (u) => {
+          // Nothing in Roll: t = 0 there is "now", the record's own right-hand edge, and a
+          // trigger-position marker on it would claim an event that never happened. The axis says
+          // where the edge is by reading 0 at it.
+          if (props.record?.rolled === true) return
+
           const x = u.valToPos(0, 'x', true)
           if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return
 
@@ -647,7 +652,9 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
     hooks: {
       drawAxes: [
         (u) => {
-          if (!props.showTriggerLevel) return
+          // Never on a rolling record: nothing triggered, so a line at the trigger level would
+          // be read as the thing that placed this window.
+          if (!props.showTriggerLevel || props.record?.rolled === true) return
           const { levelV, band, offWindow } = indicator.value
 
           const ctx = u.ctx
@@ -1137,7 +1144,7 @@ function syncHandle() {
   syncCursorHandles()
 
   const u = plot.value
-  if (!u || !props.showTriggerLevel) {
+  if (!u || !props.showTriggerLevel || props.record?.rolled === true) {
     handleRect.value = null
     return
   }
@@ -1362,7 +1369,7 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
     const detail = record
       ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${props.filterNote ? ` · ${props.filterNote}` : ''}${
           record.spliced ? ' · spliced' : ''
-        }${record.forced ? ' · untriggered' : ''}`
+        }${record.forced ? ' · untriggered' : ''}${record.rolled ? ' · rolling' : ''}`
       : ''
     return await composeChartPng({
       width,
@@ -1698,6 +1705,12 @@ const recordFlag = computed(() => {
       label: 'Spliced',
       detail:
         'This record spans a dropped chunk or block — two pieces of the stream sit side by side in it, so an edge in the middle may be the splice rather than the signal.',
+    }
+  if (record?.rolled)
+    return {
+      label: 'Rolling',
+      detail:
+        'There is no trigger in Roll: this is the newest window of the stream, with t = 0 at its right-hand edge and the record running backwards from it. The trigger level, slope and hysteresis do nothing here.',
     }
   if (record?.forced)
     return {

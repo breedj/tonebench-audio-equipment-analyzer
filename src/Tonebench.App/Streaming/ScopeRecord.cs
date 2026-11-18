@@ -46,7 +46,8 @@ public readonly record struct ScopeCaptureSpec(
     double SampleRateHz,
     long AutoTimeoutFrames = 0,
     long DiscontinuityHoldoffFrames = 0,
-    long SettleFrames = 0);
+    long SettleFrames = 0,
+    long RollStepFrames = 0);
 
 /// <summary>
 /// One captured record: the samples, and everything needed to say what they are.
@@ -74,6 +75,16 @@ public readonly record struct ScopeCaptureSpec(
 /// fault are indistinguishable in a waveform drawn without it.
 /// </param>
 /// <param name="Forced">Taken by <see cref="ScopeRunMode.Auto"/>'s timeout; nothing qualified.</param>
+/// <param name="Rolled">
+/// Taken by <see cref="ScopeRunMode.Roll"/>: the newest window, with no trigger involved at all.
+/// <paramref name="TriggerPosition"/> is its right-hand edge, so t = 0 is <i>now</i> and the whole
+/// record sits to the left of it — the axis going negative rather than re-zeroing, which is this
+/// app's convention everywhere a time is measured from an event.
+///
+/// <para>Flagged rather than left to be inferred from the span, because what a reader must not do
+/// is read the trigger controls against it: nothing triggered, so the level, the slope and the
+/// hysteresis had no part in where this window starts. The chart draws no trigger line on one.</para>
+/// </param>
 public sealed record ScopeRecord(
     double[][] Channels,
     double SampleRateHz,
@@ -81,7 +92,8 @@ public sealed record ScopeRecord(
     double TriggerPosition,
     int Epoch,
     bool Spliced,
-    bool Forced)
+    bool Forced,
+    bool Rolled = false)
 {
     public int ChannelCount => Channels.Length;
 

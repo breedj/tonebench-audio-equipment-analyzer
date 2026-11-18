@@ -6,7 +6,7 @@ namespace Tonebench.App.Streaming;
 /// <summary>Where the engine is in the arm / trigger / fill / hold cycle.</summary>
 public enum ScopeEngineState
 {
-    /// <summary>Not armed. Roll mode sits here for ever, and so does a Single that has delivered.</summary>
+    /// <summary>Not armed, and nothing coming. A Single that has delivered sits here.</summary>
     Idle,
 
     /// <summary>Armed and scanning for a qualifying event.</summary>
@@ -17,6 +17,16 @@ public enum ScopeEngineState
 
     /// <summary>A record is ready to be taken. <see cref="ScopeRunMode.Single"/> stays here until re-armed.</summary>
     Held,
+
+    /// <summary>
+    /// <see cref="ScopeRunMode.Roll"/>: no trigger at all, and the newest window is the record.
+    ///
+    /// <para>Its own state rather than <see cref="Idle"/>, which is what it used to be: idle means
+    /// nothing is coming, and a Roll run that sat there committed no record ever — the mode was
+    /// offered in the picker, accepted by the runner and then produced a screen that stayed blank
+    /// for ever. Nothing scans and nothing fills here; see <c>NewestWindow</c>.</para>
+    /// </summary>
+    Rolling,
 }
 
 /// <summary>
@@ -155,7 +165,7 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
             // Or a retune that arrived as the run was ending would re-arm a disarmed engine.
             _pending = null;
 
-            if (_state is ScopeEngineState.Waiting or ScopeEngineState.Filling)
+            if (_state is ScopeEngineState.Waiting or ScopeEngineState.Filling or ScopeEngineState.Rolling)
                 _state = ScopeEngineState.Idle;
         }
     }
@@ -190,7 +200,7 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         _forced = false;
 
         lock (_handoff)
-            _state = spec.Mode == ScopeRunMode.Roll ? ScopeEngineState.Idle : ScopeEngineState.Waiting;
+            _state = spec.Mode == ScopeRunMode.Roll ? ScopeEngineState.Rolling : ScopeEngineState.Waiting;
     }
 
     /// <summary>Takes up a queued retune. Called at the top of <see cref="Write"/> and nowhere else.</summary>
@@ -208,6 +218,106 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
 
         _droppedAtArm = _droppedSeen;
         Take(pending.Spec, pending.Scanner);
+    }
+
+    /// <summary>
+    /// How many roll steps have gone by since the run was armed — 0 in every other mode.
+    ///
+    /// <para><b>Arithmetic on the buffer's own clock, so it costs nothing and allocates nothing.</b>
+    /// It is what a client watches to know there is a newer window to fetch, in place of the record
+    /// counter a triggered run advances. The step is a <i>time</i> converted once by the runner, so
+    /// the counter ticks at the same rate whatever the sample rate and whatever the record
+    /// length.</para>
+    /// </summary>
+    public long RollWindowsElapsed
+    {
+        get
+        {
+            lock (_handoff)
+            {
+                if (_state != ScopeEngineState.Rolling || _spec.RollStepFrames <= 0)
+                    return 0;
+                return Math.Max(0, (_buffer.Newest - _armedAt) / _spec.RollStepFrames);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a whole record's worth of unbroken history is on hand to roll — asked without
+    /// copying any of it, so the status poll can answer it several times a second.
+    /// </summary>
+    public bool RollWindowReady
+    {
+        get
+        {
+            lock (_handoff)
+            {
+                if (_state != ScopeEngineState.Rolling)
+                    return false;
+            }
+
+            return _buffer.AvailableFrames >= _spec.RecordFrames;
+        }
+    }
+
+    /// <summary>
+    /// The newest window, built here and now — Roll's record.
+    ///
+    /// <para><b>Built on demand rather than committed on a schedule, and that is the whole design
+    /// of Roll.</b> A rolling scope has no event to anchor a record to, so <i>any</i> window is as
+    /// good as the one before it and the only question is when somebody looks. Committing one every
+    /// n milliseconds would put a fresh <c>double[RecordFrames]</c> per channel on the acquisition
+    /// thread at that rate whether or not anything was reading it — 3 MB a go at the one-second
+    /// extreme, which is a large-object allocation and the documented cause of the sound card's
+    /// dropped chunks. Building it when it is asked for moves that cost onto the request thread and
+    /// makes it proportional to how often somebody is looking, which for a scrolling display is the
+    /// client's own status poll.</para>
+    ///
+    /// <para>Null until a whole record of unbroken history exists. <b>Never spliced</b>, by
+    /// construction rather than by a check: a window that would cross a break is refused by the
+    /// buffer, so a drop shortens the history available instead of putting two non-adjacent pieces
+    /// of the stream side by side.</para>
+    /// </summary>
+    public ScopeRecord? NewestWindow()
+    {
+        lock (_handoff)
+        {
+            if (_state != ScopeEngineState.Rolling)
+                return null;
+        }
+
+        int frames = _spec.RecordFrames;
+        if (frames < 2)
+            return null;
+
+        long newest = _buffer.Newest;
+        long start = newest - frames;
+        if (start < 0 || _buffer.AvailableFrames < frames)
+            return null;
+
+        var channels = new double[_buffer.ChannelCount][];
+        for (int c = 0; c < channels.Length; c++)
+        {
+            var samples = new double[frames];
+            if (!_buffer.CopyRange(c, start, samples))
+                return null;
+
+            // What is stored is what is measured -- the committed path's own rule, and it has to
+            // hold here too or a rolling reading and the same capture saved would differ.
+            PcmCodec.QuantizeInPlace(samples);
+            channels[c] = samples;
+        }
+
+        return new ScopeRecord(
+            channels,
+            _spec.SampleRateHz,
+            start,
+            // The right-hand edge: t = 0 is "now" and the record runs backwards from it.
+            newest,
+            _buffer.Epoch,
+            Spliced: false,
+            Forced: false,
+            Rolled: true);
     }
 
     /// <summary>

@@ -202,7 +202,8 @@ public static class MeasurementsEndpoints
                 TriggerPosition: triggerOffsetS * pcm.SampleRateHz,
                 Epoch: 0,
                 Spliced: facts.Spliced,
-                Forced: facts.Forced);
+                Forced: facts.Forced,
+                Rolled: facts.Rolled);
 
             var record = path.Apply(raw);
             int columns = Math.Clamp(maxColumns ?? ScopeFrameBuilder.DefaultMaxColumns, 1, 4096);
@@ -425,7 +426,8 @@ public static class MeasurementsEndpoints
         bool ProcessLeft,
         bool ProcessRight,
         bool Spliced,
-        bool Forced)
+        bool Forced,
+        bool Rolled)
     {
         /// <summary>
         /// What a document this build cannot read is taken to mean: the trigger at the first
@@ -435,7 +437,7 @@ public static class MeasurementsEndpoints
         /// measurement did not capture is a trace too many, where one that draws nothing is a
         /// history item that silently does not appear.</para>
         /// </summary>
-        public static StoredWaveformFacts Unknown { get; } = new(0.0, true, true, false, false);
+        public static StoredWaveformFacts Unknown { get; } = new(0.0, true, true, false, false, false);
 
         /// <summary>
         /// Whether the stored measurement asked for this channel — the live route's
@@ -486,7 +488,8 @@ public static class MeasurementsEndpoints
                 StoredFlag(root, "processLeft", true),
                 StoredFlag(root, "processRight", true),
                 StoredFlag(root, "spliced", false),
-                StoredFlag(root, "forced", false));
+                StoredFlag(root, "forced", false),
+                StoredFlag(root, "rolled", false));
         }
         catch (JsonException)
         {

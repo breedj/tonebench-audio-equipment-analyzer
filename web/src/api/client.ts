@@ -1421,6 +1421,14 @@ export interface OscilloscopeStatus {
   triggerOffsetS: number | null
   recordFromS: number | null
   recordToS: number | null
+  /**
+   * The run is rolling: the record on hand is the newest window and nothing triggered.
+   *
+   * <p>In Roll <code>recordsTaken</code> counts roll steps rather than records, so it is still what
+   * says there is a newer window to fetch — it just advances on a clock rather than on an
+   * event.</p>
+   */
+  rolled: boolean
 }
 
 /**
@@ -1643,6 +1651,15 @@ export interface ScopeRecordResponse {
    * period. Null when it did not ask, and null when there is nothing to fold on.
    */
   eye?: ScopeEyeSlice | null
+  /**
+   * This record is the newest window of a rolling run rather than a triggered capture: t = 0 is
+   * <em>now</em> and the whole record sits to its left.
+   *
+   * <p>What the chart does with it is draw no trigger furniture. The level, the slope and the
+   * hysteresis had no part in where this window starts, so a line across the trace at the trigger
+   * level would be read as something it is not.</p>
+   */
+  rolled?: boolean
   /**
    * Something in the display path changed the trace — the coupling, the filter, or both.
    *

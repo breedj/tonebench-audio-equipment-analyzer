@@ -90,6 +90,7 @@ const { showPage } = useManual()
             timeout, and marks it <em>Untriggered</em> — what stops a mis-set level looking like a
             dead input. <strong>Normal</strong> waits as long as it takes and shows nothing until
             something qualifies. <strong>Single</strong> catches one record and holds it.
+            <strong>Roll</strong> has no trigger at all — see <strong>Roll</strong> below.
           </td>
         </tr>
         <tr>
@@ -134,6 +135,40 @@ const { showPage } = useManual()
       running, so nothing here needs a stop and a start: the settings are handed to the capture in
       flight, within one record. The only exception is the sample rate, which re-clocks the
       analyzer and therefore restarts the run.
+    </p>
+
+    <h2>Roll</h2>
+
+    <p>
+      <strong>Roll draws the newest samples as they arrive, with no trigger.</strong> What is on
+      screen is always the last <em>record length</em> of the stream, so <strong>t&nbsp;=&nbsp;0 is
+      now</strong> and the whole record sits to its left: the axis runs from
+      −<em>record</em>&nbsp;to&nbsp;0 rather than straddling a trigger. Entering or leaving Roll
+      therefore moves the time window onto the new axis, because a window from the other side of
+      that switch can hold no samples at all.
+    </p>
+
+    <p>
+      It is for the signals a trigger cannot help with: a drifting bias, a thermal effect, a supply
+      sagging over seconds, a slow sweep by hand — anything whose period is comparable with the
+      record or which has no period at all. Set a long record (up to a second) and watch it scroll.
+    </p>
+
+    <p>
+      Four things follow from there being no trigger, and all four are on screen rather than left to
+      be worked out. The chart carries a <strong>Rolling</strong> badge. <strong>No trigger line and
+      no trigger marker are drawn</strong> — the level, the slope and the hysteresis had no part in
+      where this window starts, so a line across the trace would be read as something it is not, and
+      those controls are disabled in the Trigger panel while Roll is selected. There is no
+      <em>Untriggered</em> flag either, since nothing was meant to trigger. And a saved Roll capture
+      reopens with t&nbsp;=&nbsp;0 at its right-hand edge, which is where it was.
+    </p>
+
+    <p>
+      The window is built <strong>when it is asked for</strong> rather than committed on a clock, so
+      a rolling display costs only what the screen is actually reading — and a drop in the stream
+      shortens the history available for a moment rather than splicing two pieces of it together: a
+      rolled record is never marked spliced, because a window that would cross a break is refused.
     </p>
 
     <h2>The generator</h2>

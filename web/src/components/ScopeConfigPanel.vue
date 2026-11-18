@@ -210,6 +210,15 @@ watch(
 )
 
 /** The 50 % button: the midpoint of what was actually measured. See TriggerAutoLevel.FiftyPercent. */
+/**
+ * True while the mode is Roll, where the trigger controls below have no effect at all.
+ *
+ * <p>They are disabled rather than hidden, which is the display rail's own answer for a channel
+ * that is not being captured: hiding them takes away the only place a level can be typed before
+ * switching back to a triggered mode, and leaving them live offers four controls that do nothing.</p>
+ */
+const rolling = computed(() => mode.value === 'Roll')
+
 const canAutoLevel = computed(
   () => Number.isFinite(props.measuredMaxV ?? Number.NaN) && Number.isFinite(props.measuredMinV ?? Number.NaN),
 )
@@ -497,10 +506,21 @@ function onAutoTimeoutChange(event: Event) {
       </select>
     </label>
 
+    <!--
+      Roll has no trigger at all, so everything below is disabled rather than hidden — the
+      display rail's own rule for a channel that is not being captured. Hiding them would take
+      away the only place a level can be typed before switching back to a triggered mode, and
+      leaving them live would offer four controls that do nothing.
+    -->
+    <p v-if="rolling" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      Roll draws the newest samples as they arrive, with t&nbsp;=&nbsp;0 at the right-hand edge.
+      Nothing below has any effect until you pick Auto, Normal or Single.
+    </p>
+
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         Source
-        <select v-model="triggerSource" class="tb-input">
+        <select v-model="triggerSource" class="tb-input" :disabled="rolling">
           <option v-for="option in SCOPE_TRIGGER_SOURCES" :key="option.value" :value="option.value">
             {{ option.label }}
           </option>
@@ -508,7 +528,7 @@ function onAutoTimeoutChange(event: Event) {
       </label>
       <label class="tb-field">
         Slope
-        <select v-model="form.slope" class="tb-input">
+        <select v-model="form.slope" class="tb-input" :disabled="rolling">
           <option v-for="option in SCOPE_TRIGGER_SLOPES" :key="option.value" :value="option.value">
             {{ option.label }}
           </option>
@@ -525,12 +545,14 @@ function onAutoTimeoutChange(event: Event) {
           type="number"
           step="0.01"
           class="tb-input w-24 shrink-0"
+          :disabled="rolling"
           title="Drag the dashed line on the chart to set this. The box is here for a figure you already know."
           @change="onLevelChange"
         />
         <button
           type="button"
           class="btn-chip shrink-0"
+          :disabled="rolling"
           title="Zero volts, which needs nothing to have been captured — where an AC-coupled signal crosses, and the way back after a drag has left the line somewhere odd."
           @click="setZero"
         >
@@ -539,7 +561,7 @@ function onAutoTimeoutChange(event: Event) {
         <button
           type="button"
           class="btn-chip shrink-0"
-          :disabled="!canAutoLevel"
+          :disabled="rolling || !canAutoLevel"
           title="Half way between the extremes of the record on screen — the midpoint, not the mean, so an uneven duty cycle still puts the level on the edge."
           @click="setFiftyPercent"
         >
@@ -556,6 +578,7 @@ function onAutoTimeoutChange(event: Event) {
           type="number"
           step="0.01"
           class="tb-input"
+          :disabled="rolling"
           title="The noise-reject band, drawn around the level on the chart. Raise it when the trace will not stand still."
           @change="onHysteresisChange"
         />
@@ -567,6 +590,7 @@ function onAutoTimeoutChange(event: Event) {
           type="number"
           step="1"
           class="tb-input"
+          :disabled="rolling"
           title="How long after a capture the trigger refuses to fire again — for a signal with several edges per cycle."
           @change="onHoldoffChange"
         />

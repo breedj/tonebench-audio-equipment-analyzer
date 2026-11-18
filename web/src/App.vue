@@ -2136,6 +2136,49 @@ const scopeRecordSeconds = ref(0.02)
 const scopePreTriggerFraction = ref(0.25)
 const scopeMode = ref<import('./api/client').ScopeRunMode>('Auto')
 
+/**
+ * The pre-trigger fraction the <em>display</em> works from — one in Roll, the staged value
+ * otherwise.
+ *
+ * <p>Mirrors <code>OscilloscopeRequest.PreTriggerFramesAt</code>'s own rule, and for its reason: in
+ * Roll t = 0 is <i>now</i> and every sample in the record is older than it, so the pre-trigger
+ * <em>is</em> the record and the window comes out at <code>[-record, 0]</code>. The staged ref is
+ * left alone rather than rewritten — it is a measurement setting the Trigger panel still shows,
+ * and switching back to a triggered mode has to restore it.</p>
+ *
+ * <p>It only decides the window <b>before anything has been captured</b>: once a record exists,
+ * <code>scopeRecordBounds</code> is the record's own span and takes precedence. Without it a Roll
+ * run came up showing a quarter of its window to the left of zero and the rest to the right, and
+ * then jumped when the first window arrived.</p>
+ */
+const scopeDisplayPreTriggerFraction = computed(() => (scopeMode.value === 'Roll' ? 1 : scopePreTriggerFraction.value))
+
+/**
+ * Crossing into or out of Roll moves the window onto the record's own span.
+ *
+ * <p><b>Because the axis's zero moves.</b> In Roll t = 0 is the right-hand edge, so the whole
+ * record is negative; in a triggered mode it sits wherever the pre-trigger fraction puts it. A
+ * window left over from the other side of that switch can hold no samples at all — picked up in
+ * the app, where a 0 to 0.5 ms window survived the switch to Roll and the chart drew nothing, with
+ * a live record on hand and no error anywhere. It is the X–Y view's own rule for the same reason:
+ * entering a view whose axis means something different cannot keep the old view's window.</p>
+ *
+ * <p>Only on the <em>crossing</em>, not on every mode change: Auto, Normal and Single share one
+ * axis, and rewriting their window when the user picks between them would throw away a zoom they
+ * had set deliberately.</p>
+ */
+watch(
+  () => scopeMode.value === 'Roll',
+  (rolling, wasRolling) => {
+    if (!isOscilloscope.value || wasRolling === undefined || rolling === wasRolling) return
+
+    const window = recordWindow(scopeRecordSeconds.value, rolling ? 1 : scopePreTriggerFraction.value)
+    scopeTimeFromS.value = window.fromS
+    scopeTimeToS.value = window.toS
+    scopeViewWindow.value = null
+  },
+)
+
 const scopeConfigPanel = ref<InstanceType<typeof ScopeConfigPanel> | null>(null)
 const scopeGeneratorPanel = ref<InstanceType<typeof GeneratorPanel> | null>(null)
 
@@ -2471,7 +2514,7 @@ const scopeStripWindow = computed<ScopeTimeWindow>(
 
 /** The axis the zoom bar draws: the record's span, or the one the settings are about to capture. */
 const scopeStripBounds = computed<ScopeTimeWindow>(
-  () => scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopePreTriggerFraction.value),
+  () => scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopeDisplayPreTriggerFraction.value),
 )
 
 /**
@@ -2506,7 +2549,7 @@ function onScopeCursorsCommitted() {
 
 /** "Set axis" from the chart: the window on screen written back into the display panel's boxes. */
 function onScopeAxisWindow(window: ScopeAxisWindow) {
-  const bounds = scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopePreTriggerFraction.value)
+  const bounds = scopeRecordBounds.value ?? recordWindow(scopeRecordSeconds.value, scopeDisplayPreTriggerFraction.value)
   const clamped = clampWindow({ fromS: window.fromS, toS: window.toS }, bounds)
   scopeTimeFromS.value = clamped.fromS
   scopeTimeToS.value = clamped.toS
@@ -6153,7 +6196,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :trigger-hysteresis-v="scopeTriggerHysteresisV"
                   :trigger-source="scopeTriggerSource"
                   :record-seconds="scopeRecordSeconds"
-                  :pre-trigger-fraction="scopePreTriggerFraction"
+                  :pre-trigger-fraction="scopeDisplayPreTriggerFraction"
                   :running="scopeRunning"
                   :show-left="scopeShowLeft"
                   :show-right="scopeShowRight"
@@ -6178,7 +6221,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
               <template #aside>
                 <ScopeDisplayPanel
                   :record-seconds="scopeRecordSeconds"
-                  :pre-trigger-fraction="scopePreTriggerFraction"
+                  :pre-trigger-fraction="scopeDisplayPreTriggerFraction"
                   v-model:volts-per-division="scopeVoltsPerDivision"
                   v-model:volt-offset-v="scopeVoltOffsetV"
                   v-model:time-from-s="scopeTimeFromS"

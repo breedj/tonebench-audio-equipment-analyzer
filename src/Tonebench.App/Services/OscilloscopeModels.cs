@@ -59,6 +59,18 @@ public sealed record OscilloscopeRequest(
     public const double MinRecordSeconds = 20e-6;
 
     /// <summary>
+    /// How often <see cref="ScopeRunMode.Roll"/> offers a newer window, in seconds.
+    ///
+    /// <para>50 ms, which is a smooth scroll for the slow signals Roll exists for, and a
+    /// <i>time</i> rather than a frame count so it means the same at every sample rate and at every
+    /// record length — the lesson the transfer queue's depth and the decay span each had to learn
+    /// on their own. It paces a <b>counter</b> and not a copy: nothing is built until a client asks
+    /// for the window, so this decides how often one may usefully ask rather than how much work the
+    /// acquisition thread does. See <c>ScopeTriggerEngine.NewestWindow</c>.</para>
+    /// </summary>
+    public const double RollStepSeconds = 0.05;
+
+    /// <summary>
     /// The record length the pipeline analyses at while the scope runs.
     ///
     /// <para>The scope does not want an FFT, but the pipeline must not be switched off either:
@@ -120,9 +132,23 @@ public sealed record OscilloscopeRequest(
     public int RecordFramesAt(double sampleRateHz) =>
         Math.Max(2, (int)Math.Round(RecordSeconds * sampleRateHz));
 
-    /// <summary>The pre-trigger length in frames, never longer than the record itself.</summary>
+    /// <summary>
+    /// The pre-trigger length in frames, never longer than the record itself.
+    ///
+    /// <para><b>The whole record in Roll</b>, whatever the fraction says. There t = 0 is <i>now</i>
+    /// and every sample in the record is older than it, so the pre-trigger <em>is</em> the record —
+    /// which is also what makes the client's own window arithmetic come out at
+    /// <c>[-record, 0]</c> without a second rule. The staged fraction is left alone rather than
+    /// rewritten, so switching back to a triggered mode restores it.</para>
+    /// </summary>
     public int PreTriggerFramesAt(double sampleRateHz) =>
-        Math.Clamp((int)Math.Round(PreTriggerFraction * RecordFramesAt(sampleRateHz)), 0, RecordFramesAt(sampleRateHz));
+        Mode == ScopeRunMode.Roll
+            ? RecordFramesAt(sampleRateHz)
+            : Math.Clamp((int)Math.Round(PreTriggerFraction * RecordFramesAt(sampleRateHz)), 0, RecordFramesAt(sampleRateHz));
+
+    /// <summary>The roll step in frames at <paramref name="sampleRateHz"/>, at least one.</summary>
+    public long RollStepFramesAt(double sampleRateHz) =>
+        Math.Max(1, (long)Math.Round(RollStepSeconds * sampleRateHz));
 
     /// <summary>Which channel index the trigger watches.</summary>
     public int TriggerChannelIndex => TriggerSource == TriggerSource.ChannelB ? 1 : 0;
@@ -147,6 +173,11 @@ public sealed record OscilloscopeRequest(
 /// <param name="HasRecord">Whether a record is on hand to be drawn or saved.</param>
 /// <param name="Spliced">The record on hand spans a dropped chunk or block.</param>
 /// <param name="Forced">The record on hand was taken by Auto's timeout; nothing qualified.</param>
+/// <param name="Rolled">
+/// The run is <see cref="ScopeRunMode.Roll"/>, so the record on hand is the newest window and
+/// nothing triggered. What the client does with it is suppress the trigger line: the level, the
+/// slope and the hysteresis had no part in where this window starts.
+/// </param>
 /// <param name="TriggerOffsetS">Seconds from the start of the record to the trigger, or null with no record.</param>
 /// <param name="RecordFromS">The record's first sample, relative to the trigger. Negative for any pre-trigger at all.</param>
 /// <param name="RecordToS">Its last sample, same reference.</param>
@@ -162,7 +193,8 @@ public sealed record OscilloscopeStatus(
     bool Forced,
     double? TriggerOffsetS,
     double? RecordFromS,
-    double? RecordToS);
+    double? RecordToS,
+    bool Rolled = false);
 
 /// <summary>The acknowledgement a start returns, so the client knows what it actually got.</summary>
 /// <param name="SampleRateHz">The rate the run is streaming at.</param>

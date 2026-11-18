@@ -76,10 +76,39 @@ public sealed class OscilloscopeRunner(
         get { lock (_stateLock) return _lastRequest; }
     }
 
-    /// <summary>The record on hand, or null. Kept after the run so it can still be saved.</summary>
+    /// <summary>
+    /// The record on hand, or null. Kept after the run so it can still be saved.
+    ///
+    /// <para><b>In Roll it is built here and now</b>, from the newest window the buffer holds — see
+    /// <c>ScopeTriggerEngine.NewestWindow</c> for why a rolling display is served on demand rather
+    /// than committed on a schedule. The cost is a copy of the record per read, so this is read
+    /// once per fetch and <see cref="Status"/> deliberately does not read it at all. A run that has
+    /// <i>stopped</i> rolling keeps whatever was last built, so the trace on screen does not vanish
+    /// when the run ends.</para>
+    /// </summary>
     public ScopeRecord? Record
     {
-        get { lock (_stateLock) return _record; }
+        get
+        {
+            lock (_stateLock)
+            {
+                if (_mode != ScopeRunMode.Roll || !Running)
+                    return _record;
+            }
+
+            // Outside the lock: the copy is megabytes at a long record, and nothing else here may
+            // wait on it. A null answer means the window is not whole yet, which keeps the last
+            // one on hand rather than blanking the screen between the two.
+            var window = engine.NewestWindow();
+            if (window is null)
+                return _record;
+
+            lock (_stateLock)
+            {
+                _record = window;
+                return window;
+            }
+        }
     }
 
     public OscilloscopeStatus Status
@@ -90,6 +119,31 @@ public sealed class OscilloscopeRunner(
             {
                 var record = _record;
                 var span = record?.Span;
+
+                // Roll answers from arithmetic rather than from a record, because building one
+                // costs a copy of the whole window and the status is polled several times a
+                // second. The counter is what a client watches to know there is a newer window;
+                // the span is the record's by construction -- it ends at "now".
+                if (_mode == ScopeRunMode.Roll && Running)
+                {
+                    bool ready = engine.RollWindowReady;
+                    double recordSeconds = _sampleRateHz > 0.0 ? _recordFrames / _sampleRateHz : 0.0;
+
+                    return new OscilloscopeStatus(
+                        _phase,
+                        _error,
+                        _sampleRateHz,
+                        _recordFrames,
+                        _preTriggerFrames,
+                        (int)Math.Min(int.MaxValue, engine.RollWindowsElapsed),
+                        HasRecord: ready || record is not null,
+                        Spliced: false,
+                        Forced: false,
+                        TriggerOffsetS: ready ? recordSeconds : null,
+                        RecordFromS: ready ? -recordSeconds : null,
+                        RecordToS: ready ? 0.0 : null,
+                        Rolled: true);
+                }
 
                 return new OscilloscopeStatus(
                     _phase,
@@ -103,7 +157,8 @@ public sealed class OscilloscopeRunner(
                     Forced: record?.Forced ?? false,
                     TriggerOffsetS: record?.TriggerOffsetS,
                     RecordFromS: span?.FromS,
-                    RecordToS: span?.ToS);
+                    RecordToS: span?.ToS,
+                    Rolled: record?.Rolled ?? false);
             }
         }
     }
@@ -516,7 +571,11 @@ public sealed class OscilloscopeRunner(
             DiscontinuityHoldoffFrames: recordFrames,
 
             // Zero on a retune, which is what the default is for: a retune changes no stimulus.
-            SettleFrames: settleFrames);
+            SettleFrames: settleFrames,
+
+            // How often Roll offers a newer window. A time converted once, here, against the rate
+            // the run is streaming at.
+            RollStepFrames: request.RollStepFramesAt(request.SampleRateHz));
     }
 
     private sealed record ParkedRun(

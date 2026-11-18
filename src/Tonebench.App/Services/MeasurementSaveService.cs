@@ -1014,7 +1014,14 @@ public sealed class MeasurementSaveService(
             new OscilloscopeParameters(
                 SampleRateHz: record.SampleRateHz,
                 RecordSeconds: record.FrameCount / record.SampleRateHz,
-                PreTriggerFraction: request.PreTriggerFraction,
+                // The record's own offset rather than the request's fraction, so the document
+                // says where t = 0 actually is. The two agree to a rounding on a triggered
+                // capture; on a rolled one they do not agree at all -- there the trigger is the
+                // record's right-hand edge whatever the staged fraction says, and storing the
+                // staged 0.25 would reopen the capture with t = 0 a quarter of the way in.
+                PreTriggerFraction: record.FrameCount > 0
+                    ? Math.Clamp(record.TriggerOffsetS * record.SampleRateHz / record.FrameCount, 0.0, 1.0)
+                    : request.PreTriggerFraction,
                 Mode: request.Mode.ToString(),
                 TriggerKind: request.TriggerKind.ToString(),
                 TriggerSource: request.TriggerSource.ToString(),
@@ -1026,6 +1033,7 @@ public sealed class MeasurementSaveService(
                 ProcessRight: request.ProcessRight,
                 Spliced: record.Spliced,
                 Forced: record.Forced,
+                Rolled: record.Rolled,
                 Generator: request.Generator,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb,

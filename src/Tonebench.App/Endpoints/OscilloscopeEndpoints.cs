@@ -355,7 +355,8 @@ public static class OscilloscopeEndpoints
                 mathSlice,
                 xySlice,
                 eyeSlice,
-                path.Changes));
+                path.Changes,
+                record.Rolled));
         });
     }
 
@@ -559,7 +560,8 @@ public sealed record ScopeRecordResponse(
     ScopeMathSlice? Math = null,
     ScopeXySlice? Xy = null,
     ScopeEyeSlice? Eye = null,
-    bool Filtered = false);
+    bool Filtered = false,
+    bool Rolled = false);
 
 /// <summary>
 /// One filter's magnitude response, as the display rail's preview draws it.

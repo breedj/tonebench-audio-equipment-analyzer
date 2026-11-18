@@ -8,6 +8,7 @@ import {
   type MeasurementSummary,
   type SaveMeasurementRequest,
   type SaveRunRequest,
+  type ScopeRecordResponse,
   type StoredResponsePreviewPoint,
   type StoredResponseTrace,
   type StoredSweepPoint,
@@ -21,6 +22,7 @@ import {
   isOutputImpedanceKind,
   isImdSweepKind,
   isImpedanceKind,
+  isOscilloscopeKind,
   isImpulseResponseKind,
   isSteppedResponseKind,
   isSweepKind,
@@ -74,6 +76,17 @@ export interface OverlayEntry {
    * running one with. Undefined for every other kind.
    */
   responseTraces?: ResponseTrace[]
+
+  /**
+   * A stored oscilloscope capture, in the same shape the live record arrives in — a reference
+   * trace, drawn by the code that draws the live one.
+   *
+   * <p><b>Re-fetched when the drawn window moves</b>, unlike every other field here: a scope
+   * overlay is a slice of a record rather than a complete curve, so it has to be cut from the same
+   * stretch of time as the live trace or the two are of different moments. See
+   * <code>setScopeOverlayWindow</code>.</p>
+   */
+  scopeRecord?: ScopeRecordResponse | null
 
   /**
    * A stepped-sine response result's per-point captures, in the shape the live run holds them — so
@@ -576,9 +589,16 @@ export function useMeasurements() {
       const impedanceTraces = isImpedanceKind(detail.kind) || isOutputImpedanceKind(detail.kind)
         ? toImpedanceTraces((await api.getStoredResponse(resultId)).traces)
         : undefined
+      // A stored capture, in the same shape the live record arrives in -- so the chart draws a
+      // reference through the code that draws the trace. Cut to whatever window the chart is on,
+      // and re-cut whenever it moves: a scope overlay is a slice of a record rather than a
+      // complete curve, so a stale one is of a different moment.
+      const scopeRecord = isOscilloscopeKind(detail.kind)
+        ? await api.getStoredScopeRecord(resultId, scopeOverlayWindow ?? undefined, scopeOverlayColumns, scopeOverlayPath)
+        : undefined
       overlays.value = [
         ...overlays.value,
-        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, responsePreviews, impulseTrace, harmonicCurves, impedanceTraces },
+        { id: resultId, detail, visible: true, sweepPoints, sweepMethod, sweepFamily, sweepEndFreqHz, responseTraces, responsePreviews, impulseTrace, harmonicCurves, impedanceTraces, scopeRecord },
       ]
       error.value = null
     } catch (e) {
@@ -638,6 +658,74 @@ export function useMeasurements() {
   function setOverlayWindow(window: SpectrumWindow | null) {
     overlayWindow = window
     void refetchOverlaysForWindow(window)
+  }
+
+  /**
+   * The window, column budget and display path a scope reference is cut to — whatever the chart
+   * is showing.
+   *
+   * <p>All three, because all three change what a slice <em>is</em>: the window decides which
+   * stretch, the budget whether it comes back as samples or as columns, and the path what filter
+   * it was read through. A reference cut to a different window is of a different moment, and one
+   * read through a different filter is a comparison of two different things.</p>
+   */
+  let scopeOverlayWindow: { fromS: number; toS: number } | null = null
+  let scopeOverlayColumns: number | undefined
+  let scopeOverlayPath: Record<string, string> | undefined
+  let scopeOverlayKey = ''
+
+  /**
+   * Cuts every scope reference on the chart to the window the live trace is on.
+   *
+   * <p>Change-gated on the three things together, because the chart reports its window on every
+   * record and most reports are the window it is already showing. Failures are swallowed for the
+   * spectrum overlays' reason: a reference that did not re-cut is a coarser picture, not an error
+   * worth a banner over.</p>
+   */
+  async function setScopeOverlayWindow(
+    window: { fromS: number; toS: number } | null,
+    columns?: number,
+    path?: Record<string, string>,
+  ): Promise<void> {
+    const key = `${window ? `${window.fromS}:${window.toS}` : 'whole'}:${columns ?? ''}:${JSON.stringify(path ?? {})}`
+    if (key === scopeOverlayKey) return
+    scopeOverlayKey = key
+    scopeOverlayWindow = window
+    scopeOverlayColumns = columns
+    scopeOverlayPath = path
+
+    const wanted = overlays.value.filter((o) => o.visible && o.scopeRecord !== undefined)
+    if (wanted.length === 0) return
+
+    await Promise.all(
+      wanted.map(async (entry) => {
+        try {
+          const next = await api.getStoredScopeRecord(entry.id, window ?? undefined, columns, path)
+          // The window may have moved on while this was in flight; the newest ask wins.
+          if (key !== scopeOverlayKey) return
+          entry.scopeRecord = next
+          overlays.value = [...overlays.value]
+        } catch {
+          // A reference that did not re-cut is a coarser picture, not an error worth a banner.
+        }
+      }),
+    )
+  }
+
+  /**
+   * The display path alone, keeping whatever window and column budget the references are already
+   * cut to.
+   *
+   * <p>Its own entry point rather than <code>setScopeOverlayWindow(currentWindow, …)</code> at the
+   * call site, and that is not a convenience: the one caller is an <code>immediate</code> watcher
+   * on the filter settings, which runs <i>during</i> App.vue's setup — where a ref declared further
+   * down the file is still in its temporal dead zone. Reading one there threw out of setup and left
+   * every ref below it unassigned, so the chart and the overview strip were handed
+   * <code>undefined</code> and drew nothing (caught 2026-11-18). A function that needs no window
+   * cannot reach for one.</p>
+   */
+  function setScopeOverlayPath(path?: Record<string, string>): Promise<void> {
+    return setScopeOverlayWindow(scopeOverlayWindow, scopeOverlayColumns, path)
   }
 
   /**
@@ -747,5 +835,6 @@ export function useMeasurements() {
   return { items, filter, overlays, error, load, save, saveSweep, saveImdSweep, saveResponse, saveImpulse, saveImpedance, saveCrosstalk, saveOscilloscope, saveOutputImpedance,
     update, remove,
     addOverlay, reloadOverlay, removeOverlay, pruneOverlaysToTypes, clearOverlays, setOverlayVisible, setOverlayWindow,
+    setScopeOverlayWindow, setScopeOverlayPath,
     visibleOverlayCount, canShowMoreOverlays }
 }

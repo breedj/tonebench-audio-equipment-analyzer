@@ -3,6 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerSource } from '../api/client'
+import type { OverlayEntry } from '../composables/useMeasurements'
+import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
+import { runTint } from '../charts/runTint'
+import { onScopeGrid } from '../scope/references'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
@@ -150,6 +154,15 @@ const props = withDefaults(defineProps<{
   /** How one sample is joined to the next. See scope/interpolation.ts. */
   drawing?: ScopeDrawing
   /**
+   * Checked history items drawn as reference traces — stored captures, cut to this same window by
+   * the analyzer so they arrive in the live record's own shape.
+   *
+   * <p>Which is the point of the arrangement: a reference is drawn by the code that draws the
+   * trace, so the two cannot disagree about decimation, about which channels are shown, or about
+   * what the display path did to them.</p>
+   */
+  references?: OverlayEntry[]
+  /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
    * practice the open measurement. It joins the signature rather than being watched for, so a
    * switch cannot be forgotten at a call site.
@@ -166,6 +179,7 @@ const props = withDefaults(defineProps<{
   mathOperation: 'Off',
   filterNote: null,
   drawing: 'Linear',
+  references: () => [],
   persistenceKey: 0,
 })
 
@@ -251,6 +265,10 @@ interface ChannelSeries {
   scale?: string
   /** True for the math trace, which is excluded from the haze and from the band's volts reading. */
   math?: boolean
+  /** True for a stored capture drawn behind the live one — dashed, tinted and thin. */
+  reference?: boolean
+  /** The dash that tells one reference from another, and from the live trace, in a report with no colour. */
+  dash?: number[]
 }
 
 /**
@@ -271,6 +289,17 @@ const RESIDUAL_COLORS = ['#93c5fd', '#fdba74'] as const
  * quantity drawn against its own axis.</p>
  */
 const MATH_COLOR = '#a855f7'
+
+/**
+ * How far a reference's colour is pulled toward its run's own hue, and how much of the trace's
+ * weight it keeps.
+ *
+ * <p><b>Dashed first, tinted second</b>, which is the impedance chart's own order and for its
+ * reason: the dash is what the legend draws, what survives a black-and-white report and what
+ * matches a run across two channels, where the hue is the quicker read on screen. Thin, because a
+ * reference is there to be compared against rather than read.</p>
+ */
+const REFERENCE_TINT = 0.55
 
 /** The scale the math trace is drawn against, which is its own. See ChannelSeries.scale. */
 const MATH_SCALE = 'm'
@@ -305,11 +334,35 @@ const series = computed(() => {
   const drawn = (record?.channels ?? []).filter((slice) =>
     slice.channel === 1 ? props.showRight : props.showLeft,
   )
-  if (!drawn.length) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+  // The references, resolved before the x array is chosen: with no live record they are the whole
+  // of what is on the chart, so they have to be able to decide its geometry. Each is a stored
+  // capture the analyzer cut to this same window.
+  const references: { label: string; slice: ScopeChannelSlice; run: number }[] = []
+  props.references.forEach((entry, index) => {
+    // One behind the live trace when there is one, taking its place when there is not -- the sweep
+    // chart's own rule, so a run's dash means the same thing on both screens.
+    const run = overlayRunIndex(index, drawn.length > 0)
+    for (const slice of entry.scopeRecord?.channels ?? []) {
+      if (slice.channel === 1 ? !props.showRight : !props.showLeft) continue
+      if (sliceLength(slice) === 0) continue
+      references.push({
+        label: `${entry.detail.name} · ${slice.channel === 0 ? 'Left' : 'Right'}`,
+        slice,
+        run,
+      })
+    }
+  })
 
+  if (!drawn.length && !references.length) {
+    return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+  }
+
+  // The x array is the live record's wherever there is one, so the trace being measured is never
+  // the one that gets resampled; with nothing live, the longest reference decides it.
+  const geometry = drawn.length ? drawn : references.map((reference) => reference.slice)
   let longest: ScopeChannelSlice | null = null
   let count = 0
-  for (const slice of drawn) {
+  for (const slice of geometry) {
     const length = sliceLength(slice)
     if (length > count) {
       count = length
@@ -320,6 +373,38 @@ const series = computed(() => {
 
   const xMs = sliceXMs(longest, count)
   const channels: ChannelSeries[] = []
+
+  // The references FIRST, so the live trace paints over them: uPlot draws its series in order, and
+  // what is being read is the capture that just arrived -- a stored one drawn on top of it would
+  // hide the very trace the screen exists for. Before the reconstruction too, so they go through
+  // it as well: a reference drawn with straight lines beside a reconstructed live trace would
+  // differ by the drawing rather than by the measurement.
+  //
+  // Mapped onto the grid by TIME and not by index: a reference is a different capture, taken at
+  // its own sample rate, so a 48 kS/s one beside a 192 kS/s live record holds a quarter as many
+  // samples over the same window. See scope/references.ts.
+  const grid = { x0S: longest.x0, dxS: longest.dx, count }
+  for (const reference of references) {
+    const slice = reference.slice
+    const source = { x0S: slice.x0, dxS: slice.dx, length: sliceLength(slice) }
+    channels.push({
+      index: slice.channel,
+      label: reference.label,
+      color: runTint(CHANNEL_COLORS[slice.channel] ?? CHANNEL_COLORS[0], reference.run, REFERENCE_TINT),
+      line: slice.raw
+        ? onScopeGrid(slice.samples, source, grid, 'interpolate')
+        : onScopeGrid(slice.max, source, grid, 'nearest'),
+      // Its min/max band only where it is the one reference on the chart -- the spectrum chart's
+      // own rule (soleBandOverlay) and for its reason: a stored trace plotted as maxima alone
+      // reads several dB quiet at the floor, so the band is worth drawing, and three translucent
+      // bands over each other are a wash rather than three readings.
+      band: slice.raw || references.length > 1 ? null : onScopeGrid(slice.min, source, grid, 'nearest'),
+      raw: slice.raw,
+      reference: true,
+      dash: runDash(reference.run) ?? undefined,
+    })
+  }
+
   for (const slice of drawn) {
     const length = sliceLength(slice)
     const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
@@ -768,7 +853,7 @@ function accumulateIntensity() {
   // second, fainter waveform into a picture whose whole subject is how often the measured one
   // passes somewhere -- and the math trace is not even on the volts scale this reads positions
   // against, so its hits would land at the wrong heights.
-  const measured = channels.filter((channel) => !channel.residual && !channel.math)
+  const measured = channels.filter((channel) => !channel.residual && !channel.math && !channel.reference)
   if (!measured.length || !xMs.length) return
 
   let layers = intensityLayers.value
@@ -981,15 +1066,15 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         // Thinner and dashed for the residual: it is derived from the trace beside it rather than
         // measured, and at a quiet DUT it sits on the zero line where a solid line of the same
         // weight would read as a second waveform.
-        width: channel.residual ? 1 : props.thickLines ? 2 : 1,
-        dash: channel.residual ? [4, 3] : undefined,
+        width: channel.residual || channel.reference ? 1 : props.thickLines ? 2 : 1,
+        dash: channel.residual ? [4, 3] : channel.dash,
         // Dots: the samples and nothing joining them, which is the one mode that can never draw
         // something the analyzer did not measure. uPlot takes a null path builder for that.
         paths: dotsOnly.value ? () => null : undefined,
         // Markers only on a raw slice: a point drawn on a min/max column marks the column's
         // maximum rather than a sample, which is a reading of the decimation.
         points: {
-          show: (props.showDataPoints || dotsOnly.value) && channel.raw && !channel.residual,
+          show: (props.showDataPoints || dotsOnly.value) && channel.raw && !channel.residual && !channel.reference,
           size: dotsOnly.value ? 3 : 4,
         },
       })),
@@ -1526,7 +1611,10 @@ watch(
     // The drawing mode, because Dots replaces the series' own path builder, which uPlot reads at
     // construction -- a mode changed without a rebuild ticks and does nothing.
     () => props.drawing,
-    () => series.value.channels.map((c) => `${c.index}:${c.raw}:${c.residual === true}:${c.math === true}`).join(','),
+    () =>
+      series.value.channels
+        .map((c) => `${c.index}:${c.raw}:${c.residual === true}:${c.math === true}:${c.reference === true}`)
+        .join(','),
   ],
   rebuild,
 )

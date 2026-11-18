@@ -350,6 +350,23 @@ public static class OscilloscopeEndpoints
     /// The display path a request names, parsed once and shared by the record route and the
     /// preview, so the curve the rail draws is the filter the trace gets.
     /// </summary>
+    /// <summary>
+    /// The same parse, for the stored-record route in MeasurementsEndpoints.
+    ///
+    /// <para>Shared rather than copied so a reference trace is read through exactly the filter the
+    /// live trace is — two parsers would be two filters, and a comparison of two different
+    /// things.</para>
+    /// </summary>
+    internal static bool TryParseStoredPath(
+        string? coupling,
+        string? filter,
+        double? filterHz,
+        double? filterQ,
+        int? filterOrder,
+        out ScopeSignalPath path,
+        out string? error) =>
+        TryParsePath(coupling, filter, filterHz, filterQ, filterOrder, out path, out error);
+
     private static bool TryParsePath(
         string? coupling,
         string? filter,

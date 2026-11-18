@@ -4970,6 +4970,33 @@ export const api = {
    * than no preview. A pure function of the spec and the rate, so it answers before anything has
    * been captured.
    */
+  /**
+   * A stored oscilloscope capture, cut to the same window and read through the same display path
+   * as the live one — a reference trace.
+   *
+   * <p>It answers in the <em>same shape</em> as the live record, which is the point: a reference
+   * is then not a second kind of object the chart has to learn, it is a record drawn by the code
+   * that draws the record. The window and the path are passed so the two are cut from the same
+   * stretch of time and read through the same filter; a reference read through a different filter
+   * would be a comparison of two different things.</p>
+   */
+  getStoredScopeRecord: (
+    resultId: number,
+    window?: { fromS: number; toS: number },
+    maxColumns?: number,
+    path?: Record<string, string>,
+  ) => {
+    const query = new URLSearchParams()
+    if (window) {
+      query.set('fromS', String(window.fromS))
+      query.set('toS', String(window.toS))
+    }
+    if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
+    for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)
+    const suffix = query.size > 0 ? `?${query}` : ''
+    return request<ScopeRecordResponse | null>(`/measurements/${resultId}/scope-record${suffix}`)
+  },
+
   getOscilloscopeFilterResponse: (path: Record<string, string>, sampleRateHz?: number) => {
     const query = new URLSearchParams(path)
     if (sampleRateHz !== undefined && sampleRateHz > 0) query.set('sampleRateHz', String(sampleRateHz))

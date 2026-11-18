@@ -251,7 +251,13 @@ const {
   captureFftDisplay,
   restoreFftDisplay,
 } = useSpectrumStream()
-const { overlays, load: loadMeasurements, setOverlayWindow } = useMeasurements()
+const {
+  overlays,
+  load: loadMeasurements,
+  setOverlayWindow,
+  setScopeOverlayWindow,
+  setScopeOverlayPath,
+} = useMeasurements()
 const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig()
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 // For the report's Metrics element — the power tiles need the load the Generator pane names.
@@ -1182,6 +1188,19 @@ function curveOverlaysFor(screen: CurveOverlayScreen): OverlayEntry[] {
       curveOverlayScreen(o.detail.kind) === screen,
   )
 }
+
+/**
+ * The checked history items the scope chart draws as reference traces.
+ *
+ * <p>Its own filter rather than <code>curveOverlaysFor</code>'s, because what a scope reference
+ * carries is a <code>scopeRecord</code> — a slice of a stored capture — and not curves out of
+ * <code>response_trace</code>. The kind test is the same one and for the same reason.</p>
+ */
+const visibleScopeOverlays = computed<OverlayEntry[]>(() =>
+  overlays.value.filter(
+    (o) => o.visible && o.scopeRecord != null && curveOverlayScreen(o.detail.kind) === 'Oscilloscope',
+  ),
+)
 
 /**
  * The same filter for the response screens — and split by **kind**, for the reason the impedance
@@ -2328,7 +2347,13 @@ watch(
 watch(
   scopeFilter,
   (settings) => {
-    if (isOscilloscope.value) void setOscilloscopePath(filterQuery(settings)).catch(() => undefined)
+    if (!isOscilloscope.value) return
+    void setOscilloscopePath(filterQuery(settings)).catch(() => undefined)
+    // And the references, which have to be read through the same path or the comparison is of two
+    // different things. The path alone: this watcher is `immediate`, so it runs during setup, where
+    // `scopeViewWindow` and `SCOPE_DEFAULT_COLUMNS` are declared further down and still in their
+    // temporal dead zone — reading either threw out of setup and left every ref below unassigned.
+    void setScopeOverlayPath(filterQuery(settings)).catch(() => undefined)
   },
   { immediate: true, deep: true },
 )
@@ -2496,6 +2521,11 @@ function requestScopeSlice(window: { fromS: number; toS: number } | null, column
   scopeWindowHandle = setTimeout(() => {
     scopeWindowHandle = null
     void setOscilloscopeWindow(window, columns).catch(() => undefined)
+    // The reference traces follow the same window, the same column budget and the same display
+    // path: a stored capture cut to a different window is of a different moment, and one read
+    // through a different filter is a comparison of two different things. Asked for here rather
+    // than watched, so the live slice and the references are requested from one place.
+    void setScopeOverlayWindow(window, columns, filterQuery(scopeFilter.value)).catch(() => undefined)
   }, 120)
 }
 
@@ -3325,10 +3355,7 @@ function chartOnScreen() {
 const screenshotAvailable = computed(() => {
   if (isFrequencyResponse.value) return responseTraces.value.length > 0 || visibleResponseOverlays.value.length > 0
   if (isCrosstalk.value) return responseTraces.value.length > 0 || visibleCrosstalkOverlays.value.length > 0
-  // No overlay arm: a scope measurement's results are waveforms in `capture.pcm` rather than curves
-  // in `response_trace`, so nothing can be checked onto this chart yet (curveOverlayScreen answers
-  // null for the kind). The live record is the whole of what there is to photograph.
-  if (isOscilloscope.value) return scopeRecord.value !== null
+  if (isOscilloscope.value) return scopeRecord.value !== null || visibleScopeOverlays.value.length > 0
   if (isOutputImpedance.value)
     return outputImpedanceTrace.value !== null || visibleOutputImpedanceOverlays.value.length > 0
   if (isSweepKind.value) return sweepPoints.value.length > 0 || visibleSweepOverlays.value.length > 0
@@ -6093,6 +6120,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :math-operation="scopeMathOperation"
                   :filter-note="scopeFilterNote"
                   :drawing="scopeDrawing"
+                  :references="visibleScopeOverlays"
                   :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"

@@ -158,6 +158,93 @@ public static class MeasurementsEndpoints
         // that cannot share a table (see CsvExporter.ExportImpulse). Every other kind ignores it
         // rather than rejecting it: a stray query string must not turn a working download into a
         // 400, and there is nothing for it to mean there.
+        // A stored oscilloscope capture, sliced exactly as the live one is -- which is the whole
+        // point of it answering in the same shape. A reference trace is then not a second kind of
+        // object the chart has to learn: it is a record, drawn by the code that draws the record.
+        //
+        // <para>The window and the display path are the caller's, so a reference is cut from the
+        // same stretch of time as the live trace and read through the same filter. A reference
+        // read through a different filter would be a comparison of two different things.</para>
+        group.MapGet("/{id:long}/scope-record", async (
+            long id,
+            MeasurementRepository repo,
+            double? fromS,
+            double? toS,
+            string? coupling,
+            string? filter,
+            double? filterHz,
+            double? filterQ,
+            int? filterOrder,
+            int? maxColumns,
+            CancellationToken ct) =>
+        {
+            var detail = await repo.GetResultAsync(id, ct);
+            if (detail is null)
+                return Results.NotFound();
+            if (!MeasurementSaveService.IsOscilloscopeKind(detail.Kind))
+                return Results.BadRequest("That measurement is not an oscilloscope capture.");
+
+            var pcm = await repo.GetCapturePcmAsync(detail.CaptureId, ct);
+            if (pcm is null || pcm.Channels.Length == 0 || pcm.Channels[0].Length == 0)
+                return Results.NoContent();
+
+            if (!OscilloscopeEndpoints.TryParseStoredPath(coupling, filter, filterHz, filterQ, filterOrder, out var path, out var pathError))
+                return Results.BadRequest(pathError);
+
+            // Read once, used four times -- and the one read is what decides where t = 0 is, so
+            // the reference and the live trace cannot disagree about it.
+            var facts = ReadStoredWaveformFacts(detail.ParamsJson);
+            double triggerOffsetS = WaveformTriggerOffsetS(facts, pcm);
+            var raw = new ScopeRecord(
+                pcm.Channels,
+                pcm.SampleRateHz,
+                FirstIndex: 0,
+                TriggerPosition: triggerOffsetS * pcm.SampleRateHz,
+                Epoch: 0,
+                Spliced: facts.Spliced,
+                Forced: facts.Forced);
+
+            var record = path.Apply(raw);
+            int columns = Math.Clamp(maxColumns ?? ScopeFrameBuilder.DefaultMaxColumns, 1, 4096);
+
+            var channels = new List<ScopeChannelSlice>(record.ChannelCount);
+            for (int ch = 0; ch < record.ChannelCount; ch++)
+            {
+                // The channels the stored measurement asked for, not the ones the blob holds: a
+                // capture.pcm carries both inputs whatever the measurement captured, because what
+                // is stored is what the analyzer saw.
+                if (!facts.Captures(ch))
+                    continue;
+
+                var slice = fromS is { } from && toS is { } to
+                    ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
+                    : ScopeFrameBuilder.Overview(record, ch, columns);
+
+                channels.Add(new ScopeChannelSlice(
+                    ch,
+                    slice.X0,
+                    slice.Dx,
+                    slice.IsRaw,
+                    slice.Samples,
+                    slice.Columns?.Select(c => (float)c.Min).ToArray(),
+                    slice.Columns?.Select(c => (float)c.Max).ToArray(),
+                    slice.Measurements));
+            }
+
+            return Results.Ok(new ScopeRecordResponse(
+                record.SampleRateHz,
+                record.FrameCount,
+                record.TriggerOffsetS,
+                record.Span.FromS,
+                record.Span.ToS,
+                record.Spliced,
+                record.Forced,
+                channels,
+                Math: null,
+                Xy: null,
+                Filtered: path.Changes));
+        });
+
         group.MapGet("/{id:long}/export.csv", async (
             long id, string? part, MeasurementRepository repo, CancellationToken ct) =>
         {
@@ -220,7 +307,7 @@ public static class MeasurementsEndpoints
                 if (pcm is null || pcm.Channels.Length == 0)
                     return Results.NotFound();
 
-                csv = CsvExporter.ExportWaveform(detail, pcm, WaveformTriggerOffsetS(detail.ParamsJson, pcm));
+                csv = CsvExporter.ExportWaveform(detail, pcm, WaveformTriggerOffsetS(ReadStoredWaveformFacts(detail.ParamsJson), pcm));
             }
             else if (ExportShapeFor(detail.Kind) == CsvExportShape.Impedance)
             {
@@ -323,6 +410,127 @@ public static class MeasurementsEndpoints
             + "part=curves (the gated magnitude and phase) or part=harmonics.";
 
     /// <summary>
+    /// The four things a reader of a <i>stored</i> oscilloscope capture needs out of its
+    /// <c>params_json</c>: where the trigger sits, which inputs the measurement asked for, and the
+    /// two facts the capture recorded about itself.
+    ///
+    /// <para>Read with <see cref="ReadStoredWaveformFacts"/> rather than inferred from the samples,
+    /// because nothing in a waveform says any of them: a splice is two pieces of the stream side by
+    /// side and looks like a waveform, a forced record looks triggered, and a
+    /// <c>capture.pcm</c> carries both inputs whatever the measurement captured — what is stored is
+    /// what the analyzer saw.</para>
+    /// </summary>
+    internal readonly record struct StoredWaveformFacts(
+        double PreTriggerFraction,
+        bool ProcessLeft,
+        bool ProcessRight,
+        bool Spliced,
+        bool Forced)
+    {
+        /// <summary>
+        /// What a document this build cannot read is taken to mean: the trigger at the first
+        /// sample, both inputs drawn, neither flag set.
+        ///
+        /// <para>Both inputs rather than neither, because a reference that draws a channel the
+        /// measurement did not capture is a trace too many, where one that draws nothing is a
+        /// history item that silently does not appear.</para>
+        /// </summary>
+        public static StoredWaveformFacts Unknown { get; } = new(0.0, true, true, false, false);
+
+        /// <summary>
+        /// Whether the stored measurement asked for this channel — the live route's
+        /// <c>WasCaptured</c>, answered from a stored document instead of a live request.
+        ///
+        /// <para>A document that asked for <i>neither</i> input is one this build cannot make sense
+        /// of, so both are drawn: those two booleans are the measurement's own and one of them is
+        /// always true on a capture that happened.</para>
+        /// </summary>
+        public bool Captures(int channel)
+        {
+            if (!ProcessLeft && !ProcessRight)
+                return true;
+            return channel == 1 ? ProcessRight : ProcessLeft;
+        }
+    }
+
+    /// <summary>
+    /// Reads those four facts straight out of the stored document, field by field.
+    ///
+    /// <para><b>A <see cref="JsonDocument"/> and not
+    /// <c>Deserialize&lt;OscilloscopeParameters&gt;</c>, and that is a correctness decision rather
+    /// than a cheaper one.</b> A reader that needs four scalars should not have to bind thirty
+    /// members, every one of which is a way for it to fail — and it did fail: the record carries a
+    /// <c>GeneratorConfig</c>, whose <c>Kind</c>, noise <c>Shape</c> and chirp <c>Smoothing</c> are
+    /// <i>enums written as strings</i> by the app's source-generated converter, which a bare
+    /// <see cref="JsonSerializerDefaults.Web"/> options instance has no converter for. So every
+    /// stored scope capture — the one kind that stores a generator — threw
+    /// <see cref="JsonException"/> and silently fell back to the defaults: a trace drawn with its
+    /// trigger at sample 0 and both channels shown, with nothing on screen or in the log saying so.
+    /// Field by field, a member added later of a type these options cannot bind cannot reach
+    /// these four.</para>
+    ///
+    /// <para>Each name is tried in camelCase and then in PascalCase, because the app writes the
+    /// first and a hand-edited or older document may hold the second.</para>
+    /// </summary>
+    internal static StoredWaveformFacts ReadStoredWaveformFacts(string paramsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(paramsJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return StoredWaveformFacts.Unknown;
+
+            return new StoredWaveformFacts(
+                StoredNumber(root, "preTriggerFraction", 0.0),
+                StoredFlag(root, "processLeft", true),
+                StoredFlag(root, "processRight", true),
+                StoredFlag(root, "spliced", false),
+                StoredFlag(root, "forced", false));
+        }
+        catch (JsonException)
+        {
+            return StoredWaveformFacts.Unknown;
+        }
+    }
+
+    /// <summary>One stored member, by either spelling, or null where the document has neither.</summary>
+    private static JsonElement? StoredMember(JsonElement root, string camelCase)
+    {
+        if (root.TryGetProperty(camelCase, out var found))
+            return found;
+
+        string pascalCase = char.ToUpperInvariant(camelCase[0]) + camelCase[1..];
+        return root.TryGetProperty(pascalCase, out found) ? found : null;
+    }
+
+    private static double StoredNumber(JsonElement root, string name, double fallback) =>
+        StoredMember(root, name) is { ValueKind: JsonValueKind.Number } member && member.TryGetDouble(out double value)
+            ? value
+            : fallback;
+
+    private static bool StoredFlag(JsonElement root, string name, bool fallback) =>
+        StoredMember(root, name) switch
+        {
+            { ValueKind: JsonValueKind.True } => true,
+            { ValueKind: JsonValueKind.False } => false,
+            _ => fallback,
+        };
+
+    /// <summary>
+    /// Where the trigger sits in a stored waveform, in seconds from its first sample.
+    ///
+    /// <para>Derived from the pre-trigger <i>fraction</i> the result stored rather than kept as a
+    /// time, because the fraction is what the measurement was configured with and means the same
+    /// thing at any rate. Zero for a document that cannot be read — a CSV whose time column starts
+    /// at zero is wrong about where t = 0 is, which is better than refusing to export at all.</para>
+    /// </summary>
+    internal static double WaveformTriggerOffsetS(StoredWaveformFacts facts, StoredPcm pcm) =>
+        pcm.SampleRateHz > 0.0
+            ? Math.Round(facts.PreTriggerFraction * pcm.Channels[0].Length) / pcm.SampleRateHz
+            : 0.0;
+
+    /// <summary>
     /// The one place a stored kind is mapped to its exporter, so the route's branches and any test
     /// of them cannot disagree about it.
     ///
@@ -335,33 +543,6 @@ public static class MeasurementsEndpoints
     /// writes as <c>_db</c> columns. Crosstalk rows <i>are</i> response rows in plain dB, so the
     /// generic per-kind columns (<c>xtalk_l2r_min_db</c>, …) are exactly right for them.</para>
     /// </summary>
-    /// <summary>
-    /// Where the trigger sits in a stored waveform, in seconds from its first sample.
-    ///
-    /// <para>Derived from the pre-trigger <i>fraction</i> the result stored rather than kept as a
-    /// time, because the fraction is what the measurement was configured with and means the same
-    /// thing at any rate. Zero for a document that cannot be read — a CSV whose time column starts
-    /// at zero is wrong about where t = 0 is, which is better than refusing to export at all.</para>
-    /// </summary>
-    private static readonly JsonSerializerOptions WaveformParamsOptions =
-        new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
-
-    private static double WaveformTriggerOffsetS(string paramsJson, StoredPcm pcm)
-    {
-        try
-        {
-            var stored = JsonSerializer.Deserialize<OscilloscopeParameters>(paramsJson, WaveformParamsOptions);
-            if (stored is null || !(pcm.SampleRateHz > 0.0))
-                return 0.0;
-
-            return Math.Round(stored.PreTriggerFraction * pcm.Channels[0].Length) / pcm.SampleRateHz;
-        }
-        catch (JsonException)
-        {
-            return 0.0;
-        }
-    }
-
     internal static CsvExportShape ExportShapeFor(string kind)
     {
         if (MeasurementSaveService.IsImpulseResponseKind(kind))

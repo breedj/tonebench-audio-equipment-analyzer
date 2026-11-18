@@ -6,6 +6,7 @@ import {
   isFrequencyResponseKind,
   isImpedanceKind,
   isImpulseResponseKind,
+  isOscilloscopeKind,
   isOutputImpedanceKind,
   isSteppedResponseKind,
 } from './kinds'
@@ -70,6 +71,11 @@ export type CurveOverlayScreen =
   | 'Crosstalk'
   | 'Impedance'
   | 'OutputImpedance'
+  /**
+   * The oscilloscope, whose overlays are stored <b>waveforms</b> rather than curves out of
+   * <c>response_trace</c> — the only screen here whose references are slices of a record.
+   */
+  | 'Oscilloscope'
 
 /**
  * Which screen a stored result may be overlaid on, for the five kinds whose curves all come out of
@@ -108,6 +114,7 @@ export function curveOverlayScreen(kind: string | null | undefined): CurveOverla
   if (isCrosstalkKind(kind)) return 'Crosstalk'
   if (isImpedanceKind(kind)) return 'Impedance'
   if (isOutputImpedanceKind(kind)) return 'OutputImpedance'
+  if (isOscilloscopeKind(kind)) return 'Oscilloscope'
   return null
 }
 

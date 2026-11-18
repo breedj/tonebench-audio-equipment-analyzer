@@ -243,6 +243,13 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>History</td>
+          <td>
+            Stored results ticked here are drawn behind the live trace as reference traces — see
+            <strong>Reference traces</strong> below. Up to three.
+          </td>
+        </tr>
+        <tr>
           <td>Persistence</td>
           <td>
             How many records the chart keeps — see <strong>Persistence</strong> below. Off draws
@@ -687,6 +694,86 @@ const { showPage } = useManual()
       An operation that needs an input the measurement is not capturing draws nothing and says so,
       rather than computing against silence and labelling the result A − B. Tick the input under
       <strong>Acquisition ▸ Channels</strong>.
+    </p>
+
+    <h2>Reference traces</h2>
+
+    <p>
+      Tick a stored result in <strong>History</strong> and it is drawn on the chart behind the live
+      trace, dashed and in its own shade — a reference. Up to three at once, which is the overlay
+      limit everywhere in this app. The point of it is the comparison a scope is mostly used for:
+      the amplifier before a change against the amplifier after it, or one channel's capture against
+      the other's.
+    </p>
+
+    <p>
+      <strong>A reference is cut to the same window as the live trace, by the analyzer, every time
+      the window moves.</strong> That is what makes the two comparable: a stored capture shown at
+      its own full length beside a 1 ms zoom would be two pictures of different stretches of time
+      laid over each other. Zoom in and the references come back cut to the zoom; drag the zoom bar
+      and they follow it. They are read through the <strong>signal path</strong> too — the same
+      coupling and the same filter as the live trace — because a reference read through a different
+      filter is a comparison of two different things rather than of two measurements.
+    </p>
+
+    <p>
+      Both records are laid out <em>against the trigger</em>, so t = 0 is t = 0 on both however much
+      pre-trigger each was taken with. Where a reference was taken at a different sample rate its
+      samples are placed by time rather than one-for-one, so a 48 kS/s capture drawn beside a
+      192 kS/s one keeps its real timebase. Where a reference does not reach as far as the window
+      does, it stops: the trace simply has a gap there rather than a flat line along zero.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>What it shows</th><th>Reading</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Dashes</td>
+          <td>
+            Which reference it is, and that it is not the live trace. The dash is what tells them
+            apart in a black-and-white report and in a screenshot; the shade is the quicker read on
+            screen.
+          </td>
+        </tr>
+        <tr>
+          <td>Thin</td>
+          <td>
+            Deliberate: a reference is there to be compared against rather than read, and the live
+            trace is drawn over it.
+          </td>
+        </tr>
+        <tr>
+          <td>Its own channel colour</td>
+          <td>
+            Blue for the left input, orange for the right, pulled toward that reference's own hue.
+            A reference of a left-only measurement draws one trace.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>What a reference does not do</h3>
+
+    <p>
+      <strong>Nothing is measured off it.</strong> The Measurements panel, the cursors' gated
+      figures, the math channel and the residual are all of the <em>live</em> record — a reference is
+      a picture. To read a stored capture's own figures, open it: selecting it in History loads it as
+      the record, and then every reading on the panel is its.
+    </p>
+
+    <p>
+      Checking a result does not change the picture's own history either: the persistence haze is a
+      history of the live display, so a reference is drawn as a line and never accumulated into it,
+      and neither the sample markers nor the min/max band of a second and third reference are drawn
+      — one band is a reading, three over each other are a wash.
+    </p>
+
+    <p>
+      References belong to the measurement that is open, and unticking is how they go away. Opening
+      another measurement clears them, which is the rule on every screen here: a measurement's chart
+      draws its own results.
     </p>
 
     <h2>Persistence</h2>

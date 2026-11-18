@@ -8,6 +8,7 @@ import {
   IMPEDANCE_KIND,
   IMPULSE_RESPONSE_KIND,
   MEASUREMENT_KINDS,
+  OSCILLOSCOPE_KIND,
   OUTPUT_IMPEDANCE_KIND,
   STEPPED_RESPONSE_KIND,
   THD_VS_AMPLITUDE_KIND,
@@ -75,6 +76,10 @@ describe('curveOverlayScreen', () => {
       Impedance: [IMPEDANCE_KIND],
       Crosstalk: [CROSSTALK_KIND],
       OutputImpedance: [OUTPUT_IMPEDANCE_KIND],
+      // The one screen here whose references are stored waveforms rather than response_trace
+      // curves. It is in this partition all the same, because what the function answers is which
+      // screen a stored result may be drawn on, and that question is the same for both.
+      Oscilloscope: [OSCILLOSCOPE_KIND],
     })
   })
 })

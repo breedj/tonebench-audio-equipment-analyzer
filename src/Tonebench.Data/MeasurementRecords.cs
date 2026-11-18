@@ -1257,6 +1257,8 @@ public sealed record OscilloscopeParameters(
     bool Spliced = false,
     bool Forced = false,
     bool Rolled = false,
+    string? Accumulation = null,
+    int? AverageCount = null,
     GeneratorConfig? Generator = null,
     /// <summary>The unit the level boxes were typed in, so a measurement quoted in mV reads in mV again.</summary>
     string? GeneratorLevelUnit = null,

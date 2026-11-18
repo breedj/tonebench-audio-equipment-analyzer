@@ -85,6 +85,19 @@ public readonly record struct ScopeCaptureSpec(
 /// is read the trigger controls against it: nothing triggered, so the level, the slope and the
 /// hysteresis had no part in where this window starts. The chart draws no trigger line on one.</para>
 /// </param>
+/// <param name="Lower">
+/// The lower outline, under <see cref="RecordAccumulation.Envelope"/> only — null everywhere else.
+///
+/// <para>With it set, <see cref="Channels"/> is the <b>upper</b> outline and the pair is the band
+/// every sample position has swept over the records since the accumulator was reset. That is not a
+/// waveform, and the readings taken from one are its own extremes and nothing else: see
+/// <c>ScopeSliceMeasurements.OfEnvelope</c> for which figures survive and why the rest are absent
+/// rather than computed from an outline.</para>
+/// </param>
+/// <param name="AveragesTaken">
+/// How many records went into this one — 1 for an ordinary capture, and what a screen counts up
+/// while an average or an envelope fills.
+/// </param>
 public sealed record ScopeRecord(
     double[][] Channels,
     double SampleRateHz,
@@ -93,9 +106,20 @@ public sealed record ScopeRecord(
     int Epoch,
     bool Spliced,
     bool Forced,
-    bool Rolled = false)
+    bool Rolled = false,
+    double[][]? Lower = null,
+    int AveragesTaken = 1)
 {
     public int ChannelCount => Channels.Length;
+
+    /// <summary>
+    /// True where <see cref="Lower"/> is set: this is a band rather than a waveform.
+    ///
+    /// <para>What reads it is everything that assumes a waveform and would otherwise answer
+    /// plausibly about an outline — the math channel, the X–Y figure and the eye all refuse on one,
+    /// and the slice's readings are the band's own extremes.</para>
+    /// </summary>
+    public bool IsEnvelope => Lower is not null;
 
     public int FrameCount => Channels.Length == 0 ? 0 : Channels[0].Length;
 

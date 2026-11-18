@@ -94,6 +94,22 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
+          <td>Records</td>
+          <td>
+            What the analyzer does with each record after the first — <strong>Normal</strong>,
+            <strong>Average</strong> or <strong>Envelope</strong>. See <strong>Averaging and
+            envelope</strong> below. Disabled under Single and Roll, which produce nothing to
+            combine.
+          </td>
+        </tr>
+        <tr>
+          <td>Average over</td>
+          <td>
+            How many records the mean is of, 2 to 256. Shown only under <strong>Average</strong>;
+            the note under the control says how long that many will take to settle.
+          </td>
+        </tr>
+        <tr>
           <td>Source</td>
           <td>Which channel the trigger watches. It must be one of the captured channels.</td>
         </tr>
@@ -135,6 +151,105 @@ const { showPage } = useManual()
       running, so nothing here needs a stop and a start: the settings are handed to the capture in
       flight, within one record. The only exception is the sample rate, which re-clocks the
       analyzer and therefore restarts the run.
+    </p>
+
+    <h2>Averaging and envelope</h2>
+
+    <p>
+      <strong>Records</strong> decides what happens to each capture after the first, and the two
+      modes beyond Normal answer opposite questions.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>What it answers</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Normal</td>
+          <td>Each record replaces the one before it. What a scope does.</td>
+        </tr>
+        <tr>
+          <td>Average</td>
+          <td>
+            <em>What does this signal look like with the noise taken out?</em> The mean of the last
+            N records, sample position by sample position: the uncorrelated part falls as
+            <strong>√N</strong> while the signal stays — 12 dB of noise floor at 16 records, 24 dB
+            at 256. The badge on the chart counts up while it fills.
+          </td>
+        </tr>
+        <tr>
+          <td>Envelope</td>
+          <td>
+            <em>How much does it move?</em> The band every sample position has swept since the run
+            started. A signal that repeats exactly draws as a line; jitter, drift, modulation and a
+            fault that happens once in a hundred cycles all draw as a band.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Averaging needs a trigger that is standing still</h3>
+
+    <p>
+      <strong>This is the one thing that can go wrong silently.</strong> Averaging works because
+      sample <em>i</em> of every record is the same point on the same repeating signal — which is
+      true only as far as the trigger puts it there. Average records that are <em>not</em> aligned
+      and the signal itself is low-passed: the trace comes out smaller and rounder, which reads as
+      quieter. Nothing in the analyzer can tell those two apart, so get the trigger steady first
+      (raise <strong>Hysteresis</strong> until the trace stands still under Normal), and treat a
+      trace whose <em>amplitude</em> fell when you turned averaging on as a trigger problem rather
+      than a measurement.
+    </p>
+
+    <p>
+      Two consequences worth knowing. A record that is marked <strong>Spliced</strong> is left out
+      rather than combined — two non-adjacent pieces of the stream are not the same point on the
+      waveform as everything already in the average. And anything that changes <em>what</em> is
+      being combined starts it again: the mode, the count, the record length, the pre-trigger
+      position, a Clear, or a new run.
+    </p>
+
+    <h3>An envelope is not a waveform</h3>
+
+    <p>
+      It is two outlines, so only the questions that are about a band have answers:
+      <strong>Vmax</strong>, <strong>Vmin</strong> and <strong>Vpp</strong>. Everything else in the
+      Measurements panel is <em>absent</em> rather than computed — a mean or an RMS of an outline is
+      arithmetic on something that was never a signal, a period or a duty cycle would be a reading
+      of the accumulation rather than of the DUT, and a rise time between two outlines is the jitter
+      and the edge added together. For the same reason the <strong>math channel</strong>, the
+      <strong>X–Y figure</strong>, the <strong>eye</strong> and the <strong>residual</strong> are all
+      absent on an envelope.
+    </p>
+
+    <p>
+      The envelope keeps the worst case rather than the last N records, because what it is read for
+      is “how far does this ever move” — a bound that quietly forgot a bad record three captures ago
+      would answer a different question every time you looked. <strong>Clear</strong> starts the band
+      again.
+    </p>
+
+    <p>
+      Neither mode is offered under <strong>Single</strong>, which holds one record and so has
+      nothing to combine it with, or under <strong>Roll</strong>, whose windows overlap by all but
+      one roll step — averaging those would low-pass the signal and an envelope of them would be the
+      same band drawn N times.
+    </p>
+
+    <h3>Two modes a bench scope has that this one does not need</h3>
+
+    <p>
+      <strong>Peak detect</strong> is already how every record works here: the capture keeps every
+      sample, and the chart draws the minimum and the maximum of each display column, so nothing
+      wider than one sample can hide between pixels. There is nothing to switch on. Zoom in until
+      the header reads <em>every sample drawn</em> and you are looking at the samples themselves.
+    </p>
+
+    <p>
+      <strong>High resolution</strong> — averaging adjacent samples to trade bandwidth for vertical
+      detail — is the <strong>Signal path</strong>’s low-pass filter, which does the same thing where
+      you can see its corner and its slope rather than behind a single button.
     </p>
 
     <h2>Roll</h2>

@@ -1034,6 +1034,8 @@ public sealed class MeasurementSaveService(
                 Spliced: record.Spliced,
                 Forced: record.Forced,
                 Rolled: record.Rolled,
+                Accumulation: request.Accumulation.ToString(),
+                AverageCount: request.Accumulation == RecordAccumulation.Normal ? null : request.AverageCount,
                 Generator: request.Generator,
                 CaptureDelayMs: session.LastAppliedCaptureDelayMs,
                 ExternalGainLeftDb: session.ExternalGainLeftDb,

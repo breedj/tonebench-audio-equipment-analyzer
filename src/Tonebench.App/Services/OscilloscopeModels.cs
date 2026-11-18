@@ -23,6 +23,8 @@ namespace Tonebench.App.Services;
 /// <param name="TriggerHysteresisV">The noise-reject band. Zero is a plain crossing test.</param>
 /// <param name="HoldoffSeconds">How long after a hit the trigger refuses to fire again.</param>
 /// <param name="AutoTimeoutSeconds">For <see cref="ScopeRunMode.Auto"/>: how long to wait before forcing a record.</param>
+/// <param name="Accumulation">What to do with the records after the first: replace, average or envelope.</param>
+/// <param name="AverageCount">How many records an average combines. Ignored under Normal.</param>
 /// <param name="ProcessLeft">Whether the left channel is captured.</param>
 /// <param name="ProcessRight">Whether the right channel is captured.</param>
 /// <param name="Generator">
@@ -41,6 +43,8 @@ public sealed record OscilloscopeRequest(
     double TriggerHysteresisV = 0.0,
     double HoldoffSeconds = 0.0,
     double AutoTimeoutSeconds = 0.5,
+    RecordAccumulation Accumulation = RecordAccumulation.Normal,
+    int AverageCount = 16,
     bool ProcessLeft = true,
     bool ProcessRight = true,
     GeneratorConfig? Generator = null)
@@ -94,6 +98,28 @@ public sealed record OscilloscopeRequest(
             throw new ArgumentOutOfRangeException(nameof(TriggerSource), TriggerSource, "Unknown trigger source.");
         if (!Enum.IsDefined(TriggerSlope))
             throw new ArgumentOutOfRangeException(nameof(TriggerSlope), TriggerSlope, "Slope must be Rising, Falling or Either.");
+        if (!Enum.IsDefined(Accumulation))
+            throw new ArgumentOutOfRangeException(nameof(Accumulation), Accumulation, "Accumulation must be Normal, Average or Envelope.");
+
+        if (Accumulation != RecordAccumulation.Normal
+            && (AverageCount < RecordAccumulator.MinCount || AverageCount > RecordAccumulator.MaxCount))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(AverageCount), AverageCount,
+                $"The number of records to combine must be between {RecordAccumulator.MinCount} and {RecordAccumulator.MaxCount}.");
+        }
+
+        // Single takes one record and holds it, so there is never a second one to combine with --
+        // and a screen that sat at "1 of 16" for ever, with no way to advance it, is worse than
+        // the refusal. Roll has no record boundary at all: its windows overlap by all but one roll
+        // step, so averaging them would low-pass the signal and an envelope of them would be the
+        // same band drawn N times.
+        if (Accumulation != RecordAccumulation.Normal && Mode is ScopeRunMode.Single or ScopeRunMode.Roll)
+        {
+            throw new ArgumentException(
+                $"{Accumulation} needs repeated records to combine, which {Mode} does not produce. Use Auto or Normal.",
+                nameof(Accumulation));
+        }
 
         if (TriggerKind != TriggerKind.Edge)
             throw new ArgumentOutOfRangeException(nameof(TriggerKind), TriggerKind, "Only the edge trigger is implemented so far.");
@@ -178,6 +204,9 @@ public sealed record OscilloscopeRequest(
 /// nothing triggered. What the client does with it is suppress the trigger line: the level, the
 /// slope and the hysteresis had no part in where this window starts.
 /// </param>
+/// <param name="Accumulation">Which mode the records are being combined under, as its own name.</param>
+/// <param name="AveragesTaken">How many have gone into the record on hand — what a screen counts up while it fills.</param>
+/// <param name="AverageCount">How many it is working toward. One under Normal.</param>
 /// <param name="TriggerOffsetS">Seconds from the start of the record to the trigger, or null with no record.</param>
 /// <param name="RecordFromS">The record's first sample, relative to the trigger. Negative for any pre-trigger at all.</param>
 /// <param name="RecordToS">Its last sample, same reference.</param>
@@ -194,7 +223,10 @@ public sealed record OscilloscopeStatus(
     double? TriggerOffsetS,
     double? RecordFromS,
     double? RecordToS,
-    bool Rolled = false);
+    bool Rolled = false,
+    string Accumulation = nameof(RecordAccumulation.Normal),
+    int AveragesTaken = 0,
+    int AverageCount = 1);
 
 /// <summary>The acknowledgement a start returns, so the client knows what it actually got.</summary>
 /// <param name="SampleRateHz">The rate the run is streaming at.</param>

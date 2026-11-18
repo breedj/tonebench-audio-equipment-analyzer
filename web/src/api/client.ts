@@ -1385,6 +1385,10 @@ export interface OscilloscopeStartRequest {
   triggerHysteresisV?: number
   holdoffSeconds?: number
   autoTimeoutSeconds?: number
+  /** Normal, Average or Envelope — see scope/acquisition.ts. */
+  accumulation?: string
+  /** How many records an average combines. Ignored under Normal. */
+  averageCount?: number
   processLeft?: boolean
   processRight?: boolean
   generatorLeft?: GeneratorChannelRequest
@@ -1429,6 +1433,12 @@ export interface OscilloscopeStatus {
    * event.</p>
    */
   rolled: boolean
+  /** Which mode the records are being combined under — see scope/acquisition.ts. */
+  accumulation: string
+  /** How many have gone into the record on hand. */
+  averagesTaken: number
+  /** How many it is working toward. One under Normal. */
+  averageCount: number
 }
 
 /**
@@ -1661,6 +1671,23 @@ export interface ScopeRecordResponse {
    */
   rolled?: boolean
   /**
+   * This record is an <em>envelope</em>: the band every sample position has swept, rather than a
+   * waveform.
+   *
+   * <p>The chart needs no second code path to draw it — the slice arrives as the min/max columns it
+   * already draws as a band. What reads this is the badge, and the readings: a math channel, an
+   * X–Y figure and an eye are all absent on one, because each of them assumes a signal.</p>
+   */
+  envelope?: boolean
+  /**
+   * How many records went into this one — 1 for an ordinary capture.
+   *
+   * <p>On the record rather than read off the live status, so the badge counts the picture that is
+   * on screen rather than whatever the run has reached since: the figures under a chart are figures
+   * of the chart.</p>
+   */
+  averagesTaken?: number
+  /**
    * Something in the display path changed the trace — the coupling, the filter, or both.
    *
    * <p>Carried so the chart and the panel can say so where the figures are: a filter changes every
@@ -1826,6 +1853,12 @@ export interface OscilloscopeParameters {
   spliced?: boolean | null
   /** Auto's timeout took it; nothing crossed the level. A run record. */
   forced?: boolean | null
+  /** The record was the newest window of a rolling run; nothing triggered. A run record. */
+  rolled?: boolean | null
+  /** Normal, Average or Envelope — what the analyzer did with the records. See scope/acquisition.ts. */
+  accumulation?: string | null
+  /** How many records an average combined. Null under Normal. */
+  averageCount?: number | null
   generator?: StoredGeneratorConfig | null
   generatorLevelUnit?: string | null
   chartVoltsPerDivision?: number | null

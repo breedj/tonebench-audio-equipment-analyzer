@@ -81,6 +81,7 @@ import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cu
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
+import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
 import { DEFAULT_SCOPE_FILTER, filterQuery, pathSummary, type ScopeFilterSettings } from './scope/filters'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
@@ -2137,6 +2138,17 @@ const scopePreTriggerFraction = ref(0.25)
 const scopeMode = ref<import('./api/client').ScopeRunMode>('Auto')
 
 /**
+ * What the analyzer does with the records after the first — see scope/acquisition.ts.
+ *
+ * <p>Measurement settings rather than display ones, so they ride on the run request and are stored
+ * in <code>params_json</code>: they decide what the analyzer <em>computes</em>, not how the result
+ * is drawn. The panel owns the controls; these are the models behind them, here because the chart's
+ * badge and the Measurements panel read them too.</p>
+ */
+const scopeAccumulation = ref<ScopeAccumulation>('Normal')
+const scopeAverageCount = ref(DEFAULT_SCOPE_AVERAGE_COUNT)
+
+/**
  * The pre-trigger fraction the <em>display</em> works from — one in Roll, the staged value
  * otherwise.
  *
@@ -2348,6 +2360,10 @@ watch(
     scopeChartView,
     scopeFilter,
     scopeDrawing,
+    // What the analyzer does with the records is a measurement setting, so a change to it is a
+    // change to the measurement -- and both are bound here rather than inside the panel's form.
+    scopeAccumulation,
+    scopeAverageCount,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -6109,6 +6125,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:record-seconds="scopeRecordSeconds"
                   v-model:pre-trigger-fraction="scopePreTriggerFraction"
                   v-model:mode="scopeMode"
+                  v-model:accumulation="scopeAccumulation"
+                  v-model:average-count="scopeAverageCount"
                   v-model:sample-rate-hz="scopeStagedSampleRateHz"
                   @run="runOscilloscope"
                   @retune="onScopeRetune"
@@ -6207,6 +6225,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :filter-note="scopeFilterNote"
                   :drawing="scopeDrawing"
                   :references="visibleScopeOverlays"
+                  :accumulation="scopeAccumulation"
+                  :average-count="scopeAverageCount"
                   :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"

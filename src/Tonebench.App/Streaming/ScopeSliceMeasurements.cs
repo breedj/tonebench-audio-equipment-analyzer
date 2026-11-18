@@ -112,6 +112,38 @@ public sealed record ScopeSliceMeasurements(
             PreshootPercent: Finite(timing.PreshootPercent));
     }
 
+    /// <summary>
+    /// Measures an <b>envelope</b>: the band between a lower and an upper outline.
+    ///
+    /// <para><b>Three figures, and everything else absent.</b> An envelope is not a waveform, so
+    /// only the questions that are about a band have answers: how high it ever reached, how low,
+    /// and how far apart those are. A mean, an RMS or a crest factor of an outline is arithmetic
+    /// on something that was never a signal; a period or a duty cycle is a reading of the
+    /// accumulation rather than of the DUT; and a rise time between two outlines is the jitter and
+    /// the edge added together, which is neither. Absent rather than wrong is this screen's rule
+    /// everywhere, and this is the place with the most opportunities to break it.</para>
+    /// </summary>
+    public static ScopeSliceMeasurements OfEnvelope(ReadOnlySpan<double> lower, ReadOnlySpan<double> upper)
+    {
+        if (lower.IsEmpty || upper.IsEmpty)
+            return Empty;
+
+        double low = double.PositiveInfinity;
+        double high = double.NegativeInfinity;
+
+        foreach (double v in lower)
+            if (v < low) low = v;
+        foreach (double v in upper)
+            if (v > high) high = v;
+
+        // An outline of non-finite samples cannot happen on a quantised record, but Empty is the
+        // right answer rather than a pair of infinities on the wire.
+        if (!double.IsFinite(low) || !double.IsFinite(high))
+            return Empty;
+
+        return Empty with { MaxV = high, MinV = low, PeakToPeakV = high - low };
+    }
+
     /// <summary>The last gate before the wire: anything that is not a number this app may write becomes absent.</summary>
     private static double? Finite(double? value) => value is { } v && double.IsFinite(v) ? v : null;
 }

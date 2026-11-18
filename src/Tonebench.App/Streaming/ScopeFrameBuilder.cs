@@ -352,6 +352,10 @@ public static class ScopeFrameBuilder
     {
         if (frameCount <= 0)
             return (null, 0);
+        // Refused on an envelope: combining two upper outlines is arithmetic on two things that
+        // were never signals, and A - B of them would read as a differential measurement.
+        if (record.IsEnvelope)
+            return (null, 0);
         if (WaveformMath.NeedsA(operation) && record.ChannelCount < 1)
             return (null, 0);
         if (WaveformMath.NeedsB(operation) && record.ChannelCount < 2)
@@ -401,7 +405,9 @@ public static class ScopeFrameBuilder
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maxPoints, 1);
 
-        if (record.ChannelCount < 2 || slice.FrameCount <= 0)
+        // Refused on an envelope: pairing the upper outlines of two channels is not pairing two
+        // signals, and the figure it would draw is a shape nothing was ever at.
+        if (record.ChannelCount < 2 || slice.FrameCount <= 0 || record.IsEnvelope)
             return null;
 
         int count = Math.Min(slice.FrameCount, maxPoints);
@@ -489,7 +495,10 @@ public static class ScopeFrameBuilder
         ArgumentOutOfRangeException.ThrowIfLessThan(maxFolds, WaveformEye.MinFolds);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxFoldFrames, 2);
 
-        if (slice.FrameCount <= 0 || slice.Measurements.FrequencyHz is not { } seedHz || !(seedHz > 0.0))
+        // An envelope has no measured frequency (its readings are extremes only), so this is
+        // already refused -- but stated here as well, since what makes it wrong is the outlines
+        // rather than the missing figure.
+        if (record.IsEnvelope || slice.FrameCount <= 0 || slice.Measurements.FrequencyHz is not { } seedHz || !(seedHz > 0.0))
             return null;
 
         // Refined by a sine fit, seeded from the crossing estimate -- and this is the difference
@@ -667,6 +676,16 @@ public static class ScopeFrameBuilder
         if (FrameRange(record, fromS, toS) is not { } range)
             return null;
 
+        // An envelope's gated figures are the band's own extremes over that stretch, the same three
+        // the slice reads -- measuring the upper outline on its own would report the band's top as
+        // both the maximum and the minimum.
+        if (record.Lower is { } lower)
+        {
+            return ScopeSliceMeasurements.OfEnvelope(
+                lower[channel].AsSpan(range.First, range.Count),
+                record.Channels[channel].AsSpan(range.First, range.Count));
+        }
+
         return ScopeSliceMeasurements.Of(
             record.Channels[channel].AsSpan(range.First, range.Count), record.SampleRateHz);
     }
@@ -704,6 +723,27 @@ public static class ScopeFrameBuilder
         double samplePeriod = 1.0 / record.SampleRateHz;
         double x0 = record.TimeAt(firstFrame);
 
+        // An envelope is two outlines rather than a waveform, so it is drawn as the band it is and
+        // its readings are the band's own extremes. Always columns, never raw samples: the pair of
+        // outlines IS the min/max per column the chart draws, and a raw slice has nowhere to put
+        // the second one -- while a single outline served as a waveform would be read as one.
+        if (record.Lower is { } lower)
+        {
+            var low = lower[channel].AsSpan(firstFrame, frameCount);
+            int envelopeColumns = Math.Min(maxColumns, frameCount);
+            var band = new MinMax[envelopeColumns];
+            ReduceEnvelope(low, source, band);
+
+            return new ScopeFrameSlice(
+                x0,
+                frameCount * samplePeriod / envelopeColumns,
+                band,
+                Samples: null,
+                firstFrame,
+                frameCount,
+                ScopeSliceMeasurements.OfEnvelope(low, source));
+        }
+
         var measurements = ScopeSliceMeasurements.Of(source, record.SampleRateHz);
 
         if (frameCount <= maxColumns * RawSamplesPerColumn)
@@ -724,6 +764,43 @@ public static class ScopeFrameBuilder
         // axis; this one matches what the encoder documents.
         double dx = frameCount * samplePeriod / columnCount;
         return new ScopeFrameSlice(x0, dx, columns, Samples: null, firstFrame, frameCount, measurements);
+    }
+
+    /// <summary>
+    /// Reduces a pair of outlines onto <paramref name="columns"/>: the lowest the lower one reaches
+    /// in each column, and the highest the upper one does.
+    ///
+    /// <para>Its own loop rather than two passes of <c>SpectrumDecimator.DecimateLinear</c>, and
+    /// the reason is which extreme comes from which array: a column's minimum must come from the
+    /// <b>lower</b> outline and its maximum from the <b>upper</b> one. Decimating each on its own
+    /// and taking one half of each answer would work, and decimating the upper outline alone --
+    /// the obvious shortcut, since it is what sits in <c>Channels</c> -- would draw the band's top
+    /// edge twice and lose the bottom one entirely.</para>
+    /// </summary>
+    private static void ReduceEnvelope(ReadOnlySpan<double> lower, ReadOnlySpan<double> upper, Span<MinMax> columns)
+    {
+        int count = columns.Length;
+        int frames = Math.Min(lower.Length, upper.Length);
+
+        for (int c = 0; c < count; c++)
+        {
+            // The same column bounds DecimateLinear uses, so an envelope and a waveform of the
+            // same record land on the same x positions.
+            int from = (int)((long)c * frames / count);
+            int to = (int)((long)(c + 1) * frames / count);
+            if (to <= from)
+                to = Math.Min(frames, from + 1);
+
+            double low = double.PositiveInfinity;
+            double high = double.NegativeInfinity;
+            for (int i = from; i < to; i++)
+            {
+                if (lower[i] < low) low = lower[i];
+                if (upper[i] > high) high = upper[i];
+            }
+
+            columns[c] = double.IsFinite(low) && double.IsFinite(high) ? new MinMax(low, high) : new MinMax(0.0, 0.0);
+        }
     }
 
     /// <summary>The frame index a time relative to the trigger falls on.</summary>

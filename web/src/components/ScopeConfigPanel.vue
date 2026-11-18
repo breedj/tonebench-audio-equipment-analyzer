@@ -14,6 +14,18 @@ import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
 import { clampNumberField } from '../numberField'
 import {
+  DEFAULT_SCOPE_AVERAGE_COUNT,
+  MAX_SCOPE_AVERAGE_COUNT,
+  MIN_SCOPE_AVERAGE_COUNT,
+  SCOPE_ACCUMULATIONS,
+  SCOPE_ACCUMULATION_HINTS,
+  accumulationSettleSeconds,
+  accumulationUnavailableNote,
+  clampAverageCount,
+  modeCanAccumulate,
+  type ScopeAccumulation,
+} from '../scope/acquisition'
+import {
   DEFAULT_SCOPE_TRIGGER,
   SCOPE_RUN_MODES,
   SCOPE_RUN_MODE_HINTS,
@@ -149,6 +161,10 @@ function applyStoredParams(paramsJson: string) {
     form.slope = stored.triggerSlope
   if (typeof stored.holdoffSeconds === 'number' && stored.holdoffSeconds >= 0)
     form.holdoffMs = stored.holdoffSeconds * 1000
+  if (SCOPE_ACCUMULATIONS.some((a) => a.value === stored.accumulation))
+    accumulation.value = stored.accumulation as ScopeAccumulation
+  if (typeof stored.averageCount === 'number' && Number.isFinite(stored.averageCount))
+    averageCount.value = clampAverageCount(stored.averageCount)
 
   // The models, written here too so a measurement restores as one thing rather than half from this
   // panel and half from App.vue.
@@ -202,7 +218,21 @@ watch(
 )
 
 watch(
-  () => [form, triggerLevelV.value, triggerHysteresisV.value, triggerSource.value, mode.value] as const,
+  () =>
+    [
+      form,
+      triggerLevelV.value,
+      triggerHysteresisV.value,
+      triggerSource.value,
+      mode.value,
+      // Both bound outside `form`, so they have to be listed by hand in BOTH watchers -- the rule
+      // this project has already paid for twice. Missing from the retune one, switching Average
+      // back to Normal left the analyzer still averaging: the picture went on reading "x16" with
+      // the control saying Normal and nothing anywhere saying why. Missing from the dirty one, the
+      // change is discarded on the next measurement switch without a word.
+      accumulation.value,
+      averageCount.value,
+    ] as const,
   () => {
     if (!restoring) markDirty()
   },
@@ -218,6 +248,35 @@ watch(
  * switching back to a triggered mode, and leaving them live offers four controls that do nothing.</p>
  */
 const rolling = computed(() => mode.value === 'Roll')
+
+/**
+ * Whether the records are combined, and over how many — see scope/acquisition.ts.
+ *
+ * <p>Measurement settings, not display ones: they decide what the analyzer <em>does</em> with each
+ * capture, so they are stored with the measurement and sent on the run request.</p>
+ */
+const accumulation = defineModel<ScopeAccumulation>('accumulation', { default: 'Normal' })
+const averageCount = defineModel<number>('averageCount', { default: DEFAULT_SCOPE_AVERAGE_COUNT })
+
+/** Disabled under Single and Roll, which produce no records to combine. */
+const canAccumulate = computed(() => modeCanAccumulate(mode.value))
+const accumulationNote = computed(() => accumulationUnavailableNote(mode.value))
+
+/**
+ * How long the accumulation takes to settle, as a sentence, or null.
+ *
+ * <p>Said before the run rather than discovered during it: 256 records of the one-second capture
+ * this app allows is over four minutes, and a display nobody waits for is one nobody believes.</p>
+ */
+const settleNote = computed(() => {
+  const seconds = accumulationSettleSeconds(accumulation.value, averageCount.value, captureMs.value / 1000)
+  if (seconds === null) return null
+  return seconds >= 1 ? `${seconds.toFixed(1)} s to settle` : `${(seconds * 1000).toFixed(0)} ms to settle`
+})
+
+function onAverageCountChange(event: Event) {
+  averageCount.value = clampAverageCount(Number((event.target as HTMLInputElement).value))
+}
 
 const canAutoLevel = computed(
   () => Number.isFinite(props.measuredMaxV ?? Number.NaN) && Number.isFinite(props.measuredMinV ?? Number.NaN),
@@ -300,6 +359,11 @@ function buildRequest(single = false): OscilloscopeStartRequest {
     triggerHysteresisV: triggerHysteresisV.value,
     holdoffSeconds: form.holdoffMs / 1000,
     autoTimeoutSeconds: form.autoTimeoutMs / 1000,
+    // Normal where the staged mode cannot produce records to combine, so the Single button never
+    // sends a combination the analyzer would refuse -- which would be a refusal the user did not
+    // cause, from a button that has nothing to do with the setting.
+    accumulation: single || !canAccumulate.value ? 'Normal' : accumulation.value,
+    averageCount: clampAverageCount(averageCount.value),
     processLeft: form.processLeft,
     processRight: form.processRight,
   }
@@ -350,7 +414,21 @@ function flushRetune(): void {
  * turn of a knob. An invalid form sends nothing and the next valid change catches up.</p>
  */
 watch(
-  () => [form, triggerLevelV.value, triggerHysteresisV.value, triggerSource.value, mode.value] as const,
+  () =>
+    [
+      form,
+      triggerLevelV.value,
+      triggerHysteresisV.value,
+      triggerSource.value,
+      mode.value,
+      // Both bound outside `form`, so they have to be listed by hand in BOTH watchers -- the rule
+      // this project has already paid for twice. Missing from the retune one, switching Average
+      // back to Normal left the analyzer still averaging: the picture went on reading "x16" with
+      // the control saying Normal and nothing anywhere saying why. Missing from the dirty one, the
+      // change is discarded on the next measurement switch without a word.
+      accumulation.value,
+      averageCount.value,
+    ] as const,
   () => {
     if (restoring || !props.running) return
     if (retuneHandle !== null) clearTimeout(retuneHandle)
@@ -505,6 +583,42 @@ function onAutoTimeoutChange(event: Event) {
         <option v-for="option in SCOPE_RUN_MODES" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </label>
+
+    <div class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Records
+        <select
+          v-model="accumulation"
+          class="tb-input"
+          :disabled="!canAccumulate"
+          :title="SCOPE_ACCUMULATION_HINTS[accumulation]"
+        >
+          <option v-for="option in SCOPE_ACCUMULATIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label v-if="accumulation === 'Average'" class="tb-field">
+        Average over
+        <input
+          :value="averageCount"
+          type="number"
+          step="1"
+          :max="MAX_SCOPE_AVERAGE_COUNT"
+          class="tb-input"
+          :disabled="!canAccumulate"
+          :title="`How many records the mean is of, ${MIN_SCOPE_AVERAGE_COUNT} to ${MAX_SCOPE_AVERAGE_COUNT}. The noise falls as the square root of this.`"
+          @change="onAverageCountChange"
+        />
+      </label>
+    </div>
+
+    <p v-if="accumulationNote" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      {{ accumulationNote }}
+    </p>
+    <p v-else-if="settleNote" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      {{ settleNote }}
+    </p>
 
     <!--
       Roll has no trigger at all, so everything below is disabled rather than hidden — the

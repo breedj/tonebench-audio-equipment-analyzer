@@ -7,6 +7,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
 import { runTint } from '../charts/runTint'
 import { onScopeGrid } from '../scope/references'
+import { accumulationBadge, type ScopeAccumulation } from '../scope/acquisition'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
 import ExpandToggle from './ExpandToggle.vue'
@@ -153,6 +154,10 @@ const props = withDefaults(defineProps<{
   filterNote?: string | null
   /** How one sample is joined to the next. See scope/interpolation.ts. */
   drawing?: ScopeDrawing
+  /** Which accumulation the run asked for — what the badge is about. See scope/acquisition.ts. */
+  accumulation?: ScopeAccumulation
+  /** How many records it is working toward, for the badge while an average fills. */
+  averageCount?: number
   /**
    * Checked history items drawn as reference traces — stored captures, cut to this same window by
    * the analyzer so they arrive in the live record's own shape.
@@ -179,6 +184,8 @@ const props = withDefaults(defineProps<{
   mathOperation: 'Off',
   filterNote: null,
   drawing: 'Linear',
+  accumulation: 'Normal',
+  averageCount: 1,
   references: () => [],
   persistenceKey: 0,
 })
@@ -1680,6 +1687,12 @@ const recordNote = computed(() => {
   const record = props.record
   if (!record) return 'Nothing captured yet'
   const parts = [`${record.frameCount.toLocaleString()} samples`, `${(record.sampleRateHz / 1000).toFixed(0)} kS/s`]
+  // An envelope's columns are the band itself rather than a decimation of a waveform, so neither
+  // of the two usual answers is true of one.
+  if (record.envelope === true) {
+    parts.push(`envelope of ${(record.averagesTaken ?? 1).toLocaleString()} records`)
+    return parts.join(' · ')
+  }
   const raw = record.channels.some((c) => c.raw)
   parts.push(raw ? 'every sample drawn' : 'min/max per column')
   return parts.join(' · ')
@@ -1700,6 +1713,20 @@ const recordNote = computed(() => {
  */
 const recordFlag = computed(() => {
   const record = props.record
+
+  // Ahead of the two flags below, because it changes what every reading on the screen *means*
+  // rather than qualifying one capture: an envelope's figures are its own extremes, and an
+  // averaged trace's noise floor is not the analyzer's.
+  if (record && props.accumulation !== 'Normal')
+  {
+    const badge = accumulationBadge(
+      record.envelope === true ? 'Envelope' : props.accumulation,
+      record.averagesTaken ?? 1,
+      props.averageCount,
+    )
+    if (badge) return badge
+  }
+
   if (record?.spliced)
     return {
       label: 'Spliced',

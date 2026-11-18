@@ -23,7 +23,7 @@ public static class OscilloscopeEndpoints
 
         group.MapPost("/start", async (OscilloscopeStartRequest request, OscilloscopeRunner runner, CancellationToken ct) =>
         {
-            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var enumError))
+            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var accumulation, out var enumError))
                 return Results.BadRequest(enumError);
 
             GeneratorConfig? generator = null;
@@ -37,7 +37,7 @@ public static class OscilloscopeEndpoints
                 generator = new GeneratorConfig(left, right) { SnapToBin = request.SnapToBin ?? false };
             }
 
-            var measurement = request.ToMeasurement(mode, triggerKind, source, slope, generator);
+            var measurement = request.ToMeasurement(mode, triggerKind, source, slope, accumulation, generator);
 
             try
             {
@@ -60,7 +60,7 @@ public static class OscilloscopeEndpoints
         // "stop or cancel it first" is the one answer this route must never give.
         group.MapPost("/retune", (OscilloscopeStartRequest request, OscilloscopeRunner runner) =>
         {
-            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var enumError))
+            if (!TryParseEnums(request, out var mode, out var triggerKind, out var source, out var slope, out var accumulation, out var enumError))
                 return Results.BadRequest(enumError);
 
             // Refused rather than ignored. Reconfiguring the generator books a stimulus-latency and
@@ -72,7 +72,7 @@ public static class OscilloscopeEndpoints
 
             try
             {
-                return Results.Ok(runner.Retune(request.ToMeasurement(mode, triggerKind, source, slope, generator: null)));
+                return Results.Ok(runner.Retune(request.ToMeasurement(mode, triggerKind, source, slope, accumulation, generator: null)));
             }
             catch (ArgumentException ex)
             {
@@ -356,7 +356,9 @@ public static class OscilloscopeEndpoints
                 xySlice,
                 eyeSlice,
                 path.Changes,
-                record.Rolled));
+                record.Rolled,
+                record.IsEnvelope,
+                record.AveragesTaken));
         });
     }
 
@@ -450,11 +452,13 @@ public static class OscilloscopeEndpoints
         out TriggerKind triggerKind,
         out TriggerSource source,
         out TriggerSlope slope,
+        out RecordAccumulation accumulation,
         out string? error)
     {
         triggerKind = TriggerKind.Edge;
         source = TriggerSource.ChannelA;
         slope = TriggerSlope.Rising;
+        accumulation = RecordAccumulation.Normal;
 
         if (!EnumParsing.TryParse(request.Mode, ScopeRunMode.Single, out mode, out error))
             return false;
@@ -463,6 +467,8 @@ public static class OscilloscopeEndpoints
         if (!EnumParsing.TryParse(request.TriggerSource, TriggerSource.ChannelA, out source, out error))
             return false;
         if (!EnumParsing.TryParse(request.TriggerSlope, TriggerSlope.Rising, out slope, out error))
+            return false;
+        if (!EnumParsing.TryParse(request.Accumulation, RecordAccumulation.Normal, out accumulation, out error))
             return false;
 
         return true;
@@ -561,7 +567,9 @@ public sealed record ScopeRecordResponse(
     ScopeXySlice? Xy = null,
     ScopeEyeSlice? Eye = null,
     bool Filtered = false,
-    bool Rolled = false);
+    bool Rolled = false,
+    bool Envelope = false,
+    int AveragesTaken = 1);
 
 /// <summary>
 /// One filter's magnitude response, as the display rail's preview draws it.
@@ -686,6 +694,8 @@ public sealed record OscilloscopeStartRequest(
     double? TriggerHysteresisV,
     double? HoldoffSeconds,
     double? AutoTimeoutSeconds,
+    string? Accumulation,
+    int? AverageCount,
     bool? ProcessLeft,
     bool? ProcessRight,
     GeneratorChannelRequest? GeneratorLeft,
@@ -697,6 +707,7 @@ public sealed record OscilloscopeStartRequest(
         TriggerKind triggerKind,
         TriggerSource triggerSource,
         TriggerSlope triggerSlope,
+        RecordAccumulation accumulation,
         GeneratorConfig? generator) =>
         new(
             SampleRateHz,
@@ -710,6 +721,8 @@ public sealed record OscilloscopeStartRequest(
             TriggerHysteresisV ?? 0.0,
             HoldoffSeconds ?? 0.0,
             AutoTimeoutSeconds ?? 0.5,
+            accumulation,
+            AverageCount ?? 16,
             ProcessLeft ?? true,
             ProcessRight ?? true,
             generator);

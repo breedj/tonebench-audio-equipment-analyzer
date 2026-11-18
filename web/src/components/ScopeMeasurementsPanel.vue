@@ -153,6 +153,20 @@ const gateNote = computed(() => {
 const spanMs = computed(() => Math.abs(toChartMs(props.timeToS) - toChartMs(props.timeFromS)))
 
 /** The record's own facts: how long it is, how it was sampled, and whether it can be trusted. */
+/**
+ * Why an envelope's figures are only three, printed where the figures are.
+ *
+ * <p>The chart's badge carries the same sentence as a tooltip, and this is the place it is readable
+ * without hovering — the Measurements panel's own rule for the spliced and untriggered flags. An
+ * envelope is not a waveform, so a mean, a period or a rise time of one would be arithmetic on
+ * something that was never a signal.</p>
+ */
+const envelopeNote = computed(() =>
+  record.value?.envelope === true
+    ? `The band ${(record.value.averagesTaken ?? 1).toLocaleString()} records have swept, not a waveform — so only its extremes have readings. Clear to start the band again.`
+    : null,
+)
+
 const recordFacts = computed(() => {
   const current = record.value
   if (!current) return null
@@ -169,6 +183,12 @@ const recordFacts = computed(() => {
 <template>
   <CollapsibleSection title="Measurements">
     <template v-if="blocks.length > 0">
+      <p
+        v-if="envelopeNote"
+        class="mb-2 rounded bg-amber-500/10 px-1.5 py-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300"
+      >
+        {{ envelopeNote }}
+      </p>
       <p
         v-if="gateNote"
         class="mb-2 rounded bg-teal-500/10 px-1.5 py-1 text-[11px] leading-snug text-teal-700 dark:text-teal-300"

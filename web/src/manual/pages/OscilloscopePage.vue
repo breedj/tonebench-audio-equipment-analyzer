@@ -212,6 +212,13 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Signal path</td>
+          <td>
+            The coupling and an in-path filter — see <strong>The signal path</strong> below. Both
+            run on the analyzer before anything is drawn or measured.
+          </td>
+        </tr>
+        <tr>
           <td>View</td>
           <td>
             Which picture the chart draws — <strong>Y–T</strong>, the waveforms against time, or
@@ -258,6 +265,104 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <h2>The signal path</h2>
+    <p>
+      Two controls that change the <em>trace</em> rather than adding to it: a coupling and one
+      filter. Both run on the analyzer, over the whole record, before anything is drawn, measured,
+      combined or plotted — so the picture and every figure beside it are of the same waveform.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Coupling</td>
+          <td>
+            <strong>DC</strong> shows what arrived. <strong>AC</strong> subtracts the record’s own
+            mean — see the note below, which is why it is a mean and not a filter.
+          </td>
+        </tr>
+        <tr>
+          <td>Filter</td>
+          <td>
+            Off, or a <strong>low-pass</strong> (a bandwidth limit — a bench scope’s “20 MHz”
+            button, and real noise reduction on a quiet DUT), a <strong>high-pass</strong> (for a
+            drift or a rumble inside the record), a <strong>band-pass</strong> (to look at one
+            component of a busy trace) or a <strong>notch</strong> (what mains hum is taken out
+            with).
+          </td>
+        </tr>
+        <tr>
+          <td>Corner / Centre</td>
+          <td>Where it acts, in hertz.</td>
+        </tr>
+        <tr>
+          <td>Order</td>
+          <td>
+            How steep a low- or high-pass is: a Butterworth of 2, 4, 6 or 8 poles — and then
+            <em>doubled</em>, because the filter runs twice. Order 2 is 24 dB an octave on the
+            trace, not 12.
+          </td>
+        </tr>
+        <tr>
+          <td>Q</td>
+          <td>How narrow a band-pass or a notch is. A notch at Q 8 is about an eighth of its centre wide.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      The small chart under the controls is the filter’s own magnitude response, drawn from the
+      analyzer’s own figures rather than from a second copy of the filter here — so it is the
+      response the trace really gets, with the corner marked. It is the <em>squared</em> response,
+      which is why the corner reads −6 dB and not −3.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>The filter adds no delay, and that is why the corner is −6 dB.</strong> This
+        screen’s x axis is time relative to the trigger, so an ordinary filter would slide the
+        waveform off the very edge it fired on and a rise time measured from there would be of an
+        edge that is no longer where it happened. Running the filter forward and then backward over
+        the record cancels the delay exactly — and applies the magnitude twice, which doubles both
+        the corner attenuation and the skirt.
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>AC coupling here is the mean, not a high-pass, and that is the more correct
+        operation on this hardware.</strong> Both the QA403 and a sound card already block DC in
+        hardware, with a corner near 0.2 Hz — so what reaches a capture is the front end’s own
+        standing offset, measured at about −4.5 mV on the left input. That is a constant, and
+        subtracting the mean removes a constant <em>exactly</em>: no corner to choose, no settling,
+        and nothing to ring at the start of the record where the pre-trigger view is read. For a
+        genuine low-frequency roll-off — a drift or a rumble <em>inside</em> the record — use the
+        high-pass.
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>The first and last few cycles of the corner are the filter’s own assumption.</strong>
+        A record is a window of a stream that has since moved on, so nothing in it says what came
+        next, and a filter has to assume something about it. What is drawn at the very ends is that
+        assumption rather than a measurement — bounded, and never more than about a fifth of full
+        scale, but visible on a short record. The middle of the record is exact. If an edge matters,
+        widen the record so the part you are reading is not at its end.
+      </p>
+    </div>
+    <div class="manual-note">
+      <p>
+        <strong>Every reading is of the filtered trace, and what is stored never is.</strong> A
+        low-pass lowers a peak to peak and lengthens a rise time; a notch removes a component the
+        RMS was counting. None of that is wrong — the figures are of what is on screen, which is the
+        only honest arrangement — and the Measurements panel says which trace that is. The samples
+        that go into a saved result are always the unfiltered capture, so a result can be reopened
+        and read through a different filter, or none.
+      </p>
+    </div>
 
     <h2>The X–Y view</h2>
     <p>

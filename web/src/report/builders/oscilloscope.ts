@@ -2,6 +2,7 @@ import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordRespo
 import { mathReadings, scopeChannelReadings } from '../../scope/readings'
 import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
 import { xyReadings, xyTruncationNote } from '../../scope/xy'
+import { pathSummary } from '../../scope/filters'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
@@ -101,6 +102,8 @@ export function scopeMeasurementSections(
   voltsPerDivision: number,
   showLeft: boolean,
   showRight: boolean,
+  /** What the display path was doing, in the rail's own words, or null for a bare record. */
+  filterNote: string | null = null,
 ): ReportSection[] {
   if (!record || record.channels.length === 0) {
     return [{ kind: 'paragraph', title: 'Measurements', text: 'Nothing captured.' }]
@@ -188,6 +191,14 @@ export function scopeMeasurementSections(
   }
   sections.push({ kind: 'keyValues', title: 'The record', rows: facts })
 
+  // Paper has no tooltip, so what qualifies every figure above has to be a sentence of its own.
+  if (filterNote) {
+    sections.push({
+      kind: 'paragraph',
+      text: `Read through the display path: ${filterNote}. Every figure above is of the filtered trace — a low-pass lowers a peak to peak and lengthens a rise time, a notch removes a component the RMS was counting. What is stored is always the unfiltered capture.`,
+    })
+  }
+
   // Said on paper because paper has no tooltip, and because it is the one reading here that is
   // routinely misread: both the QA403 and a sound card are AC-coupled.
   sections.push({
@@ -211,7 +222,15 @@ export function scopeSections(subject: ReportSubject, elements: readonly ReportE
 
   if (elements.includes('measurements') && subject.data.kind === 'scope') {
     const { record, display } = subject.data
-    sections.push(...scopeMeasurementSections(record, display.voltsPerDivision, display.showLeft, display.showRight))
+    sections.push(
+      ...scopeMeasurementSections(
+        record,
+        display.voltsPerDivision,
+        display.showLeft,
+        display.showRight,
+        pathSummary(display.filter),
+      ),
+    )
   }
 
   return sections

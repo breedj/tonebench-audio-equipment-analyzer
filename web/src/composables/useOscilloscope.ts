@@ -111,6 +111,15 @@ const wantMath = shallowRef<string | null>(null)
 const wantXy = ref(false)
 
 /**
+ * The display path the fetch asks for — the coupling and the in-path filter, as query parameters.
+ *
+ * <p>The sixth thing a fetch is keyed on, and the one that changes the <em>trace</em> rather than
+ * adding to it: the analyzer applies it to the whole record before slicing, so the picture and
+ * every figure beside it are of the same filtered waveform. See scope/filters.ts.</p>
+ */
+const wantPath = shallowRef<Record<string, string>>({})
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -153,6 +162,7 @@ async function fetchRecord(force = false): Promise<void> {
       wantResidual.value,
       wantMath.value,
       wantXy.value,
+      wantPath.value,
     )
     if (token !== fetchToken) return
     record.value = next
@@ -311,6 +321,20 @@ export function useOscilloscope() {
     await fetchRecord(true)
   }
 
+  /**
+   * Sets the display path, and re-fetches so the trace on screen is the one the path describes.
+   *
+   * <p>Compared as a whole rather than field by field, because a path is one thing: turning the
+   * coupling on and moving a corner are the same kind of change and both have to reach the
+   * analyzer before the next picture is drawn.</p>
+   */
+  async function setPath(query: Record<string, string>): Promise<void> {
+    const next = JSON.stringify(query)
+    if (JSON.stringify(wantPath.value) === next) return
+    wantPath.value = query
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -382,6 +406,7 @@ export function useOscilloscope() {
     setGate,
     setMath,
     setXy,
+    setPath,
     setResidual,
     start,
     retune,

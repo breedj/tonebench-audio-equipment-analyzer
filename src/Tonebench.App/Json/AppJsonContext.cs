@@ -212,6 +212,10 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(OscilloscopeStarted))]
 [JsonSerializable(typeof(OscilloscopeStatus))]
 [JsonSerializable(typeof(ScopeRecordResponse))]
+// The filter preview's own route. Its slices reach the wire inside ScopeRecordResponse, which the
+// generator walks; this one is a return type of its own and so needs naming -- AppJsonContextTests
+// is what says so, and it found this one.
+[JsonSerializable(typeof(ScopeFilterResponse))]
 [JsonSerializable(typeof(ScopeChannelSlice))]
 [JsonSerializable(typeof(OutputImpedanceStartRequest))]
 [JsonSerializable(typeof(OutputImpedanceStarted))]

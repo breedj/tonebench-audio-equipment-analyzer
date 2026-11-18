@@ -79,6 +79,7 @@ import {
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
+import { DEFAULT_SCOPE_FILTER, filterQuery, pathSummary, type ScopeFilterSettings } from './scope/filters'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2064,6 +2065,12 @@ const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
 const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
+/** The display path — the coupling and the in-path filter. One ref, because it is one thing. */
+const scopeFilter = ref<ScopeFilterSettings>({ ...DEFAULT_SCOPE_FILTER })
+
+/** What is in the path, for the chart's badge and the measurements panel's note. */
+const scopeFilterNote = computed(() => pathSummary(scopeFilter.value))
+
 /** True while the goniometer is the picture on screen rather than the waveforms. */
 const scopeXyShowing = computed(() => scopeViewIsXy(scopeChartView.value))
 
@@ -2167,6 +2174,7 @@ const {
   setResidual: setOscilloscopeResidual,
   setMath: setOscilloscopeMath,
   setXy: setOscilloscopeXy,
+  setPath: setOscilloscopePath,
 } = useOscilloscope()
 
 function currentScopeDisplay() {
@@ -2186,6 +2194,7 @@ function currentScopeDisplay() {
     intensityPalette: scopeIntensityPalette.value,
     mathOperation: scopeMathOperation.value,
     chartView: scopeChartView.value,
+    filter: { ...scopeFilter.value },
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2216,6 +2225,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeIntensityPalette.value = display.intensityPalette
   scopeMathOperation.value = display.mathOperation
   scopeChartView.value = display.chartView
+  scopeFilter.value = { ...display.filter }
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2252,10 +2262,14 @@ watch(
     scopeIntensityPalette,
     scopeMathOperation,
     scopeChartView,
+    scopeFilter,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
   },
+  // Deep, because the path is one object rather than five refs: a corner moved inside it is a
+  // change to the measurement the same way a checkbox is.
+  { deep: true },
 )
 
 /**
@@ -2299,6 +2313,19 @@ watch(
     if (isOscilloscope.value) void setOscilloscopeXy(on).catch(() => undefined)
   },
   { immediate: true },
+)
+
+/**
+ * And so is the display path, which is the one of the four that changes the <em>trace</em> rather
+ * than adding to it: the analyzer applies the coupling and the filter to the whole record before
+ * slicing, so the picture and every figure beside it are of one filtered waveform.
+ */
+watch(
+  scopeFilter,
+  (settings) => {
+    if (isOscilloscope.value) void setOscilloscopePath(filterQuery(settings)).catch(() => undefined)
+  },
+  { immediate: true, deep: true },
 )
 
 /**
@@ -5988,6 +6015,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :time-to-s="scopeTimeToS"
                   :show-left="scopeShowLeft"
                   :show-right="scopeShowRight"
+                  :filter-note="scopeFilterNote"
                 />
               </template>
 
@@ -6058,6 +6086,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
                   :math-operation="scopeMathOperation"
+                  :filter-note="scopeFilterNote"
                   :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
@@ -6089,6 +6118,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:intensity-palette="scopeIntensityPalette"
                   v-model:math-operation="scopeMathOperation"
                   v-model:chart-view="scopeChartView"
+                  v-model:filter="scopeFilter"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

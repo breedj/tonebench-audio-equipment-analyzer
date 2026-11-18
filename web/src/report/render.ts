@@ -13,6 +13,7 @@ import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
 import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import OscilloscopeScreenChart from '../components/OscilloscopeScreenChart.vue'
 import ScopeXyChart from '../components/ScopeXyChart.vue'
+import { pathSummary } from '../scope/filters'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
 import SpectrumChart from '../components/SpectrumChart.vue'
@@ -573,6 +574,9 @@ export async function renderView(
           // The math trace is on the record, so a report draws whichever one was fetched -- no
           // second flag to keep in step, the way the residual needs none.
           mathOperation: display.mathOperation,
+          // The record handed to a report has already been through the display path, so the
+          // picture is right by construction; what the page needs is the words for it.
+          filterNote: pathSummary(display.filter),
           triggerLevelV: data.triggerLevelV,
           triggerHysteresisV: data.triggerHysteresisV,
           triggerSource: data.triggerSource,

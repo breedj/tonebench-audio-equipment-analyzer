@@ -39,8 +39,17 @@ const props = withDefaults(
      */
     showLeft?: boolean
     showRight?: boolean
+    /**
+     * What the display path is doing to the trace, or null for a bare record.
+     *
+     * <p>Printed under the readings because it qualifies every one of them: a low-pass lowers a
+     * peak to peak and lengthens a rise time, a notch removes a component the RMS was counting.
+     * None of that is wrong — the figures are of the trace on screen, which is the only honest
+     * arrangement — but nothing else here would say which trace that is.</p>
+     */
+    filterNote?: string | null
   }>(),
-  { showLeft: true, showRight: true },
+  { showLeft: true, showRight: true, filterNote: null },
 )
 
 const { record, spliced, forced, gate } = useOscilloscope()
@@ -244,6 +253,12 @@ const recordFacts = computed(() => {
 
       <!-- Both of these make an ordinary-looking trace mean something else, so they are said here as
            well as on the chart. -->
+      <p v-if="filterNote" class="mt-2 text-[11px] leading-snug text-blue-600 dark:text-blue-400">
+        Read through the display path: {{ filterNote }}. Every figure above is of the filtered
+        trace. What is stored is always the unfiltered capture, so a saved result can be reopened
+        and read through a different filter, or none.
+      </p>
+
       <p v-if="spliced" class="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
         This record spans a dropped chunk or block, so every reading above is taken across a splice.
       </p>

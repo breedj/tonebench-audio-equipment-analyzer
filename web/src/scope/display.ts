@@ -7,6 +7,17 @@ import {
 } from './persistence'
 import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
 import { SCOPE_VIEWS, type ScopeView } from './xy'
+import {
+  DEFAULT_SCOPE_FILTER,
+  MAX_FILTER_Q,
+  MIN_FILTER_Q,
+  SCOPE_COUPLINGS,
+  SCOPE_FILTER_KINDS,
+  SCOPE_FILTER_ORDERS,
+  type ScopeCoupling,
+  type ScopeFilterKind,
+  type ScopeFilterSettings,
+} from './filters'
 import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
@@ -82,6 +93,15 @@ export interface ScopeDisplay {
    * full height. See scope/xy.ts.</p>
    */
   chartView: ScopeView
+  /**
+   * The display path the trace is read through — the coupling and the in-path filter.
+   *
+   * <p>A display preference, so it is stored with the measurement and the <b>stored samples are
+   * never filtered</b>: a filter is a way of looking at a capture rather than a property of it, and
+   * a saved result can be reopened and read through a different one, or none. See
+   * scope/filters.ts.</p>
+   */
+  filter: ScopeFilterSettings
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -138,6 +158,8 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   mathOperation: 'Off',
   /** The waveform, which is what a scope is for; X–Y is a view a reader switches to on purpose. */
   chartView: 'Waveform',
+  /** DC and no filter: a scope shows what arrived until somebody asks it not to. */
+  filter: { ...DEFAULT_SCOPE_FILTER },
   annotations: [],
 })
 
@@ -159,7 +181,7 @@ export function scopeDisplayFromParams(
   paramsJson: string | null | undefined,
   base: Readonly<ScopeDisplay> = DEFAULT_SCOPE_DISPLAY,
 ): ScopeDisplay {
-  const display: ScopeDisplay = { ...base, annotations: [...base.annotations] }
+  const display: ScopeDisplay = { ...base, annotations: [...base.annotations], filter: { ...base.filter } }
   if (!paramsJson) return display
 
   let stored: Partial<OscilloscopeParameters>
@@ -224,6 +246,19 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
     display.chartView = stored.chartView as ScopeView
 
+  // Validated against the tables rather than cast, like the palettes: a name from a newer build,
+  // or a hand-edited one, would otherwise reach the analyzer as a filter that does not exist.
+  if (typeof stored.chartCoupling === 'string' && SCOPE_COUPLINGS.some((c) => c.value === stored.chartCoupling))
+    display.filter.coupling = stored.chartCoupling as ScopeCoupling
+  if (typeof stored.chartFilterKind === 'string' && SCOPE_FILTER_KINDS.some((k) => k.value === stored.chartFilterKind))
+    display.filter.kind = stored.chartFilterKind as ScopeFilterKind
+  if (typeof stored.chartFilterHz === 'number' && stored.chartFilterHz > 0)
+    display.filter.frequencyHz = stored.chartFilterHz
+  if (typeof stored.chartFilterQ === 'number' && stored.chartFilterQ >= MIN_FILTER_Q && stored.chartFilterQ <= MAX_FILTER_Q)
+    display.filter.q = stored.chartFilterQ
+  if (typeof stored.chartFilterOrder === 'number' && SCOPE_FILTER_ORDERS.includes(stored.chartFilterOrder))
+    display.filter.order = stored.chartFilterOrder
+
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
     xQuantity: 'ms',
@@ -252,5 +287,10 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartIntensityPalette: display.intensityPalette,
     chartMathOperation: display.mathOperation,
     chartView: display.chartView,
+    chartCoupling: display.filter.coupling,
+    chartFilterKind: display.filter.kind,
+    chartFilterHz: display.filter.frequencyHz,
+    chartFilterQ: display.filter.q,
+    chartFilterOrder: display.filter.order,
   }
 }

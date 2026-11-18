@@ -136,6 +136,11 @@ const props = withDefaults(defineProps<{
    */
   mathOperation?: ScopeMathOperation
   /**
+   * What the display path is doing to the trace, in the words the rail uses — or null for a bare
+   * record. Shown as a badge, because a filter changes every reading beside it.
+   */
+  filterNote?: string | null
+  /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
    * practice the open measurement. It joins the signature rather than being watched for, so a
    * switch cannot be forgotten at a call site.
@@ -150,6 +155,7 @@ const props = withDefaults(defineProps<{
   intensityMode: 'Single',
   intensityPalette: 'Jet',
   mathOperation: 'Off',
+  filterNote: null,
   persistenceKey: 0,
 })
 
@@ -1231,9 +1237,9 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
 
     const record = props.record
     const detail = record
-      ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${record.spliced ? ' · spliced' : ''}${
-          record.forced ? ' · untriggered' : ''
-        }`
+      ? ` — ${timebaseLabel.value} · ${verticalLabel.value}${props.filterNote ? ` · ${props.filterNote}` : ''}${
+          record.spliced ? ' · spliced' : ''
+        }${record.forced ? ' · untriggered' : ''}`
       : ''
     return await composeChartPng({
       width,
@@ -1593,6 +1599,14 @@ const windowNote = computed(
         class="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
         :title="recordFlag.detail"
         >{{ recordFlag.label }}</span
+      >
+      <!-- A badge rather than a line, for recordFlag's reason: a note that comes and goes above the
+           plot takes its height off the canvas every time it appears. -->
+      <span
+        v-if="filterNote"
+        class="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+        title="Something in the display path is changing this trace, so every reading beside it is of the filtered waveform. What is stored is always the unfiltered capture."
+        >{{ filterNote }}</span
       >
       <span class="truncate">
         {{ timebaseLabel }} · {{ verticalLabel }} · {{ windowNote }} · {{ recordNote }}

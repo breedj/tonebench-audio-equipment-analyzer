@@ -1605,6 +1605,21 @@ export interface ScopeRecordResponse {
    * line that looks like a measurement.</p>
    */
   xy?: ScopeXySlice | null
+  /**
+   * Something in the display path changed the trace — the coupling, the filter, or both.
+   *
+   * <p>Carried so the chart and the panel can say so where the figures are: a filter changes every
+   * one of them, and a reading taken through one is of the filtered trace rather than of the
+   * capture. See scope/filters.ts.</p>
+   */
+  filtered?: boolean
+}
+
+/** One filter's magnitude response, as the display rail's preview draws it. See scope/filters.ts. */
+export interface ScopeFilterResponse {
+  sampleRateHz: number
+  frequenciesHz: number[]
+  magnitudesDb: number[]
 }
 
 export interface CrosstalkStarted {
@@ -1779,6 +1794,12 @@ export interface OscilloscopeParameters {
   chartMathOperation?: string | null
   /** Which picture the chart drew — `Waveform` or `XY`. See scope/xy.ts. */
   chartView?: string | null
+  /** The display path the trace was read through — see scope/filters.ts. */
+  chartCoupling?: string | null
+  chartFilterKind?: string | null
+  chartFilterHz?: number | null
+  chartFilterQ?: number | null
+  chartFilterOrder?: number | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null
@@ -4909,6 +4930,7 @@ export const api = {
     residual?: boolean,
     math?: string | null,
     xy?: boolean,
+    path?: Record<string, string>,
   ) => {
     const query = new URLSearchParams()
     if (window) {
@@ -4929,10 +4951,28 @@ export const api = {
     // And the same again: the X-Y figure is the one slice that cannot be summarised, so it is the
     // one that costs real bytes. Only the view that draws it asks for it.
     if (xy) query.set('xy', 'true')
+    // The coupling and the in-path filter, which run on the analyzer over the whole record before
+    // anything is drawn or measured. See scope/filters.ts.
+    for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
 
     const suffix = query.size > 0 ? `?${query}` : ''
     return request<ScopeRecordResponse | null>(`/oscilloscope/record${suffix}`)
+  },
+
+  /**
+   * The in-path filter's own magnitude response, for the display rail's preview.
+   *
+   * Asked of the analyzer rather than computed here, for the reason every reading on this screen
+   * is: two implementations of one filter drift, and a preview that is not the filter is worse
+   * than no preview. A pure function of the spec and the rate, so it answers before anything has
+   * been captured.
+   */
+  getOscilloscopeFilterResponse: (path: Record<string, string>, sampleRateHz?: number) => {
+    const query = new URLSearchParams(path)
+    if (sampleRateHz !== undefined && sampleRateHz > 0) query.set('sampleRateHz', String(sampleRateHz))
+    const suffix = query.size > 0 ? `?${query}` : ''
+    return request<ScopeFilterResponse>(`/oscilloscope/filter-response${suffix}`)
   },
 
   // The impulse response. The same five verbs as the two response measurements above, plus the

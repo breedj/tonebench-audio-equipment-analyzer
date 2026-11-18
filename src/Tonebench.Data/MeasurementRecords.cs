@@ -1311,6 +1311,21 @@ public sealed record OscilloscopeParameters(
     /// measurement was last read in is the one it reopens in.
     /// </summary>
     string? ChartView = null,
+    /// <summary>
+    /// The display path the trace was read through — the coupling (<c>Dc</c> or <c>Ac</c>) and the
+    /// in-path filter (<c>None</c>, <c>LowPass</c>, <c>HighPass</c>, <c>BandPass</c>, <c>Notch</c>)
+    /// with its corner, its Q and its order.
+    ///
+    /// <para>Display preferences, so the <b>stored samples are never filtered</b>: a filter is a
+    /// way of looking at a capture rather than a property of it, and a saved result can be
+    /// reopened and read through a different one, or none. What is stored is what the analyzer
+    /// saw.</para>
+    /// </summary>
+    string? ChartCoupling = null,
+    string? ChartFilterKind = null,
+    double? ChartFilterHz = null,
+    double? ChartFilterQ = null,
+    int? ChartFilterOrder = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

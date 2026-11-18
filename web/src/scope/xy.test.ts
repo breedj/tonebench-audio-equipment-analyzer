@@ -30,8 +30,8 @@ function slice(patch: Partial<ScopeXySlice> = {}): ScopeXySlice {
 }
 
 describe('the view toggle', () => {
-  it('offers both pictures once, the waveform first', () => {
-    expect(SCOPE_VIEWS.map((v) => v.value)).toEqual(['Waveform', 'XY'])
+  it('offers every picture once, the waveform first', () => {
+    expect(SCOPE_VIEWS.map((v) => v.value)).toEqual(['Waveform', 'XY', 'Eye'])
     for (const view of SCOPE_VIEWS) {
       expect(view.label.length).toBeGreaterThan(0)
       expect(view.title.length).toBeGreaterThan(30)
@@ -41,6 +41,7 @@ describe('the view toggle', () => {
   it('knows which one is the goniometer', () => {
     expect(scopeViewIsXy('XY')).toBe(true)
     expect(scopeViewIsXy('Waveform')).toBe(false)
+    expect(scopeViewIsXy('Eye')).toBe(false)
   })
 })
 

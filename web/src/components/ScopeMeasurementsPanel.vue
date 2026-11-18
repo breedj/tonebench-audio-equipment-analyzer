@@ -6,6 +6,7 @@ import { useOscilloscope } from '../composables/useOscilloscope'
 import { mathReadings, residualReadings, scopeChannelReadings } from '../scope/readings'
 import { mathAxisLabel, type ScopeMathOperation } from '../scope/math'
 import { correlationDescription, xyReadings } from '../scope/xy'
+import { eyeNote, eyeReadings } from '../scope/eye'
 import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
 
@@ -127,6 +128,21 @@ const xyBlock = computed(() => {
   return { description: correlationDescription(figure.correlation), readings }
 })
 
+/**
+ * The eye diagram's own readings, when one was fetched.
+ *
+ * <p>Shown whenever the record carries one, like the figure above and for the same reason: the
+ * fetch already asked for it, and a cycle-to-cycle spread is a fact about the signal rather than
+ * about the picture — worth reading beside the waveform that produced it.</p>
+ */
+const eyeBlock = computed(() => {
+  const figure = record.value?.eye
+  if (!figure) return null
+  const readings = eyeReadings(figure)
+  if (!readings.length) return null
+  return { note: eyeNote(figure), readings }
+})
+
 /** The gate as the heading quotes it, so the reader can see which stretch the figures are of. */
 const gateNote = computed(() => {
   const window = gate.value
@@ -221,6 +237,23 @@ const recordFacts = computed(() => {
         <table class="w-full text-left text-[11px]">
           <tbody>
             <tr v-for="reading in xyBlock.readings" :key="`xy-${reading.label}`">
+              <td class="pr-2" :title="reading.title">{{ reading.label }}</td>
+              <td><ReadingValue :text="reading.value" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        v-if="eyeBlock"
+        class="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800"
+      >
+        <div class="mb-1 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+          Eye · {{ eyeBlock.note }}
+        </div>
+        <table class="w-full text-left text-[11px]">
+          <tbody>
+            <tr v-for="reading in eyeBlock.readings" :key="`eye-${reading.label}`">
               <td class="pr-2" :title="reading.title">{{ reading.label }}</td>
               <td><ReadingValue :text="reading.value" /></td>
             </tr>

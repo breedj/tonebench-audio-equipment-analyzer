@@ -128,6 +128,45 @@ public sealed record ScopeXy(
 }
 
 /// <summary>
+/// The record folded on its own period: every cycle of the waveform drawn on top of every other.
+///
+/// <para><b>It is traces of samples, and like an X–Y figure it cannot be columns.</b> What this
+/// picture shows is how much one cycle differs from the next, and a min/max per column has already
+/// collapsed the folds into one band — which is the very thing being measured. So this carries the
+/// folds themselves, and the two caps below are what keep that affordable.</para>
+///
+/// <para><b>The fold is the signal’s own measured period, not a symbol clock.</b> There is no
+/// clock here to recover: a comms eye folds on the symbol rate and reads the opening a receiver has
+/// to decide in, where this folds on the frequency the slice measured and reads repeatability. A
+/// clean tone folds into one line; amplitude modulation, rail sag under a burst, a drifting
+/// generator or a noisy supply spread it into a band, and a crossing that wanders spreads it
+/// sideways.</para>
+/// </summary>
+/// <param name="Folds">One array per cycle drawn, all of <see cref="FoldFrameCount"/> samples.</param>
+/// <param name="FoldFrameCount">Samples in one fold — the period, rounded to a whole sample.</param>
+/// <param name="FoldSeconds">That fold in seconds, which is the picture’s own x span.</param>
+/// <param name="PeriodHz">The frequency it was folded on, from the slice’s own measurement.</param>
+/// <param name="WindowFoldCount">How many whole folds the window held, which is more when truncated.</param>
+/// <param name="MaxSpreadV">The widest the band gets anywhere across the fold, peak to peak.</param>
+/// <param name="SpreadAtS">Where in the fold that worst spread sits — at the peaks it is amplitude, at a crossing it is jitter.</param>
+/// <param name="MeanSpreadV">The band’s average width over the fold.</param>
+/// <param name="JitterS">How much the folds’ own zero crossings move, as a standard deviation, or null where too few cross.</param>
+public sealed record ScopeEye(
+    float[][] Folds,
+    int FoldFrameCount,
+    double FoldSeconds,
+    double PeriodHz,
+    int WindowFoldCount,
+    double MaxSpreadV,
+    double SpreadAtS,
+    double MeanSpreadV,
+    double? JitterS)
+{
+    /// <summary>The window held more cycles than the cap, so these are the first of them.</summary>
+    public bool Truncated => Folds.Length < WindowFoldCount;
+}
+
+/// <summary>
 /// Cuts a <see cref="ScopeRecord"/> down to what a chart needs.
 ///
 /// <para><b>The whole record always goes out as columns</b>, because the zoom bar's overview strip
@@ -396,6 +435,202 @@ public static class ScopeFrameBuilder
             readings.Correlation,
             readings.PhaseDeg,
             readings.AmplitudeRatio);
+    }
+
+    /// <summary>
+    /// How many folds an eye diagram overlays, at most.
+    ///
+    /// <para>256, which at 1 kHz is a quarter of a second of signal and at 20 kHz is 13 ms — far
+    /// more cycles than a reader can tell apart in the picture, and enough that an intermittent one
+    /// in a hundred shows. The cap is on the wire as much as on the drawing: 256 folds of a 1 kHz
+    /// period at 192 kS/s is 192 samples each, 196 kB, which is already the largest thing this
+    /// builder sends.</para>
+    /// </summary>
+    public const int MaxEyeFolds = 256;
+
+    /// <summary>
+    /// How many samples one fold may carry, at most.
+    ///
+    /// <para>2048 is 10.7 ms at 192 kS/s, i.e. every period down to 94 Hz drawn sample for sample.
+    /// Below that the fold is <b>strided</b> rather than refused — see the remarks on the method —
+    /// which is the one place in this builder where striding is the right answer.</para>
+    /// </summary>
+    public const int MaxEyeFoldFrames = 2048;
+
+    /// <summary>
+    /// The eye diagram over the window <paramref name="slice"/> names, folded on the frequency that
+    /// slice measured.
+    ///
+    /// <para><b>Null rather than a guess where there is no measured frequency</b>, where the window
+    /// holds fewer than two whole periods, and where the period is not a usable fold: a picture
+    /// folded on an invented period is a band of noise that looks exactly like a jittery signal,
+    /// which is the plausible wrong answer this whole file is written against. The panel says which
+    /// of those it is rather than drawing nothing silently.</para>
+    ///
+    /// <para><b>A contiguous run of folds from the start of the window</b>, like the X–Y figure
+    /// and for the same reason: striding <i>folds</i> would skip cycles, and an intermittent fault
+    /// one cycle in three is exactly what someone turns this picture on to find.</para>
+    ///
+    /// <para><b>Within a fold, a long period is strided</b>, which is the opposite of the rule
+    /// everywhere else here — and right, because the x axis of this picture is one period rather
+    /// than a stretch of the record: a min/max per column would collapse the folds into the band
+    /// the picture exists to resolve, so there is no decimation available that keeps what is being
+    /// measured. The stride is a whole number and the <i>same</i> for every fold, so the folds stay
+    /// aligned with each other; what it costs is the detail between its samples, and the readings
+    /// are taken on the strided folds so the figures are figures of the picture.</para>
+    /// </summary>
+    public static ScopeEye? EyeFigure(
+        ScopeRecord record,
+        int channel,
+        ScopeFrameSlice slice,
+        int maxFolds = MaxEyeFolds,
+        int maxFoldFrames = MaxEyeFoldFrames)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxFolds, WaveformEye.MinFolds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxFoldFrames, 2);
+
+        if (slice.FrameCount <= 0 || slice.Measurements.FrequencyHz is not { } seedHz || !(seedHz > 0.0))
+            return null;
+
+        // Refined by a sine fit, seeded from the crossing estimate -- and this is the difference
+        // between a feature that works and one that cannot.
+        //
+        // <para>A fold is a whole number of samples, so the period has to be right to within
+        // roughly half a sample over the whole overlay or successive cycles walk sideways and a
+        // clean tone draws as a band. The crossing estimate is not that good: measured against the
+        // simulator's snapped 1000.49 Hz tone it read 996.09 Hz, 0.44 % low, which rounds the fold
+        // to 193 samples where the period is 191.9 -- one sample of walk per cycle, nineteen
+        // samples over the window, and a 0.10 V "spread" on a 0.71 V peak signal that is entirely
+        // this and nothing to do with the DUT. The fit reads the same tone to about a part in
+        // 100,000, which rounds to the right fold and folds it to one line.</para>
+        //
+        // <para>The same bounded fit the residual uses, and bounded for its reason: SineFit is O(n)
+        // per iteration and 2.65 s over a 1,048,576-point record, which is not a thing to put on a
+        // fetch that happens several times a second. A fit that will not converge falls back to the
+        // seed rather than refusing -- a picture folded a little loosely is still a picture, where
+        // none at all is not.</para>
+        double frequencyHz = RefineFoldFrequency(record, channel, slice, seedHz);
+
+        int foldFrames = WaveformEye.FoldFrames(1.0 / frequencyHz, record.SampleRateHz);
+        if (foldFrames == 0)
+            return null;
+
+        int windowFolds = WaveformEye.FoldCount(slice.FrameCount, foldFrames);
+        if (windowFolds == 0)
+            return null;
+
+        int folds = Math.Min(windowFolds, maxFolds);
+        int stride = Math.Max(1, (foldFrames + maxFoldFrames - 1) / maxFoldFrames);
+        int drawn = (foldFrames + stride - 1) / stride;
+
+        // Each fold placed at its EXACT fractional period and read between samples, not at a whole
+        // number of them -- and this is what makes the picture mean what it says.
+        //
+        // <para>A period is almost never a whole number of samples: 1000.49 Hz at 48 kS/s is
+        // 47.9765. Starting fold k at k whole folds leaves every cycle 0.0235 samples further
+        // along than the last, which ACCUMULATES -- 0.45 samples by the twentieth fold and twelve
+        // by the two hundred and fifty sixth. At the steepest part of a sine that is 6 % of the
+        // amplitude at twenty folds and the whole of it at the cap, so a signal that repeats
+        // perfectly would draw as a band that grows with the length of the overlay. Measured: a
+        // 1000.49 Hz tone over twenty folds read a 0.0585 V spread on a 1.0 V amplitude, which is
+        // exactly omega times the walk and nothing to do with any DUT.</para>
+        //
+        // <para>Linear between the two samples either side, which is affordable precisely because
+        // the offset is under one sample: for a band-limited signal the error goes as
+        // (omega*delta)^2/8, i.e. 0.05 % of amplitude at 48 samples a period. It is the same trade
+        // the waveform view's Lines drawing makes, and the same place it stops being free -- near
+        // Nyquist a straight line between samples is not the signal, which is what sin(x)/x
+        // drawing exists for and what makes a 2-sample-a-period eye a coarse picture whatever is
+        // done here.</para>
+        double periodSamples = record.SampleRateHz / frequencyHz;
+        double step = periodSamples / drawn;
+        int available = slice.FirstFrame + slice.FrameCount;
+
+        var source = record.Channels[channel];
+        var samples = new double[folds][];
+        var wire = new float[folds][];
+        for (int f = 0; f < folds; f++)
+        {
+            samples[f] = new double[drawn];
+            wire[f] = new float[drawn];
+            double start = slice.FirstFrame + (f * periodSamples);
+            for (int i = 0; i < drawn; i++)
+            {
+                double at = start + (i * step);
+                int lower = (int)Math.Floor(at);
+                double fraction = at - lower;
+                // The last fold can reach one sample past the window's end by a rounding, where
+                // holding the final sample is right and reading past the record is not.
+                int upper = Math.Min(lower + 1, available - 1);
+                lower = Math.Clamp(lower, slice.FirstFrame, available - 1);
+                upper = Math.Clamp(upper, slice.FirstFrame, available - 1);
+
+                double v = lower == upper
+                    ? source[lower]
+                    : source[lower] + ((source[upper] - source[lower]) * fraction);
+                samples[f][i] = v;
+                wire[f][i] = (float)v;
+            }
+        }
+
+        // Measured on the folds that are drawn, strided and all, so the figures under the picture
+        // are figures of the picture -- the X-Y figure's own rule.
+        // The exact period rather than the rounded sample count, since that is what the folds are
+        // placed on -- an x axis a fraction of a sample longer than the picture would put the
+        // cursor readout and the spread's own phase slightly off.
+        double foldSeconds = 1.0 / frequencyHz;
+        // The readings are taken on the folds that are DRAWN, so the figures are figures of the
+        // picture -- the X-Y figure's own rule. Their time base is one drawn point rather than one
+        // sample, since the points are spaced `step` samples apart.
+        double drawnRateHz = record.SampleRateHz / step;
+        var spread = WaveformEye.Measure(samples, drawnRateHz) ?? new EyeSpread(0.0, 0.0, 0.0);
+
+        return new ScopeEye(
+            wire,
+            drawn,
+            foldSeconds,
+            frequencyHz,
+            windowFolds,
+            spread.MaxSpreadV,
+            spread.AtTimeS,
+            spread.MeanSpreadV,
+            // Against the folds' own mean rather than against zero: an offset waveform has no zero
+            // crossing at all, and this hardware's captures carry the front end's own offset.
+            WaveformEye.CrossingJitterS(samples, drawnRateHz, slice.Measurements.MeanV));
+    }
+
+    /// <summary>
+    /// The frequency an eye is folded on: the window's own measured one, refined by a sine fit.
+    ///
+    /// <para>Shares <see cref="Residual"/>'s bounds — at least <see cref="ResidualFitPeriods"/>
+    /// whole periods of the seed, clamped to
+    /// <see cref="MinResidualFitFrames"/>..<see cref="MaxResidualFitFrames"/> and to the window —
+    /// and its centred placement, so neither pays for the other's choices. Falls back to the seed
+    /// wherever the fit cannot run or comes back implausible: a <b>tenth of an octave</b> either
+    /// side is the bound, because a fit that has locked onto a harmonic or onto noise is worse than
+    /// the estimate it was seeded from, while a genuine refinement is a fraction of a per cent.</para>
+    /// </summary>
+    private static double RefineFoldFrequency(ScopeRecord record, int channel, ScopeFrameSlice slice, double seedHz)
+    {
+        double fs = record.SampleRateHz;
+        int wanted = (int)Math.Ceiling(ResidualFitPeriods * fs / seedHz);
+        int fitLength = Math.Clamp(Math.Max(wanted, MinResidualFitFrames), 1, MaxResidualFitFrames);
+        fitLength = Math.Min(fitLength, slice.FrameCount);
+        if (fitLength < 4)
+            return seedHz;
+
+        int fitStart = slice.FirstFrame + ((slice.FrameCount - fitLength) / 2);
+
+        try
+        {
+            var fit = SineFit.Fit(record.Channels[channel].AsSpan(fitStart, fitLength), fs, seedHz);
+            double ratio = fit.FreqHz / seedHz;
+            return fit.FreqHz > 0.0 && ratio > 0.933 && ratio < 1.072 ? fit.FreqHz : seedHz;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return seedHz;
+        }
     }
 
     /// <summary>Cuts the whole record, for the overview a chart and the zoom strip both draw.</summary>

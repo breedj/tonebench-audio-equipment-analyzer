@@ -181,6 +181,7 @@ public static class OscilloscopeEndpoints
             bool? residual,
             string? math,
             bool? xy,
+            bool? eye,
             string? coupling,
             string? filter,
             double? filterHz,
@@ -215,6 +216,9 @@ public static class OscilloscopeEndpoints
 
             var channels = new List<ScopeChannelSlice>(record.ChannelCount);
             ScopeFrameSlice? geometry = null;
+            // Which channel that geometry belongs to, for the eye diagram: it is drawn for one
+            // input, and the readings under it are that input's.
+            int? drawnChannel = null;
             for (int ch = 0; ch < record.ChannelCount; ch++)
             {
                 if (!WasCaptured(runner.LastRequest, ch))
@@ -224,6 +228,7 @@ public static class OscilloscopeEndpoints
                     ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
                     : ScopeFrameBuilder.Overview(record, ch, columns);
                 geometry ??= slice;
+                drawnChannel ??= ch;
 
                 // The gate rides on the same fetch as the picture it qualifies, which is the
                 // point of it being a parameter here rather than a second route: two round trips
@@ -309,6 +314,35 @@ public static class OscilloscopeEndpoints
                 }
             }
 
+            // The eye diagram, when the chart is in that view. Asked for by name like the three
+            // above, and the most expensive of them: it is folds of samples rather than one
+            // trace, so see ScopeFrameBuilder.MaxEyeFolds for what bounds it.
+            //
+            // <para>On the FIRST drawn channel rather than on both. Two eyes over each other is
+            // not two readings -- the whole picture is a band, and two bands at different levels
+            // are a wash -- and the readings are per channel, so a pair of them would have to be
+            // reported separately and read separately. The rail says which channel it is.</para>
+            ScopeEyeSlice? eyeSlice = null;
+            if (eye == true && geometry is { } eyeReference && drawnChannel is { } eyeChannel)
+            {
+                var figure = ScopeFrameBuilder.EyeFigure(record, eyeChannel, eyeReference);
+                if (figure is not null)
+                {
+                    eyeSlice = new ScopeEyeSlice(
+                        eyeChannel,
+                        figure.Folds,
+                        figure.FoldFrameCount,
+                        figure.FoldSeconds,
+                        figure.PeriodHz,
+                        figure.Folds.Length,
+                        figure.WindowFoldCount,
+                        figure.MaxSpreadV,
+                        figure.SpreadAtS,
+                        figure.MeanSpreadV,
+                        figure.JitterS);
+                }
+            }
+
             return Results.Ok(new ScopeRecordResponse(
                 record.SampleRateHz,
                 record.FrameCount,
@@ -320,6 +354,7 @@ public static class OscilloscopeEndpoints
                 channels,
                 mathSlice,
                 xySlice,
+                eyeSlice,
                 path.Changes));
         });
     }
@@ -523,6 +558,7 @@ public sealed record ScopeRecordResponse(
     IReadOnlyList<ScopeChannelSlice> Channels,
     ScopeMathSlice? Math = null,
     ScopeXySlice? Xy = null,
+    ScopeEyeSlice? Eye = null,
     bool Filtered = false);
 
 /// <summary>
@@ -591,6 +627,42 @@ public sealed record ScopeXySlice(
     double Correlation,
     double? PhaseDeg,
     double? AmplitudeRatio);
+
+/// <summary>
+/// The eye diagram as the client draws it: the window folded on the signal’s own period, every
+/// cycle over every other.
+///
+/// <para><b>Folds of samples, never columns</b> — see <see cref="ScopeEye"/>. A min/max per column
+/// has already collapsed the folds into the band this picture exists to resolve.</para>
+///
+/// <para>Null when the request did not ask for one, and null when there is nothing to fold on: no
+/// measured frequency, fewer than two whole periods in the window, or a period that is not a usable
+/// fold. A picture folded on an invented period is a band of noise that looks exactly like a
+/// jittery signal, so absent is the only honest answer.</para>
+/// </summary>
+/// <param name="Channel">Which input this is the eye of — the first one drawn.</param>
+/// <param name="Folds">One array per cycle, all of <paramref name="FoldFrameCount"/> samples.</param>
+/// <param name="FoldFrameCount">Samples in one fold, after any stride.</param>
+/// <param name="FoldSeconds">What one fold covers, which is the picture’s x span.</param>
+/// <param name="PeriodHz">The frequency it was folded on.</param>
+/// <param name="FoldCount">How many folds are here.</param>
+/// <param name="WindowFoldCount">How many whole folds the window held; more when truncated.</param>
+/// <param name="MaxSpreadV">The widest the band gets anywhere across the fold, peak to peak.</param>
+/// <param name="SpreadAtS">Where in the fold that worst spread sits.</param>
+/// <param name="MeanSpreadV">The band’s average width over the fold.</param>
+/// <param name="JitterS">The standard deviation of the folds’ own crossings, or null where too few cross.</param>
+public sealed record ScopeEyeSlice(
+    int Channel,
+    float[][] Folds,
+    int FoldFrameCount,
+    double FoldSeconds,
+    double PeriodHz,
+    int FoldCount,
+    int WindowFoldCount,
+    double MaxSpreadV,
+    double SpreadAtS,
+    double MeanSpreadV,
+    double? JitterS);
 
 
 /// <summary>

@@ -13,6 +13,7 @@ import ImpulseResponseChart from '../components/ImpulseResponseChart.vue'
 import OscilloscopeChart from '../components/OscilloscopeChart.vue'
 import OscilloscopeScreenChart from '../components/OscilloscopeScreenChart.vue'
 import ScopeXyChart from '../components/ScopeXyChart.vue'
+import ScopeEyeChart from '../components/ScopeEyeChart.vue'
 import { pathSummary } from '../scope/filters'
 import ResponsePolarChart from '../components/ResponsePolarChart.vue'
 import ResponseSPlaneChart from '../components/ResponseSPlaneChart.vue'
@@ -554,6 +555,20 @@ export async function renderView(
           options,
         )
         return { png: figure, caption: 'The left input against the right, with time thrown away' }
+      }
+
+      if (display.chartView === 'Eye') {
+        const figure = await renderChartPng(
+          ScopeEyeChart,
+          {
+            record,
+            voltsPerDivision: display.voltsPerDivision,
+            voltOffsetV: display.voltOffsetV,
+            running: false,
+          },
+          options,
+        )
+        return { png: figure, caption: 'Every cycle of the window folded on the signal’s own period' }
       }
 
       const png = await renderChartPng(

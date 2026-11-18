@@ -230,9 +230,10 @@ const { showPage } = useManual()
         <tr>
           <td>View</td>
           <td>
-            Which picture the chart draws — <strong>Y–T</strong>, the waveforms against time, or
-            <strong>X–Y</strong>, one input against the other. See <strong>The X–Y view</strong>
-            below.
+            Which picture the chart draws — <strong>Y–T</strong>, the waveforms against time,
+            <strong>X–Y</strong>, one input against the other, or <strong>Eye</strong>, every cycle
+            folded on the signal’s own period. See <strong>The X–Y view</strong> and
+            <strong>The eye view</strong> below.
           </td>
         </tr>
         <tr>
@@ -509,6 +510,125 @@ const { showPage } = useManual()
       zoom with, those two boxes are the only control: switching to X–Y therefore ends any zoom the
       waveform view was holding, so the boxes and the picture always agree. The trigger line, the
       cursors and the notes belong to the waveform view and come back with it.
+    </p>
+
+    <h2>The eye view</h2>
+
+    <p>
+      Pick <strong>Eye</strong> and the window is cut into single cycles of the signal’s own
+      measured period and all of them are drawn on top of each other. A signal that repeats exactly
+      folds into <em>one line</em>. Anything that moves it from one cycle to the next spreads that
+      line into a band — and the shape of the band says what moved it.
+    </p>
+
+    <p>
+      This is not the eye diagram of a data link. There is no symbol clock to recover here: a comms
+      eye folds on the clock and reads the opening a receiver has to decide in, where this folds on
+      the tone and reads <strong>repeatability</strong>. What it finds is the class of fault that
+      looks like “a slightly fuzzy trace” on a time axis and like nothing at all in a spectrum
+      averaged over seconds.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>What you see</th><th>What it usually is</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>One clean line</td>
+          <td>
+            Every cycle in the window is the same. The starting point — a loopback at a round
+            frequency folds to a single line, which is how you know the view is working.
+          </td>
+        </tr>
+        <tr>
+          <td>A band widest at the peaks</td>
+          <td>
+            The amplitude is varying: a rail sagging under drive, a thermal effect, a generator that
+            is not settled, or hum at a frequency unrelated to the tone riding on it. The
+            <strong>Where</strong> reading names the phase.
+          </td>
+        </tr>
+        <tr>
+          <td>A band widest at the crossings</td>
+          <td>
+            The timing is varying — jitter. The <strong>Jitter</strong> reading is the standard
+            deviation of the folds’ own crossings, measured between samples, so it reads below the
+            5.2 µs sample interval.
+          </td>
+        </tr>
+        <tr>
+          <td>A band at one phase only</td>
+          <td>
+            Something is switching at that point in the cycle: a crossover, a protection circuit, a
+            class-B stage’s handover.
+          </td>
+        </tr>
+        <tr>
+          <td>Two or three distinct lines</td>
+          <td>
+            The signal alternates between states rather than wandering — every other cycle
+            different, which a smooth band would not show.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Reading it</h3>
+
+    <p>
+      <strong>The traces are translucent, and that is the measurement rather than the styling.</strong>
+      Where every cycle agrees the strokes land on each other and the line reads solid; where they
+      disagree the band is as faint as the number of cycles that went through each part of it. One
+      opaque stroke would draw a hundred agreeing cycles and a single outlier as the same flat line,
+      which is the one thing this picture must not do. Turn <strong>Persistence</strong> on as well
+      and the overlay accumulates across captures, which is what makes an intermittent fault visible.
+    </p>
+
+    <p>
+      The dashed vertical marks where the band is widest — the phase the <strong>Where</strong>
+      reading names. The readings under the chart are of the overlay rather than of the record:
+      <strong>Spread</strong> is how far apart the cycles got at their worst phase, not the
+      waveform’s own amplitude, and <strong>Mean spread</strong> is the band’s average width, which
+      is the figure to watch where the worst case is set by one bad cycle.
+    </p>
+
+    <h3>When there is no eye</h3>
+
+    <p>
+      The view says which of three things it is rather than coming up blank. <strong>No frequency
+      was measured</strong> in this window, so there is no period to fold on — widen it until the
+      Measurements panel reads one. <strong>Fewer than two whole periods</strong> are in the window,
+      so there is nothing to overlay. Or nothing has been captured yet. A picture folded on a
+      guessed period would be a band of noise that looks exactly like a jittery signal, so it is
+      never drawn.
+    </p>
+
+    <p>
+      Two limits are worth knowing. The overlay draws at most <strong>256 cycles</strong>, and the
+      first of them rather than every n-th — striding the cycles would hide exactly the one-in-three
+      fault someone turns this on to find; the header says when the window held more, and narrowing
+      the window moves the overlay along the record. And a period longer than about 10 ms at
+      192 kS/s (94 Hz) is drawn at reduced resolution: every cycle is drawn at the same coarser
+      step, so they stay aligned, but the fine detail between those points is not in the picture.
+    </p>
+
+    <p>
+      One more, and it is a real floor rather than a setting. A period is almost never a whole
+      number of samples, so each cycle is placed at its exact fractional position and read
+      <em>between</em> samples — without that, a perfectly repeating signal would draw as a band
+      that grows with the length of the overlay. What is left is the straight line between two
+      samples, which at 48 samples a cycle is about a thousandth of the amplitude and near the top
+      of the band is much more. So <strong>a reading of a few tenths of a per cent on a high
+      frequency is the picture’s own floor, not the signal’s</strong>: compare a suspect
+      measurement against the same signal at a lower frequency, or against a loopback, before
+      believing a small spread.
+    </p>
+
+    <p>
+      The eye is drawn for <strong>one input</strong> — the first one the measurement captures,
+      named on the axis. Two bands at different levels over each other are a wash rather than two
+      readings, and the figures are per channel.
     </p>
 
     <h2>Measurements</h2>

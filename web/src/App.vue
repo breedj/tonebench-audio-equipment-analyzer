@@ -63,6 +63,7 @@ import MeasurementLayout from './components/MeasurementLayout.vue'
 import SaveMeasurementDialog from './components/SaveMeasurementDialog.vue'
 import OscilloscopeScreenChart from './components/OscilloscopeScreenChart.vue'
 import ScopeXyChart from './components/ScopeXyChart.vue'
+import ScopeEyeChart from './components/ScopeEyeChart.vue'
 import ScopeOverviewStrip from './components/ScopeOverviewStrip.vue'
 import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
@@ -79,6 +80,7 @@ import {
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
+import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_FILTER, filterQuery, pathSummary, type ScopeFilterSettings } from './scope/filters'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
@@ -2095,6 +2097,19 @@ const scopeFilterNote = computed(() => pathSummary(scopeFilter.value))
 /** True while the goniometer is the picture on screen rather than the waveforms. */
 const scopeXyShowing = computed(() => scopeViewIsXy(scopeChartView.value))
 
+/** True while the eye diagram is the picture on screen. See scope/eye.ts. */
+const scopeEyeShowing = computed(() => scopeViewIsEye(scopeChartView.value))
+
+/**
+ * True while the picture on screen is <em>not</em> the waveforms against time.
+ *
+ * <p>Both of the other views lack a time axis of the record — the goniometer has none at all and
+ * the eye's x axis is a phase of one period — so neither has a drag-zoom and neither can be
+ * navigated by the zoom bar. Everything that follows from that is keyed on this rather than on
+ * either view by name, so a fourth view cannot quietly keep the strip.</p>
+ */
+const scopePlaneShowing = computed(() => scopeXyShowing.value || scopeEyeShowing.value)
+
 /**
  * The cursors — <b>session state, and deliberately not part of the display record</b>.
  *
@@ -2172,6 +2187,8 @@ function applyScopeGeneratorLive() {
 const scopeChart = ref<InstanceType<typeof OscilloscopeScreenChart> | null>(null)
 /** The goniometer, mounted only while it is the view on screen. See scope/xy.ts. */
 const scopeXyChart = ref<InstanceType<typeof ScopeXyChart> | null>(null)
+/** The eye, mounted only while it is the view on screen. See scope/eye.ts. */
+const scopeEyeChart = ref<InstanceType<typeof ScopeEyeChart> | null>(null)
 
 const {
   record: scopeRecord,
@@ -2195,6 +2212,7 @@ const {
   setResidual: setOscilloscopeResidual,
   setMath: setOscilloscopeMath,
   setXy: setOscilloscopeXy,
+  setEye: setOscilloscopeEye,
   setPath: setOscilloscopePath,
 } = useOscilloscope()
 
@@ -2335,6 +2353,15 @@ watch(
   scopeXyShowing,
   (on) => {
     if (isOscilloscope.value) void setOscilloscopeXy(on).catch(() => undefined)
+  },
+  { immediate: true },
+)
+
+/** And the eye, the costliest of the four and asked for the same way. */
+watch(
+  scopeEyeShowing,
+  (on) => {
+    if (isOscilloscope.value) void setOscilloscopeEye(on).catch(() => undefined)
   },
   { immediate: true },
 )
@@ -2542,7 +2569,7 @@ function requestScopeSlice(window: { fromS: number; toS: number } | null, column
  * it set would make the boxes and the picture disagree about which stretch is drawn.</p>
  */
 watch(
-  () => [scopeXyShowing.value, scopeTimeFromS.value, scopeTimeToS.value] as const,
+  () => [scopePlaneShowing.value, scopeTimeFromS.value, scopeTimeToS.value] as const,
   ([showing, fromS, toS]) => {
     if (!isOscilloscope.value || !showing) return
     scopeViewWindow.value = null
@@ -3318,7 +3345,10 @@ function chartOnScreen() {
     return activeResponseProjection.value === 'SPlane' ? responseSPlaneChart.value : responsePolarChart.value
   }
   if (isCrosstalk.value) return responseChart.value
-  if (isOscilloscope.value) return scopeXyShowing.value ? scopeXyChart.value : scopeChart.value
+  if (isOscilloscope.value) {
+    if (scopeXyShowing.value) return scopeXyChart.value
+    return scopeEyeShowing.value ? scopeEyeChart.value : scopeChart.value
+  }
   if (isOutputImpedance.value) return outputImpedanceChart.value
   if (isSweepKind.value) return sweepChart.value
   if (isImpulseResponse.value) {
@@ -6071,7 +6101,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
                 <!-- The zoom bar navigates a time axis, which the X-Y view does not have. -->
                 <ScopeOverviewStrip
-                  v-if="!scopeXyShowing"
+                  v-if="!scopePlaneShowing"
                   :overview="scopeOverview"
                   :window="scopeStripWindow"
                   :bounds="scopeStripBounds"
@@ -6085,6 +6115,19 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   ref="scopeXyChart"
                   :record="scopeRecord"
                   :volts-per-division="scopeVoltsPerDivision"
+                  :running="scopeRunning"
+                  :persistence="scopePersistence"
+                  :intensity-mode="scopeIntensityMode"
+                  :intensity-palette="scopeIntensityPalette"
+                  :persistence-key="currentTypeId ?? 0"
+                />
+
+                <ScopeEyeChart
+                  v-else-if="scopeEyeShowing"
+                  ref="scopeEyeChart"
+                  :record="scopeRecord"
+                  :volts-per-division="scopeVoltsPerDivision"
+                  :volt-offset-v="scopeVoltOffsetV"
                   :running="scopeRunning"
                   :persistence="scopePersistence"
                   :intensity-mode="scopeIntensityMode"

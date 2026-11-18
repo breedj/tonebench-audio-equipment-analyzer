@@ -111,6 +111,14 @@ const wantMath = shallowRef<string | null>(null)
 const wantXy = ref(false)
 
 /**
+ * Whether the fetch asks for the eye diagram.
+ *
+ * <p>The costliest of the lot: folds of samples rather than one trace. Asked for only by the view
+ * that draws it, like the figure above.</p>
+ */
+const wantEye = ref(false)
+
+/**
  * The display path the fetch asks for — the coupling and the in-path filter, as query parameters.
  *
  * <p>The sixth thing a fetch is keyed on, and the one that changes the <em>trace</em> rather than
@@ -162,6 +170,7 @@ async function fetchRecord(force = false): Promise<void> {
       wantResidual.value,
       wantMath.value,
       wantXy.value,
+      wantEye.value,
       wantPath.value,
     )
     if (token !== fetchToken) return
@@ -322,6 +331,18 @@ export function useOscilloscope() {
   }
 
   /**
+   * Turns the eye diagram on or off, and re-fetches so it arrives with the record it is of.
+   *
+   * <p>The goniometer's reason exactly: switching to it on a held record has no next poll to wait
+   * for, and a view that came up empty until the next capture would read as a broken one.</p>
+   */
+  async function setEye(on: boolean): Promise<void> {
+    if (wantEye.value === on) return
+    wantEye.value = on
+    await fetchRecord(true)
+  }
+
+  /**
    * Sets the display path, and re-fetches so the trace on screen is the one the path describes.
    *
    * <p>Compared as a whole rather than field by field, because a path is one thing: turning the
@@ -406,6 +427,7 @@ export function useOscilloscope() {
     setGate,
     setMath,
     setXy,
+    setEye,
     setPath,
     setResidual,
     start,

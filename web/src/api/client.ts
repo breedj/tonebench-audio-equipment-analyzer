@@ -1538,6 +1538,39 @@ export interface ScopeXySlice {
   amplitudeRatio: number | null
 }
 
+/**
+ * The eye diagram as the chart draws it: the window folded on the signal's own period, every cycle
+ * over every other.
+ *
+ * <p>Mirrors <code>Tonebench.App.Endpoints.ScopeEyeSlice</code>. <b>Folds of samples, never
+ * columns</b>: a min/max per column has already collapsed the folds into the band this picture
+ * exists to resolve.</p>
+ */
+export interface ScopeEyeSlice {
+  /** Which input this is the eye of — the first one drawn. */
+  channel: number
+  /** One array per cycle, all of foldFrameCount samples. */
+  folds: number[][]
+  /** Samples in one fold, after any stride. */
+  foldFrameCount: number
+  /** What one fold covers, in seconds — the picture's x span. */
+  foldSeconds: number
+  /** The frequency it was folded on. */
+  periodHz: number
+  /** How many folds are here. */
+  foldCount: number
+  /** How many whole folds the window held; more than foldCount when the overlay was truncated. */
+  windowFoldCount: number
+  /** The widest the band gets anywhere across the fold, peak to peak. */
+  maxSpreadV: number
+  /** Where in the fold that worst spread sits, seconds from its start. */
+  spreadAtS: number
+  /** The band's average width over the fold. */
+  meanSpreadV: number
+  /** The standard deviation of the folds' own crossings, or null where too few cross. */
+  jitterS: number | null
+}
+
 export interface ScopeChannelSlice {
   channel: number
   /** Time of the first column or sample, relative to the trigger. Negative for any pre-trigger at all. */
@@ -1605,6 +1638,11 @@ export interface ScopeRecordResponse {
    * line that looks like a measurement.</p>
    */
   xy?: ScopeXySlice | null
+  /**
+   * The eye diagram, when the request asked for one — the window folded on the signal's own
+   * period. Null when it did not ask, and null when there is nothing to fold on.
+   */
+  eye?: ScopeEyeSlice | null
   /**
    * Something in the display path changed the trace — the coupling, the filter, or both.
    *
@@ -4932,6 +4970,7 @@ export const api = {
     residual?: boolean,
     math?: string | null,
     xy?: boolean,
+    eye?: boolean,
     path?: Record<string, string>,
   ) => {
     const query = new URLSearchParams()
@@ -4953,6 +4992,9 @@ export const api = {
     // And the same again: the X-Y figure is the one slice that cannot be summarised, so it is the
     // one that costs real bytes. Only the view that draws it asks for it.
     if (xy) query.set('xy', 'true')
+    // And again, and the most expensive of the four: an eye is folds of samples rather than one
+    // trace. See ScopeFrameBuilder.MaxEyeFolds for what bounds it.
+    if (eye) query.set('eye', 'true')
     // The coupling and the in-path filter, which run on the analyzer over the whole record before
     // anything is drawn or measured. See scope/filters.ts.
     for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)

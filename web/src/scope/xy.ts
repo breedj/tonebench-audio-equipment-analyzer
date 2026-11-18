@@ -19,7 +19,7 @@ import { formatVolts } from './voltAxis'
  */
 
 /** Which picture the scope's chart is drawing. */
-export type ScopeView = 'Waveform' | 'XY'
+export type ScopeView = 'Waveform' | 'XY' | 'Eye'
 
 export const SCOPE_VIEWS: readonly { value: ScopeView; label: string; title: string }[] = Object.freeze([
   {
@@ -32,6 +32,12 @@ export const SCOPE_VIEWS: readonly { value: ScopeView; label: string; title: str
     label: 'X–Y',
     title:
       'The left input against the right, with time thrown away — a goniometer. A 45° line is a matched pair in phase, a circle is 90° apart, and an ellipse is everything between.',
+  },
+  {
+    value: 'Eye',
+    label: 'Eye',
+    title:
+      'Every cycle of the window folded on the signal’s own period and drawn over the others. A signal that repeats exactly folds into one line; anything that moves it cycle to cycle spreads that line into a band.',
   },
 ])
 

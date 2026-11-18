@@ -1154,7 +1154,14 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       { label: 'Time' },
       ...channels.map((channel) => ({
         label: channel.label,
-        scale: channel.scale,
+        // ?? 'y', never a bare channel.scale: a series handed scale: undefined is not a series
+        // with no scale. uPlot keys it under the literal string "undefined" and gives that scale
+        // auto: true, so the curve is auto-ranged to its OWN data and fills the plot height
+        // whatever the volts window says -- while the band plugin above, which spells the
+        // fallback, draws in the right place. One channel then reads as two traces, and only on a
+        // signal small in its window: filling the window they coincide. ImpedanceChart's own rule,
+        // in a chart written after it.
+        scale: channel.scale ?? 'y',
         stroke: channel.color,
         // Thinner and dashed for the residual: it is derived from the trace beside it rather than
         // measured, and at a quiet DUT it sits on the zero line where a solid line of the same

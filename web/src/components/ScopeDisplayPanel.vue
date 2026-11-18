@@ -14,6 +14,15 @@ import {
 } from '../scope/voltAxis'
 import { clampWindow, fromChartMs, recordWindow, scopeTimeScale, toChartMs } from '../scope/timeAxis'
 import { cursorPairNeedsPlacing, cursorReadings, placeCursorPair, type ScopeCursors } from '../scope/cursors'
+import {
+  persistenceDraws,
+  SCOPE_INTENSITY_MODES,
+  SCOPE_PERSISTENCE_OPTIONS,
+  type ScopeIntensityMode,
+  type ScopePersistence,
+} from '../scope/persistence'
+import { PALETTE_NAMES } from '../measurements/decay'
+import type { DecayPalette } from '../api/client'
 
 /**
  * The oscilloscope chart's display rail: the vertical pair, the time window, one Autofit for both,
@@ -35,6 +44,12 @@ const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const showResidual = defineModel<boolean>('showResidual', { required: true })
+const persistence = defineModel<ScopePersistence>('persistence', { required: true })
+const intensityMode = defineModel<ScopeIntensityMode>('intensityMode', { required: true })
+const intensityPalette = defineModel<DecayPalette>('intensityPalette', { required: true })
+
+/** The colour controls only mean something once something is being kept. */
+const persistenceOn = computed(() => persistenceDraws(persistence.value))
 
 /** The cursors. See scope/cursors.ts — session state, so they are not in <code>params_json</code>. */
 const cursors = defineModel<ScopeCursors>('cursors', { required: true })
@@ -431,6 +446,43 @@ function onVoltsPerDivisionChange(event: Event) {
     </p>
   </CollapsibleSection>
 
+
+  <CollapsibleSection title="Persistence" size="xs">
+    <!-- A history of a *display*, not of a capture: the setting is stored with the measurement, and
+         what it accumulates is thrown away whenever a pixel would stop meaning the same time and
+         the same level. -->
+    <label class="tb-field">
+      Keep
+      <select v-model="persistence" class="tb-input">
+        <option v-for="option in SCOPE_PERSISTENCE_OPTIONS" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+
+    <template v-if="persistenceOn">
+      <label class="tb-field">
+        Colour
+        <select v-model="intensityMode" class="tb-input">
+          <option v-for="option in SCOPE_INTENSITY_MODES" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label v-if="intensityMode === 'Multi'" class="tb-field">
+        Map
+        <select v-model="intensityPalette" class="tb-input">
+          <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
+    </template>
+
+    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      How often the trace passes through a pixel decides how it is painted, so a steady waveform
+      burns in bright and jitter, noise or a once-in-a-while glitch shows as a haze around it. The
+      newest record is always drawn on top at full strength.
+    </p>
+  </CollapsibleSection>
 
   <CollapsibleSection title="Cursors" size="xs">
     <!-- A cursor is a transient reading that belongs to the session, not a note that belongs to the

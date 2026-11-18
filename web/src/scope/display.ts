@@ -1,4 +1,11 @@
 import { parseAnnotations, type ChartAnnotation } from '../measurements/chartAnnotations'
+import {
+  SCOPE_INTENSITY_MODES,
+  SCOPE_PERSISTENCE_RECORDS,
+  type ScopeIntensityMode,
+  type ScopePersistence,
+} from './persistence'
+import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
 import { recordWindow } from './timeAxis'
@@ -44,6 +51,19 @@ export interface ScopeDisplay {
    * channel per fetch, and on a record with no fundamental there is nothing to remove.</p>
    */
   showResidual: boolean
+  /**
+   * How long the chart keeps each record's trace — the digital-phosphor picture, where how often
+   * the trace passes through a pixel decides how it is painted. See scope/persistence.ts.
+   *
+   * <p>The <em>setting</em> is a display preference and is stored with the measurement; what it
+   * accumulates is not — that is a history of a display rather than of a capture, so it is thrown
+   * away whenever a pixel would stop meaning the same time and the same level.</p>
+   */
+  persistence: ScopePersistence
+  /** Whether that picture is painted in the channel's own colour or through a colour map. */
+  intensityMode: ScopeIntensityMode
+  /** Which colour map, when it is one — the decay surfaces' own palettes, so a colour means one thing app-wide. */
+  intensityPalette: import('../api/client').DecayPalette
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
 }
@@ -86,6 +106,13 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   showLeft: true,
   showRight: true,
   showResidual: false,
+  /**
+   * Off by default. Persistence is what a reader turns on while hunting something intermittent; on
+   * a steady signal it draws the same trace over itself and buys nothing but a slower redraw.
+   */
+  persistence: 'Off',
+  intensityMode: 'Single',
+  intensityPalette: 'Jet',
   annotations: [],
 })
 
@@ -150,6 +177,21 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
   if (typeof stored.chartShowResidual === 'boolean') display.showResidual = stored.chartShowResidual
 
+  // Validated against the tables rather than cast: a stored string from a newer build, or a
+  // hand-edited one, would otherwise reach the painter as a palette that does not exist.
+  if (typeof stored.chartPersistence === 'string' && stored.chartPersistence in SCOPE_PERSISTENCE_RECORDS)
+    display.persistence = stored.chartPersistence as ScopePersistence
+  if (
+    typeof stored.chartIntensityMode === 'string' &&
+    SCOPE_INTENSITY_MODES.some((m) => m.value === stored.chartIntensityMode)
+  )
+    display.intensityMode = stored.chartIntensityMode as ScopeIntensityMode
+  if (
+    typeof stored.chartIntensityPalette === 'string' &&
+    (PALETTE_NAMES as string[]).includes(stored.chartIntensityPalette)
+  )
+    display.intensityPalette = stored.chartIntensityPalette as import('../api/client').DecayPalette
+
   display.annotations = parseAnnotations((stored as { chartAnnotations?: unknown }).chartAnnotations, {
     view: OSCILLOSCOPE_ANNOTATION_VIEW,
     xQuantity: 'ms',
@@ -173,5 +215,8 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartShowLeft: display.showLeft,
     chartShowRight: display.showRight,
     chartShowResidual: display.showResidual,
+    chartPersistence: display.persistence,
+    chartIntensityMode: display.intensityMode,
+    chartIntensityPalette: display.intensityPalette,
   }
 }

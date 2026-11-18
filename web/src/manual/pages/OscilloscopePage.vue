@@ -212,6 +212,13 @@ const { showPage } = useManual()
           <td>Whether the line and its hysteresis band are drawn over the trace.</td>
         </tr>
         <tr>
+          <td>Persistence</td>
+          <td>
+            How many records the chart keeps — see <strong>Persistence</strong> below. Off draws
+            each record over the last; anything else keeps a history behind it.
+          </td>
+        </tr>
+        <tr>
           <td>Residual</td>
           <td>
             Draws each channel again with its fitted fundamental taken out — see
@@ -308,6 +315,62 @@ const { showPage } = useManual()
         <strong>Mean</strong> on a quiet input is the analyzer's own residual offset — a few
         millivolts, different on each channel, and corrected by nobody — rather than the DUT's DC.
         Measure DC with a multimeter.
+      </p>
+    </div>
+
+    <h2>Persistence</h2>
+    <p>
+      With <strong>Keep</strong> set to anything but Off, the chart stops drawing each record over
+      the last and starts <strong>accumulating</strong> them: how often the trace passes through a
+      pixel decides how that pixel is painted. A steady waveform burns in bright; jitter, noise and
+      a once-in-a-while glitch show as a haze around it. The newest record is always drawn on top at
+      full strength, so the live trace is still the clearest thing on the chart.
+    </p>
+    <p>
+      <strong>This is the one display here that answers a question the ordinary trace cannot.</strong>
+      A glitch one record in fifty is invisible on a chart that redraws each record over the last,
+      and unmistakable on one that keeps them — which is what <strong>Infinite</strong> is for: set
+      it, leave the scope running in Normal or Auto, and come back.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>What it does</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Keep</td>
+          <td>
+            How many records are kept — 8, 32, 128, or all of them. A <em>record count</em> rather
+            than a time, because records arrive at a rate set by the record length, the trigger and
+            the DUT: two seconds is anywhere between one record and two hundred.
+          </td>
+        </tr>
+        <tr>
+          <td>Colour</td>
+          <td>
+            <strong>Channel's colour</strong> paints the haze in each trace's own hue, brighter the
+            more often the trace goes there — the classic analog-scope picture.
+            <strong>Colour map</strong> grades it instead, cold where the trace rarely goes and hot
+            where it often does, which is how a digital-phosphor scope draws it.
+          </td>
+        </tr>
+        <tr>
+          <td>Map</td>
+          <td>Which colour map, when it is one — the same three the decay surfaces use, so a colour means one thing throughout.</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="manual-note">
+      <p>
+        <strong>The picture is thrown away whenever a pixel would stop meaning the same thing.</strong>
+        Zoom, change the V/div or the centre, resize the window or open another measurement, and the
+        accumulated history goes: every count in it was a claim about a different part of the
+        signal. It starts again from the next record, which is a second or two at most. It is not
+        saved with the measurement and not in a report either — what is kept is a history of a
+        <em>display</em>, not of a capture, and the setting is what is stored.
       </p>
     </div>
 

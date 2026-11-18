@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerSource } from '../api/client'
@@ -37,6 +37,17 @@ import {
 import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
 import type { ScopeAxisWindow } from '../scope/display'
 import { triggerChannel, triggerIndicator } from '../scope/triggerSpec'
+import {
+  hexRgb,
+  intensityPixels,
+  intensitySignature,
+  persistenceDecay,
+  persistenceDraws,
+  ScopeIntensityBuffer,
+  type ScopeIntensityMode,
+  type ScopePersistence,
+} from '../scope/persistence'
+import type { DecayPalette } from '../api/client'
 import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
 
 /**
@@ -104,7 +115,26 @@ const props = withDefaults(defineProps<{
   /** Whether each captured input is drawn. The display rail's pair; see scope/display.ts. */
   showLeft?: boolean
   showRight?: boolean
-}>(), { annotationNumbers: true, running: false, showLeft: true, showRight: true })
+  /** How long the chart keeps each record's trace. See scope/persistence.ts. */
+  persistence?: ScopePersistence
+  intensityMode?: ScopeIntensityMode
+  intensityPalette?: DecayPalette
+  /**
+   * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
+   * practice the open measurement. It joins the signature rather than being watched for, so a
+   * switch cannot be forgotten at a call site.
+   */
+  persistenceKey?: string | number
+}>(), {
+  annotationNumbers: true,
+  running: false,
+  showLeft: true,
+  showRight: true,
+  persistence: 'Off',
+  intensityMode: 'Single',
+  intensityPalette: 'Jet',
+  persistenceKey: 0,
+})
 
 const emit = defineEmits<{
   axisWindow: [window: ScopeAxisWindow]
@@ -528,6 +558,206 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Persistence — the digital-phosphor picture
+// ---------------------------------------------------------------------------
+
+/** One accumulator per drawn channel, so the haze is painted in the trace's own colour. */
+interface IntensityLayer {
+  index: number
+  color: string
+  buffer: ScopeIntensityBuffer
+  pixels?: Uint8ClampedArray<ArrayBuffer>
+}
+
+/**
+ * The accumulated hit counts, in CSS pixels of the plot area, and the picture they were drawn for.
+ *
+ * <p>Held on the component rather than in a store because it <b>is</b> the component's canvas: it
+ * is a history of a <em>display</em> and not of a capture, so it is not parked with the run, not
+ * restored with the measurement and not in a report — the spectrogram's rows, for the same
+ * reason.</p>
+ */
+const intensityLayers = shallowRef<IntensityLayer[]>([])
+let intensityFor = ''
+let intensityCanvas: HTMLCanvasElement | null = null
+
+/** Bumped when the picture changes, so a redraw repaints it. */
+const intensityTick = ref(0)
+
+/** The record already folded in, so a redraw cannot count one twice. */
+let accumulatedRecord: ScopeRecordResponse | null = null
+
+/**
+ * What the accumulated counts are a picture <em>of</em>.
+ *
+ * <p><b>This is the rule the whole feature turns on.</b> A cell is a pixel, and a pixel stands for
+ * a time and a level only while the plot's size and both of its windows are unchanged — so a zoom,
+ * a V/div step, a resize or a measurement switch makes every count already there a claim about a
+ * different part of the signal. Read fresh on every record rather than watched: a watcher is a
+ * list somebody has to keep in step, and this is the one place that already knows all of it.</p>
+ */
+function currentIntensitySignature(u: uPlot): string {
+  const geo = intensityGeometry(u)
+  return intensitySignature(
+    geo.width,
+    geo.height,
+    u.scales.x.min ?? Number.NaN,
+    u.scales.x.max ?? Number.NaN,
+    u.scales.y.min ?? Number.NaN,
+    u.scales.y.max ?? Number.NaN,
+    `${props.persistenceKey}:${props.showLeft}:${props.showRight}`,
+  )
+}
+
+/** The plot area in CSS pixels, which is what the buffer is sized and addressed in. */
+function intensityGeometry(u: uPlot): { width: number; height: number } {
+  const css = u.over.clientWidth
+  const scale = css > 0 ? u.bbox.width / css : 1
+  return { width: Math.round(u.bbox.width / scale), height: Math.round(u.bbox.height / scale) }
+}
+
+/** Throws the picture away. A changed signature, a Clear, and switching persistence off all land here. */
+function resetIntensity() {
+  intensityLayers.value = []
+  intensityFor = ''
+  accumulatedRecord = null
+  intensityTick.value++
+}
+
+/**
+ * Folds the record on screen into the accumulated picture.
+ *
+ * <p>Called when a record arrives rather than from the draw hook, and that is what keeps the counts
+ * a measurement: a redraw happens for a dozen reasons — a theme change, a cursor drag, a resize —
+ * and counting on any of them would make the brightness a reading of how often the chart
+ * repainted.</p>
+ */
+function accumulateIntensity() {
+  const u = plot.value
+  if (!u || !persistenceDraws(props.persistence)) return
+
+  const record = props.record
+  if (!record || record === accumulatedRecord) return
+
+  const { width, height } = intensityGeometry(u)
+  if (width < 1 || height < 1) return
+
+  const signature = currentIntensitySignature(u)
+  const { xMs, channels } = series.value
+
+  // The residual is a derived trace and is left out: accumulating it would put a second, fainter
+  // waveform into a picture whose whole subject is how often the measured one passes somewhere.
+  const measured = channels.filter((channel) => !channel.residual)
+  if (!measured.length || !xMs.length) return
+
+  let layers = intensityLayers.value
+  const stale =
+    intensityFor !== signature ||
+    layers.length !== measured.length ||
+    layers.some((layer, i) => layer.index !== measured[i].index)
+
+  if (stale) {
+    layers = measured.map((channel) => ({
+      index: channel.index,
+      color: channel.color,
+      buffer: new ScopeIntensityBuffer(width, height),
+    }))
+    intensityLayers.value = layers
+    intensityFor = signature
+  }
+
+  const decay = persistenceDecay(props.persistence)
+
+  for (let c = 0; c < measured.length; c++) {
+    const channel = measured[c]
+    const buffer = layers[c].buffer
+    buffer.decay(decay)
+
+    let previous: number | null = null
+    for (let i = 0; i < xMs.length; i++) {
+      const hi = channel.line[i]
+      if (hi === null) {
+        previous = null
+        continue
+      }
+
+      // A decimated column already *is* a span — both extremes of what it covers — while a raw
+      // trace's span is from the previous sample to this one, which is what keeps a fast edge a
+      // line rather than a column of dots.
+      const lo = channel.band ? (channel.band[i] ?? hi) : (previous ?? hi)
+      // valToPos with canvasPixels false is already relative to the plot area's own origin, which
+      // is exactly what a buffer cell is addressed in -- subtracting bbox would shift every hit up
+      // and left by the axis gutters.
+      buffer.addSpan(
+        u.valToPos(xMs[i], 'x', false),
+        u.valToPos(hi, 'y', false),
+        u.valToPos(lo, 'y', false),
+      )
+      previous = hi
+    }
+
+    buffer.renormalise()
+  }
+
+  accumulatedRecord = record
+  intensityTick.value++
+}
+
+/**
+ * The accumulated picture, painted under the traces.
+ *
+ * <p>Under them deliberately: the newest record is drawn at full strength as an ordinary series, so
+ * what the haze adds is everything <em>before</em> it — which is how a bench instrument reads, the
+ * live trace brightest with its own history behind it.</p>
+ */
+function intensityPlugin(): uPlot.Plugin {
+  return {
+    hooks: {
+      drawAxes: [
+        (u) => {
+          // Read so the draw re-runs when the picture changes rather than only when uPlot decides.
+          void intensityTick.value
+          if (!persistenceDraws(props.persistence)) return
+
+          const layers = intensityLayers.value
+          if (!layers.length) return
+
+          if (!intensityCanvas) intensityCanvas = document.createElement('canvas')
+          const scratch = intensityCanvas
+
+          const ctx = u.ctx
+          ctx.save()
+          ctx.imageSmoothingEnabled = false
+          for (const layer of layers) {
+            const buffer = layer.buffer
+            if (buffer.peak <= 0) continue
+
+            layer.pixels = intensityPixels(
+              buffer,
+              props.intensityMode,
+              props.intensityPalette,
+              hexRgb(layer.color),
+              layer.pixels,
+            )
+
+            if (scratch.width !== buffer.width || scratch.height !== buffer.height) {
+              scratch.width = buffer.width
+              scratch.height = buffer.height
+            }
+            const scratchCtx = scratch.getContext('2d')
+            if (!scratchCtx) break
+            scratchCtx.putImageData(new ImageData(layer.pixels, buffer.width, buffer.height), 0, 0)
+            ctx.drawImage(scratch, u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
+          }
+          ctx.restore()
+        },
+      ],
+    },
+  }
+}
+
 const { zoomed, isZoomedNow, noteScale, resetZoom, noteZoomGesture, zoomBack, currentWindow, canGoBack } = useZoomBounds(
   () => plot.value,
   () => ({
@@ -616,6 +846,7 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
     ],
     // Last: whatever draws after the annotations paints over their labels.
     plugins: [
+      intensityPlugin(),
       minMaxBandPlugin(),
       triggerPositionPlugin(t),
       triggerLevelPlugin(triggerColor.value),
@@ -1144,7 +1375,34 @@ watch(
 )
 
 // A record arriving keeps whatever window is on screen; see refresh().
-watch(() => props.record, () => refresh())
+watch(() => props.record, () => {
+  refresh()
+  // Queued, so the samples are measured against the scales they are about to be drawn against:
+  // uPlot commits a scale on a microtask, and reading valToPos before that commit would place
+  // every hit in the window being left.
+  void nextTick(() => {
+    accumulateIntensity()
+    plot.value?.redraw()
+  })
+})
+
+// Switching persistence off throws the picture away rather than freezing it: what is on screen has
+// to be what the setting says, and a frozen haze over a live trace is neither.
+watch(
+  () => [props.persistence, props.intensityMode, props.intensityPalette] as const,
+  ([mode]) => {
+    if (!persistenceDraws(mode)) resetIntensity()
+    plot.value?.redraw()
+  },
+)
+
+// A record going away — a Clear, or a measurement with nothing captured — takes its history too.
+watch(
+  () => props.record === null,
+  (empty) => {
+    if (empty) resetIntensity()
+  },
+)
 
 // The panel's own boxes are an instruction, and they end a zoom.
 watch(

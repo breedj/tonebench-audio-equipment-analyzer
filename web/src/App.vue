@@ -2055,6 +2055,9 @@ const scopeAutofitOnDone = ref(DEFAULT_SCOPE_DISPLAY.autofitOnDone)
 const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
 const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
 const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
+const scopePersistence = ref(DEFAULT_SCOPE_DISPLAY.persistence)
+const scopeIntensityMode = ref(DEFAULT_SCOPE_DISPLAY.intensityMode)
+const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
 
 /**
  * The cursors — <b>session state, and deliberately not part of the display record</b>.
@@ -2166,6 +2169,9 @@ function currentScopeDisplay() {
     showTriggerLevel: scopeShowTriggerLevel.value,
     autofitOnDone: scopeAutofitOnDone.value,
     showResidual: scopeShowResidual.value,
+    persistence: scopePersistence.value,
+    intensityMode: scopeIntensityMode.value,
+    intensityPalette: scopeIntensityPalette.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
   }
@@ -2191,6 +2197,9 @@ function applyStoredScopeDisplay(paramsJson: string) {
   // wrong place until its chart reported for itself.
   scopeViewWindow.value = null
   scopeShowResidual.value = display.showResidual
+  scopePersistence.value = display.persistence
+  scopeIntensityMode.value = display.intensityMode
+  scopeIntensityPalette.value = display.intensityPalette
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
   void nextTick(() => {
@@ -2222,6 +2231,9 @@ watch(
     scopeShowLeft,
     scopeShowRight,
     scopeShowResidual,
+    scopePersistence,
+    scopeIntensityMode,
+    scopeIntensityPalette,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -5954,6 +5966,10 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :running="scopeRunning"
                   :show-left="scopeShowLeft"
                   :show-right="scopeShowRight"
+                  :persistence="scopePersistence"
+                  :intensity-mode="scopeIntensityMode"
+                  :intensity-palette="scopeIntensityPalette"
+                  :persistence-key="currentTypeId ?? 0"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
@@ -5979,6 +5995,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:show-left="scopeShowLeft"
                   v-model:show-right="scopeShowRight"
                   v-model:show-residual="scopeShowResidual"
+                  v-model:persistence="scopePersistence"
+                  v-model:intensity-mode="scopeIntensityMode"
+                  v-model:intensity-palette="scopeIntensityPalette"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
                 />

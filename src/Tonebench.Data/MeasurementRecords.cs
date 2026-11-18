@@ -1283,6 +1283,16 @@ public sealed record OscilloscopeParameters(
     /// checkbox rather than something always sent.
     /// </summary>
     bool? ChartShowResidual = null,
+    /// <summary>
+    /// How long the chart keeps each record's trace — the digital-phosphor picture. A display
+    /// preference like the pair above, so it is stored; what is <i>accumulated</i> is never stored
+    /// and never parked, being a history of a display rather than of a capture.
+    /// </summary>
+    string? ChartPersistence = null,
+    /// <summary>Whether that picture is painted in the channel's own colour or through a colour map.</summary>
+    string? ChartIntensityMode = null,
+    /// <summary>Which colour map, when it is one. The decay surfaces' own palette names.</summary>
+    string? ChartIntensityPalette = null,
     /// <summary>The settle time the run discarded after the stimulus change, in ms — a run record, null on a type's own params_json.</summary>
     double? CaptureDelayMs = null,
     /// <summary>

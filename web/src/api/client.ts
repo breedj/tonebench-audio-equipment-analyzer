@@ -1701,6 +1701,10 @@ export interface OscilloscopeParameters {
   chartShowRight?: boolean | null
   /** Whether the THD residual is drawn as a second trace. Costs a sine fit per fetch, so it is asked for. */
   chartShowResidual?: boolean | null
+  /** How long the chart keeps each record's trace. See scope/persistence.ts. */
+  chartPersistence?: string | null
+  chartIntensityMode?: string | null
+  chartIntensityPalette?: string | null
   captureDelayMs?: number | null
   externalGainLeftDb?: number | null
   externalGainRightDb?: number | null

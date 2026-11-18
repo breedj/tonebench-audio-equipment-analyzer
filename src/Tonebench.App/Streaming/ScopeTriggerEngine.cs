@@ -197,7 +197,18 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     /// every sample rate -- and compared against sample indices, so something has to convert it, and
     /// doing it here means no scanner carries a rate it could get out of step with.</para>
     /// </summary>
-    private static IScanTrigger BuildScanner(ScopeCaptureSpec spec) => spec.Trigger.Kind switch
+    private static IScanTrigger BuildScanner(ScopeCaptureSpec spec)
+    {
+        // The source is resolved here and not by a scanner, which is what the enum's own remarks
+        // say: a trigger on the generator's repeat reads no samples at all, so it replaces the kind
+        // rather than qualifying it. The request refuses the two together by name.
+        if (spec.Trigger.Source == TriggerSource.Stimulus)
+            return new StimulusTrigger(spec.StimulusPeriodFrames, spec.Trigger.HoldoffFrames);
+
+        return ScannerForKind(spec);
+    }
+
+    private static IScanTrigger ScannerForKind(ScopeCaptureSpec spec) => spec.Trigger.Kind switch
     {
         TriggerKind.Edge => new EdgeTrigger(spec.Trigger),
         TriggerKind.PulseWidth => new PulseWidthTrigger(spec.Trigger, spec.SampleRateHz),

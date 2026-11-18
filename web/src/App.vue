@@ -6130,6 +6130,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :ranges="ranges"
                   :measured-max-v="scopeExtremes?.maxV ?? null"
                   :measured-min-v="scopeExtremes?.minV ?? null"
+                  :stimulus-kind="scopeStimulus.kind.value"
                   v-model:trigger-level-v="scopeTriggerLevelV"
                   v-model:trigger-hysteresis-v="scopeTriggerHysteresisV"
                   v-model:trigger-source="scopeTriggerSource"

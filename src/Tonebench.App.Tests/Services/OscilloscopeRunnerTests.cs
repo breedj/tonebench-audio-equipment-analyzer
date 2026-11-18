@@ -430,6 +430,93 @@ public class OscilloscopeRunnerTests
     }
 
     [Fact]
+    public void TheStimulusSourceNeedsAGeneratorWhoseRepeatIsKnown()
+    {
+        // A plain tone has no whole-frame period -- fs/f is a whole number only for frequencies
+        // nobody types -- and rounding it would walk the trace sideways a fraction of a sample per
+        // cycle. It has a crossing to trigger on instead, which the message says.
+        var tone = Request() with { TriggerSource = TriggerSource.Stimulus };
+
+        var ex = Assert.Throws<ArgumentException>(tone.Validate);
+        Assert.Contains("repeat is exact", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // A square is built to an exact frame count, so it is one this can lock to.
+        var square = tone with
+        {
+            Generator = new GeneratorConfig(
+                new ChannelGeneratorConfig(true, []) { Kind = GeneratorKind.Square, Wave = new PeriodicWaveSettings { FrequencyHz = 1_000.0 } },
+                new ChannelGeneratorConfig(false, [])),
+        };
+
+        square.Validate();
+
+        // 48 frames: a 1 kHz square at this bench's 48 kS/s, quantised to a whole even number of
+        // samples the way PeriodicWave builds it -- which is the whole reason this stimulus has a
+        // period to trigger on at all.
+        Assert.Equal(48, square.StimulusPeriodFrames());
+    }
+
+    [Fact]
+    public void TheStimulusSourceReplacesTheKindRatherThanQualifyingIt()
+    {
+        // There is no level, no slope and no width in a trigger that fires on the generator's own
+        // repeat, so a kind beside it would be four controls doing nothing.
+        var request = Request() with
+        {
+            TriggerSource = TriggerSource.Stimulus,
+            TriggerKind = TriggerKind.Window,
+            TriggerLevelV = 0.2,
+            TriggerLevelLowV = -0.2,
+            Generator = new GeneratorConfig(
+                new ChannelGeneratorConfig(true, []) { Kind = GeneratorKind.Square, Wave = new PeriodicWaveSettings { FrequencyHz = 1_000.0 } },
+                new ChannelGeneratorConfig(false, [])),
+        };
+
+        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Contains("generator's own repeat", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStimulusTriggeredRun_CapturesARecordWithNoEdgeToFind()
+    {
+        // The seam, and the case the source exists for: periodic noise has no feature an edge
+        // trigger could lock to, so a record at all is the thing to assert. The period reaches the
+        // scanner through the spec, which BuildSpec fills from the staged generator -- two private
+        // methods again, and a run that commits is what proves they agree.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var request = Request() with
+            {
+                TriggerSource = TriggerSource.Stimulus,
+                Generator = new GeneratorConfig(
+                    new ChannelGeneratorConfig(true, [])
+                    {
+                        Kind = GeneratorKind.PinkNoise,
+                        Noise = new WhiteNoiseSettings { LevelDbv = -20.0, PeriodFrames = 8192 },
+                    },
+                    new ChannelGeneratorConfig(false, [])),
+            };
+
+            Assert.Equal(8192, request.StimulusPeriodFrames());
+
+            await bench.Runner.StartAsync(request, CancellationToken.None);
+
+            Assert.True(await WaitForAsync(() => !bench.Runner.Running));
+
+            var status = bench.Runner.Status;
+            Assert.Equal(FrequencyResponsePhase.Finished, status.Phase);
+            Assert.Null(status.Error);
+            Assert.Equal(1, status.RecordsTaken);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
     public async Task ADropoutRun_CapturesARecordOnAnInputThatIsNotMoving()
     {
         // The seam for the kind whose timeout rides on a field of its own: the request's

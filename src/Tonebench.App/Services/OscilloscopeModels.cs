@@ -111,6 +111,59 @@ public sealed record OscilloscopeRequest(
     /// </summary>
     public const int OscilloscopeFftSize = 16384;
 
+    /// <summary>
+    /// How many frames the staged stimulus repeats in, or null where it does not repeat in a way
+    /// this can know.
+    ///
+    /// <para><b>The trigger source that no bench scope has needs exactly one number, and this is
+    /// it.</b> Every periodic stimulus here is built to a whole frame count — the chirp's own rule,
+    /// because a period that is not an exact number of samples is not periodic in the sampled
+    /// domain at all — so the figure is read off the settings rather than measured.</para>
+    ///
+    /// <para><b>A plain tone is deliberately absent.</b> Its period is <c>fs / f</c>, which is a
+    /// whole number of frames only for frequencies nobody types, and rounding it would walk the
+    /// trace sideways a fraction of a sample per cycle. A tone has a clean crossing anyway, which
+    /// is what the edge trigger is for; the stimuli listed here are the ones that have no feature
+    /// to lock to.</para>
+    ///
+    /// <para>The first enabled channel decides, since that is the one driving the DUT; with both
+    /// on they are normally the same stimulus, and where they are not the left is what the trace
+    /// is read against.</para>
+    ///
+    /// <para><b>A periodic noise sequence is handled and is not reachable from a screen</b>, which
+    /// is why the refusal names three stimuli and this names four: <c>PeriodFrames</c> is set by
+    /// the runners that build their own configuration — the impedance measurement's pink noise —
+    /// and the generator endpoint's noise block carries a level and no period, so noise staged from
+    /// a panel is the continuous kind and genuinely has no repeat. The arm is kept because the
+    /// rule is about the <i>stimulus</i> rather than about which screen composed it.</para>
+    /// </summary>
+    public long? StimulusPeriodFrames()
+    {
+        if (Generator is null)
+            return null;
+
+        var channel = Generator.Left is { Enabled: true } left ? left
+            : Generator.Right is { Enabled: true } right ? right
+            : null;
+
+        if (channel is null)
+            return null;
+
+        if (PeriodicWave.IsWaveKind(channel.Kind))
+        {
+            int frames = PeriodicWave.PeriodFrames(channel.Wave?.FrequencyHz ?? 0.0, SampleRateHz);
+            return frames > 0 ? frames : null;
+        }
+
+        return channel.Kind switch
+        {
+            GeneratorKind.EchoChirp when channel.Chirp is { RepeatFrames: > 1 } chirp => chirp.RepeatFrames,
+            GeneratorKind.PinkNoise or GeneratorKind.WhiteNoise when channel.Noise is { PeriodFrames: > 1 } noise =>
+                noise.PeriodFrames,
+            _ => null,
+        };
+    }
+
     public void Validate()
     {
         if (!(SampleRateHz > 0.0))
@@ -226,8 +279,30 @@ public sealed record OscilloscopeRequest(
             throw new ArgumentException("The trigger watches the left channel, which is not being captured.", nameof(TriggerSource));
         if (TriggerSource == TriggerSource.ChannelB && !ProcessRight)
             throw new ArgumentException("The trigger watches the right channel, which is not being captured.", nameof(TriggerSource));
-        if (TriggerSource is TriggerSource.Math or TriggerSource.Stimulus)
+        if (TriggerSource == TriggerSource.Math)
             throw new ArgumentOutOfRangeException(nameof(TriggerSource), TriggerSource, "That trigger source is not implemented yet.");
+
+        if (TriggerSource == TriggerSource.Stimulus)
+        {
+            // The source replaces the kind rather than qualifying it: there is no level, no slope
+            // and no width in a trigger that fires on the generator's own repeat, so a kind beside
+            // it would be four controls doing nothing. Refused by name rather than ignored.
+            if (TriggerKind != TriggerKind.Edge)
+            {
+                throw new ArgumentException(
+                    "The stimulus trigger fires on the generator's own repeat, so it cannot also be a "
+                        + $"{TriggerKind} trigger. Set the kind to Edge, or pick a channel to trigger on.",
+                    nameof(TriggerSource));
+            }
+
+            if (StimulusPeriodFrames() is null)
+            {
+                throw new ArgumentException(
+                    "The stimulus trigger needs a stimulus whose repeat is exact: a chirp, a square or "
+                        + "a triangle. A plain tone has a crossing to trigger on instead.",
+                    nameof(TriggerSource));
+            }
+        }
     }
 
     /// <summary>The record length in frames at <paramref name="sampleRateHz"/>, at least two.</summary>

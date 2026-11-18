@@ -47,7 +47,13 @@ public readonly record struct ScopeCaptureSpec(
     long AutoTimeoutFrames = 0,
     long DiscontinuityHoldoffFrames = 0,
     long SettleFrames = 0,
-    long RollStepFrames = 0);
+    long RollStepFrames = 0,
+
+    /// <summary>
+    /// How many frames the stimulus repeats in, for <see cref="TriggerSource.Stimulus"/>. Zero
+    /// everywhere else, and the source is refused without it.
+    /// </summary>
+    long StimulusPeriodFrames = 0);
 
 /// <summary>
 /// One captured record: the samples, and everything needed to say what they are.

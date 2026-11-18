@@ -176,15 +176,59 @@ export function pulseWidthFor(condition: ScopePulseCondition, loS: number, hiS: 
 /**
  * The trigger sources this build implements.
  *
- * <p><code>Math</code> and <code>Stimulus</code> exist on the wire and are deliberately not offered:
- * the server refuses them by name, and a dropdown entry whose only outcome is a refusal is worse
- * than no entry. The stimulus-synchronous trigger is the interesting one of the two and is the whole
- * point of owning the generator — it arrives with the advanced triggers.</p>
+ * <p><code>Math</code> is on the wire and is deliberately not offered: the server refuses it by
+ * name, and a dropdown entry whose only outcome is a refusal is worse than no entry.</p>
+ *
+ * <p><b>Stimulus is last because it is the odd one.</b> The other two name a channel to watch; this
+ * one watches nothing at all and fires on the generator's own repeat, which is the whole point of
+ * owning the stimulus — and the only way to hold a chirp or a noise sequence still, neither having
+ * any feature an edge trigger could lock to.</p>
  */
 export const SCOPE_TRIGGER_SOURCES: readonly ScopeOption<ScopeTriggerSource>[] = Object.freeze([
   { value: 'ChannelA', label: 'Left' },
   { value: 'ChannelB', label: 'Right' },
+  { value: 'Stimulus', label: 'Stimulus' },
 ])
+
+/** What each source watches, for the control's tooltip. */
+export const SCOPE_TRIGGER_SOURCE_HINTS: Readonly<Record<ScopeTriggerSource, string>> = Object.freeze({
+  ChannelA: 'The left input.',
+  ChannelB: 'The right input.',
+  Math: 'Not implemented.',
+  Stimulus:
+    "The generator's own repeat rather than anything measured — no level, no slope, no jitter. Needs a stimulus whose repeat is exact: a chirp, a square or a triangle.",
+})
+
+/**
+ * Whether the staged source replaces the kind and its controls.
+ *
+ * <p>Triggering on the generator's repeat reads no samples, so the kind, the level, the slope and
+ * every width beside them do nothing. The server refuses a kind other than Edge alongside it rather
+ * than ignoring one, and this is the client saying the same thing by not offering them.</p>
+ */
+export function triggerIsStimulus(source: ScopeTriggerSource): boolean {
+  return source === 'Stimulus'
+}
+
+/**
+ * Which stimuli the analyzer can lock to, as a sentence, or null where the staged one is fine.
+ *
+ * <p>Mirrors <code>OscilloscopeRequest.StimulusPeriodFrames</code>: a stimulus has a period to
+ * trigger on only where it was <em>built</em> to a whole number of frames. A plain tone's period is
+ * <code>fs / f</code>, which is a whole number only for frequencies nobody types — and it has a
+ * crossing to trigger on anyway, which the message says rather than leaving a reader to wonder why
+ * the obvious stimulus is the one that will not do.</p>
+ */
+export function stimulusSourceProblem(generatorKind: string | null | undefined): string | null {
+  // The three the generator panel can stage with an exact repeat. A PERIODIC noise sequence
+  // qualifies too and the server will take one, but nothing here can compose it: the generator
+  // endpoint's noise block carries a level and no period, so noise staged from a screen is the
+  // continuous kind and genuinely has no repeat. Listing it would be a client that accepts what
+  // the server refuses, which is worse than a short list.
+  const locks = ['EchoChirp', 'Square', 'Triangle']
+  if (generatorKind && locks.includes(generatorKind)) return null
+  return 'The stimulus trigger needs a stimulus whose repeat is exact: a chirp, a square or a triangle. A plain tone has a crossing to trigger on instead.'
+}
 
 /** Which captured channel the trigger watches. */
 export function triggerChannel(source: ScopeTriggerSource): number {
@@ -203,6 +247,7 @@ export function triggerSourceProblem(
   processLeft: boolean,
   processRight: boolean,
 ): string | null {
+  // Stimulus watches no channel at all, so it has nothing to be missing.
   if (source === 'ChannelA' && !processLeft) return 'The trigger watches the left channel, which is not being captured.'
   if (source === 'ChannelB' && !processRight) return 'The trigger watches the right channel, which is not being captured.'
   return null

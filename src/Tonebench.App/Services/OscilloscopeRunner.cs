@@ -689,7 +689,12 @@ public sealed class OscilloscopeRunner(
 
             // How often Roll offers a newer window. A time converted once, here, against the rate
             // the run is streaming at.
-            RollStepFrames: request.RollStepFramesAt(request.SampleRateHz));
+            RollStepFrames: request.RollStepFramesAt(request.SampleRateHz),
+
+            // Read off the staged generator's settings rather than measured, because every periodic
+            // stimulus here is built to an exact frame count. Zero where the source is not the
+            // stimulus, which is where the engine does not look at it.
+            StimulusPeriodFrames: request.StimulusPeriodFrames() ?? 0);
     }
 
     private sealed record ParkedRun(

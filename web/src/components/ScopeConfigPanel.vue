@@ -36,11 +36,14 @@ import {
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SLOPE_HINTS,
   SCOPE_TRIGGER_SOURCES,
+  SCOPE_TRIGGER_SOURCE_HINTS,
   dropoutProblem,
   pulseConditionFor,
   pulseWidthBounds,
   pulseWidthFor,
   pulseWidthProblem,
+  stimulusSourceProblem,
+  triggerIsStimulus,
   triggerSourceProblem,
   windowLevelsProblem,
   type ScopePulseCondition,
@@ -95,6 +98,15 @@ const props = defineProps<{
    */
   measuredMaxV?: number | null
   measuredMinV?: number | null
+  /**
+   * What the generator panel in the same rail is staging, as a kind.
+   *
+   * <p>Only the stimulus trigger reads it, and it has to: a stimulus has a repeat to lock to only
+   * where it was built to a whole number of frames, so the source and the stimulus are one setting
+   * in two panels. Passed down rather than read from the store here, because the store is the
+   * other panel's and a second reader of it is a second thing to keep in step.</p>
+   */
+  stimulusKind?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -379,6 +391,18 @@ const sourceProblem = computed(() => triggerSourceProblem(triggerSource.value, f
 const kindIsWindow = computed(() => triggerKind.value === 'Window')
 const kindIsPulse = computed(() => triggerKind.value === 'PulseWidth')
 const kindIsDropout = computed(() => triggerKind.value === 'Dropout')
+
+/**
+ * True while the trigger fires on the generator's own repeat.
+ *
+ * <p>Everything a trigger normally needs — the kind, the level, the slope, a width — is about the
+ * <em>signal</em>, and this one reads none of it. The controls are hidden rather than disabled,
+ * which is the opposite of what Roll does with the same controls and is right for the opposite
+ * reason: Roll is a mode you come back from, so the level typed under it has to survive, while the
+ * source is a choice about what the trigger <em>is</em> and the kind beside it would be a second
+ * answer to that question. The server refuses the two together by name.</p>
+ */
+const sourceIsStimulus = computed(() => triggerIsStimulus(triggerSource.value))
 const kindIsRunt = computed(() => triggerKind.value === 'Runt')
 
 /**
@@ -397,6 +421,10 @@ const secondLevelLabel = computed(() => (kindIsRunt.value ? 'Second threshold (V
  */
 const pulseBounds = computed(() =>
   pulseWidthBounds(form.pulseCondition, form.pulseWidthUs / 1e6, form.pulseWidthHiUs / 1e6),
+)
+
+const stimulusProblem = computed(() =>
+  sourceIsStimulus.value ? stimulusSourceProblem(props.stimulusKind) : null,
 )
 
 const windowProblem = computed(() =>
@@ -428,6 +456,11 @@ const invalid = computed(() => {
   if (!(triggerHysteresisV.value >= 0)) return 'The hysteresis must be zero or a positive voltage.'
   if (!(form.holdoffMs >= 0)) return 'The holdoff must be zero or a positive time.'
   if (mode.value === 'Auto' && !(form.autoTimeoutMs > 0)) return 'Auto mode needs a timeout above zero.'
+  // The stimulus problem first: under that source every other check is about a control the run
+  // will not read.
+  if (stimulusProblem.value) return stimulusProblem.value
+  if (sourceIsStimulus.value) return sourceProblem.value
+
   return windowProblem.value ?? pulseProblem.value ?? dropoutProblemText.value ?? sourceProblem.value
 })
 
@@ -445,7 +478,9 @@ function buildParamsJson(): string {
     recordSeconds: form.recordMs / 1000,
     preTriggerFraction: form.preTriggerPercent / 100,
     mode: mode.value,
-    triggerKind: triggerKind.value,
+    // Edge under the stimulus source, which is what the server takes: the source replaces the kind
+    // rather than qualifying it, and sending the staged kind alongside would be refused.
+    triggerKind: sourceIsStimulus.value ? 'Edge' : triggerKind.value,
     triggerSource: triggerSource.value,
     triggerSlope: form.slope,
     triggerLevelV: triggerLevelV.value,
@@ -471,7 +506,7 @@ function buildRequest(single = false): OscilloscopeStartRequest {
     recordSeconds: form.recordMs / 1000,
     preTriggerFraction: form.preTriggerPercent / 100,
     mode: single ? 'Single' : mode.value,
-    triggerKind: triggerKind.value,
+    triggerKind: sourceIsStimulus.value ? 'Edge' : triggerKind.value,
     triggerSource: triggerSource.value,
     triggerSlope: form.slope,
     triggerLevelV: triggerLevelV.value,
@@ -801,6 +836,25 @@ function onAutoTimeoutChange(event: Event) {
 
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
+        Source
+        <select
+          v-model="triggerSource"
+          class="tb-input"
+          :disabled="rolling"
+          :title="SCOPE_TRIGGER_SOURCE_HINTS[triggerSource]"
+        >
+          <option v-for="option in SCOPE_TRIGGER_SOURCES" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <!--
+        Hidden rather than disabled under the stimulus source, which is the opposite of what Roll
+        does with these controls and is right for the opposite reason: Roll is a mode you come back
+        from, so what was typed under it has to survive, while the source is a choice about what the
+        trigger IS and a kind beside it would be a second answer to the same question.
+      -->
+      <label v-if="!sourceIsStimulus" class="tb-field">
         Kind
         <select v-model="triggerKind" class="tb-input" :disabled="rolling" :title="SCOPE_TRIGGER_KIND_HINTS[triggerKind]">
           <option v-for="option in SCOPE_TRIGGER_KINDS" :key="option.value" :value="option.value">
@@ -808,21 +862,16 @@ function onAutoTimeoutChange(event: Event) {
           </option>
         </select>
       </label>
-      <label class="tb-field">
-        Source
-        <select v-model="triggerSource" class="tb-input" :disabled="rolling">
-          <option v-for="option in SCOPE_TRIGGER_SOURCES" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
     </div>
 
-    <p v-if="triggerKind !== 'Edge'" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      {{ SCOPE_TRIGGER_KIND_HINTS[triggerKind] }}
+    <p
+      v-if="sourceIsStimulus || triggerKind !== 'Edge'"
+      class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400"
+    >
+      {{ sourceIsStimulus ? SCOPE_TRIGGER_SOURCE_HINTS.Stimulus : SCOPE_TRIGGER_KIND_HINTS[triggerKind] }}
     </p>
 
-    <label class="tb-field">
+    <label v-if="!sourceIsStimulus" class="tb-field">
       Slope
       <!--
         The word is the same for every kind and the thing it selects is not: on a pulse-width
@@ -837,7 +886,7 @@ function onAutoTimeoutChange(event: Event) {
     </label>
 
     <!-- The level's box is the precise fallback; the line on the chart is how it is normally set. -->
-    <label class="tb-field">
+    <label v-if="!sourceIsStimulus" class="tb-field">
       Level (V)
       <div class="flex items-center gap-1.5">
         <input
@@ -875,7 +924,7 @@ function onAutoTimeoutChange(event: Event) {
       of bounds in either order and the chart draws the band between them whichever way round they
       are typed.
     -->
-    <label v-if="needsSecondLevel" class="tb-field">
+    <label v-if="needsSecondLevel && !sourceIsStimulus" class="tb-field">
       {{ secondLevelLabel }}
       <input
         :value="triggerLevelLowV"
@@ -888,7 +937,7 @@ function onAutoTimeoutChange(event: Event) {
       />
     </label>
 
-    <label v-if="kindIsDropout" class="tb-field">
+    <label v-if="kindIsDropout && !sourceIsStimulus" class="tb-field">
       No edge within (ms)
       <input
         :value="form.dropoutMs"
@@ -901,7 +950,7 @@ function onAutoTimeoutChange(event: Event) {
       />
     </label>
 
-    <template v-if="kindIsPulse">
+    <template v-if="kindIsPulse && !sourceIsStimulus">
       <div class="grid grid-cols-2 gap-2.5">
         <label class="tb-field">
           Condition
@@ -946,7 +995,7 @@ function onAutoTimeoutChange(event: Event) {
     </template>
 
     <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
+      <label v-if="!sourceIsStimulus" class="tb-field">
         Hysteresis (V)
         <input
           :value="triggerHysteresisV"

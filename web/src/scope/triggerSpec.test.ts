@@ -10,14 +10,17 @@ import {
   SCOPE_TRIGGER_KIND_HINTS,
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SOURCES,
+  SCOPE_TRIGGER_SOURCE_HINTS,
   dropoutProblem,
   fiftyPercentLevel,
   pulseConditionFor,
   pulseWidthBounds,
   pulseWidthFor,
   pulseWidthProblem,
+  stimulusSourceProblem,
   suggestedHysteresis,
   triggerChannel,
+  triggerIsStimulus,
   triggerIndicator,
   triggerSourceProblem,
   windowIndicator,
@@ -35,14 +38,14 @@ describe('the dropdowns', () => {
     for (const mode of SCOPE_RUN_MODES) expect(SCOPE_RUN_MODE_HINTS[mode.value]).toBeTruthy()
   })
 
-  it('offers only the two trigger sources the server implements', () => {
-    // Math and Stimulus exist on the wire and are refused by name; a dropdown entry whose only
-    // outcome is a refusal is worse than no entry.
-    expect(SCOPE_TRIGGER_SOURCES.map((s) => s.value)).toEqual(['ChannelA', 'ChannelB'])
+  it('offers only the trigger sources the server implements', () => {
+    // Math exists on the wire and is refused by name; a dropdown entry whose only outcome is a
+    // refusal is worse than no entry.
+    expect(SCOPE_TRIGGER_SOURCES.map((s) => s.value)).toEqual(['ChannelA', 'ChannelB', 'Stimulus'])
   })
 
   it('labels the sources as the channels a user sees, not as the enum', () => {
-    expect(SCOPE_TRIGGER_SOURCES.map((s) => s.label)).toEqual(['Left', 'Right'])
+    expect(SCOPE_TRIGGER_SOURCES.map((s) => s.label)).toEqual(['Left', 'Right', 'Stimulus'])
   })
 
   it('offers all three slopes', () => {
@@ -345,5 +348,54 @@ describe('the runt thresholds', () => {
 
   it('still says window when it is one', () => {
     expect(windowLevelsProblem(0.5, 0.5)).toMatch(/window/i)
+  })
+})
+
+describe('the stimulus source', () => {
+  it('is offered last, after the two that name a channel', () => {
+    // It is the odd one: the others say which input to watch, this one watches nothing at all.
+    expect(SCOPE_TRIGGER_SOURCES.map((s) => s.value)).toEqual(['ChannelA', 'ChannelB', 'Stimulus'])
+    expect(triggerIsStimulus('Stimulus')).toBe(true)
+    expect(triggerIsStimulus('ChannelA')).toBe(false)
+  })
+
+  it('has a hint for every source on the wire, Math included', () => {
+    for (const source of ['ChannelA', 'ChannelB', 'Math', 'Stimulus'] as const)
+      expect(SCOPE_TRIGGER_SOURCE_HINTS[source].length).toBeGreaterThan(0)
+  })
+
+  it('accepts the stimuli the generator panel can stage with an exact repeat', () => {
+    // The chirp is the one with no feature an edge trigger could lock to, which is what the source
+    // is for; the two waves buy an exact trigger point rather than an interpolated one.
+    for (const kind of ['EchoChirp', 'Square', 'Triangle']) expect(stimulusSourceProblem(kind)).toBeNull()
+  })
+
+  it('refuses noise, because nothing here can stage a PERIODIC one', () => {
+    // A periodic noise sequence does have a repeat and the server takes one, but the generator
+    // endpoint's noise block carries a level and no period -- so noise staged from a screen is the
+    // continuous kind. Accepting it here would be a client that accepts what the server refuses.
+    expect(stimulusSourceProblem('PinkNoise')).toMatch(/repeat is exact/)
+    expect(stimulusSourceProblem('WhiteNoise')).toMatch(/repeat is exact/)
+  })
+
+  it('refuses a plain tone, and says what to do instead', () => {
+    // fs/f is a whole number of frames only for frequencies nobody types, and a tone has a
+    // crossing to trigger on anyway -- which the message says, rather than leaving a reader
+    // wondering why the obvious stimulus is the one that will not do.
+    const problem = stimulusSourceProblem('Tones')
+    expect(problem).toMatch(/repeat is exact/)
+    expect(problem).toMatch(/crossing to trigger on/)
+  })
+
+  it('refuses a stimulus that is not staged at all', () => {
+    expect(stimulusSourceProblem(null)).toMatch(/repeat is exact/)
+    expect(stimulusSourceProblem(undefined)).toMatch(/repeat is exact/)
+    expect(stimulusSourceProblem('Off')).toMatch(/repeat is exact/)
+  })
+
+  it('does not complain that it is watching an uncaptured channel', () => {
+    // It watches no channel at all, so it has nothing to be missing -- and a refusal there would
+    // be about a control the run does not read.
+    expect(triggerSourceProblem('Stimulus', false, false)).toBeNull()
   })
 })

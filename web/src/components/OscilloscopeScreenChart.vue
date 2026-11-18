@@ -694,8 +694,11 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
       drawAxes: [
         (u) => {
           // Never on a rolling record: nothing triggered, so a line at the trigger level would
-          // be read as the thing that placed this window.
+          // be read as the thing that placed this window. And never under the stimulus source,
+          // which fires on the generator's own repeat and reads no level at all -- a line there
+          // would be read as the thing that placed the record, which is the same fault.
           if (!props.showTriggerLevel || props.record?.rolled === true) return
+          if (props.triggerSource === 'Stimulus') return
 
           const ctx = u.ctx
           const left = u.bbox.left

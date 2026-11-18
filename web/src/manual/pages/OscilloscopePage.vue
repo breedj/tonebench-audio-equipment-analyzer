@@ -120,7 +120,11 @@ const { showPage } = useManual()
         </tr>
         <tr>
           <td>Source</td>
-          <td>Which channel the trigger watches. It must be one of the captured channels.</td>
+          <td>
+            Which channel the trigger watches — or <strong>Stimulus</strong>, which watches no
+            channel at all and fires on the generator's own repeat. See <strong>The stimulus
+            trigger</strong> below. A channel source must be one of the captured channels.
+          </td>
         </tr>
         <tr>
           <td>Slope</td>
@@ -296,6 +300,45 @@ const { showPage } = useManual()
       bandwidth it is the most marginal of the five: the same fault usually reads better as
       distortion against level on a THD sweep. It earns its keep on a switching or logic waveform,
       and on anything where one cycle in a thousand is the question.
+    </p>
+
+    <h2>The stimulus trigger</h2>
+
+    <p>
+      This analyzer composes the stimulus, so the stimulus's phase is known exactly rather than
+      inferred from the signal coming back — and <strong>Source ▸ Stimulus</strong> turns that into
+      a trigger. It fires on the generator's own repeat: no level, no slope, no kind, and no
+      jitter. No bench oscilloscope has it, because none of them generates what you are measuring.
+    </p>
+
+    <p>
+      <strong>What it is for is a stimulus with no edge to find.</strong> A chirp, a periodic-noise
+      sequence and a multitone comb have no feature an edge trigger can lock to, so they draw as a
+      wash that redraws differently every capture. Triggered on the stimulus they stand perfectly
+      still — which is what makes a transient visible in one, and what makes <strong>Average</strong>
+      worth anything on them at all, since averaging rests on sample i of every record being the
+      same point on the waveform. On a square or a triangle it is still worth having: the trigger
+      point is exact rather than interpolated, so there is no sub-sample residue left over.
+    </p>
+
+    <p>
+      It needs a stimulus whose repeat is a whole number of samples. A <strong>square</strong> and a
+      <strong>triangle</strong> are built that way and are what this screen's own generator offers;
+      a chirp qualifies too, and is what the frequency-response and impulse measurements play. A
+      plain tone is refused, and deliberately — its period is the sample rate over its frequency, a
+      whole number of samples only for frequencies nobody types, and rounding it would walk the
+      trace sideways a fraction of a sample per cycle. A tone has a clean crossing to trigger on
+      instead. Noise is refused for a different reason: the noise this panel stages runs
+      continuously rather than repeating, so there is nothing to lock to.
+    </p>
+
+    <p>
+      <strong>What it is not is absolute phase.</strong> Between the generator writing a sample and
+      the ADC returning it there is the output queue, the DUT and the analog path, and this app does
+      not measure that delay. So t&nbsp;=&nbsp;0 is a consistent point of the stimulus offset by an
+      unknown constant, not the stimulus's own zero crossing. Consistent is the whole of what a
+      stable trace needs; for an absolute figure, measure the delay — that is what the frequency
+      response's group delay reading is.
     </p>
 
     <h2>Averaging and envelope</h2>

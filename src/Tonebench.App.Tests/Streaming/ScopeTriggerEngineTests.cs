@@ -70,6 +70,54 @@ public class ScopeTriggerEngineTests
     }
 
     [Fact]
+    public void AnEventEarlyInABlockFarLongerThanTheRecord_IsStillCaught()
+    {
+        // THE regression, and it had been there since the engine was written. The capture buffer
+        // was sized at twice the record, which with a 4 ms record at 192 kS/s is 1536 frames --
+        // shorter than the 4096-frame block the device delivers. So by the time a block had been
+        // written, the oldest of its own samples were already gone: `Oldest` sat two thirds of the
+        // way into the block just delivered, and a hit before that point was refused for want of
+        // pre-trigger history it could never have had.
+        //
+        // On an ordinary waveform nothing looks wrong -- a 1 kHz tone has a crossing in the
+        // scannable part every time -- so what it cost was a ONE-SHOT event landing in the other
+        // three fifths of the stream, which is the one thing Single exists for. The dropout
+        // trigger is what exposed it: its event is a deadline rather than a feature of the signal,
+        // so it lands wherever the arithmetic puts it.
+        //
+        // Here the signal is flat except for one rising step 100 frames into the second block --
+        // the only crossing in the whole stream, and far too early in its block to survive the old
+        // depth.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 768, preTriggerFrames: 384), droppedTotal: 0);
+
+        var records = new List<ScopeRecord>();
+        for (int b = 0; b < 4; b++)
+        {
+            var block = new float[BlockFrames * 2];
+            for (int f = 0; f < BlockFrames; f++)
+            {
+                long i = ((long)b * BlockFrames) + f;
+                float v = i >= BlockFrames + 100 ? 1f : -1f;
+                block[f * 2] = v;
+                block[(f * 2) + 1] = v;
+            }
+
+            engine.Write(block, default, startsAfterDiscontinuity: false, 0);
+            if (engine.TakeRecord() is { } record)
+                records.Add(record);
+        }
+
+        var caught = Assert.Single(records);
+        Assert.Equal(768, caught.FrameCount);
+
+        // Placed on the step: the pre-trigger half is the flat low stretch before it.
+        Assert.Equal(-1.0, caught.Channels[0][0], 6);
+        Assert.Equal(-1.0, caught.Channels[0][383], 6);
+        Assert.Equal(1.0, caught.Channels[0][384], 6);
+    }
+
+    [Fact]
     public void ARecordCarriesTheSamplesFromBeforeItsTrigger()
     {
         // The property the whole design exists for. The square is -1 before each rising edge and
@@ -353,12 +401,31 @@ public class ScopeTriggerEngineTests
     }
 
     [Fact]
-    public void AnUnimplementedTriggerKind_IsRefusedAtArmingRatherThanIgnored()
+    public void AKindTheEngineCannotBuild_IsRefusedAtArmingRatherThanIgnored()
     {
+        // Every kind the enum names is implemented now, so this needs a value from outside it --
+        // which is the case the default arm of BuildScanner is really for: a kind added to the enum
+        // and not to the factory. What it must not do is throw on the pump thread at the top of the
+        // next block, where it would take the stream down rather than the request that asked for it.
         var (_, engine) = NewEngine();
-        var spec = Spec() with { Trigger = TriggerSpec.Edge(0.0) with { Kind = TriggerKind.Dropout } };
+        var spec = Spec() with { Trigger = TriggerSpec.Edge(0.0) with { Kind = (TriggerKind)99 } };
 
         Assert.Throws<NotSupportedException>(() => engine.Arm(spec, droppedTotal: 0));
+    }
+
+    [Fact]
+    public void ASettingAScannerRefuses_IsAlsoRefusedAtArming()
+    {
+        // The same rule one layer in: a dropout trigger with no timeout is refused by its own
+        // constructor, and because the engine builds the scanner on the caller's thread that
+        // refusal comes back to whoever asked rather than arriving on the stream.
+        var (_, engine) = NewEngine();
+        var spec = Spec() with
+        {
+            Trigger = new TriggerSpec(TriggerKind.Dropout, TriggerSource.ChannelA, TriggerSlope.Rising, 0.0),
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => engine.Arm(spec, droppedTotal: 0));
     }
 
     [Theory]
@@ -527,17 +594,19 @@ public class ScopeTriggerEngineTests
     /// built on the caller's thread rather than at the top of the next block.
     /// </summary>
     [Fact]
-    public void ARetuneToAnUnimplementedTriggerIsRefusedOnTheCallersThread()
+    public void ARetuneToATriggerTheEngineRefusesIsRefusedOnTheCallersThread()
     {
         var (_, engine) = NewEngine();
         engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
 
+        // A runt with one threshold rather than two: a setting its own scanner refuses, which is
+        // what a retune can realistically carry now that every kind is implemented.
         var spec = Spec(mode: ScopeRunMode.Normal) with
         {
             Trigger = new TriggerSpec(TriggerKind.Runt, TriggerSource.ChannelA, TriggerSlope.Rising, 0.0),
         };
 
-        Assert.Throws<NotSupportedException>(() => engine.Retune(spec));
+        Assert.Throws<ArgumentOutOfRangeException>(() => engine.Retune(spec));
 
         // And the capture it was armed with is untouched.
         Assert.NotEmpty(Feed(engine, blocks: 3));

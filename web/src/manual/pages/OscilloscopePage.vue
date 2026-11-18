@@ -112,9 +112,10 @@ const { showPage } = useManual()
         <tr>
           <td>Kind</td>
           <td>
-            <strong>Edge</strong>, <strong>Pulse width</strong> or <strong>Window</strong> — what the
-            analyzer is looking for. See <strong>The advanced triggers</strong> below. Edge is what a
-            scope does unless you tell it otherwise.
+            <strong>Edge</strong>, <strong>Pulse width</strong>, <strong>Window</strong>,
+            <strong>Dropout</strong> or <strong>Runt</strong> — what the analyzer is looking for. See
+            <strong>The advanced triggers</strong> below. Edge is what a scope does unless you tell
+            it otherwise.
           </td>
         </tr>
         <tr>
@@ -141,11 +142,19 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Second level (V)</td>
+          <td>Second level / Second threshold (V)</td>
           <td>
-            The window trigger's other bound. The order does not matter — the chart and the capture
-            both sort the pair, so typing the higher figure in either box gives the same band. Shown
-            only on that kind.
+            The other of the two voltages the window and runt triggers need. The order does not
+            matter — the chart and the capture both sort the pair — and both kinds draw the band
+            between them. Shown only on those kinds.
+          </td>
+        </tr>
+        <tr>
+          <td>No edge within (ms)</td>
+          <td>
+            The dropout trigger's timeout: how long an absence of qualifying edges has to last.
+            Milliseconds, because this is for a signal that <em>stops</em> rather than for a glitch.
+            Shown only on that kind.
           </td>
         </tr>
         <tr>
@@ -243,10 +252,50 @@ const { showPage } = useManual()
       entered — and it is why a very tight band simply never fires rather than firing on every edge.
     </p>
 
+    <h3>Dropout — the trigger that waits for nothing</h3>
+
     <p>
-      <strong>Dropout</strong> and <strong>runt</strong> are not implemented. They are on the wire
-      and the dropdown does not offer them, because a control whose only outcome is a refusal is
-      worse than no control.
+      Every other trigger waits for something to happen. This one fires when a qualifying edge has
+      <em>not</em> happened for as long as you set, which is what an intermittent fault actually
+      looks like: an amplifier that mutes for a tenth of a second, an oscillator that drops out, a
+      connection that goes open. None of them produces an event to trigger on, and with 100 %
+      pre-trigger the record is the signal right up to the moment it stopped.
+    </p>
+
+    <p>
+      <strong>Slope</strong> decides what counts as a sign of life — <strong>Either</strong> means a
+      crossing in any direction. Raise the <strong>hysteresis</strong> here before anything else: a
+      signal sitting on the level crosses it constantly on its own noise, so without it a dead input
+      looks perfectly alive and the trigger never fires at all. Two things worth knowing. The clock
+      counts from the <em>first sample of the run</em> as well as from each edge, so an input that
+      is already dead fires after one timeout rather than waiting for ever. And a signal that stays
+      dead goes on firing once a timeout, which is what keeps something on screen.
+    </p>
+
+    <p>
+      <strong>It will also fire on a hole in the stream</strong>, and that is worth recognising
+      before it is read as a DUT fault. A dropped USB chunk or a starved DAC is a stretch of
+      recording with no edges in it. The record says which it was: a capture that spans a drop is
+      marked <strong>spliced</strong> on the chart and in the saved measurement, because a hole and
+      a dead amplifier look identical in a waveform.
+    </p>
+
+    <h3>Runt — an edge that did not make it</h3>
+
+    <p>
+      A runt is a pulse that crosses one threshold and fails to reach the other: a stage that cannot
+      quite swing to the rail on one cycle in a thousand, a supply that sags under a transient. Set
+      the two thresholds either side of where a good pulse goes, and <strong>Rising</strong> catches
+      a pulse up that never reaches the upper one. It fires on the way back, where "it never got
+      there" becomes known.
+    </p>
+
+    <p>
+      Neither a level nor a width can pick a runt out — it is exactly as wide as a good pulse and it
+      crosses exactly the same lower threshold — which is the whole reason the kind exists. At audio
+      bandwidth it is the most marginal of the five: the same fault usually reads better as
+      distortion against level on a THD sweep. It earns its keep on a switching or logic waveform,
+      and on anything where one cycle in a thousand is the question.
     </p>
 
     <h2>Averaging and envelope</h2>

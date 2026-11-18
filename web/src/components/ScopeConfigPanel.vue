@@ -36,6 +36,7 @@ import {
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SLOPE_HINTS,
   SCOPE_TRIGGER_SOURCES,
+  dropoutProblem,
   pulseConditionFor,
   pulseWidthBounds,
   pulseWidthFor,
@@ -139,6 +140,16 @@ const form = reactive({
   pulseCondition: 'ShorterThan' as ScopePulseCondition,
   pulseWidthUs: 50,
   pulseWidthHiUs: 200,
+  /**
+   * The dropout timeout, in milliseconds.
+   *
+   * <p>Milliseconds rather than the widths' microseconds because it is a different scale: what this
+   * is set for is an amplifier that mutes, an oscillator that stops or a connection that goes open,
+   * none of which is measured in microseconds. 20 ms is twenty cycles of a 1 kHz tone — long enough
+   * not to fire on an ordinary waveform's own quiet moments, short enough to catch a dropout a
+   * listener would hear.</p>
+   */
+  dropoutMs: 20,
 })
 
 /** The rates this analyzer can capture at, newest-first as the device reports them. */
@@ -211,6 +222,9 @@ function applyStoredParams(paramsJson: string) {
   // The condition is read back from the pair of bounds rather than stored on its own, so there is
   // one statement of what the capture did and the panel cannot disagree with it. A measurement saved
   // as "shorter than 50 us" reopens saying that, not "between 0 and 50".
+  if (typeof stored.dropoutSeconds === 'number' && stored.dropoutSeconds > 0)
+    form.dropoutMs = stored.dropoutSeconds * 1000
+
   if (stored.triggerKind === 'PulseWidth') {
     const condition = pulseConditionFor(stored.pulseWidthLoSeconds, stored.pulseWidthHiSeconds)
     form.pulseCondition = condition
@@ -364,6 +378,16 @@ const sourceProblem = computed(() => triggerSourceProblem(triggerSource.value, f
 /** Which extra controls the staged kind needs. */
 const kindIsWindow = computed(() => triggerKind.value === 'Window')
 const kindIsPulse = computed(() => triggerKind.value === 'PulseWidth')
+const kindIsDropout = computed(() => triggerKind.value === 'Dropout')
+const kindIsRunt = computed(() => triggerKind.value === 'Runt')
+
+/**
+ * The window's band and the runt's pair of thresholds are the same two numbers read two ways, so
+ * one box serves both — with its own label, since a band and a pair of thresholds a pulse has to
+ * reach are not the same idea.
+ */
+const needsSecondLevel = computed(() => kindIsWindow.value || kindIsRunt.value)
+const secondLevelLabel = computed(() => (kindIsRunt.value ? 'Second threshold (V)' : 'Second level (V)'))
 
 /**
  * The width condition as the two bounds the wire carries, in seconds.
@@ -376,7 +400,13 @@ const pulseBounds = computed(() =>
 )
 
 const windowProblem = computed(() =>
-  kindIsWindow.value ? windowLevelsProblem(triggerLevelV.value, triggerLevelLowV.value) : null,
+  needsSecondLevel.value
+    ? windowLevelsProblem(triggerLevelV.value, triggerLevelLowV.value, triggerKind.value)
+    : null,
+)
+
+const dropoutProblemText = computed(() =>
+  kindIsDropout.value ? dropoutProblem(form.dropoutMs / 1000) : null,
 )
 
 const pulseProblem = computed(() =>
@@ -398,7 +428,7 @@ const invalid = computed(() => {
   if (!(triggerHysteresisV.value >= 0)) return 'The hysteresis must be zero or a positive voltage.'
   if (!(form.holdoffMs >= 0)) return 'The holdoff must be zero or a positive time.'
   if (mode.value === 'Auto' && !(form.autoTimeoutMs > 0)) return 'Auto mode needs a timeout above zero.'
-  return windowProblem.value ?? pulseProblem.value ?? sourceProblem.value
+  return windowProblem.value ?? pulseProblem.value ?? dropoutProblemText.value ?? sourceProblem.value
 })
 
 /**
@@ -423,9 +453,10 @@ function buildParamsJson(): string {
     // Only the kind that reads each one, which is what the server's own save does: a stored window
     // level on an edge-triggered measurement would reopen showing a band the trigger never had.
     // Undefined rather than null, so JSON.stringify leaves the field out altogether.
-    triggerLevelLowV: kindIsWindow.value ? triggerLevelLowV.value : undefined,
+    triggerLevelLowV: needsSecondLevel.value ? triggerLevelLowV.value : undefined,
     pulseWidthLoSeconds: kindIsPulse.value ? pulseBounds.value.loS : undefined,
     pulseWidthHiSeconds: kindIsPulse.value ? (pulseBounds.value.hiS ?? undefined) : undefined,
+    dropoutSeconds: kindIsDropout.value ? form.dropoutMs / 1000 : undefined,
     holdoffSeconds: form.holdoffMs / 1000,
     processLeft: form.processLeft,
     processRight: form.processRight,
@@ -445,11 +476,12 @@ function buildRequest(single = false): OscilloscopeStartRequest {
     triggerSlope: form.slope,
     triggerLevelV: triggerLevelV.value,
     triggerHysteresisV: triggerHysteresisV.value,
-    triggerLevelLowV: kindIsWindow.value ? triggerLevelLowV.value : undefined,
+    triggerLevelLowV: needsSecondLevel.value ? triggerLevelLowV.value : undefined,
     pulseWidthLoSeconds: kindIsPulse.value ? pulseBounds.value.loS : undefined,
     // Left out entirely where the condition has no upper bound: absent is "longer than", which is a
     // condition of its own rather than a missing figure -- and an infinity cannot ride on JSON.
     pulseWidthHiSeconds: kindIsPulse.value ? (pulseBounds.value.hiS ?? undefined) : undefined,
+    dropoutSeconds: kindIsDropout.value ? form.dropoutMs / 1000 : undefined,
     holdoffSeconds: form.holdoffMs / 1000,
     autoTimeoutSeconds: form.autoTimeoutMs / 1000,
     // Normal where the staged mode cannot produce records to combine, so the Single button never
@@ -600,6 +632,10 @@ function readWidthUs(event: Event, current: number): number {
   const clamped = clampNumberField(typed, 0.01)
   box.value = String(clamped)
   return clamped
+}
+
+function onDropoutChange(event: Event) {
+  form.dropoutMs = readWidthUs(event, form.dropoutMs)
 }
 
 function onHysteresisChange(event: Event) {
@@ -839,8 +875,8 @@ function onAutoTimeoutChange(event: Event) {
       of bounds in either order and the chart draws the band between them whichever way round they
       are typed.
     -->
-    <label v-if="kindIsWindow" class="tb-field">
-      Second level (V)
+    <label v-if="needsSecondLevel" class="tb-field">
+      {{ secondLevelLabel }}
       <input
         :value="triggerLevelLowV"
         type="number"
@@ -849,6 +885,19 @@ function onAutoTimeoutChange(event: Event) {
         :disabled="rolling"
         title="The band's other bound. The order does not matter — the chart and the capture both sort the pair."
         @change="onSecondLevelChange"
+      />
+    </label>
+
+    <label v-if="kindIsDropout" class="tb-field">
+      No edge within (ms)
+      <input
+        :value="form.dropoutMs"
+        type="number"
+        step="1"
+        class="tb-input"
+        :disabled="rolling"
+        title="How long an absence of qualifying edges has to last before the analyzer takes a record. Milliseconds: this is for a signal that stops, not for a glitch."
+        @change="onDropoutChange"
       />
     </label>
 

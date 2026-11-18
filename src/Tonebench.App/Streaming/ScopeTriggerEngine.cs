@@ -71,6 +71,15 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     /// <summary>Scratch for the trigger scan, grown to the largest block seen.</summary>
     private double[] _scan = new double[4096];
 
+    /// <summary>
+    /// The deepest block this engine has been handed, which is what the capture buffer's depth has
+    /// to be sized against — see <see cref="RequiredCapacity"/> for what it costs to leave it out.
+    ///
+    /// <para>Learned from the stream rather than taken as a constant: the block length belongs to
+    /// the device, and a sound card's is not a QA403's.</para>
+    /// </summary>
+    private int _largestBlockFrames;
+
     public ScopeEngineState State
     {
         get
@@ -193,17 +202,39 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         TriggerKind.Edge => new EdgeTrigger(spec.Trigger),
         TriggerKind.PulseWidth => new PulseWidthTrigger(spec.Trigger, spec.SampleRateHz),
         TriggerKind.Window => new WindowTrigger(spec.Trigger),
+        TriggerKind.Dropout => new DropoutTrigger(spec.Trigger, spec.SampleRateHz),
+        TriggerKind.Runt => new RuntTrigger(spec.Trigger),
         _ => throw new NotSupportedException($"The {spec.Trigger.Kind} trigger is not implemented yet."),
     };
+
+    /// <summary>
+    /// How deep the buffer has to be for a record of <paramref name="recordFrames"/>.
+    ///
+    /// <para><b>Twice the record <i>plus a whole block</i>, and the block is the part that was
+    /// missing.</b> Twice the record covers a hit at the very start of the newest samples with the
+    /// whole of its record still to fill; what it does not cover is that those samples arrive a
+    /// <b>block at a time</b>, and a block here is 4096 frames against a 4 ms record's 768. The
+    /// buffer was then shorter than one block, so by the time a block had been written the oldest
+    /// of its own samples were already gone — <c>Oldest</c> sat part way into the block just
+    /// delivered, and a hit before that point was refused for want of pre-trigger history it could
+    /// never have had.</para>
+    ///
+    /// <para>What that cost was invisible on an ordinary waveform and fatal on a rare event: with a
+    /// 768-frame record only the newest ~1664 samples of each 4096-frame block could be triggered
+    /// on, so <b>three fifths of the stream was not triggerable at all</b>. A periodic signal has a
+    /// crossing in the scannable part every time and nothing looks wrong; a one-shot transient
+    /// landing in the rest is simply never caught, which is the one thing Single exists for. The
+    /// dropout trigger is what exposed it — its event is a <i>deadline</i> rather than a feature of
+    /// the signal, so it lands wherever the arithmetic puts it, and a timeout past about 6 ms could
+    /// never commit a record.</para>
+    /// </summary>
+    private int RequiredCapacity(int recordFrames) => checked((recordFrames * 2) + _largestBlockFrames);
 
     /// <summary>Puts a validated spec and its scanner into service: armed, and scanning from here on.</summary>
     private void Take(ScopeCaptureSpec spec, IScanTrigger scanner)
     {
         _spec = spec;
-
-        // Twice the record, so a hit landing anywhere in the newest block still has a whole
-        // pre-trigger window behind it that has not been overwritten while the rest was filling.
-        _buffer.EnsureCapacity(checked(spec.RecordFrames * 2));
+        _buffer.EnsureCapacity(RequiredCapacity(spec.RecordFrames));
 
         _scanner = scanner;
         _armedAt = _buffer.Newest;
@@ -356,6 +387,20 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     public void Write(ReadOnlySpan<float> interleaved, ReadOnlySpan<double> scale, bool startsAfterDiscontinuity, long droppedTotal)
     {
         ApplyPending();
+
+        // The deepest block seen so far, which is what the capacity has to be sized against. Read
+        // from the stream rather than assumed: the block length is the device's and a sound card's
+        // is not a QA403's. A block bigger than anything before it grows the buffer BEFORE it is
+        // written, so the samples about to arrive are the ones that survive -- EnsureCapacity
+        // starts the history again, which on a growth is one block's worth and nothing more.
+        int channels = Math.Max(1, _buffer.ChannelCount);
+        int frames = interleaved.Length / channels;
+        if (frames > _largestBlockFrames)
+        {
+            _largestBlockFrames = frames;
+            if (_spec.RecordFrames > 0)
+                _buffer.EnsureCapacity(RequiredCapacity(_spec.RecordFrames));
+        }
 
         long from = _buffer.Newest;
         _buffer.Write(interleaved, scale, startsAfterDiscontinuity);

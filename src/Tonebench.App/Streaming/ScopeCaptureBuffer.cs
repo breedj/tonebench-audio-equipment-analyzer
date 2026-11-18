@@ -149,7 +149,16 @@ public sealed class ScopeCaptureBuffer
 
             // Everything held described a different depth; nothing before here may be read, but the
             // clock keeps running so an index still means the moment it always meant.
-            _contiguousFrom = _writeIndex;
+            //
+            // The LATER of the two, never a plain assignment -- the rule BookDiscard and
+            // NoteDiscontinuity already follow and this was the one place that did not. A discard
+            // booked ahead of the write head is a refusal of samples that have not arrived yet, so
+            // assigning the write head here would hand them back: a resize landing between a
+            // stimulus change and its settle would quietly cancel the settle, and the first record
+            // of the run would be taken on audio that is still the old stimulus. That is the
+            // Reset(0) fault in another costume, and a resize does land there -- the engine grows
+            // this buffer on the first block after an arm, which is exactly when a settle is owed.
+            _contiguousFrom = Math.Max(_contiguousFrom, _writeIndex);
             _epoch++;
         }
     }

@@ -6,9 +6,11 @@ import {
   SCOPE_RUN_MODE_HINTS,
   SCOPE_PULSE_CONDITIONS,
   SCOPE_TRIGGER_KINDS,
+  SCOPE_TRIGGER_SLOPE_HINTS,
   SCOPE_TRIGGER_KIND_HINTS,
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SOURCES,
+  dropoutProblem,
   fiftyPercentLevel,
   pulseConditionFor,
   pulseWidthBounds,
@@ -199,17 +201,24 @@ describe('the trigger panel binds its voltages without v-model', () => {
 })
 
 describe('the trigger kinds', () => {
-  it('offers only the kinds the server implements', () => {
-    // A dropdown entry whose only outcome is a refusal is worse than no entry -- the same rule the
-    // two unimplemented sources follow.
-    expect(SCOPE_TRIGGER_KINDS.map((k) => k.value)).toEqual(['Edge', 'PulseWidth', 'Window'])
+  it('offers every kind the server implements', () => {
+    expect(SCOPE_TRIGGER_KINDS.map((k) => k.value)).toEqual([
+      'Edge',
+      'PulseWidth',
+      'Window',
+      'Dropout',
+      'Runt',
+    ])
   })
 
-  it('has a hint for every kind on the wire, including the two it does not offer', () => {
-    // So a kind restored from a measurement saved by a later build still has something to say for
-    // itself rather than rendering an empty tooltip.
-    for (const kind of ['Edge', 'PulseWidth', 'Window', 'Dropout', 'Runt'] as const)
-      expect(typeof SCOPE_TRIGGER_KIND_HINTS[kind]).toBe('string')
+  it('has a hint for every kind, and a slope hint too', () => {
+    // The word "slope" means something different on every kind -- which stretch IS the pulse, enter
+    // or leave, which direction counts as life -- so an empty one is a control that says nothing
+    // about what it selects.
+    for (const { value } of SCOPE_TRIGGER_KINDS) {
+      expect(SCOPE_TRIGGER_KIND_HINTS[value].length).toBeGreaterThan(0)
+      expect(SCOPE_TRIGGER_SLOPE_HINTS[value].length).toBeGreaterThan(0)
+    }
   })
 
   it('names Edge first, which is what a scope does unless told otherwise', () => {
@@ -310,5 +319,31 @@ describe('the window trigger band', () => {
     expect(windowLevelsProblem(0.5, 0.5)).toMatch(/two different levels/)
     expect(windowLevelsProblem(0.5, -0.5)).toBeNull()
     expect(windowLevelsProblem(Number.NaN, -0.5)).toMatch(/voltages/)
+  })
+})
+
+describe('the dropout timeout', () => {
+  it('refuses a timeout of nothing', () => {
+    // Zero fires on every sample on which no edge happened, which is almost all of them -- a
+    // trigger that fires constantly while claiming to report an absence.
+    expect(dropoutProblem(0)).toMatch(/above zero/)
+    expect(dropoutProblem(-1)).toMatch(/above zero/)
+    expect(dropoutProblem(Number.NaN)).toMatch(/above zero/)
+    expect(dropoutProblem(0.02)).toBeNull()
+  })
+})
+
+describe('the runt thresholds', () => {
+  it('refuses two equal thresholds in its own words', () => {
+    // The same check as the window's, and deliberately not the same sentence: a message about a
+    // "window" on the runt screen sends a reader looking for a control that is not there.
+    const runt = windowLevelsProblem(0.5, 0.5, 'Runt')
+    expect(runt).toMatch(/runt/i)
+    expect(runt).not.toMatch(/window/i)
+    expect(windowLevelsProblem(0.5, -0.2, 'Runt')).toBeNull()
+  })
+
+  it('still says window when it is one', () => {
+    expect(windowLevelsProblem(0.5, 0.5)).toMatch(/window/i)
   })
 })

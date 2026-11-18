@@ -323,17 +323,6 @@ public class OscilloscopeRunnerTests
         Assert.Throws<ArgumentException>(request.Validate);
     }
 
-    [Theory]
-    [InlineData(TriggerKind.Dropout)]
-    [InlineData(TriggerKind.Runt)]
-    public void AnUnimplementedTriggerKind_IsRefusedWithItsOwnMessage(TriggerKind kind)
-    {
-        var request = Request() with { TriggerKind = kind };
-
-        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
-        Assert.Contains("not implemented", ex.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
     [Fact]
     public void AWindowTriggerNeedsTwoDifferentLevels()
     {
@@ -345,6 +334,35 @@ public class OscilloscopeRunnerTests
         Assert.Contains("two levels must differ", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         (request with { TriggerLevelLowV = -0.5 }).Validate();
+    }
+
+    [Fact]
+    public void ARuntTriggerNeedsTwoDifferentThresholds_AndSaysSoInItsOwnWords()
+    {
+        // The same two numbers read two ways, so they are checked together -- but a runt is a pulse
+        // that reaches one threshold and not the other, which is not what a band is, and a message
+        // about a "window" on the runt screen would send the reader looking for a control that is
+        // not there.
+        var request = Request() with { TriggerKind = TriggerKind.Runt, TriggerLevelV = 0.5, TriggerLevelLowV = 0.5 };
+
+        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Contains("runt", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("window", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        (request with { TriggerLevelLowV = -0.5 }).Validate();
+    }
+
+    [Fact]
+    public void ADropoutTriggerNeedsATimeout()
+    {
+        // Zero would fire on every sample on which no edge happened, which is almost all of them --
+        // a trigger that fires constantly while claiming to report an absence.
+        var request = Request() with { TriggerKind = TriggerKind.Dropout };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        Assert.Contains("timeout above zero", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        (request with { DropoutSeconds = 0.05 }).Validate();
     }
 
     [Fact]
@@ -403,6 +421,36 @@ public class OscilloscopeRunnerTests
             Assert.Equal(FrequencyResponsePhase.Finished, status.Phase);
             Assert.Null(status.Error);
             Assert.Equal(1, status.RecordsTaken);
+        }
+        finally
+        {
+            await bench.Runner.CancelAsync();
+            await bench.Session.ShutdownAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ADropoutRun_CapturesARecordOnAnInputThatIsNotMoving()
+    {
+        // The seam for the kind whose timeout rides on a field of its own: the request's
+        // DropoutSeconds has to reach the scanner as the spec's WidthLoS, which BuildSpec picks
+        // per kind. Sent at a level the generator's own tone never crosses, so there is no edge and
+        // the timeout is what commits the record -- and it must not come back Forced, which is
+        // Auto's own way of drawing something and a different thing entirely.
+        var bench = await NewBenchAsync();
+        try
+        {
+            var request = Request(mode: ScopeRunMode.Normal) with
+            {
+                TriggerKind = TriggerKind.Dropout,
+                TriggerLevelV = 5.0,
+                DropoutSeconds = 0.01,
+            };
+
+            await bench.Runner.StartAsync(request, CancellationToken.None);
+
+            Assert.True(await WaitForAsync(() => bench.Runner.Status.RecordsTaken > 0));
+            Assert.Null(bench.Runner.Status.Error);
         }
         finally
         {

@@ -33,6 +33,7 @@ public class OscilloscopeStartRequestTests
             TriggerLevelLowV: -0.25,
             PulseWidthLoSeconds: 30e-6,
             PulseWidthHiSeconds: 120e-6,
+            DropoutSeconds: 0.4,
             AutoTimeoutSeconds: 0.25,
             Accumulation: "Average",
             AverageCount: 8,
@@ -70,6 +71,7 @@ public class OscilloscopeStartRequestTests
         Assert.Equal(-0.25, measurement.TriggerLevelLowV);
         Assert.Equal(30e-6, measurement.PulseWidthLoSeconds);
         Assert.Equal(120e-6, measurement.PulseWidthHiSeconds);
+        Assert.Equal(0.4, measurement.DropoutSeconds);
         Assert.Equal(0.25, measurement.AutoTimeoutSeconds);
         Assert.Equal(RecordAccumulation.Average, measurement.Accumulation);
         Assert.Equal(8, measurement.AverageCount);
@@ -97,10 +99,12 @@ public class OscilloscopeStartRequestTests
     {
         // The wire record carries three fields the measurement does not -- the two generator
         // channels and the bin snap, which are folded into one GeneratorConfig before the mapping --
-        // and the measurement carries the GeneratorConfig itself. Hence 21 against 19. A field added
-        // to either without the other fails here rather than defaulting silently.
-        Assert.Equal(21, ConstructorParameterCount(typeof(OscilloscopeStartRequest)));
-        Assert.Equal(19, ConstructorParameterCount(typeof(OscilloscopeRequest)));
+        // and the measurement carries the GeneratorConfig itself. Hence 22 against 20. A field added
+        // to either without the other fails here rather than defaulting silently, which is exactly
+        // what it did the first time: the dropout timeout was added to the measurement record and
+        // this refused to compile until it was on the wire too.
+        Assert.Equal(22, ConstructorParameterCount(typeof(OscilloscopeStartRequest)));
+        Assert.Equal(20, ConstructorParameterCount(typeof(OscilloscopeRequest)));
     }
 
     [Fact]

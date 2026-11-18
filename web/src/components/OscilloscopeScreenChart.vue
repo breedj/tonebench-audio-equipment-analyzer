@@ -556,14 +556,20 @@ const indicator = computed(() =>
 )
 
 /**
- * The window trigger's two bounds and the band between them, or null on every other kind.
+ * The two thresholds and the band between them, for the window and runt triggers, or null on every
+ * other kind.
  *
  * <p>The band <b>replaces</b> the hysteresis band rather than joining it: two translucent bands
- * over each other, one of them a few millivolts tall, is unreadable — and on this kind the band
- * between the bounds is the setting, where the hysteresis is only a noise reject on its edges.</p>
+ * over each other, one of them a few millivolts tall, is unreadable — and on these kinds the pair
+ * of thresholds is the setting, where the hysteresis is only a noise reject on the entry one.</p>
+ *
+ * <p>One picture for two kinds, because they really are the same two numbers on the screen: a
+ * window fires on crossing <em>into or out of</em> the band and a runt on a pulse that entered it
+ * and failed to leave by the far side, so in both cases what a reader needs to see is where the
+ * two thresholds sit against the trace.</p>
  */
 const windowBand = computed(() =>
-  props.triggerKind === 'Window'
+  props.triggerKind === 'Window' || props.triggerKind === 'Runt'
     ? windowIndicator(
         triggerLevelV.value,
         props.triggerLevelLowV ?? 0,

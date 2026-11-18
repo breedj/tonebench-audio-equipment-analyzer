@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -465,10 +466,11 @@ public sealed class OscilloscopeRunner(
         {
             logger.LogInformation(
                 "Oscilloscope starting: {Mode}, {RecordMs:0.###} ms ({RecordFrames} frames, {PreTriggerFrames} pre-trigger) "
-                    + "at {SampleRateHz:0} Hz, {Slope} edge at {LevelV:0.####} V, hysteresis {HysteresisV:0.####} V, "
-                    + "holdoff {HoldoffMs:0.##} ms, channels L={Left} R={Right}",
+                    + "at {SampleRateHz:0} Hz, {Kind} trigger, {Slope} at {LevelV:0.####} V{Extra}, "
+                    + "hysteresis {HysteresisV:0.####} V, holdoff {HoldoffMs:0.##} ms, channels L={Left} R={Right}",
                 request.Mode, request.RecordSeconds * 1e3, recordFrames, preTriggerFrames, request.SampleRateHz,
-                request.TriggerSlope, request.TriggerLevelV, request.TriggerHysteresisV,
+                request.TriggerKind, request.TriggerSlope, request.TriggerLevelV, DescribeTriggerExtra(request),
+                request.TriggerHysteresisV,
                 request.HoldoffSeconds * 1e3, request.ProcessLeft, request.ProcessRight);
 
             // SingleShot for the documented split: DisplayHopFloor stays off a measuring run, and
@@ -622,6 +624,28 @@ public sealed class OscilloscopeRunner(
         }
     }
 
+    /// <summary>
+    /// What the chosen kind adds to the log line beyond a level, or an empty string.
+    ///
+    /// <para>The line said "Rising edge at 5 V" whatever the kind was, which on a dropout or a runt
+    /// names the one thing the capture was <i>not</i> triggered by — and a log file sent in is the
+    /// only durable record of what produced a measurement, the same reason the device lines name
+    /// their model.</para>
+    /// </summary>
+    private static string DescribeTriggerExtra(OscilloscopeRequest request) => request.TriggerKind switch
+    {
+        TriggerKind.Window or TriggerKind.Runt =>
+            $" and {request.TriggerLevelLowV.ToString("0.####", CultureInfo.InvariantCulture)} V",
+        TriggerKind.Dropout =>
+            $", no edge within {(request.DropoutSeconds * 1e3).ToString("0.##", CultureInfo.InvariantCulture)} ms",
+        TriggerKind.PulseWidth =>
+            $", width {(request.PulseWidthLoSeconds * 1e6).ToString("0.#", CultureInfo.InvariantCulture)} us to "
+                + (request.PulseWidthHiSeconds is { } hi
+                    ? $"{(hi * 1e6).ToString("0.#", CultureInfo.InvariantCulture)} us"
+                    : "unbounded"),
+        _ => string.Empty,
+    };
+
     private static ScopeCaptureSpec BuildSpec(
         OscilloscopeRequest request, int recordFrames, int preTriggerFrames, long settleFrames = 0)
     {
@@ -632,7 +656,13 @@ public sealed class OscilloscopeRunner(
             request.TriggerLevelV,
             request.TriggerHysteresisV,
             request.TriggerLevelLowV,
-            request.PulseWidthLoSeconds,
+
+            // The dropout timeout and the pulse-width trigger's shorter bound are the same field on
+            // the spec -- one record for every kind, with the fields of the kind not selected
+            // simply not read -- and two separate controls on the request, because they are two
+            // different settings with two different labels and a stored measurement has to say
+            // which one it was set by.
+            request.TriggerKind == TriggerKind.Dropout ? request.DropoutSeconds : request.PulseWidthLoSeconds,
 
             // Null on the request means unbounded above -- an infinity cannot ride on JSON -- and
             // the scanner's own unbounded case is a non-finite upper bound, so this is where the

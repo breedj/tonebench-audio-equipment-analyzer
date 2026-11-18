@@ -1033,9 +1033,12 @@ public sealed class MeasurementSaveService(
                 // Only the kind that reads each one, so the document carries no figure that had no
                 // part in the capture -- a stored window level on an edge-triggered record would
                 // reopen showing a band the trigger never had.
-                TriggerLevelLowV: request.TriggerKind == Dsp.TriggerKind.Window ? request.TriggerLevelLowV : null,
+                TriggerLevelLowV: request.TriggerKind is Dsp.TriggerKind.Window or Dsp.TriggerKind.Runt
+                    ? request.TriggerLevelLowV
+                    : null,
                 PulseWidthLoSeconds: request.TriggerKind == Dsp.TriggerKind.PulseWidth ? request.PulseWidthLoSeconds : null,
                 PulseWidthHiSeconds: request.TriggerKind == Dsp.TriggerKind.PulseWidth ? request.PulseWidthHiSeconds : null,
+                DropoutSeconds: request.TriggerKind == Dsp.TriggerKind.Dropout ? request.DropoutSeconds : null,
                 ProcessLeft: request.ProcessLeft,
                 ProcessRight: request.ProcessRight,
                 Spliced: record.Spliced,

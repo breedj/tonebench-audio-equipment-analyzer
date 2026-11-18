@@ -1395,6 +1395,8 @@ export interface OscilloscopeStartRequest {
    * number, and the server finds that out part way through writing a response.</p>
    */
   pulseWidthHiSeconds?: number
+  /** The dropout trigger's timeout in seconds: how long an absence of qualifying edges has to last. */
+  dropoutSeconds?: number
   holdoffSeconds?: number
   autoTimeoutSeconds?: number
   /** Normal, Average or Envelope — see scope/acquisition.ts. */
@@ -1864,6 +1866,8 @@ export interface OscilloscopeParameters {
   pulseWidthLoSeconds?: number | null
   /** Its longer bound, or null where nothing bounded it above. */
   pulseWidthHiSeconds?: number | null
+  /** The dropout trigger's timeout in seconds. Null on every other kind. */
+  dropoutSeconds?: number | null
   holdoffSeconds: number
   processLeft: boolean
   processRight: boolean

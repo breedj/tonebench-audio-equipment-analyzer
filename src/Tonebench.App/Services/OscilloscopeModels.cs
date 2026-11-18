@@ -30,6 +30,11 @@ namespace Tonebench.App.Services;
 /// For <see cref="Tonebench.Dsp.TriggerKind.PulseWidth"/>: the shortest width that qualifies. Zero
 /// means nothing bounds it below.
 /// </param>
+/// <param name="DropoutSeconds">
+/// For <see cref="Tonebench.Dsp.TriggerKind.Dropout"/>: how long an absence of qualifying edges has
+/// to last. Its own field rather than the pulse widths' because it is its own control with its own
+/// label, and a stored measurement has to say which one the capture was set by.
+/// </param>
 /// <param name="PulseWidthHiSeconds">
 /// For <see cref="Tonebench.Dsp.TriggerKind.PulseWidth"/>: the longest width that qualifies.
 ///
@@ -61,6 +66,7 @@ public sealed record OscilloscopeRequest(
     double TriggerLevelLowV = 0.0,
     double PulseWidthLoSeconds = 0.0,
     double? PulseWidthHiSeconds = null,
+    double DropoutSeconds = 0.0,
     double AutoTimeoutSeconds = 0.5,
     RecordAccumulation Accumulation = RecordAccumulation.Normal,
     int AverageCount = 16,
@@ -140,10 +146,18 @@ public sealed record OscilloscopeRequest(
                 nameof(Accumulation));
         }
 
-        if (TriggerKind is TriggerKind.Dropout or TriggerKind.Runt)
-            throw new ArgumentOutOfRangeException(nameof(TriggerKind), TriggerKind, "That trigger is not implemented yet.");
+        if (TriggerKind == TriggerKind.Dropout && (!(DropoutSeconds > 0.0) || !double.IsFinite(DropoutSeconds)))
+        {
+            // Zero would fire on every sample on which no edge happened, which is almost all of
+            // them -- a trigger that fires constantly while claiming to report an absence.
+            throw new ArgumentOutOfRangeException(
+                nameof(DropoutSeconds), DropoutSeconds,
+                "A dropout trigger needs a timeout above zero: how long an absence has to last.");
+        }
 
-        if (TriggerKind == TriggerKind.Window)
+        // The window's band and the runt's pair of thresholds are the same two numbers read two
+        // ways, so they are checked together -- and a single threshold is no condition in either.
+        if (TriggerKind is TriggerKind.Window or TriggerKind.Runt)
         {
             if (!double.IsFinite(TriggerLevelLowV))
                 throw new ArgumentOutOfRangeException(nameof(TriggerLevelLowV), TriggerLevelLowV, "The second trigger level must be a finite voltage.");
@@ -154,7 +168,9 @@ public sealed record OscilloscopeRequest(
             if (TriggerLevelLowV == TriggerLevelV)
             {
                 throw new ArgumentException(
-                    "The window trigger's two levels must differ. Set one above the other to make a band.",
+                    TriggerKind == TriggerKind.Window
+                        ? "The window trigger's two levels must differ. Set one above the other to make a band."
+                        : "A runt is a pulse that reaches one threshold and not the other, so the two must differ.",
                     nameof(TriggerLevelLowV));
             }
         }

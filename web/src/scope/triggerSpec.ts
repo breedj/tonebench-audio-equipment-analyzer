@@ -77,16 +77,15 @@ export const SCOPE_TRIGGER_SLOPES: readonly ScopeOption<ScopeTriggerSlope>[] = O
 ])
 
 /**
- * The trigger kinds this build implements, in the order a bench instrument offers them.
- *
- * <p><code>Dropout</code> and <code>Runt</code> exist on the wire and are deliberately not offered:
- * the server refuses them by name, and a dropdown entry whose only outcome is a refusal is worse
- * than no entry — the same rule the two unimplemented sources follow above.</p>
+ * The trigger kinds, in the order a bench instrument offers them: the ordinary one first, then the
+ * four that each select a fault an edge trigger cannot pick out of the signal around it.
  */
 export const SCOPE_TRIGGER_KINDS: readonly ScopeOption<ScopeTriggerKind>[] = Object.freeze([
   { value: 'Edge', label: 'Edge' },
   { value: 'PulseWidth', label: 'Pulse width' },
   { value: 'Window', label: 'Window' },
+  { value: 'Dropout', label: 'Dropout' },
+  { value: 'Runt', label: 'Runt' },
 ])
 
 /**
@@ -101,8 +100,10 @@ export const SCOPE_TRIGGER_KIND_HINTS: Readonly<Record<ScopeTriggerKind, string>
     'Fires on a pulse whose width qualifies, and on nothing else. The glitch trigger: a crossover notch or a stuck output is one pulse among thousands that an edge trigger cannot pick out.',
   Window:
     'Fires when the signal enters or leaves a voltage band. For watching something that is supposed to stay put — a bias point, a rail, a mute.',
-  Dropout: 'Not implemented.',
-  Runt: 'Not implemented.',
+  Dropout:
+    'Fires when a qualifying edge has NOT happened for long enough. The one trigger that waits for nothing — for a signal that stops, mutes or drops out.',
+  Runt:
+    'Fires on a pulse that crosses one threshold and fails to reach the other: an edge that did not make it. A runt is exactly as wide as a good pulse, so only its height tells them apart.',
 })
 
 /** Which slope means what, per kind: the word is the same and the thing it selects is not. */
@@ -111,8 +112,9 @@ export const SCOPE_TRIGGER_SLOPE_HINTS: Readonly<Record<ScopeTriggerKind, string
   PulseWidth:
     'Which stretch is the pulse: Rising measures the stretch above the level, Falling the stretch below it. Either watches both.',
   Window: 'Rising fires on entering the band, Falling on leaving it, Either on both.',
-  Dropout: '',
-  Runt: '',
+  Dropout: 'Which direction counts as a sign of life. Either means no crossing of any kind.',
+  Runt:
+    'Which direction the failed pulse goes: Rising is a pulse up that never reaches the upper threshold, Falling a pulse down that never reaches the lower one.',
 })
 
 /**
@@ -320,9 +322,36 @@ export function windowIndicator(
  * <p>The server refuses the same thing and names it; this is the client saying so before a run is
  * attempted, which is <code>triggerSourceProblem</code>'s arrangement one kind along.</p>
  */
-export function windowLevelsProblem(levelV: number, levelLowV: number): string | null {
-  if (!Number.isFinite(levelV) || !Number.isFinite(levelLowV)) return 'Both window levels must be voltages.'
-  if (levelV === levelLowV) return 'The window trigger needs two different levels. Set one above the other to make a band.'
+export function windowLevelsProblem(
+  levelV: number,
+  levelLowV: number,
+  kind: ScopeTriggerKind = 'Window',
+): string | null {
+  const runt = kind === 'Runt'
+  if (!Number.isFinite(levelV) || !Number.isFinite(levelLowV))
+    return runt ? 'Both runt thresholds must be voltages.' : 'Both window levels must be voltages.'
+  if (levelV === levelLowV) {
+    // The same two numbers read two ways, so one check -- but a runt is a pulse that reaches one
+    // threshold and not the other, which is not what a band is, and a message about a "window" on
+    // the runt screen would send a reader looking for a control that is not there.
+    return runt
+      ? 'A runt is a pulse that reaches one threshold and not the other, so the two must differ.'
+      : 'The window trigger needs two different levels. Set one above the other to make a band.'
+  }
+
+  return null
+}
+
+/**
+ * Why a dropout timeout will not do, or null.
+ *
+ * <p>Zero fires on every sample on which no edge happened, which is almost all of them — a trigger
+ * that fires constantly while claiming to report an absence. The server refuses the same thing and
+ * names it.</p>
+ */
+export function dropoutProblem(timeoutS: number): string | null {
+  if (!Number.isFinite(timeoutS) || timeoutS <= 0)
+    return 'The dropout trigger needs a timeout above zero: how long an absence has to last.'
   return null
 }
 

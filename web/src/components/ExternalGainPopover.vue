@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { displayPrecision, fromDisplay, toDisplay, type GainUnit } from '../soundcard/gainUnits'
+import {
+  PROBE_PRESETS,
+  displayPrecision,
+  fromDisplay,
+  matchingProbePreset,
+  probePresetHint,
+  toDisplay,
+  type GainUnit,
+  type ProbePreset,
+} from '../soundcard/gainUnits'
+import { computed } from 'vue'
 import PanelIcon from './PanelIcon.vue'
 
 /**
@@ -80,6 +90,27 @@ function show(db: number): string {
  * be a string comparison in the display unit rather than a numeric one in dB, since that is the
  * only place the two are expressed the same way.</p>
  */
+/**
+ * Which preset the stored pair is, so the row shows what is in force rather than only offering
+ * changes — the one thing this setting needs is to be visible, since a divider the bench has
+ * forgotten about makes every reported level wrong by its whole size.
+ */
+const activePreset = computed(() => matchingProbePreset(props.leftDb, props.rightDb))
+
+/**
+ * Writes one preset to <b>both</b> inputs.
+ *
+ * <p>Both, because probes and dividers are bought and fitted in pairs, and the row says so. A bench
+ * with one on a single input is a box edit away and is the unusual case; offering a chip per channel
+ * would double the controls in a 340 px panel for it.</p>
+ *
+ * <p>The unit is carried through unchanged: it is how the boxes are <em>read</em>, and a press on a
+ * chip is not a request to change that.</p>
+ */
+function applyPreset(preset: ProbePreset) {
+  emit('apply', { leftDb: preset.db, rightDb: preset.db, unit: props.unit })
+}
+
 function commit() {
   emit('apply', {
     leftDb: leftDraft.value === show(props.leftDb) ? props.leftDb : fromDisplay(Number(leftDraft.value), props.unit),
@@ -134,6 +165,31 @@ function changeUnit(event: Event) {
       <span class="font-mono text-neutral-900 dark:text-neutral-100">×0.1</span>. Every level shown is
       then the DUT's, with this undone.
     </p>
+
+    <!-- The probe row: the ratios a divider is labelled with, written to both inputs. Above the
+         boxes because it is the quick answer and they are the precise one, and the chip of whatever
+         is in force is lit so the panel says what the bench is set to rather than only what it
+         could be. -->
+    <div class="flex items-center gap-1.5 px-3.5 pb-3">
+      <span class="text-[12px] text-neutral-500 dark:text-neutral-400">Probe</span>
+      <button
+        v-for="preset in PROBE_PRESETS"
+        :key="preset.label"
+        type="button"
+        class="btn-chip"
+        :class="
+          activePreset?.label === preset.label
+            ? 'bg-teal-600 text-white hover:bg-teal-600 dark:bg-teal-500 dark:text-neutral-900'
+            : ''
+        "
+        :disabled="disabled"
+        :title="probePresetHint(preset)"
+        @click="applyPreset(preset)"
+      >
+        {{ preset.label }}
+      </button>
+      <span class="ml-auto text-[12px] text-neutral-400 dark:text-neutral-500">both inputs</span>
+    </div>
 
     <!-- The two boxes carry the channel's own colour on their caption, the way every other pair of
          channel readings in the app does, so "which one is left" is answered without reading. -->

@@ -56,6 +56,59 @@ export function formatGain(db: number, unit: GainUnit): string {
     : `${shown > 0 ? '+' : ''}${trim(shown, displayPrecision(unit))} dB`
 }
 
+/**
+ * One entry in the probe row: what the hardware is labelled, and the gain that means.
+ *
+ * <p><b>Labelled by its division ratio, the way the hardware is</b> — a 10:1 divider says 10:1 on
+ * the body, and that is −20 dB of gain. The inversion is the whole hazard here: a divider typed as
+ * +20 dB makes every level reported twenty decibels high, and nothing on screen contradicts it
+ * because the app believes whatever the bench declares. So the chip carries the hardware's own
+ * label and the tooltip carries the dB.</p>
+ */
+export interface ProbePreset {
+  /** As the probe or divider is marked. */
+  label: string
+  /** The gain that ratio is, in dB. Negative for anything that divides. */
+  db: number
+}
+
+/**
+ * The presets the external-gain panel offers, commonest first.
+ *
+ * <p>Dividers only, and deliberately: an amplifier ahead of the input is a figure somebody measured
+ * rather than a ratio printed on a body, so it is typed. 1:1 is here because it is the way <em>back</em>
+ * — a bench that has moved its probes needs one press to say "nothing between" — and because a
+ * stored gain nobody remembers setting is this setting's one real hazard.</p>
+ */
+export const PROBE_PRESETS: readonly ProbePreset[] = Object.freeze([
+  { label: '1:1', db: 0 },
+  { label: '10:1', db: -20 },
+  { label: '100:1', db: -40 },
+])
+
+/**
+ * Which preset a stored pair of gains *is*, or null where it is neither — a figure somebody typed,
+ * or two inputs that do not match.
+ *
+ * <p>Both channels, because a preset writes both: the row says "both inputs" and would otherwise
+ * light up for a bench with a divider on one side only, which is exactly the case where the label
+ * would be a lie. Compared with a tolerance, since the stored value is a double and a user may have
+ * typed −20.0 by hand.</p>
+ */
+export function matchingProbePreset(leftDb: number, rightDb: number): ProbePreset | null {
+  if (!Number.isFinite(leftDb) || !Number.isFinite(rightDb)) return null
+  if (Math.abs(leftDb - rightDb) > 0.001) return null
+  return PROBE_PRESETS.find((preset) => Math.abs(preset.db - leftDb) <= 0.001) ?? null
+}
+
+/** The tooltip a chip carries: what it will write, in both the units the panel offers. */
+export function probePresetHint(preset: ProbePreset): string {
+  if (preset.db === 0) {
+    return 'Nothing between the DUT and either input — levels are as measured. The way back after a probe set has come off.'
+  }
+  return `A ${preset.label} divider on both inputs: ${formatGain(preset.db, 'Db')}, or ${formatGain(preset.db, 'Times')}. Every level shown is then the DUT's.`
+}
+
 function clamp(db: number): number {
   return Math.max(-MAX_ABS_DB, Math.min(MAX_ABS_DB, db))
 }

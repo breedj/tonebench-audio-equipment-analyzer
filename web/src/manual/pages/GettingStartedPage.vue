@@ -335,6 +335,15 @@ const { showPage } = useManual()
       are <em>read</em>; what is stored and recorded with every measurement is dB either way.
     </p>
     <p>
+      The panel's top row is the <strong>probe</strong> presets — <strong>1:1</strong>,
+      <strong>10:1</strong>, <strong>100:1</strong> — labelled the way the hardware is and writing
+      <em>both</em> inputs at once, since dividers are fitted in pairs. The chip of whatever is in
+      force is lit, so the panel says what the bench is set to rather than only what it could be.
+      They are there because the sign is the whole hazard: a 10:1 divider typed as <em>+20 dB</em>
+      reads every level twenty decibels high and nothing on screen contradicts it. Type the boxes for
+      anything else — an amplifier ahead of the input, or a divider on one side only.
+    </p>
+    <p>
       Every sample is divided by it as it arrives, so every level the app reports — the spectrum,
       the metrics, every sweep point, and every output-referred target such as "0 dBV out" — is the
       DUT's output rather than what reached the analyzer. Input ranging is the one thing that still

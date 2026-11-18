@@ -113,8 +113,11 @@ const { showPage } = useManual()
         <button type="button" class="manual-link" @click="showPage('wiring-power-amp')">
           power amplifier
         </button>
-        page and tell the app about it under Configuration ▸ Acquisition ▸ External gain, so the
-        trace reads in the DUT's own volts.
+        page and tell the app about it, so the trace reads in the DUT's own volts — press the
+        <strong>external gain</strong> badge on the status bar and pick <strong>10:1</strong>, or type
+        the figure if your divider is something else. <strong>1:1</strong> is the way back when the
+        divider comes off, and it is worth pressing: a stored gain nobody remembers setting makes
+        every level in the app wrong by its whole size, and nothing on screen contradicts it.
       </p>
     </div>
   </div>

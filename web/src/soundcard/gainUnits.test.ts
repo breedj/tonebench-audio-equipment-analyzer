@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { fromDisplay, formatGain, toDisplay, MAX_ABS_DB } from './gainUnits'
+import {
+  MAX_ABS_DB,
+  PROBE_PRESETS,
+  formatGain,
+  fromDisplay,
+  matchingProbePreset,
+  probePresetHint,
+  toDisplay,
+} from './gainUnits'
 
 describe('gainUnits', () => {
   it('toDisplay_InDb_IsTheStoredValue', () => {
@@ -61,5 +69,77 @@ describe('gainUnits', () => {
     // Zero carries no sign: the badge is grey at 0 to say nothing is declared, and "+0" reads as
     // a figure that was chosen.
     expect(formatGain(0, 'Db')).toBe('0 dB')
+  })
+})
+
+describe('the probe presets', () => {
+  it('are dividers, labelled the way the hardware is', () => {
+    // The inversion is the hazard: a 10:1 divider typed as +20 dB makes every reported level
+    // twenty decibels high, and nothing on screen contradicts it. So the chip carries the
+    // hardware's own label and the gain it means is negative.
+    expect(PROBE_PRESETS.map((p) => p.label)).toEqual(['1:1', '10:1', '100:1'])
+    expect(PROBE_PRESETS.map((p) => p.db)).toEqual([0, -20, -40])
+  })
+
+  it('offers the way back as well as the way out', () => {
+    // A stored gain nobody remembers setting is this setting's one real hazard, so 1:1 is a press.
+    expect(PROBE_PRESETS[0]).toEqual({ label: '1:1', db: 0 })
+  })
+
+  it('reads each ratio as the dB it is, both ways round', () => {
+    for (const preset of PROBE_PRESETS) {
+      expect(toDisplay(preset.db, 'Db')).toBeCloseTo(preset.db, 12)
+    }
+    // 10:1 is a tenth, 100:1 a hundredth -- the ratio direction this module exists to pin.
+    expect(toDisplay(-20, 'Times')).toBeCloseTo(0.1, 12)
+    expect(toDisplay(-40, 'Times')).toBeCloseTo(0.01, 12)
+  })
+
+  it('stays inside the bound the server enforces', () => {
+    for (const preset of PROBE_PRESETS) {
+      expect(Math.abs(preset.db)).toBeLessThanOrEqual(MAX_ABS_DB)
+      expect(fromDisplay(preset.db, 'Db')).toBeCloseTo(preset.db, 12)
+    }
+  })
+})
+
+describe('matchingProbePreset', () => {
+  it('names the preset a stored pair is', () => {
+    expect(matchingProbePreset(0, 0)?.label).toBe('1:1')
+    expect(matchingProbePreset(-20, -20)?.label).toBe('10:1')
+    expect(matchingProbePreset(-40, -40)?.label).toBe('100:1')
+  })
+
+  it('is null where the two inputs differ', () => {
+    // A preset writes both, so lighting its chip for a bench with a divider on one side only would
+    // be the one case where the label is a lie.
+    expect(matchingProbePreset(-20, 0)).toBeNull()
+  })
+
+  it('is null for a figure somebody typed', () => {
+    expect(matchingProbePreset(-6, -6)).toBeNull()
+    expect(matchingProbePreset(-19.5, -19.5)).toBeNull()
+  })
+
+  it('allows a hand-typed figure that is the preset', () => {
+    // The stored value is a double and a user may well have typed -20.0 by hand.
+    expect(matchingProbePreset(-20.0005, -20.0005)?.label).toBe('10:1')
+  })
+
+  it('is null for a figure that is not one', () => {
+    expect(matchingProbePreset(Number.NaN, Number.NaN)).toBeNull()
+  })
+})
+
+describe('probePresetHint', () => {
+  it('says what a divider will write, in both units', () => {
+    const hint = probePresetHint(PROBE_PRESETS[1])
+    expect(hint).toContain('10:1')
+    expect(hint).toContain('dB')
+    expect(hint).toContain('×0.1')
+  })
+
+  it('says what 1:1 is for rather than quoting zero at the reader', () => {
+    expect(probePresetHint(PROBE_PRESETS[0])).toContain('Nothing between')
   })
 })

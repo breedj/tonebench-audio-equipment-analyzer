@@ -2084,6 +2084,16 @@ const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
 const scopePersistence = ref(DEFAULT_SCOPE_DISPLAY.persistence)
 const scopeIntensityMode = ref(DEFAULT_SCOPE_DISPLAY.intensityMode)
 const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
+/**
+ * Bumped by the rail's Clear, and folded into the key all three persistence charts read — so one
+ * press throws the waveform view's haze, the goniometer's and the eye's away together, whichever of
+ * them is on screen. Session state and nothing else: what it clears is a history of a display, so
+ * it is not stored with the measurement any more than the picture is.
+ */
+const scopePersistenceCleared = ref(0)
+const scopePersistenceKey = computed(
+  () => `${currentTypeId.value ?? 0}:${scopePersistenceCleared.value}`,
+)
 const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
@@ -6194,7 +6204,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :persistence="scopePersistence"
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
-                  :persistence-key="currentTypeId ?? 0"
+                  :persistence-key="scopePersistenceKey"
                 />
 
                 <ScopeEyeChart
@@ -6207,7 +6217,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :persistence="scopePersistence"
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
-                  :persistence-key="currentTypeId ?? 0"
+                  :persistence-key="scopePersistenceKey"
                 />
 
                 <OscilloscopeScreenChart
@@ -6243,7 +6253,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :references="visibleScopeOverlays"
                   :accumulation="scopeAccumulation"
                   :average-count="scopeAverageCount"
-                  :persistence-key="currentTypeId ?? 0"
+                  :persistence-key="scopePersistenceKey"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
@@ -6278,6 +6288,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:drawing="scopeDrawing"
                   v-model:cursors="scopeCursors"
                   @cursors-committed="onScopeCursorsCommitted"
+                  @clear-persistence="scopePersistenceCleared++"
                 />
 
                 <MeasurementChecklist @error="reportError" />

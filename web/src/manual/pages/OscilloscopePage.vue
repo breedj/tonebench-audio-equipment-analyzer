@@ -1284,6 +1284,16 @@ const { showPage } = useManual()
           <td>Map</td>
           <td>Which colour map, when it is one — the same three the decay surfaces use, so a colour means one thing throughout.</td>
         </tr>
+        <tr>
+          <td>Clear persistence</td>
+          <td>
+            Throws away what has been accumulated and starts again from the next record — for when
+            you have changed something about the DUT and the old picture is no longer the one you
+            want to read. The newest trace is unaffected: it is drawn in full whatever the haze
+            holds. It clears the goniometer's and the eye's pictures too, so switching view does
+            not bring an old one back.
+          </td>
+        </tr>
       </tbody>
     </table>
     <div class="manual-note">
@@ -1294,6 +1304,11 @@ const { showPage } = useManual()
         signal. It starts again from the next record, which is a second or two at most. It is not
         saved with the measurement and not in a report either — what is kept is a history of a
         <em>display</em>, not of a capture, and the setting is what is stored.
+      </p>
+      <p>
+        <strong>Left</strong> and <strong>Right</strong> take a channel's haze away with its trace,
+        and leave the other channel's where it is. A picture of a channel can never be left behind
+        on a chart that is no longer drawing it.
       </p>
     </div>
 

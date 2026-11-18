@@ -183,8 +183,13 @@ const props = withDefaults(defineProps<{
   references?: OverlayEntry[]
   /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
-   * practice the open measurement. It joins the signature rather than being watched for, so a
-   * switch cannot be forgotten at a call site.
+   * practice the open measurement, and the display rail's own Clear.
+   *
+   * <p><b>Both folded into the signature and watched, and it needs to be both.</b> The signature is
+   * read when a record arrives, which covers a switch mid-run with no second mechanism to forget at
+   * a call site; the watcher is what answers a Clear pressed on a <em>stopped</em> capture, where no
+   * record is coming — and a Clear that clears nothing until the next capture is a control that
+   * does nothing at the one moment it is reached for.</p>
    */
   persistenceKey?: string | number
 }>(), {
@@ -885,6 +890,18 @@ const intensityTick = ref(0)
 let accumulatedRecord: ScopeRecordResponse | null = null
 
 /**
+ * The channels the accumulated picture is a picture <em>of</em>: the measured traces on screen.
+ *
+ * <p>One definition, read by the accumulation and by the paint, and that is the point of it rather
+ * than a tidying — the two have to ask the same question or the picture outlives the trace it was
+ * a history of. The three derived series are left out for the reasons
+ * <code>accumulateIntensity</code> gives.</p>
+ */
+const intensityChannels = computed(() =>
+  series.value.channels.filter((c) => !c.residual && !c.math && !c.reference),
+)
+
+/**
  * What the accumulated counts are a picture <em>of</em>.
  *
  * <p><b>This is the rule the whole feature turns on.</b> A cell is a pixel, and a pixel stands for
@@ -940,13 +957,13 @@ function accumulateIntensity() {
   if (width < 1 || height < 1) return
 
   const signature = currentIntensitySignature(u)
-  const { xMs, channels } = series.value
+  const { xMs } = series.value
 
   // The residual and the math trace are derived and are left out: accumulating one would put a
   // second, fainter waveform into a picture whose whole subject is how often the measured one
   // passes somewhere -- and the math trace is not even on the volts scale this reads positions
-  // against, so its hits would land at the wrong heights.
-  const measured = channels.filter((channel) => !channel.residual && !channel.math && !channel.reference)
+  // against, so its hits would land at the wrong heights. A reference is somebody else's capture.
+  const measured = intensityChannels.value
   if (!measured.length || !xMs.length) return
 
   let layers = intensityLayers.value
@@ -1018,7 +1035,16 @@ function intensityPlugin(): uPlot.Plugin {
           void intensityTick.value
           if (!persistenceDraws(props.persistence)) return
 
-          const layers = intensityLayers.value
+          // Only the layers whose channel is still on screen. The set is rebuilt to match the
+          // drawn channels when a record arrives, and a record is exactly what does not arrive
+          // while a stopped capture is being read -- which is when the rail's own Left and Right
+          // boxes are reached for. So unticking one left its haze painted under a trace that had
+          // gone, which is the one thing a display control must never do: leave a picture of what
+          // it has just taken off the chart. Reported 2026-11-18.
+          const drawnChannels = intensityChannels.value
+          const layers = intensityLayers.value.filter((layer) =>
+            drawnChannels.some((channel) => channel.index === layer.index),
+          )
           if (!layers.length) return
 
           if (!intensityCanvas) intensityCanvas = document.createElement('canvas')
@@ -1747,6 +1773,16 @@ watch(
   () => [props.persistence, props.intensityMode, props.intensityPalette] as const,
   ([mode]) => {
     if (!persistenceDraws(mode)) resetIntensity()
+    plot.value?.redraw()
+  },
+)
+
+// The rail's Clear and a measurement switch, which the key carries together -- see its own doc for
+// why this is watched as well as read into the signature.
+watch(
+  () => props.persistenceKey,
+  () => {
+    resetIntensity()
     plot.value?.redraw()
   },
 )

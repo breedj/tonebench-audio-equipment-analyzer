@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ALPHA_KNEE,
@@ -342,5 +344,56 @@ describe('hexRgb', () => {
 
   it('answers white for anything it cannot read, rather than throwing on a draw path', () => {
     expect(hexRgb('rebeccapurple')).toEqual([255, 255, 255])
+  })
+})
+
+describe('what the charts throw the picture away for', () => {
+  // Both halves of this live in .vue files — a paint hook and three watchers — so this reads them
+  // as text, the way display.test.ts audits its own channel gate: the components are Vue against a
+  // real DOM and the suite runs on environment: 'node'. What is pinned is not the wiring but the one
+  // invariant the feature turns on: an accumulated picture may never outlive the thing it is a
+  // picture of — and both ways it could, a channel taken off the chart and a Clear, are reached for
+  // while the capture is *stopped*, which is exactly when no record arrives to notice.
+  const read = (name: string) => readFileSync(resolve(import.meta.dirname, '..', name), 'utf8')
+
+  const waveform = read('components/OscilloscopeScreenChart.vue')
+  const xy = read('components/ScopeXyChart.vue')
+  const eye = read('components/ScopeEyeChart.vue')
+  const rail = read('components/ScopeDisplayPanel.vue')
+  const app = read('App.vue')
+
+  it('paints only the layers whose channel is still drawn', () => {
+    // The reported fault: the layer set is rebuilt to match the drawn channels when a record
+    // arrives, so unticking Left on a stopped capture left its haze painted under a trace that had
+    // gone. An unfiltered read of the layers here is what that was, and is what this fails on.
+    expect(waveform).toContain('const drawnChannels = intensityChannels.value')
+    expect(waveform).toContain('const layers = intensityLayers.value.filter((layer) =>')
+    expect(waveform).toContain('drawnChannels.some((channel) => channel.index === layer.index)')
+  })
+
+  it('asks one definition of which channels the haze is of, in both places', () => {
+    // Two spellings of this rule is how a paint and an accumulation come to disagree about the
+    // same picture -- the ImpedanceTraceBuilder lesson, one component along.
+    expect(waveform).toContain('const intensityChannels = computed(()')
+    expect(waveform.match(/intensityChannels\.value/g)?.length).toBe(2)
+  })
+
+  it('has every persistence chart watch the key, not only fold it into the signature', () => {
+    // A signature is read when a record arrives. A Clear pressed on a stopped capture has no
+    // record coming, so without the watcher it would clear nothing until the next one.
+    for (const chart of [waveform, xy, eye]) {
+      expect(chart).toContain('() => props.persistenceKey')
+      expect(chart).toContain('resetIntensity()')
+    }
+  })
+
+  it('offers the Clear where the picture is, and clears all three charts with it', () => {
+    expect(rail).toContain("emit('clearPersistence')")
+    expect(rail).toContain('Clear persistence')
+    expect(app).toContain('@clear-persistence="scopePersistenceCleared++"')
+    // One key read by all three: the goniometer and the eye accumulate the same way, and a Clear
+    // that reached only the view on screen would leave the other two holding a stale picture.
+    expect(app).toContain('const scopePersistenceKey = computed(')
+    expect(app.match(/:persistence-key="scopePersistenceKey"/g)?.length).toBe(3)
   })
 })

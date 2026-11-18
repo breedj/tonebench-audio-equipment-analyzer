@@ -104,6 +104,14 @@ const emit = defineEmits<{
    * is a fetch, and a watcher would ask the server for a window per keystroke.</p>
    */
   cursorsCommitted: []
+  /**
+   * Throw the accumulated picture away and start it again from the next record.
+   *
+   * <p>An action rather than a setting, so it is emitted rather than modelled: what it clears is
+   * three charts' pixel buffers — the waveform view's, the goniometer's and the eye's — and the
+   * parent is the one thing that can reach all three.</p>
+   */
+  clearPersistence: []
 }>()
 
 const props = defineProps<{
@@ -642,6 +650,18 @@ function onVoltsPerDivisionChange(event: Event) {
           <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
         </select>
       </label>
+      <!-- Inside the section the picture belongs to, not up beside Autofit: Autofit is one action
+           for every axis of the chart, and this one acts on a single display. Offered only while
+           something is being kept, like the colour controls above it — with nothing accumulated
+           there is nothing a press could do, and a button that is always dead reads as a fault. -->
+      <button
+        type="button"
+        class="btn-panel-accent"
+        title="Throws away what has been accumulated and starts again from the next record. The newest trace is unaffected: it is drawn in full whatever the haze holds."
+        @click="emit('clearPersistence')"
+      >
+        Clear persistence
+      </button>
     </template>
 
     <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">

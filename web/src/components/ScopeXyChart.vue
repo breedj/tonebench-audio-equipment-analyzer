@@ -481,6 +481,15 @@ watch(
     draw()
   },
 )
+// The rail's Clear and a measurement switch. Watched rather than left to the signature, which is
+// read only when a record arrives -- see the waveform chart's persistenceKey for the whole of it.
+watch(
+  () => props.persistenceKey,
+  () => {
+    resetIntensity()
+    draw()
+  },
+)
 watch(
   () => props.record === null,
   (empty) => {

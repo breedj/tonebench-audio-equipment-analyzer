@@ -40,7 +40,11 @@ import {
   fromChartMs,
 } from '../scope/timeAxis'
 import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
-import type { ScopeAxisWindow } from '../scope/display'
+import {
+  capturedScopeChannels,
+  scopeChannelDrawn,
+  type ScopeAxisWindow,
+} from '../scope/display'
 import { triggerChannel, triggerIndicator, windowIndicator } from '../scope/triggerSpec'
 import {
   hexRgb,
@@ -345,11 +349,13 @@ function sliceLength(slice: ScopeChannelSlice): number {
  */
 const series = computed(() => {
   const record = props.record
-  // Only the inputs the display rail is showing. What arrives is already only what the measurement
-  // captures — the record endpoint answers for those alone — so this is the second of the two
-  // gates and the one a reader turns.
+  // The two gates every trace on this chart passes, live or stored: what the measurement is
+  // capturing, and what the display rail is showing. scope/display.ts owns the rule so this
+  // filter and the reference one below cannot become two spellings of it.
+  const shown = { left: props.showLeft, right: props.showRight }
+  const captured = capturedScopeChannels(record?.channels)
   const drawn = (record?.channels ?? []).filter((slice) =>
-    slice.channel === 1 ? props.showRight : props.showLeft,
+    scopeChannelDrawn(slice.channel, shown, captured),
   )
   // The references, resolved before the x array is chosen: with no live record they are the whole
   // of what is on the chart, so they have to be able to decide its geometry. Each is a stored
@@ -360,7 +366,11 @@ const series = computed(() => {
     // chart's own rule, so a run's dash means the same thing on both screens.
     const run = overlayRunIndex(index, drawn.length > 0)
     for (const slice of entry.scopeRecord?.channels ?? []) {
-      if (slice.channel === 1 ? !props.showRight : !props.showLeft) continue
+      // Gated on the capture as well as on the rail: a stored two-channel capture carries a
+      // right input whatever this measurement is doing, and the rail's Right box stays ticked
+      // (disabled, not cleared) while a left-only one runs — so the rail alone draws that
+      // stored channel with no live counterpart and no control on screen that turns it off.
+      if (!scopeChannelDrawn(slice.channel, shown, captured)) continue
       if (sliceLength(slice) === 0) continue
       references.push({
         label: `${entry.detail.name} · ${slice.channel === 0 ? 'Left' : 'Right'}`,

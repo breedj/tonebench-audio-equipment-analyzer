@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SCOPE_DISPLAY, scopeDisplayFromParams, scopeDisplayToParams } from './display'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import {
+  capturedScopeChannels,
+  DEFAULT_SCOPE_DISPLAY,
+  scopeChannelDrawn,
+  scopeDisplayFromParams,
+  scopeDisplayToParams,
+} from './display'
 
 describe('DEFAULT_SCOPE_DISPLAY', () => {
   it('opens on the axis the first capture will land on', () => {
@@ -176,5 +184,85 @@ describe('the per-channel display pair', () => {
     expect(params.chartShowLeft).toBe(false)
     expect(params.chartShowRight).toBe(true)
     expect(scopeDisplayFromParams(JSON.stringify(params)).showLeft).toBe(false)
+  })
+})
+
+
+describe('capturedScopeChannels', () => {
+  it('reads the channels off the record, which is the capture setting as the chart sees it', () => {
+    expect(capturedScopeChannels([{ channel: 0 }])).toEqual({ left: true, right: false })
+    expect(capturedScopeChannels([{ channel: 1 }])).toEqual({ left: false, right: true })
+    expect(capturedScopeChannels([{ channel: 0 }, { channel: 1 }])).toEqual({ left: true, right: true })
+  })
+
+  it('offers both before anything has been captured', () => {
+    // There is no record to ask, and a reference drawn on an empty chart has to be able to show
+    // everything it holds.
+    expect(capturedScopeChannels(null)).toEqual({ left: true, right: true })
+    expect(capturedScopeChannels(undefined)).toEqual({ left: true, right: true })
+    expect(capturedScopeChannels([])).toEqual({ left: true, right: true })
+  })
+})
+
+describe('scopeChannelDrawn', () => {
+  const shownBoth = { left: true, right: true }
+  const leftOnly = { left: true, right: false }
+
+  it('refuses a channel the measurement is not capturing, however the rail is set', () => {
+    // THE regression, reported 2026-11-18: capturing the left input alone, a checked history item
+    // whose stored capture has both channels drew its right one as well -- because the rail's
+    // Right box stays ticked while a left-only measurement runs. It is disabled rather than
+    // cleared, so it was not a control the reader could turn off.
+    expect(scopeChannelDrawn(1, shownBoth, leftOnly)).toBe(false)
+    expect(scopeChannelDrawn(0, shownBoth, leftOnly)).toBe(true)
+  })
+
+  it('still answers to the rail for a channel that is captured', () => {
+    expect(scopeChannelDrawn(0, { left: false, right: true }, shownBoth)).toBe(false)
+    expect(scopeChannelDrawn(1, { left: true, right: false }, shownBoth)).toBe(false)
+    expect(scopeChannelDrawn(1, shownBoth, shownBoth)).toBe(true)
+  })
+
+  it('leaves the rail in charge before the first capture', () => {
+    // Nothing captured yet means both are offered, so a reference is the whole of what is on the
+    // chart and draws what it has -- the geometry it decides included.
+    const captured = capturedScopeChannels([])
+    expect(scopeChannelDrawn(1, shownBoth, captured)).toBe(true)
+    expect(scopeChannelDrawn(1, leftOnly, captured)).toBe(false)
+  })
+
+  it('reads anything that is not channel 1 as the left input', () => {
+    // The chart's own convention, shared with CHANNEL_COLORS and the slice labels.
+    expect(scopeChannelDrawn(0, leftOnly, leftOnly)).toBe(true)
+    expect(scopeChannelDrawn(7, leftOnly, leftOnly)).toBe(true)
+  })
+})
+
+
+describe('the chart asks for the gate', () => {
+  // A rule nothing calls is the fault this change exists to fix, one layer up: the gate above was
+  // always right about the live traces and the reference loop simply did not ask it. So this reads
+  // the component as text, the way numberField.test.ts audits its own class of fault -- the chart
+  // is a .vue against a real DOM and the suite runs on environment: 'node'.
+  const chart = readFileSync(
+    resolve(import.meta.dirname, '../components/OscilloscopeScreenChart.vue'),
+    'utf8',
+  )
+
+  it('gates both the live traces and the references through scopeChannelDrawn', () => {
+    expect(chart).toContain("from '../scope/display'")
+    expect(chart).toContain('scopeChannelDrawn')
+    // Twice: the live filter and the reference loop. One call means one of them went back to
+    // spelling the rule out for itself.
+    expect(chart.match(/scopeChannelDrawn\(/g)?.length).toBe(2)
+  })
+
+  it('no longer decides a channel from the display rail alone', () => {
+    expect(chart).not.toContain('? props.showRight : props.showLeft')
+    expect(chart).not.toContain('? !props.showRight : !props.showLeft')
+  })
+
+  it('takes what is captured from the record rather than re-deriving it', () => {
+    expect(chart).toContain('capturedScopeChannels(record?.channels)')
   })
 })

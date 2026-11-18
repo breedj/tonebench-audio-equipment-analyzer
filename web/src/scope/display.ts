@@ -312,3 +312,50 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartDrawing: display.drawing,
   }
 }
+
+/** A per-channel pair — the display rail's two boxes, or the two inputs a record carries. */
+export interface ScopeChannelPair {
+  left: boolean
+  right: boolean
+}
+
+/**
+ * Which inputs a record carries — which is to say what the measurement is capturing.
+ *
+ * <p>The record endpoint answers for the channels the measurement asked for and no others, so a
+ * record's channel list <i>is</i> the Acquisition panel's pair as everything downstream sees it.
+ * Before the first capture there is no record to ask and both are offered, which is what lets a
+ * reference drawn on an empty chart show everything it has.</p>
+ */
+export function capturedScopeChannels(
+  channels: readonly { channel: number }[] | null | undefined,
+): ScopeChannelPair {
+  if (!channels?.length) return { left: true, right: true }
+  return {
+    left: channels.some((c) => c.channel === 0),
+    right: channels.some((c) => c.channel === 1),
+  }
+}
+
+/**
+ * Whether a channel is drawn: the display rail's box <b>and</b> the measurement capturing it.
+ *
+ * <p><b>Both halves, and the second is the one a reference needs.</b> A live slice can only be a
+ * channel that was captured, so for the live traces the second test is a no-op — but a
+ * <i>reference</i> is somebody else's capture, and a stored two-channel one carries a right input
+ * whatever this measurement is doing. The rail's Right box stays <b>ticked</b> while a left-only
+ * measurement runs (it is disabled rather than cleared, a channel that is not captured having
+ * nothing to hide), so gating a reference on the rail alone draws that stored right channel beside
+ * a live left one — an orange trace with no live counterpart, and no control on the screen that
+ * turns it off, since the one box that would is the disabled one. Reported 2026-11-18.</p>
+ *
+ * <p>One function for both loops so the two cannot drift: the live filter and the reference filter
+ * were two spellings of one rule, and only one of them was corrected.</p>
+ */
+export function scopeChannelDrawn(
+  channel: number,
+  shown: ScopeChannelPair,
+  captured: ScopeChannelPair,
+): boolean {
+  return channel === 1 ? shown.right && captured.right : shown.left && captured.left
+}

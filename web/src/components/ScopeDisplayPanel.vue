@@ -21,6 +21,7 @@ import {
   type ScopeIntensityMode,
   type ScopePersistence,
 } from '../scope/persistence'
+import { capturedScopeChannels } from '../scope/display'
 import { PALETTE_NAMES } from '../measurements/decay'
 import SegmentedToggle from './SegmentedToggle.vue'
 import { SCOPE_VIEWS, scopeViewIsXy, type ScopeView } from '../scope/xy'
@@ -290,14 +291,7 @@ function onOffsetChange(event: Event) {
  * and is disabled rather than being a tick that does nothing. Before the first capture there is no
  * record to ask, and both are offered.</p>
  */
-const captured = computed(() => {
-  const channels = record.value?.channels
-  if (!channels?.length) return { left: true, right: true }
-  return {
-    left: channels.some((c) => c.channel === 0),
-    right: channels.some((c) => c.channel === 1),
-  }
-})
+const captured = computed(() => capturedScopeChannels(record.value?.channels))
 
 
 /** An X–Y figure needs both inputs; one of them draws a horizontal line that looks like a measurement. */

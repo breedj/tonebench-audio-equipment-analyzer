@@ -1220,6 +1220,16 @@ const { showPage } = useManual()
       does, it stops: the trace simply has a gap there rather than a flat line along zero.
     </p>
 
+    <p>
+      <strong>A reference draws only the inputs this measurement is capturing.</strong> A stored
+      capture may hold both channels where this one holds a single input, and drawing its right
+      channel beside a left-only live trace puts a trace on the chart with nothing to compare it
+      against — and no way to take it off again, since the <strong>Right</strong> box that would
+      is disabled while the measurement is not capturing that input. So a reference is cut to the
+      same pair of channels as the live trace. Capture both inputs and both of its channels come
+      back.
+    </p>
+
     <table>
       <thead>
         <tr><th>What it shows</th><th>Reading</th></tr>

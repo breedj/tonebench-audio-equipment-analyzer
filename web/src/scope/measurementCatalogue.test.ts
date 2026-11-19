@@ -11,6 +11,12 @@ import {
   scopeMeasurement,
   scopeMeasurementsIn,
   scopeMeasurementsNeedPair,
+  removeScopeSelectionRow,
+  scopeSelectionEntry,
+  scopeSelectionId,
+  scopeSelectionSource,
+  scopeSelectionSources,
+  SCOPE_SELECTION_SOURCES,
 } from './measurementCatalogue'
 
 describe('SCOPE_MEASUREMENTS', () => {
@@ -125,5 +131,97 @@ describe('scopeMeasurementsNeedPair', () => {
     expect(scopeMeasurementsNeedPair(['pkpk', 'phase'])).toBe(true)
     expect(scopeMeasurementsNeedPair(['pkpk', 'rms'])).toBe(false)
     expect(scopeMeasurementsNeedPair([])).toBe(false)
+  })
+})
+
+describe('a selection entry', () => {
+  it('is an id, or an id and the source it is taken off', () => {
+    expect(scopeSelectionId('pkpk')).toBe('pkpk')
+    expect(scopeSelectionSource('pkpk')).toBeNull()
+
+    expect(scopeSelectionId('pkpk:ch1')).toBe('pkpk')
+    expect(scopeSelectionSource('pkpk:ch1')).toBe('ch1')
+
+    expect(scopeSelectionEntry('rms', 'math')).toBe('rms:math')
+    expect(scopeSelectionEntry('rms', null)).toBe('rms')
+  })
+
+  /**
+   * The rule the whole change rests on: a bare id is every source, which is exactly what it meant
+   * before the picker had a Source control. Nothing stored needs migrating because of it.
+   */
+  it('reads a bare id as every source', () => {
+    expect(scopeSelectionSources('pkpk')).toEqual(SCOPE_SELECTION_SOURCES)
+    expect(scopeSelectionSources('pkpk:ch0')).toEqual(['ch0'])
+  })
+
+  /** A pair reading has no source: it reads the two inputs together and has one row of its own. */
+  it('gives a Channel delay entry no sources at all', () => {
+    expect(scopeSelectionSources('phase')).toEqual([])
+    expect(scopeSelectionSources('phase:ch0')).toEqual([])
+  })
+
+  it('still knows when the X–Y figure is needed, whatever the entry looks like', () => {
+    expect(scopeMeasurementsNeedPair(['pkpk:ch0'])).toBe(false)
+    expect(scopeMeasurementsNeedPair(['pkpk:ch0', 'phase'])).toBe(true)
+  })
+})
+
+describe('parseScopeMeasurementIds, with sources', () => {
+  it('keeps one measurement once per source it was asked for on', () => {
+    expect(parseScopeMeasurementIds(['pkpk:ch1', 'pkpk:ch0'])).toEqual(['pkpk:ch0', 'pkpk:ch1'])
+  })
+
+  it('orders by the catalogue first and the source second', () => {
+    // rms comes after pkpk in the catalogue, whichever order they were pressed in.
+    expect(parseScopeMeasurementIds(['rms:ch0', 'pkpk:math', 'pkpk:ch0'])).toEqual([
+      'pkpk:ch0',
+      'pkpk:math',
+      'rms:ch0',
+    ])
+  })
+
+  it('reads a bare id, which is everything stored before this existed', () => {
+    expect(parseScopeMeasurementIds(['pkpk', 'rms'])).toEqual(['pkpk', 'rms'])
+  })
+
+  it('drops an entry whose measurement this build does not know', () => {
+    expect(parseScopeMeasurementIds(['nonesuch:ch0', 'pkpk:ch0'])).toEqual(['pkpk:ch0'])
+  })
+
+  it('drops a source this build does not know, rather than keeping a row nothing can draw', () => {
+    expect(parseScopeMeasurementIds(['pkpk:ch7'])).toEqual([])
+  })
+
+  it('is still null for something that is not a list', () => {
+    expect(parseScopeMeasurementIds('pkpk')).toBeNull()
+    expect(parseScopeMeasurementIds(undefined)).toBeNull()
+  })
+})
+
+describe('removeScopeSelectionRow', () => {
+  it('takes one source off and leaves the measurement on the others', () => {
+    expect(removeScopeSelectionRow(['pkpk:ch0', 'pkpk:ch1'], 'pkpk:ch0')).toEqual(['pkpk:ch1'])
+  })
+
+  /**
+   * A bare id is shorthand for every source and there is no shorter way to say "all but this one",
+   * so crossing one row off expands it. The alternative — dropping the measurement outright — is
+   * what the cross did before a source could be chosen, and is not what it means now.
+   */
+  it('expands a bare entry rather than dropping the whole measurement', () => {
+    expect(removeScopeSelectionRow(['pkpk'], 'pkpk:ch0')).toEqual(['pkpk:ch1', 'pkpk:math'])
+  })
+
+  it('leaves other measurements alone', () => {
+    expect(removeScopeSelectionRow(['rms:ch0', 'pkpk:ch0'], 'pkpk:ch0')).toEqual(['rms:ch0'])
+  })
+
+  it('takes a pair row off whole, there being no source on it', () => {
+    expect(removeScopeSelectionRow(['phase', 'pkpk:ch0'], 'phase:pair')).toEqual(['pkpk:ch0'])
+  })
+
+  it('changes nothing for a row that is not in the selection', () => {
+    expect(removeScopeSelectionRow(['pkpk:ch0'], 'rms:ch0')).toEqual(['pkpk:ch0'])
   })
 })

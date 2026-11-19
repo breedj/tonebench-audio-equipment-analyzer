@@ -305,6 +305,24 @@ describe('the chosen measurements', () => {
     expect(display.measurementStatistics).toBe(DEFAULT_SCOPE_DISPLAY.measurementStatistics)
   })
 
+  /**
+   * The format the Source control introduced, and the half of it that matters: a bare id is what
+   * every selection stored before that control is, and it still means every source.
+   */
+  it('round-trips a selection that names its sources', () => {
+    const stored = JSON.stringify({ chartMeasurements: ['pkpk:ch0', 'rms:ch1'] })
+    const display = scopeDisplayFromParams(stored)
+
+    expect(display.measurements).toEqual(['pkpk:ch0', 'rms:ch1'])
+    expect(scopeDisplayToParams(display).chartMeasurements).toEqual(['pkpk:ch0', 'rms:ch1'])
+  })
+
+  it('keeps a bare id bare, so nothing saved before the Source control changes meaning', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartMeasurements: ['pkpk', 'rms'] }))
+
+    expect(display.measurements).toEqual(['pkpk', 'rms'])
+  })
+
   it('keeps an empty list empty, which is a reader who cleared it', () => {
     expect(scopeDisplayFromParams(JSON.stringify({ chartMeasurements: [] })).measurements).toEqual([])
   })

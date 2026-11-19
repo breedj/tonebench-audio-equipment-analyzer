@@ -3,6 +3,7 @@ import { useProjects } from './useProjects'
 import {
   DEFAULT_SCOPE_MEASUREMENTS,
   parseScopeMeasurementIds,
+  removeScopeSelectionRow,
   scopeMeasurementsNeedPair,
 } from '../scope/measurementCatalogue'
 import {
@@ -63,8 +64,15 @@ export function useScopeMeasurements() {
     useProjects().markDirty()
   }
 
-  function remove(id: string) {
-    setSelected(selected.value.filter((other) => other !== id))
+  /**
+   * Takes one row off the table, by its row key.
+   *
+   * <p>A row rather than a measurement: with a source chosen per entry, dropping every source of a
+   * measurement because its left-channel row was crossed off is not what the cross means. See
+   * <code>removeScopeSelectionRow</code> for what that costs a bare entry.</p>
+   */
+  function remove(rowKey: string) {
+    setSelected(removeScopeSelectionRow(selected.value, rowKey))
   }
 
   function setStatistics(on: boolean) {

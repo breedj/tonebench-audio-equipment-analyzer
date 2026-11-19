@@ -121,8 +121,8 @@ const emit = defineEmits<{ pickMeasurements: [] }>()
               <button
                 type="button"
                 class="ml-1.5 text-neutral-300 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100 dark:text-neutral-600"
-                title="Take this measurement off the table."
-                @click="remove(row.id)"
+                title="Take this reading off the table. Only this source — the same measurement on the other input stays."
+                @click="remove(row.key)"
               >
                 ✕
               </button>

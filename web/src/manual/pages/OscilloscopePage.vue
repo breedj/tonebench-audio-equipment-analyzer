@@ -1217,11 +1217,28 @@ const { showPage } = useManual()
       <strong>Channel delay</strong>.
     </p>
     <p>
-      Each chosen reading appears for <em>every input the chart is drawing</em>, and for the math
-      trace when one is — so taking a reading off the table is the same gesture as taking that
-      channel off the screen. The Channel delay group is the exception: a phase, a skew or a
+      <strong>Source</strong>, at the top of that dialog, is which trace the tiles below it are
+      being ticked for — the left input, the right, or the math channel. Tick a reading, switch the
+      source, tick it again, and it appears once for each. The cross beside a row in the table takes
+      off <em>that</em> row, so the same measurement on the other input stays.
+    </p>
+    <p>
+      The Channel delay group is the exception and has no source to choose: a phase, a skew or a
       correlation is not a reading either channel has on its own, so it has one row.
     </p>
+    <div class="manual-note">
+      <p>
+        <strong>A selection outlives a capture.</strong> You can ask for a reading on a trace this
+        measurement is not reading — the right input when only the left is ticked, or the math
+        channel with no operation chosen — and it simply has no row until it is. The dialog says so
+        rather than refusing, because the alternative is being unable to set up a measurement before
+        making it.
+      </p>
+      <p>
+        Readings chosen before this control existed are shown on <em>every</em> trace, which is what
+        they always meant, and stay that way until the dialog is used again.
+      </p>
+    </div>
     <table>
       <thead>
         <tr>

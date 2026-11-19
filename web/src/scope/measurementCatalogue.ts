@@ -273,10 +273,118 @@ export function scopeMeasurementsIn(group: ScopeMeasurementGroup): ScopeMeasurem
  * were ticked in — and so a selection saved by a build with a different order opens looking
  * right.</p>
  */
+/**
+ * The sources a measurement can be taken off, in the order the picker offers them.
+ *
+ * <p>Fixed rather than read from the record, because a <em>selection</em> outlives any one
+ * capture: a measurement chosen for the right input must still be chosen when the next run has
+ * only the left one, or taking a channel off the screen would silently forget what was asked for.
+ * Which of these actually produce a row is decided per record, by what it carries — see
+ * <code>scopeMeasurementSources</code>.</p>
+ */
+export const SCOPE_SELECTION_SOURCES: readonly string[] = Object.freeze(['ch0', 'ch1', 'math'])
+
+/** The catalogue id of a stored selection entry, which may carry a source after a colon. */
+export function scopeSelectionId(entry: string): string {
+  const colon = entry.indexOf(':')
+  return colon < 0 ? entry : entry.slice(0, colon)
+}
+
+/**
+ * Which source a stored selection entry names, or null where it names none.
+ *
+ * <p><b>Null is "every source", and that is what makes this change free of a migration.</b> Every
+ * selection stored before the picker had a Source control is a bare id, and a bare id meant "shown
+ * for every input the chart is drawing" — so reading it as every source reproduces exactly what it
+ * did. New writes are explicit; the stored shape converges on its own.</p>
+ */
+export function scopeSelectionSource(entry: string): string | null {
+  const colon = entry.indexOf(':')
+  return colon < 0 ? null : entry.slice(colon + 1)
+}
+
+/** Builds a selection entry. A null source is a bare id, i.e. every source. */
+export function scopeSelectionEntry(id: string, source: string | null): string {
+  return source === null ? id : `${id}:${source}`
+}
+
+/**
+ * The sources one stored entry stands for: the one it names, or all of them for a bare id.
+ *
+ * <p>A <b>Channel delay</b> entry stands for none — it reads the two inputs together and has one
+ * row of its own, so a source on it would mean nothing.</p>
+ */
+export function scopeSelectionSources(entry: string): readonly string[] {
+  const def = BY_ID.get(scopeSelectionId(entry))
+  if (!def || def.group === 'Delay') return []
+  const named = scopeSelectionSource(entry)
+  return named === null ? SCOPE_SELECTION_SOURCES : [named]
+}
+
+/**
+ * Reads a stored selection, keeping only what this build knows and imposing the catalogue's order.
+ *
+ * <p>Entries are <code>id</code> or <code>id:source</code>, the same <code>id:source</code>
+ * spelling a row key and <code>chartTrendRow</code> already use. Ordered by the catalogue and then
+ * by source, so the table reads the same way whichever order the tiles were pressed in; deduped by
+ * the whole entry, so one measurement may legitimately appear once per source.</p>
+ */
 export function parseScopeMeasurementIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
+
   const wanted = new Set(value.filter((v): v is string => typeof v === 'string'))
-  return SCOPE_MEASUREMENTS.filter((d) => wanted.has(d.id)).map((d) => d.id)
+  const out: string[] = []
+  for (const def of SCOPE_MEASUREMENTS) {
+    // The bare id first: it is the broader claim, and a selection holding both is a reader who
+    // asked for everything and then for one source again.
+    if (wanted.has(def.id)) out.push(def.id)
+    if (def.group === 'Delay') continue
+    for (const source of SCOPE_SELECTION_SOURCES) {
+      const entry = scopeSelectionEntry(def.id, source)
+      if (wanted.has(entry)) out.push(entry)
+    }
+  }
+
+  return out
+}
+
+/**
+ * Takes one <em>row</em> off a stored selection, by its row key.
+ *
+ * <p><b>A row, not a measurement</b>, which is the whole difference the Source control makes: the
+ * table's cross used to drop a measurement and every source of it at once, which was right while
+ * the sources were implied and wrong the moment they are chosen.</p>
+ *
+ * <p>Removing one source of a <b>bare</b> entry expands it into the others, because a bare id is
+ * shorthand for all of them and there is no shorter way to say "all but this one". A
+ * <b>Channel delay</b> row has no source, so it takes its whole entry with it.</p>
+ */
+export function removeScopeSelectionRow(entries: readonly string[], rowKey: string): string[] {
+  const id = scopeSelectionId(rowKey)
+  const source = scopeSelectionSource(rowKey)
+  const out: string[] = []
+
+  for (const entry of entries) {
+    if (scopeSelectionId(entry) !== id) {
+      out.push(entry)
+      continue
+    }
+
+    const def = BY_ID.get(id)
+    // No source to take off: the pair row is the measurement.
+    if (!def || def.group === 'Delay' || source === null) continue
+
+    const named = scopeSelectionSource(entry)
+    if (named === null) {
+      for (const other of SCOPE_SELECTION_SOURCES) {
+        if (other !== source) out.push(scopeSelectionEntry(id, other))
+      }
+      continue
+    }
+    if (named !== source) out.push(entry)
+  }
+
+  return out
 }
 
 /**
@@ -293,6 +401,6 @@ export const SCOPE_MEASUREMENT_ABSENT = '—'
 export const DEFAULT_SCOPE_MEASUREMENTS: readonly string[] = Object.freeze(['pkpk', 'rms', 'freq'])
 
 /** Whether any chosen measurement needs the two channels taken together — i.e. the X–Y figure. */
-export function scopeMeasurementsNeedPair(ids: readonly string[]): boolean {
-  return ids.some((id) => BY_ID.get(id)?.group === 'Delay')
+export function scopeMeasurementsNeedPair(entries: readonly string[]): boolean {
+  return entries.some((entry) => BY_ID.get(scopeSelectionId(entry))?.group === 'Delay')
 }

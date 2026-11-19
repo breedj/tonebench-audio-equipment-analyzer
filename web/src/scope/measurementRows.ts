@@ -21,6 +21,8 @@ import {
 import {
   SCOPE_MEASUREMENT_ABSENT,
   scopeMeasurement,
+  scopeSelectionId,
+  scopeSelectionSources,
   type ScopeMeasurementDef,
   type ScopeMeasurementQuantity,
 } from './measurementCatalogue'
@@ -177,6 +179,7 @@ export type ScopeMeasurementReadingSource = 'window' | 'gate'
  */
 export function scopeMeasurementRows(
   record: ScopeRecordResponse | null | undefined,
+  /** The stored selection: `id` for every source, or `id:source` for one — see the catalogue. */
   ids: readonly string[],
   options: {
     showLeft: boolean
@@ -194,8 +197,8 @@ export function scopeMeasurementRows(
   const pairFrequencyHz = record.channels[0]?.measurements?.frequencyHz ?? null
 
   const rows: ScopeMeasurementRow[] = []
-  for (const id of ids) {
-    const def = scopeMeasurement(id)
+  for (const entry of ids) {
+    const def = scopeMeasurement(scopeSelectionId(entry))
     if (!def) continue
 
     if (def.group === 'Delay') {
@@ -203,7 +206,13 @@ export function scopeMeasurementRows(
       continue
     }
 
+    // Which sources this entry stands for -- the one it names, or every one for a bare id, which
+    // is what every selection stored before the picker had a Source control is. Intersected with
+    // what this record actually carries and the rail is actually drawing, so asking for a source
+    // the capture does not have is simply no row rather than an empty one.
+    const wanted = scopeSelectionSources(entry)
     for (const source of sources) {
+      if (!wanted.includes(source.key)) continue
       if (def.quantity === 'area' && source.kind !== 'channel') continue
       rows.push(channelRow(def, source, record, options.source))
     }

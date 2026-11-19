@@ -95,7 +95,11 @@ import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
 import { scopeCaptureSignature, type ScopeCaptureFacts } from './scope/persistence'
-import { scopeMeasurementRows, scopeStatsSignature } from './scope/measurementRows'
+import {
+  scopeMeasurementRows,
+  scopeMeasurementSources,
+  scopeStatsSignature,
+} from './scope/measurementRows'
 import { useScopeMeasurements } from './composables/useScopeMeasurements'
 import { DEFAULT_SCOPE_PATH, pathQuery, pathSummary, type ScopeSignalPathSettings } from './scope/signalPath'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
@@ -2462,6 +2466,17 @@ watch(
 )
 
 /** The chosen readings of the record on screen — what the table draws and the statistics count. */
+/**
+ * The traces this capture is offering a reading off, for the picker's Source control.
+ *
+ * <p>The same list the rows are built from, so the dialog cannot offer a source the table would
+ * then have nothing to show for — and it follows the display rail's own Left and Right, because a
+ * trace that is not drawn is not read either.</p>
+ */
+const scopeMeasurementSourceList = computed(() =>
+  scopeMeasurementSources(scopeRecord.value, scopeShowLeft.value, scopeShowRight.value),
+)
+
 const scopeMeasurementTableRows = computed(() =>
   scopeMeasurementRows(scopeRecord.value, scopeMeasurementSelection.selected.value, {
     showLeft: scopeShowLeft.value,
@@ -7582,6 +7597,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
     <ScopeMeasurementPickerDialog
       :open="scopeMeasurementPickerOpen"
+      :sources="scopeMeasurementSourceList"
       @close="scopeMeasurementPickerOpen = false"
     />
     <ReportDialog

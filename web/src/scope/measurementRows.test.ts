@@ -261,3 +261,72 @@ describe('scopeStatsSignature', () => {
     expect(sig(base, withMath('AMinusB'))).not.toBe(sig(base, withMath('BMinusA')))
   })
 })
+
+describe('choosing a source per measurement', () => {
+  /**
+   * The rule that makes this change free of a migration, and the case that matters most in it.
+   * Every selection stored before the picker had a Source control is a bare id, and a bare id
+   * meant "shown for every input the chart is drawing" — so it still has to.
+   */
+  it('shows a bare id on every drawn source, as it always did', () => {
+    const rows = scopeMeasurementRows(record(), ['pkpk'], both)
+
+    expect(rows.map((r) => r.key)).toEqual(['pkpk:ch0', 'pkpk:ch1'])
+  })
+
+  it('shows an entry that names a source on that source alone', () => {
+    const rows = scopeMeasurementRows(record(), ['pkpk:ch1'], both)
+
+    expect(rows.map((r) => r.key)).toEqual(['pkpk:ch1'])
+    expect(rows[0].sourceLabel).toBe('Right')
+  })
+
+  it('puts one measurement on several traces when it is asked for on each', () => {
+    const rows = scopeMeasurementRows(record(), ['pkpk:ch0', 'rms:ch1'], both)
+
+    expect(rows.map((r) => r.key)).toEqual(['pkpk:ch0', 'rms:ch1'])
+  })
+
+  /**
+   * A selection outlives any one capture, so asking for a reading on a trace this run is not
+   * reading is an ordinary thing to have asked for — it is simply no row until it is.
+   */
+  it('is no row rather than an empty one where the source is not being read', () => {
+    const rows = scopeMeasurementRows(record(), ['pkpk:ch1'], {
+      showLeft: true,
+      showRight: false,
+      source: 'window',
+    })
+
+    expect(rows).toEqual([])
+  })
+
+  it('still keeps area off the math trace, even asked for by name', () => {
+    const withMath = record({
+      math: {
+        operation: 'AMinusB',
+        unit: 'Volt',
+        x0: -0.005,
+        dx: 1e-5,
+        raw: false,
+        samples: null,
+        min: [-1],
+        max: [1],
+        clampedSamples: 0,
+        measurements: measurements(),
+        gated: null,
+      },
+    } as Partial<ScopeRecordResponse>)
+
+    expect(scopeMeasurementRows(withMath, ['area:math'], both)).toEqual([])
+    // And the same measurement on a channel is unaffected.
+    expect(scopeMeasurementRows(withMath, ['area:ch0'], both).map((r) => r.key)).toEqual(['area:ch0'])
+  })
+
+  /** A pair reading has no source to name, so an entry for it stays whole. */
+  it('ignores a source on a Channel delay entry', () => {
+    const rows = scopeMeasurementRows(record(), ['phase'], both)
+
+    expect(rows.map((r) => r.key)).toEqual(['phase:pair'])
+  })
+})

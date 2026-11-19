@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import type { DcLevelSettings, GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
+import type { ArbitraryChannel, DcLevelSettings, GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
 import type { ImdPresetId } from '../imd/presets'
 import type { GeneratorLevelUnit } from '../generatorLevel'
 
@@ -34,6 +34,14 @@ export function createGeneratorStimulus() {
   // In volts and signed, because a DC level has a sign and dBV cannot carry one. It starts at zero,
   // which is the DAC at rest -- a stimulus nobody asked for should do nothing.
   const dc = reactive<DcLevelSettings>({ volts: 0 })
+  // The three settings only, not the readings: what the file turned out to be is a reading of the
+  // loaded table, which the server has and the panel takes from device status after a Run. Staging
+  // a copy of it would be a second answer to drift from the first.
+  const arbitrary = reactive<{ path: string | null; channel: ArbitraryChannel; levelDbv: number }>({
+    path: null,
+    channel: 'Left',
+    levelDbv: -20,
+  })
   const chirp = reactive<EchoChirpSettings>({
     amplitudeDbv: -20,
     startFreqHz: 20,
@@ -56,7 +64,7 @@ export function createGeneratorStimulus() {
     maxOrder: 5,
   })
 
-  return { kind, tones, multitone, noise, wave, burst, dc, chirp, imd, levelUnit }
+  return { kind, tones, multitone, noise, wave, burst, dc, arbitrary, chirp, imd, levelUnit }
 }
 
 /** What one screen's staged generator form looks like, for a panel that is handed one. */

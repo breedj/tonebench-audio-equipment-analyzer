@@ -163,6 +163,12 @@ public static class OutputRangeSelector
                 ? Math.Abs(dc.Volts)
                 : 0.0,
 
+            // Measured rather than allowed for, which is the one place in this switch that is
+            // possible: the samples are all in hand, so the crest factor is the file's own. A music
+            // excerpt runs 10-15 dB and a sine 3.01, so a guess either way parks the DAC a range
+            // too low and clips the file, or wastes one and buries it in DAC noise.
+            GeneratorKind.Arbitrary => ArbitraryWave.PeakVolts(channel.Arbitrary),
+
             _ => 0.0,
         };
     }

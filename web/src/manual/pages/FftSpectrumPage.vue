@@ -120,6 +120,8 @@ const { showPage } = useManual()
             <strong>Tone burst</strong> — a sine gated on for a few cycles and off for a few more,
             which is how an amplifier's recovery, rail sag and thermal behaviour show themselves.
             <strong>DC level</strong> — a constant voltage, for offset and bias checks.
+            <strong>Arbitrary (.wav)</strong> — a file played on a loop, for everything the rest
+            cannot describe.
           </td>
         </tr>
         <tr>
@@ -210,6 +212,18 @@ const { showPage } = useManual()
             level has a sign, and dBV cannot carry one. Nothing in this app reads it back: both
             analyzer inputs are AC-coupled, so measure it at the DUT with a meter. A sound card's
             output is AC-coupled too and will not pass it at all.
+          </td>
+        </tr>
+        <tr>
+          <td>File, Channel, Level (rms)</td>
+          <td>
+            Arbitrary only. <strong>Choose…</strong> picks a <code>.wav</code> on the machine the
+            analyzer runs on — not an upload, which a browser cannot do and which would be megabytes
+            on every change. <strong>Channel</strong> takes one channel of a multi-channel file, or
+            mixes them; one channel is the default because summing is the choice that can be
+            silently wrong. The level is the loop's rms like everything else here, so swapping files
+            does not change how hard the DUT is driven. The grey lines appear once the file has been
+            read, which is when you press Run.
           </td>
         </tr>
         <tr>
@@ -351,6 +365,54 @@ const { showPage } = useManual()
       is not the DUT's. Measure DC at the DUT with a meter. And a <strong>sound card cannot play it
       at all</strong>: its output is AC-coupled in hardware, so the level decays to nothing within a
       second of being set, with nothing on screen to say why.
+    </p>
+
+    <h2>Arbitrary waveform</h2>
+    <p>
+      A <code>.wav</code> file played on a loop: a recorded transient, a measured impulse, a piece
+      of programme material, a waveform built somewhere else. It is the stimulus for everything the
+      other kinds cannot describe — and, since a recorded waveform may have no clean crossing to
+      trigger on at all, it is the one that most wants the oscilloscope's <strong>Stimulus</strong>
+      trigger, which locks to the generator's own repeat and needs no level.
+    </p>
+    <p>
+      <strong>Uncompressed PCM or float, any rate, any channel count.</strong> 8-, 16-, 24- or
+      32-bit PCM and 32- or 64-bit float, mono or multi-channel, with or without the
+      <code>WAVE_FORMAT_EXTENSIBLE</code> wrapper that most 24-bit files from a DAW use. Anything
+      compressed — ADPCM, A-law, an MP3 in a WAV container — is refused by name rather than guessed
+      at, because such a file's header parses perfectly and its data is not samples: read as if it
+      were, it would play a plausible waveform that is not the one in the file.
+    </p>
+    <p>
+      <strong>The file is read when you press Run, and is not stored in the measurement.</strong>
+      What the measurement keeps is the path. So a waveform can be edited in place and re-run
+      without touching the app, and a project does not quietly carry a year-old copy of a file that
+      has since changed — but a measurement whose file has moved cannot be run, and says which file
+      it could not find. It still opens, so the path is on screen to be corrected.
+    </p>
+    <p>
+      <strong>It is resampled to the analyzer's rate and looped.</strong> The loop is a whole number
+      of samples, which is what keeps the stimulus exactly periodic: every line of whatever is in
+      the file lands on a multiple of the loop rate, so the spectrum holds the file's own content
+      and nothing the playback added. A 44.1 kHz file at 192 kHz is the same waveform over a longer
+      loop; the panel reports both lengths. The resampling is circular, so there is no artefact at
+      the joint — but if the file's last sample does not run into its first there is a step there
+      once per loop, and that one is the file's. Sometimes it is the point: a step is a stimulus.
+      Where it is not, use a file whose ends match, or one holding a whole number of cycles.
+    </p>
+    <p>
+      <strong>The level is the loop's rms, and the crest factor is measured.</strong> Every other
+      stimulus here has a crest factor the app knows in advance; a file's has to be read off the
+      samples, and it is — the panel shows it, and the output range is chosen from it. That matters:
+      programme material runs 10–15 dB where a sine is 3, so a range picked for a sine would clip it
+      and one picked for music would bury a sine in DAC noise. Because the level is an rms, two files
+      at one setting deliver the same power into the same load.
+    </p>
+    <p>
+      Note that THD+N, SNR and the noise tiles read <code>n/a</code> here as they do for the shapes
+      and the burst: the analyzer takes the loudest line as the fundamental and counts the rest as
+      noise and distortion, which on a file describes nothing in particular. Read it on the
+      oscilloscope screen.
     </p>
 
     <h2>FFT settings panel</h2>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
-import type { GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
+import { computed, reactive, ref, watch } from 'vue'
+import type { ArbitraryChannel, ArbitrarySettings, GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
+import FileBrowserDialog from './FileBrowserDialog.vue'
 import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import {
@@ -69,6 +70,13 @@ const KINDS: { value: GeneratorKind; label: string }[] = [
   { value: 'Pulse', label: 'Pulse' },
   { value: 'ToneBurst', label: 'Tone burst' },
   { value: 'DcLevel', label: 'DC level' },
+  { value: 'Arbitrary', label: 'Arbitrary (.wav)' },
+]
+
+const ARBITRARY_CHANNELS: { value: ArbitraryChannel; label: string }[] = [
+  { value: 'Left', label: 'Left' },
+  { value: 'Right', label: 'Right' },
+  { value: 'Mix', label: 'Mix' },
 ]
 
 const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
@@ -86,7 +94,43 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, wave, burst, dc, chirp, imd, levelUnit } = props.stimulus
+const { kind, tones, multitone, noise, wave, burst, dc, arbitrary, chirp, imd, levelUnit } = props.stimulus
+
+/** The .wav browser, opened from the Arbitrary form. Its folder is remembered under its own purpose. */
+const arbitraryBrowserOpen = ref(false)
+
+/**
+ * What the file turned out to be, once the analyzer has read it.
+ *
+ * <p>Taken from device status rather than staged, because the reading belongs to the <em>loaded</em>
+ * table and only the server has one: the file is read when the generator is configured, which is
+ * Run. Staging a copy would be a second answer to drift from the first — and a stale one, since the
+ * file may have changed on disk since.</p>
+ *
+ * <p>Cleared whenever the path or the channel changes, so a reading never describes a file that is
+ * no longer selected.</p>
+ */
+const arbitraryReading = ref<ArbitrarySettings | null>(null)
+
+/** Just the file name: a path on a bench is mostly folders, and the whole of it is in the title. */
+const arbitraryName = computed(() => {
+  const path = arbitrary.path
+  if (!path) return null
+  return path.split(/[\\/]/).pop() || path
+})
+
+function onArbitrarySelected(path: string) {
+  arbitraryBrowserOpen.value = false
+  arbitrary.path = path
+  arbitraryReading.value = null
+  emit('change')
+}
+
+function onArbitraryChannel(event: Event) {
+  arbitrary.channel = (event.target as HTMLSelectElement).value as ArbitraryChannel
+  arbitraryReading.value = null
+  emit('change')
+}
 
 // The rate Run would ask for, not the one the device happens to be streaming at — the quantised
 // frequency depends on it, and the panel has to show the right answer before anything is running.
@@ -293,6 +337,10 @@ function onToneEdit() {
 // textbox keeps showing what was typed (e.g. 1000) while the label beneath it reports what's
 // really playing (e.g. 999.76, the nearest coherent bin).
 function syncFromStatus(status: GeneratorChannelState) {
+  // Before the early return below: this is the one thing a non-Tones stimulus has to take from
+  // status, and it is the only place the loaded file's own figures exist.
+  if (status.kind === 'Arbitrary' && status.arbitrary?.frames) arbitraryReading.value = status.arbitrary
+
   if (status.kind !== 'Tones') return
   status.tones.forEach((t, i) => {
     if (i < actualFreqHz.length) actualFreqHz[i] = t.freqHz
@@ -319,6 +367,8 @@ function currentConfig(): Omit<GeneratorChannelRequest, 'enabled'> {
       return { ...base, burst: { ...burst } }
     case 'DcLevel':
       return { ...base, dc: { ...dc } }
+    case 'Arbitrary':
+      return { ...base, arbitrary: { ...arbitrary } }
     case 'EchoChirp':
       return { ...base, chirp: { ...chirp } }
     default:
@@ -659,6 +709,82 @@ defineExpose({ currentConfig, syncFromStatus })
         setting drive the DUT to the same amplitude. Read it on the oscilloscope screen: the gating
         puts sidebands across the band, so the noise tiles show n/a.
       </p>
+    </div>
+
+    <!-- A .wav on a loop. The path is a file on the analyzer's machine rather than an upload:
+         the browser cannot read one, and a stimulus posted on every reconfigure would be
+         megabytes. -->
+    <div v-else-if="kind === 'Arbitrary'" class="space-y-2 text-sm">
+      <div class="flex flex-col gap-1">
+        File
+        <div class="flex items-center gap-2">
+          <span
+            class="min-w-0 flex-1 truncate rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="arbitrary.path ? '' : 'text-neutral-400 dark:text-neutral-600'"
+            :title="arbitrary.path ?? 'No file chosen'"
+          >
+            {{ arbitraryName ?? 'No file chosen' }}
+          </span>
+          <button type="button" class="btn-secondary shrink-0" @click="arbitraryBrowserOpen = true">
+            Choose…
+          </button>
+        </div>
+      </div>
+      <label class="flex flex-col gap-1">
+        Channel
+        <select
+          :value="arbitrary.channel"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="onArbitraryChannel"
+        >
+          <option v-for="c in ARBITRARY_CHANNELS" :key="c.value" :value="c.value">{{ c.label }}</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1">
+        Level (rms)
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(arbitrary.levelDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
+            @change="onLevelEdit($event, arbitrary.levelDbv, (v) => (arbitrary.levelDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
+      </label>
+      <div v-if="arbitraryReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p>
+          Loop {{ arbitraryReading.frames }} frames ·
+          {{ ((arbitraryReading.durationSeconds ?? 0) * 1000).toPrecision(4) }} ms ·
+          {{ (arbitraryReading.repeatHz ?? 0).toPrecision(4) }} Hz
+        </p>
+        <p>
+          File {{ ((arbitraryReading.sourceSampleRateHz ?? 0) / 1000).toPrecision(4) }} kHz,
+          {{ arbitraryReading.sourceFrames }} frames · crest
+          {{ (arbitraryReading.crestFactorDb ?? 0).toFixed(2) }} dB
+        </p>
+      </div>
+      <p v-else-if="arbitrary.path" class="text-xs text-neutral-400 dark:text-neutral-600">
+        Press Run to read the file; what it turns out to be is reported here.
+      </p>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">
+        The file is read when the generator is configured, not stored in the measurement — so it can
+        be edited in place and re-run, and a measurement whose file has moved says which one. It is
+        resampled to the analyzer's rate and played on a loop; if its last sample does not run into
+        its first there is a step once per loop, which is the file's rather than the analyzer's.
+      </p>
+      <FileBrowserDialog
+        :open="arbitraryBrowserOpen"
+        mode="open"
+        extension=".wav"
+        title="Choose a waveform"
+        purpose="arbitrary-waveform"
+        :start-path="arbitrary.path"
+        @close="arbitraryBrowserOpen = false"
+        @select="onArbitrarySelected"
+      />
     </div>
 
     <!-- A constant. The one stimulus here whose level is in volts rather than dBV. -->

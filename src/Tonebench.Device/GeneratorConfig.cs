@@ -94,6 +94,16 @@ public enum GeneratorKind
     /// the DUT's own output with a meter, not read back through the analyzer.</para>
     /// </summary>
     DcLevel,
+
+    /// <summary>
+    /// A <c>.wav</c> file played on a loop — see <see cref="ArbitraryWave"/>.
+    ///
+    /// <para>The stimulus for everything the other kinds cannot describe: a recorded transient, a
+    /// measured impulse, a piece of programme material, a waveform built somewhere else. It is
+    /// periodic by construction, the loop being a whole number of frames, so it is analysable on
+    /// the same terms as the chirp.</para>
+    /// </summary>
+    Arbitrary,
 }
 
 /// <summary>
@@ -305,6 +315,43 @@ public sealed record DcLevelSettings
 }
 
 /// <summary>
+/// Parameters for <see cref="GeneratorKind.Arbitrary"/> — see <see cref="ArbitraryWave"/>.
+///
+/// <para><b>The path is what is stored and the samples are not.</b> A measurement's
+/// <c>params_json</c> carries this record, and a loaded table is megabytes: a ten-second loop at
+/// 192 kHz is nearly two million floats. So <see cref="Table"/> is <see cref="JsonIgnoreAttribute"/>d
+/// and the file is re-read when the measurement is run — which is also the honest behaviour, since
+/// the file may have changed since the measurement was saved, and a project that silently carried
+/// a year-old copy of it inside itself would be worse.</para>
+///
+/// <para>The cost is that a measurement whose file has moved cannot be <i>run</i>. It still opens:
+/// nothing is loaded when a type is applied, so the path is on screen to be corrected. Run says
+/// which file it could not read.</para>
+/// </summary>
+public sealed record ArbitrarySettings
+{
+    /// <summary>The file, as a path on the machine the analyzer runs on. Null until one is chosen.</summary>
+    public string? Path { get; init; }
+
+    /// <summary>Which channel of it to play — see <see cref="ArbitraryChannel"/>, whose default is never silently wrong.</summary>
+    public ArbitraryChannel Channel { get; init; } = ArbitraryChannel.Left;
+
+    /// <summary>
+    /// The loop's rms, dBV, like every other kind here — so the table carries the shape and this
+    /// carries the loudness, and changing files does not change how hard the DUT is driven.
+    /// </summary>
+    public double LevelDbv { get; init; } = -20.0;
+
+    /// <summary>
+    /// The samples, once the App layer has read and resampled them. Never serialized (see this
+    /// record's own remarks) and never set by a request — <c>DeviceSessionService</c> fills it in
+    /// when the generator is configured, because that is the only place that knows the rate.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ArbitraryWaveformTable? Table { get; init; }
+}
+
+/// <summary>
 /// One channel's generator state: on/off, which <see cref="GeneratorKind"/> is active, and the
 /// settings for each kind.
 /// </summary>
@@ -343,6 +390,9 @@ public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<Generato
 
     /// <summary>Parameters for <see cref="GeneratorKind.DcLevel"/>.</summary>
     public DcLevelSettings? Dc { get; init; }
+
+    /// <summary>Parameters for <see cref="GeneratorKind.Arbitrary"/>.</summary>
+    public ArbitrarySettings? Arbitrary { get; init; }
 
     public static ChannelGeneratorConfig Off { get; } = new(Enabled: false, Tones: []) { Kind = GeneratorKind.Off };
 }

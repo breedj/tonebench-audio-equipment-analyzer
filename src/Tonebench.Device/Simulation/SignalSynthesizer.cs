@@ -78,6 +78,8 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
 
             GeneratorKind.DcLevel => channel.Dc?.Volts ?? 0.0,
 
+            GeneratorKind.Arbitrary => ArbitraryWave.Sample(channel.Arbitrary, frameIndex),
+
             _ => 0.0,
         };
     }

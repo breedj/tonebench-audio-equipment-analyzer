@@ -155,13 +155,51 @@ public sealed record OscilloscopeRequest(
             return frames > 0 ? frames : null;
         }
 
+        if (channel.Kind == GeneratorKind.Arbitrary)
+            return ArbitraryPeriodFrames(channel.Arbitrary);
+
         return channel.Kind switch
         {
             GeneratorKind.EchoChirp when channel.Chirp is { RepeatFrames: > 1 } chirp => chirp.RepeatFrames,
             GeneratorKind.PinkNoise or GeneratorKind.WhiteNoise when channel.Noise is { PeriodFrames: > 1 } noise =>
                 noise.PeriodFrames,
+            GeneratorKind.ToneBurst when channel.Burst is not null =>
+                ToneBurst.BurstPeriodFrames(channel.Burst, SampleRateHz) is > 1 and var burst ? burst : null,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// An arbitrary waveform's loop, in frames — which is the one period here that cannot be
+    /// derived from the request alone, because it is the resampled table's own length.
+    ///
+    /// <para>So the file is read. That is <b>cheap in every case that matters</b>: the loader
+    /// caches by the file's identity and the rate, so the read this does is the same one the
+    /// generator's own configure is about to do, and every later call is a dictionary lookup. It is
+    /// also the pairing this stimulus most wants — a recorded waveform may have no clean crossing
+    /// to trigger on at all, while its repeat is exact by construction.</para>
+    ///
+    /// <para>A file that cannot be read answers <c>null</c> rather than throwing, because this runs
+    /// inside <see cref="Validate"/>: the refusal a user needs there is about the file, and
+    /// <see cref="Validate"/> says so by name rather than blaming the trigger.</para>
+    /// </summary>
+    private int? ArbitraryPeriodFrames(ArbitrarySettings? arbitrary)
+    {
+        if (arbitrary is null || string.IsNullOrWhiteSpace(arbitrary.Path))
+            return null;
+
+        if (arbitrary.Table is { Frames: > 1 } loaded)
+            return loaded.Frames;
+
+        try
+        {
+            int frames = ArbitraryWaveformLoader.Load(arbitrary, SampleRateHz).Frames;
+            return frames > 1 ? frames : null;
+        }
+        catch (WaveFileException)
+        {
+            return null;
+        }
     }
 
     public void Validate()
@@ -297,9 +335,19 @@ public sealed record OscilloscopeRequest(
 
             if (StimulusPeriodFrames() is null)
             {
+                // A file names itself: "no repeat" would send the reader looking at the trigger
+                // when what is wrong is the path, and the file is the thing they can fix.
+                bool arbitrary = Generator is not null
+                    && (Generator.Left is { Enabled: true, Kind: GeneratorKind.Arbitrary }
+                        || Generator.Right is { Enabled: true, Kind: GeneratorKind.Arbitrary });
+
                 throw new ArgumentException(
-                    "The stimulus trigger needs a stimulus whose repeat is exact: a chirp, a square or "
-                        + "a triangle. A plain tone has a crossing to trigger on instead.",
+                    arbitrary
+                        ? "The stimulus trigger needs the .wav file's loop, and the file could not be read. "
+                            + "Choose another trigger source and press Run to see why."
+                        : "The stimulus trigger needs a stimulus whose repeat is exact: a chirp, a periodic "
+                            + "noise sequence, one of the hard-switched shapes, a tone burst or a .wav on a "
+                            + "loop. A plain tone has a crossing to trigger on instead.",
                     nameof(TriggerSource));
             }
         }

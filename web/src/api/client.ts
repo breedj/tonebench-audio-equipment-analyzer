@@ -526,6 +526,7 @@ export type GeneratorKind =
   | 'Pulse'
   | 'ToneBurst'
   | 'DcLevel'
+  | 'Arbitrary'
 
 /** Mirrors Tonebench.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
 export type SmoothingOctaves =
@@ -597,6 +598,35 @@ export interface DcLevelSettings {
   volts: number
 }
 
+/** Mirrors Tonebench.Device.ArbitraryChannel — which channel of a multi-channel file to play. */
+export type ArbitraryChannel = 'Left' | 'Right' | 'Mix'
+
+/**
+ * Arbitrary-waveform parameters — mirrors Tonebench.Device.ArbitrarySettings.
+ *
+ * `path` is a file on the machine the analyzer runs on, not an upload: the browser cannot read one,
+ * and a stimulus that had to be posted would be megabytes on every reconfigure. `levelDbv` is the
+ * loop's rms, like every other kind, so switching files does not change how hard the DUT is driven.
+ *
+ * Every field past `levelDbv` is a **reading of the loaded file** and is null until the generator
+ * has been configured — the file is read then, not when a measurement is selected, so a stored
+ * measurement that has not been run has a path and no readings.
+ */
+export interface ArbitrarySettings {
+  path: string | null
+  channel: ArbitraryChannel
+  levelDbv: number
+  /** The loop's length at the analyzer's rate, which is also its period. */
+  frames?: number | null
+  durationSeconds?: number | null
+  /** How often the loop repeats — what a scope's timebase is set from. */
+  repeatHz?: number | null
+  /** The file's own peak-to-rms, measured. What decides the output range. */
+  crestFactorDb?: number | null
+  sourceSampleRateHz?: number | null
+  sourceFrames?: number | null
+}
+
 export interface GeneratorChannelState {
   enabled: boolean
   /** The effective tone list — for kind 'Multitone' this is the derived comb, not the parameters. */
@@ -608,6 +638,7 @@ export interface GeneratorChannelState {
   wave: PeriodicWaveSettings
   burst: ToneBurstSettings
   dc: DcLevelSettings
+  arbitrary: ArbitrarySettings
 }
 
 
@@ -2778,6 +2809,7 @@ export interface GeneratorChannelRequest {
   wave?: Partial<PeriodicWaveSettings>
   burst?: Partial<ToneBurstSettings>
   dc?: Partial<DcLevelSettings>
+  arbitrary?: Partial<ArbitrarySettings>
 }
 
 export interface GeneratorRequest {

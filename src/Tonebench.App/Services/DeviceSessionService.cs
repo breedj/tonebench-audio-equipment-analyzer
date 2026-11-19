@@ -1037,7 +1037,11 @@ public sealed class DeviceSessionService(
             // A burst IS periodic over a whole number of frames, and over a long one -- its repeat
             // is (on + off) carrier cycles, so a pairing at two rates really would drift. It is the
             // first kind to reach the default arm by meaning it rather than by being new.
-            GeneratorKind.ToneBurst => true,
+            //
+            // So is an arbitrary waveform, and more sharply: its loop is the resampled table's own
+            // length, which is built FOR one rate -- a pairing at two would play it at the wrong
+            // speed as well as out of step.
+            GeneratorKind.ToneBurst or GeneratorKind.Arbitrary => true,
             GeneratorKind.WhiteNoise or GeneratorKind.PinkNoise => (channel.Noise?.PeriodFrames ?? 0) > 0,
             GeneratorKind.EchoChirp => (channel.Chirp?.RepeatFrames ?? 0) > 0,
             _ => true,
@@ -1416,6 +1420,7 @@ public sealed class DeviceSessionService(
         wave = wave with { DutyPercent = PeriodicWave.ResolveDutyPercent(wave.DutyPercent) };
         var burst = config.Burst ?? new ToneBurstSettings();
         var dc = config.Dc ?? new DcLevelSettings();
+        var arbitrary = config.Arbitrary ?? new ArbitrarySettings();
 
         return new GeneratorChannelResponse(
             config.Enabled,
@@ -1426,7 +1431,31 @@ public sealed class DeviceSessionService(
             new EchoChirpResponse(chirp.AmplitudeDbv, chirp.StartFrequencyHz, chirp.EndFrequencyHz, chirp.Smoothing),
             new PeriodicWaveResponse(wave.FrequencyHz, wave.LevelDbv, wave.DutyPercent),
             new ToneBurstResponse(burst.FrequencyHz, burst.LevelDbv, burst.CyclesOn, burst.CyclesOff),
-            new DcLevelResponse(dc.Volts));
+            new DcLevelResponse(dc.Volts),
+            ToArbitraryResponse(arbitrary));
+    }
+
+    /// <summary>
+    /// The arbitrary block, with the loaded file's own figures where there is one.
+    ///
+    /// <para>Nulls rather than zeros where nothing is loaded: a stored type carries a path and no
+    /// table, so the panel has to be able to tell "not read yet" from "a loop of no length".</para>
+    /// </summary>
+    private static ArbitraryResponse ToArbitraryResponse(ArbitrarySettings settings)
+    {
+        if (settings.Table is not { } table)
+            return new ArbitraryResponse(settings.Path, settings.Channel, settings.LevelDbv);
+
+        return new ArbitraryResponse(
+            settings.Path,
+            settings.Channel,
+            settings.LevelDbv,
+            table.Frames,
+            table.DurationSeconds,
+            table.RepeatHz,
+            20.0 * Math.Log10(Math.Max(table.PeakOfUnitRms, double.Epsilon)),
+            table.SourceSampleRateHz,
+            table.SourceFrames);
     }
 
     /// <summary>
@@ -1742,6 +1771,9 @@ public sealed class DeviceSessionService(
             if (channel.Kind == GeneratorKind.ToneBurst)
                 return ResolveBurst(channel);
 
+            if (channel.Kind == GeneratorKind.Arbitrary)
+                return ResolveArbitrary(channel);
+
             if (!PeriodicWave.IsWaveKind(channel.Kind) || channel.Wave is not { } wave)
                 return channel;
 
@@ -1788,6 +1820,27 @@ public sealed class DeviceSessionService(
                 Burst = burst with { FrequencyHz = effectiveHz },
                 Tones = [new GeneratorTone(effectiveHz, ToneBurst.CarrierLineDbv(burst))],
             };
+        }
+
+        ChannelGeneratorConfig ResolveArbitrary(ChannelGeneratorConfig channel)
+        {
+            if (channel.Arbitrary is not { } arbitrary)
+                return channel;
+
+            // A silenced channel is never loaded, and that is not an optimisation: Stop and every
+            // measurement switch disable both channels unconditionally and must never fail, so a
+            // file that has been moved or deleted would otherwise make it impossible to stop.
+            if (!channel.Enabled)
+                return channel with { Tones = [] };
+
+            // Throws WaveFileException -- an InvalidOperationException -- which every caller of
+            // ConfigureGeneratorAsync already turns into a refusal carrying its message. Silence
+            // would be the wrong answer here: a stimulus that is not playing has to say so.
+            var table = ArbitraryWaveformLoader.Load(arbitrary, sampleRateHz);
+
+            // No tone list: a recorded waveform has no single line to name, and a figure invented
+            // for one would be read as the fundamental by the trigger and the Gen tile alike.
+            return channel with { Arbitrary = arbitrary with { Table = table }, Tones = [] };
         }
     }
 
@@ -2238,6 +2291,16 @@ public sealed class DeviceSessionService(
 
             case GeneratorKind.DcLevel when channel.Dc is { } dc:
                 return $"DC at {dc.Volts:0.#####} V";
+
+            case GeneratorKind.Arbitrary when channel.Arbitrary is { } arbitrary:
+                // The file by name, and what it came to: a log file sent in is the only durable
+                // record of what a measurement was taken with, and "arbitrary" alone says nothing.
+                return arbitrary.Table is { } table
+                    ? $"arbitrary \"{System.IO.Path.GetFileName(arbitrary.Path)}\" "
+                        + $"({arbitrary.Channel}, {table.Frames} frames, {table.DurationSeconds:0.###} s, "
+                        + $"crest {20.0 * Math.Log10(Math.Max(table.PeakOfUnitRms, double.Epsilon)):0.##} dB) "
+                        + $"at {arbitrary.LevelDbv:0.##} dBV rms"
+                    : $"arbitrary \"{arbitrary.Path}\" (not loaded) at {arbitrary.LevelDbv:0.##} dBV rms";
 
             case GeneratorKind.EchoChirp when channel.Chirp is { } chirp:
                 return $"chirp {chirp.StartFrequencyHz:0.##}-{chirp.EndFrequencyHz:0.##} Hz at "

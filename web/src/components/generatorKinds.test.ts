@@ -21,9 +21,17 @@ import { describe, expect, it } from 'vitest'
  */
 const source = readFileSync(resolve(import.meta.dirname, 'GeneratorChannelPanel.vue'), 'utf8')
 
-/** The picker's own list, read out of the component so it cannot drift from what is on screen. */
+/**
+ * The picker's own list, read out of the component so it cannot drift from what is on screen.
+ *
+ * Bounded by the array's own closing bracket rather than by whatever declaration comes next: the
+ * panel has more than one `{ value, label }` list in it now, and reading to the next `const` once
+ * swept a channel picker's Left/Right/Mix in with the stimulus kinds.
+ */
 function offeredKinds(): string[] {
-  const list = source.slice(source.indexOf('const KINDS'), source.indexOf('const SMOOTHING'))
+  // From the `= [` rather than from the declaration: the type annotation carries a `]` of its own.
+  const start = source.indexOf('= [', source.indexOf('const KINDS'))
+  const list = source.slice(start, source.indexOf(']', start))
   return [...list.matchAll(/value: '(\w+)'/g)].map((m) => m[1])
 }
 
@@ -46,11 +54,19 @@ describe('the generator panel request', () => {
     }
   })
 
+  it('reads the stimulus list and not the other pickers beside it', () => {
+    // The panel has more than one `{ value, label }` list in it, and reading past the array's own
+    // closing bracket once swept the arbitrary channel picker's Left/Right/Mix in with the kinds.
+    for (const notAKind of ['Mix', 'OneOver24', 'Smpte']) {
+      expect(offeredKinds()).not.toContain(notAKind)
+    }
+  })
+
   it('offers the four stimuli a bench scope needs', () => {
     // Named rather than left to the sweep above: the sweep only says the two lists agree, and two
     // empty lists agree too. These are the kinds this file was written for.
     const offered = offeredKinds()
-    for (const kind of ['Sawtooth', 'Pulse', 'ToneBurst', 'DcLevel']) {
+    for (const kind of ['Sawtooth', 'Pulse', 'ToneBurst', 'DcLevel', 'Arbitrary']) {
       expect(offered).toContain(kind)
     }
   })

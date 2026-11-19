@@ -489,7 +489,8 @@ public sealed record GeneratorChannelResponse(
     EchoChirpResponse Chirp,
     PeriodicWaveResponse Wave,
     ToneBurstResponse Burst,
-    DcLevelResponse Dc);
+    DcLevelResponse Dc,
+    ArbitraryResponse Arbitrary);
 
 public sealed record MultitoneResponse(int TonesPerOctave, double TotalRmsDbv, double RolloffDbPerOctave);
 
@@ -515,6 +516,33 @@ public sealed record ToneBurstResponse(double FreqHz, double LevelDbv, int Cycle
 
 /// <summary>The DC block, in volts and signed — see <c>Tonebench.Device.DcLevelSettings</c>.</summary>
 public sealed record DcLevelResponse(double Volts);
+
+/// <summary>
+/// The arbitrary block: what was chosen, and — once a generator has been configured — what the
+/// file turned out to be.
+///
+/// <para>Every figure past <c>LevelDbv</c> is <b>null until the file has been loaded</b>, which
+/// happens when the generator is configured rather than when a measurement is selected: a stored
+/// type carries the path and nothing else, so a panel showing a measurement that has not been run
+/// has a path and no readings. That is also why none of them is 0 instead — a loop of 0 frames is
+/// a claim, and "not loaded yet" is not one.</para>
+/// </summary>
+/// <param name="Frames">The loop's length at the analyzer's rate, which is also its period.</param>
+/// <param name="DurationSeconds">How long one loop lasts.</param>
+/// <param name="RepeatHz">How often it repeats — what a scope's timebase is set from.</param>
+/// <param name="CrestFactorDb">The file's own peak-to-rms, measured. What decides the output range.</param>
+/// <param name="SourceSampleRateHz">The file's own rate, which is usually not the analyzer's.</param>
+/// <param name="SourceFrames">And its own length, before resampling.</param>
+public sealed record ArbitraryResponse(
+    string? Path,
+    ArbitraryChannel Channel,
+    double LevelDbv,
+    int? Frames = null,
+    double? DurationSeconds = null,
+    double? RepeatHz = null,
+    double? CrestFactorDb = null,
+    double? SourceSampleRateHz = null,
+    int? SourceFrames = null);
 
 public sealed record DeviceRangesResponse(
     IReadOnlyList<double> SampleRatesHz,

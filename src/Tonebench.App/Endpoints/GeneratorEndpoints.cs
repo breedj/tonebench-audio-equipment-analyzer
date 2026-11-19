@@ -72,6 +72,8 @@ public static class GeneratorEndpoints
             return false;
         if (!TryToDc(request.Dc, kind, channelName, out var dc, out error))
             return false;
+        if (!TryToArbitrary(request.Arbitrary, kind, channelName, out var arbitrary, out error))
+            return false;
 
         IReadOnlyList<GeneratorTone> tones = request.Tones is { } requested
             ? requested.Select(t => new GeneratorTone(t.FreqHz, t.AmpDbv)).ToArray()
@@ -99,6 +101,7 @@ public static class GeneratorEndpoints
             Wave = wave,
             Burst = burst,
             Dc = dc,
+            Arbitrary = arbitrary,
         };
 
         return true;
@@ -237,6 +240,44 @@ public static class GeneratorEndpoints
         return true;
     }
 
+    /// <summary>
+    /// The arbitrary block. Only the path and the channel name are checked here; whether the file
+    /// can actually be played is not knowable without the sample rate, so it is answered where the
+    /// generator is configured — see <c>ArbitraryWaveformLoader</c>, whose refusals name the file.
+    /// </summary>
+    private static bool TryToArbitrary(
+        ArbitraryRequest? request, GeneratorKind kind, string channelName,
+        out ArbitrarySettings settings, out string error)
+    {
+        var defaults = new ArbitrarySettings();
+        settings = defaults;
+        error = "";
+
+        if (request is null)
+            return true;
+
+        if (!EnumParsing.TryParse(request.Channel, defaults.Channel, out ArbitraryChannel channel, out error))
+        {
+            error = $"{channelName} channel: {error}";
+            return false;
+        }
+
+        settings = defaults with
+        {
+            Path = string.IsNullOrWhiteSpace(request.Path) ? null : request.Path,
+            Channel = channel,
+            LevelDbv = request.LevelDbv ?? defaults.LevelDbv,
+        };
+
+        if (kind == GeneratorKind.Arbitrary && settings.Path is null)
+        {
+            error = $"{channelName} channel: Arbitrary needs a .wav file to play.";
+            return false;
+        }
+
+        return true;
+    }
+
     private static MultitoneSettings ToMultitone(MultitoneRequest? request)
     {
         var defaults = new MultitoneSettings();
@@ -320,6 +361,13 @@ public sealed record ToneBurstRequest(double? FreqHz, double? LevelDbv, int? Cyc
 public sealed record DcLevelRequest(double? Volts);
 
 /// <summary>
+/// Arbitrary-waveform parameters — see <see cref="ArbitrarySettings"/>. <c>Path</c> is a file on
+/// the machine the analyzer runs on, not an upload: the browser cannot read one, and a stimulus
+/// that had to be posted would be megabytes on every reconfigure.
+/// </summary>
+public sealed record ArbitraryRequest(string? Path, string? Channel, double? LevelDbv);
+
+/// <summary>
 /// One channel's generator request. <c>Kind</c> and the per-kind blocks are optional so the
 /// original body shape (<c>{ enabled, tones }</c>) still means a plain sine tone list.
 /// </summary>
@@ -332,7 +380,8 @@ public sealed record GeneratorChannelRequest(
     EchoChirpRequest? Chirp = null,
     PeriodicWaveRequest? Wave = null,
     ToneBurstRequest? Burst = null,
-    DcLevelRequest? Dc = null);
+    DcLevelRequest? Dc = null,
+    ArbitraryRequest? Arbitrary = null);
 
 /// <summary>
 /// <c>SampleRateHz</c>/<c>ChannelCount</c>/<c>BlockFrameCount</c> are only a hint for starting a

@@ -92,6 +92,10 @@ internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
             // says so where a user can act on it.
             GeneratorKind.DcLevel => channel.Dc?.Volts ?? 0.0,
 
+            // A modulo and a multiply: everything that could be got wrong about a file happens
+            // once, in the App layer, where it can be reported to somebody who can act on it.
+            GeneratorKind.Arbitrary => ArbitraryWave.Sample(channel.Arbitrary, frameIndex),
+
             _ => 0.0,
         };
     }

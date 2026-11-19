@@ -3,7 +3,7 @@
 // just call these and render the result.
 
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, MultitoneFrame } from './streaming/protocol'
-import type { AveragingMode, DcLevelSettings, GeneratorKind, GeneratorTone, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings } from './api/client'
+import type { ArbitrarySettings, AveragingMode, DcLevelSettings, GeneratorKind, GeneratorTone, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings } from './api/client'
 import {
   isWaveKind,
   pulseEffectiveDutyPercent,
@@ -157,6 +157,12 @@ export function noiseFigureCaveat(stimulus: StimulusSummary | null | undefined):
     // here too. What a burst is read on is the scope screen.
     return 'the stimulus is a gated burst, whose sidebands fill the noise band -- so these read the gating rather than the DUT; read the burst on the oscilloscope screen instead'
   }
+  if (stimulus.kind === 'Arbitrary') {
+    // Whatever is in the file. The notch finds its loudest line, which may be a fundamental, a
+    // sideband or a hum component -- so the figures are arithmetically fine and describe nothing
+    // in particular. What an arbitrary stimulus is read on is the oscilloscope screen.
+    return 'the stimulus is a file, so whatever happens to be its loudest line is taken as the fundamental and the rest of it is counted as noise and distortion; read it on the oscilloscope screen instead'
+  }
   if (stimulus.kind === 'DcLevel') {
     // And the one case where there is no fundamental at all: ComputeMeters takes the loudest bin
     // above 200 Hz, which on a DC stimulus is whatever noise happens to be the largest, and notches
@@ -193,6 +199,8 @@ export function stimulusSummary(
   // the caveat blame two tones for a one-tone stimulus. A burst is the same: one gated carrier.
   if (isWaveKind(kind)) return { kind, toneCount: 1, dutyPercent: wave?.dutyPercent }
   if (kind === 'ToneBurst') return { kind, toneCount: 1 }
+  // A file holds whatever it holds, which is not a count of tones -- and is never one.
+  if (kind === 'Arbitrary') return { kind, toneCount: 0 }
   // And DC plays no tone at all, which is the whole of why its figures mean nothing.
   if (kind === 'DcLevel') return { kind, toneCount: 0 }
   return { kind, toneCount: kind === 'Multitone' ? multitoneToneCount(multitone.tonesPerOctave) : tones.length }
@@ -458,6 +466,7 @@ export function generatorTile(
   sampleRateHz?: number,
   burst?: ToneBurstSettings,
   dc?: DcLevelSettings,
+  arbitrary?: ArbitrarySettings,
 ): MetricTile | null {
   switch (kind) {
     case 'Tones': {
@@ -509,6 +518,14 @@ export function generatorTile(
     case 'DcLevel': {
       if (!dc) return null
       return { label: GEN_METRIC_LABEL, value: `DC, ${dc.volts.toFixed(4)} V` }
+    }
+    case 'Arbitrary': {
+      if (!arbitrary?.path) return null
+      // The file's name rather than its path: the tile is a few characters wide, and a path on a
+      // bench is mostly folders. The panel above shows the whole of it.
+      const name = arbitrary.path.split(/[\\/]/).pop() || arbitrary.path
+      const loop = arbitrary.durationSeconds ? `, ${(arbitrary.durationSeconds * 1000).toPrecision(4)} ms loop` : ''
+      return { label: GEN_METRIC_LABEL, value: `${name}${loop}, ${arbitrary.levelDbv.toFixed(2)} dBV rms` }
     }
     default:
       return null

@@ -1366,7 +1366,21 @@ public sealed record OscilloscopeParameters(
     /// This result's own annotations, frozen as they were when it was saved — see
     /// <see cref="FftSpectrumParameters.ChartAnnotations"/>.
     /// </summary>
-    IReadOnlyList<JsonElement>? ChartAnnotations = null);
+    IReadOnlyList<JsonElement>? ChartAnnotations = null,
+    /// <summary>
+    /// Which readings the readout under the chart shows, by their catalogue ids (<c>pkpk</c>,
+    /// <c>cycleRms</c>, <c>phase</c> and the rest).
+    ///
+    /// <para>A display preference like the pair of channel boxes above, so it is stored with the
+    /// measurement and travels into a report: which figures a reader is watching is part of how a
+    /// measurement is read. <b>Null is not an empty table</b> — it means a measurement saved before
+    /// this existed, which opens on this build's default set, where an empty list is a reader who
+    /// cleared it. What the readings have <i>averaged to</i> is never stored: that is a history of
+    /// a run rather than of the capture, on exactly the grounds the persistence picture is not.</para>
+    /// </summary>
+    IReadOnlyList<string>? ChartMeasurements = null,
+    /// <summary>Whether that readout keeps statistics across records beside each value.</summary>
+    bool? ChartMeasurementStatistics = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the

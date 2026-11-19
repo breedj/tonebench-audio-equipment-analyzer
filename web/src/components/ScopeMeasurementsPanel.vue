@@ -9,6 +9,7 @@ import { correlationDescription, xyReadings } from '../scope/xy'
 import { eyeNote, eyeReadings } from '../scope/eye'
 import { formatSeconds } from '../scope/readings'
 import { formatPerDivision, formatScopeTime, toChartMs } from '../scope/timeAxis'
+import { useScopeMeasurements } from '../composables/useScopeMeasurements'
 
 /**
  * What the record on screen reads — one block per captured channel, plus the facts about the record
@@ -54,6 +55,27 @@ const props = withDefaults(
 )
 
 const { record, spliced, forced, gate } = useOscilloscope()
+
+/**
+ * The controls for the readout under the chart, which live here rather than beside it.
+ *
+ * <p>A bench instrument puts the readings on the screen and the controls that decide them in a
+ * menu, and this screen's menu is its rail — every other thing a reader sets about this
+ * measurement is in it. Keeping the table itself free of controls also keeps it the one thing on
+ * the page that is purely what was measured.</p>
+ */
+const {
+  selected: selectedMeasurements,
+  statistics,
+  setStatistics,
+  resetStats,
+  statCount,
+} = useScopeMeasurements()
+
+const emit = defineEmits<{
+  /** Open the picker. The dialog belongs to the screen, which is the one thing that can mount it. */
+  pickMeasurements: []
+}>()
 
 /**
  * Whether the figures below are the cursors' or the window's.
@@ -182,6 +204,50 @@ const recordFacts = computed(() => {
 
 <template>
   <CollapsibleSection title="Measurements">
+    <!-- What the readout under the chart shows, and whether it keeps statistics. Above the readings
+         because it is a setting rather than a figure, and because the list below is long. -->
+    <div class="mb-2 flex flex-wrap items-center gap-2 border-b border-neutral-200 pb-2 dark:border-neutral-800">
+      <button
+        type="button"
+        class="btn-panel-accent"
+        title="Choose which readings are shown under the chart, from a figure of each."
+        @click="emit('pickMeasurements')"
+      >
+        Choose measurements…
+      </button>
+      <!-- "chosen" rather than "shown": each one is a row per drawn channel, so the two counts
+           differ on a stereo capture and the smaller is the one this button changes. -->
+      <span class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        {{ selectedMeasurements.length }} chosen
+      </span>
+    </div>
+    <div class="mb-2 flex flex-wrap items-center gap-2 border-b border-neutral-200 pb-2 dark:border-neutral-800">
+      <label
+        class="tb-check-row text-[11px]"
+        title="Accumulates every chosen reading across records: its mean, its extremes, how far it has wandered, and how many records have been counted."
+      >
+        <input
+          type="checkbox"
+          class="tb-check"
+          :checked="statistics"
+          @change="setStatistics(($event.target as HTMLInputElement).checked)"
+        />
+        Statistics
+      </label>
+      <button
+        type="button"
+        class="btn-panel-accent"
+        :disabled="statCount === 0"
+        title="Throws the accumulated statistics away and starts counting again from the next record. The readings themselves are unaffected."
+        @click="resetStats()"
+      >
+        Reset statistics
+      </button>
+      <span v-if="statCount > 0" class="text-[11px] text-neutral-500 dark:text-neutral-400">
+        {{ statCount.toLocaleString() }} {{ statCount === 1 ? 'record' : 'records' }}
+      </span>
+    </div>
+
     <template v-if="blocks.length > 0">
       <p
         v-if="envelopeNote"

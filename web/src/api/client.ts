@@ -1430,7 +1430,17 @@ export interface OscilloscopeStatus {
   sampleRateHz: number
   recordFrames: number
   preTriggerFrames: number
+  /** How many records the run has **collected** — what to watch to know there is a newer one to fetch. */
   recordsTaken: number
+  /**
+   * How many the trigger engine committed over the same acquisition — the capture rate the hardware
+   * is managing, bounded by the device's block rather than by the trigger.
+   *
+   * The engine holds one record and overwrites it, so the difference from `recordsTaken` is
+   * captures that existed and were replaced before anything collected them. Zero in Roll, which
+   * commits nothing and whose `recordsTaken` counts roll steps instead.
+   */
+  recordsCommitted: number
   hasRecord: boolean
   /** The record on hand spans a dropped chunk or block, so two non-adjacent pieces sit side by side in it. */
   spliced: boolean
@@ -1493,6 +1503,32 @@ export interface ScopeSliceMeasurements {
   fallTimeS?: number | null
   overshootPercent?: number | null
   preshootPercent?: number | null
+  /** The negative width as a percentage of the period — measured, not written as 100 − duty. */
+  negativeDutyPercent?: number | null
+  /**
+   * When the extremes fell, on the same axis the chart draws — negative anywhere in the pre-trigger.
+   *
+   * <p>The first such sample where several share the value, so a clipped flat top says where the
+   * clipping began rather than where it happened to end.</p>
+   */
+  timeAtMaxS?: number | null
+  timeAtMinS?: number | null
+  /**
+   * The same levels over <b>one period</b> rather than over the window.
+   *
+   * <p>Not a refinement of the figures above but a different measurement, and frequently the right
+   * one: a window almost never holds a whole number of cycles, and what the part-cycle contributes
+   * biases the whole-window RMS of a periodic signal by up to 0.4 % at ten cycles in the window
+   * and 3.6 % at one.
+   * On a transient the window's own figure is the one that means something, which is why both are
+   * reported. See <code>Tonebench.Dsp.WaveformCycleMeasure</code>.</p>
+   */
+  cycleMeanV?: number | null
+  cycleRmsV?: number | null
+  cycleStdevV?: number | null
+  /** The window's integral, in volt-seconds, and one period's. */
+  areaVs?: number | null
+  cycleAreaVs?: number | null
 }
 
 /**
@@ -1912,6 +1948,15 @@ export interface OscilloscopeParameters {
   programmableLoadKind?: string | null
   programmableLoadOhms?: number | null
   chartAnnotations?: unknown
+  /**
+   * Which readings the readout under the chart shows, by their catalogue ids.
+   *
+   * <p>Absent means a measurement saved before this existed, which opens on this build's default
+   * set; an empty list is a reader who cleared it. See scope/measurementCatalogue.ts.</p>
+   */
+  chartMeasurements?: string[] | null
+  /** Whether that readout keeps statistics across records beside each value. */
+  chartMeasurementStatistics?: boolean | null
 }
 
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */
@@ -3030,6 +3075,16 @@ export interface StreamRecordingStatus {
  * writes a CSV row per analysed record and a WAV per trigger, and a switch left on for a week is a
  * folder nobody asked for.
  */
+/**
+ * Whether the oscilloscope shows its capture rate — committed, collected and drawn per second.
+ *
+ * Off by default: a bench diagnostic rather than a reading every session needs. What it answers is
+ * why an intensity-graded persistence picture builds at the speed it does.
+ */
+export interface CaptureRateConfig {
+  enabled: boolean
+}
+
 export interface DiagnosticsStatus {
   enabled: boolean
   logMetrics: boolean
@@ -4512,6 +4567,11 @@ export const api = {
   openRecordingsFolder: () => request<void>('/config/stream-recording/open-folder', { method: 'POST' }),
 
   openDiagnosticsFolder: () => request<void>('/config/diagnostics/open-folder', { method: 'POST' }),
+
+  getCaptureRateConfig: () => request<CaptureRateConfig>('/config/capture-rate'),
+
+  setCaptureRateConfig: (config: CaptureRateConfig) =>
+    request<CaptureRateConfig>('/config/capture-rate', { method: 'PUT', body: JSON.stringify(config) }),
 
   getDiagnostics: () => request<DiagnosticsStatus>('/diagnostics'),
 

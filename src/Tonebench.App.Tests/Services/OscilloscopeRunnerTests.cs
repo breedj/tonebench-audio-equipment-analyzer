@@ -98,6 +98,12 @@ public class OscilloscopeRunnerTests
             Assert.Equal(1, status.RecordsTaken);
             Assert.False(status.Forced);
 
+            // The engine cannot have committed fewer than the run collected -- every collected
+            // record was committed first -- so this ordering is the invariant, not the equality.
+            Assert.True(
+                status.RecordsCommitted >= status.RecordsTaken,
+                $"committed {status.RecordsCommitted} < collected {status.RecordsTaken}");
+
             // The readings the status carries are the record's own, and all finite.
             Assert.NotNull(status.TriggerOffsetS);
             Assert.NotNull(status.RecordFromS);
@@ -239,10 +245,16 @@ public class OscilloscopeRunnerTests
             Assert.False(away.HasRecord);
             Assert.Equal(0, away.RecordsTaken);
 
+            // Including the capture-rate pair. Status mirrors a runner field rather than reading
+            // the engine precisely so this is 0: the engine still holds the previous run's count,
+            // and reporting it here would invent a gap on a measurement that has never run.
+            Assert.Equal(0, away.RecordsCommitted);
+
             // And back: the first measurement's record is still its own.
             var back = bench.Runner.SwitchOwner("project@1:1");
             Assert.True(back.HasRecord);
             Assert.Equal(1, back.RecordsTaken);
+            Assert.True(back.RecordsCommitted >= back.RecordsTaken);
             Assert.NotNull(bench.Runner.Record);
             Assert.NotNull(bench.Runner.LastRequest);
         }

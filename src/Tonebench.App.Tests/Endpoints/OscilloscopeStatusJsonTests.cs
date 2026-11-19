@@ -75,6 +75,12 @@ public class OscilloscopeStatusJsonTests
         using var parsed = JsonDocument.Parse(json);
         Assert.Equal(0.005, parsed.RootElement.GetProperty("triggerOffsetS").GetDouble(), 9);
         Assert.Equal(-0.005, parsed.RootElement.GetProperty("recordFromS").GetDouble(), 9);
+
+        // The capture-rate pair, both present and camelCase. The client declares recordsCommitted
+        // required, so a field that went out under another name would arrive as undefined and the
+        // badge would quietly read the collected count as though it were the committed one.
+        Assert.Equal(0, parsed.RootElement.GetProperty("recordsTaken").GetInt32());
+        Assert.Equal(0, parsed.RootElement.GetProperty("recordsCommitted").GetInt32());
     }
 
     [Fact]

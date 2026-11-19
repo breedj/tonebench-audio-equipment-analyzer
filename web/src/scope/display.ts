@@ -18,6 +18,7 @@ import { PALETTE_NAMES } from '../measurements/decay'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import type { OscilloscopeParameters } from '../api/client'
 import { recordWindow } from './timeAxis'
+import { DEFAULT_SCOPE_MEASUREMENTS, parseScopeMeasurementIds } from './measurementCatalogue'
 
 /**
  * The oscilloscope chart's display state — every prop the chart takes that is a preference rather
@@ -109,6 +110,18 @@ export interface ScopeDisplay {
   drawing: ScopeDrawing
   /** The notes drawn on this measurement's chart, as stored. See measurements/chartAnnotations.ts. */
   annotations: ChartAnnotation[]
+  /**
+   * Which readings the readout under the chart shows, by their catalogue ids. See
+   * scope/measurementCatalogue.ts.
+   *
+   * <p>A display preference like the pair of channel boxes: it is <em>which figures a reader is
+   * watching</em>, which is part of how a measurement is read and so belongs with it. What those
+   * figures have averaged to over the last ninety records is not stored and never could be — a
+   * history of a run rather than of a capture, the persistence picture's own rule.</p>
+   */
+  measurements: string[]
+  /** Whether that readout keeps statistics across records beside each value. */
+  measurementStatistics: boolean
 }
 
 /**
@@ -171,6 +184,14 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
    */
   drawing: 'Linear',
   annotations: [],
+  /** The three a scope is read for at a glance; the picker is one press away for the rest. */
+  measurements: [...DEFAULT_SCOPE_MEASUREMENTS],
+  /**
+   * Off. Statistics answer "is this steady", which is a question a reader asks on purpose — and
+   * five more columns under every chart for a reader who has not asked is the clutter this app
+   * already refuses elsewhere.
+   */
+  measurementStatistics: false,
 })
 
 /**
@@ -269,6 +290,16 @@ export function scopeDisplayFromParams(
     yQuantity: 'volt',
   })
 
+  // Absent keeps the base's set -- a measurement saved before the readout existed opens on this
+  // build's default rather than on an empty table. An empty list is kept empty, because that is a
+  // reader who cleared it and not a measurement that never had one. Unknown ids are dropped by the
+  // parser: a reading from a newer build has nothing here that can take it, and a row that is
+  // always blank reads as a fault.
+  const measurements = parseScopeMeasurementIds(stored.chartMeasurements)
+  if (measurements) display.measurements = measurements
+  if (typeof stored.chartMeasurementStatistics === 'boolean')
+    display.measurementStatistics = stored.chartMeasurementStatistics
+
   return display
 }
 
@@ -293,6 +324,8 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartView: display.chartView,
     chartCoupling: display.path.coupling,
     chartDrawing: display.drawing,
+    chartMeasurements: [...display.measurements],
+    chartMeasurementStatistics: display.measurementStatistics,
   }
 }
 

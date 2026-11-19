@@ -440,7 +440,8 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         V/div
         <select :value="voltsPerDivision" class="tb-input" @change="onVoltsPerDivisionChange">
-          <option v-for="rung in VOLTS_PER_DIVISION_LADDER" :key="rung" :value="rung">
+          <!-- v-once: a frozen ladder, and an option patched per record flickers an open popup. See Math. -->
+          <option v-for="rung in VOLTS_PER_DIVISION_LADDER" v-once :key="rung" :value="rung">
             {{ formatVoltsPerDivision(rung).replace('/div', '') }}
           </option>
         </select>
@@ -537,7 +538,8 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         Drawing
         <select v-model="drawing" class="tb-input">
-          <option v-for="option in SCOPE_DRAWINGS" :key="option.value" :value="option.value" :title="option.title">
+          <!-- v-once, as Math's list: a frozen table, rendered once rather than rewritten per record. -->
+          <option v-for="option in SCOPE_DRAWINGS" v-once :key="option.value" :value="option.value" :title="option.title">
             {{ option.label }}
           </option>
         </select>
@@ -571,7 +573,8 @@ function onVoltsPerDivisionChange(event: Event) {
         :value="path.coupling"
         @change="path = { ...path, coupling: ($event.target as HTMLSelectElement).value as ScopeSignalPathSettings['coupling'] }"
       >
-        <option v-for="option in SCOPE_COUPLINGS" :key="option.value" :value="option.value" :title="option.title">
+        <!-- v-once, as Math's list. -->
+        <option v-for="option in SCOPE_COUPLINGS" v-once :key="option.value" :value="option.value" :title="option.title">
           {{ option.label }}
         </option>
       </select>
@@ -594,7 +597,19 @@ function onVoltsPerDivisionChange(event: Event) {
       Channel
       <select v-model="mathOperation" class="tb-input" :title="math.title">
         <option value="Off">Off</option>
-        <optgroup v-for="group in mathGroups" :key="group.name" :label="group.name">
+        <!-- v-once, and it is a fix rather than an optimisation. Vue patches a `value` binding
+             unconditionally (patchProps carves it out of the "only when it changed" rule) and then
+             syncs the attribute with a bare setAttribute that has no equality guard of its own — so
+             every re-render of this section writes `value` on all eleven options whether or not one
+             of them moved. Chrome repaints an open <select> popup when its options' attributes
+             mutate, and what a repaint redraws most visibly is the highlighted row: with a math
+             channel on, this list re-rendered on every arriving record and the selected item
+             flickered a few times a second. (Only with one on: `mathClamped` is the one thing in
+             this section that reads the record, so with Math off nothing here tracked it and
+             nothing flickered — which is why this dropdown was the one reported.) The table is a
+             frozen module constant and `mathGroups` has no reactive input, so rendering it once is
+             the whole answer. Its five siblings below carry it for the same reason. -->
+        <optgroup v-for="group in mathGroups" v-once :key="group.name" :label="group.name">
           <option v-for="option in group.options" :key="option.value" :value="option.value">
             {{ option.label }}
           </option>
@@ -629,7 +644,8 @@ function onVoltsPerDivisionChange(event: Event) {
     <label class="tb-field">
       Keep
       <select v-model="persistence" class="tb-input">
-        <option v-for="option in SCOPE_PERSISTENCE_OPTIONS" :key="option.value" :value="option.value">
+        <!-- v-once, as Math's list. -->
+        <option v-for="option in SCOPE_PERSISTENCE_OPTIONS" v-once :key="option.value" :value="option.value">
           {{ option.label }}
         </option>
       </select>
@@ -639,7 +655,8 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         Colour
         <select v-model="intensityMode" class="tb-input">
-          <option v-for="option in SCOPE_INTENSITY_MODES" :key="option.value" :value="option.value">
+          <!-- v-once, as Math's list. -->
+          <option v-for="option in SCOPE_INTENSITY_MODES" v-once :key="option.value" :value="option.value">
             {{ option.label }}
           </option>
         </select>
@@ -647,7 +664,8 @@ function onVoltsPerDivisionChange(event: Event) {
       <label v-if="intensityMode === 'Multi'" class="tb-field">
         Map
         <select v-model="intensityPalette" class="tb-input">
-          <option v-for="name in PALETTE_NAMES" :key="name" :value="name">{{ name }}</option>
+          <!-- v-once, as Math's list. -->
+          <option v-for="name in PALETTE_NAMES" v-once :key="name" :value="name">{{ name }}</option>
         </select>
       </label>
       <!-- Inside the section the picture belongs to, not up beside Autofit: Autofit is one action

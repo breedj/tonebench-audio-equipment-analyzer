@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { ScopeChannelSlice, ScopeRecordResponse, ScopeSliceMeasurements } from '../../api/client'
 import { DEFAULT_SCOPE_DISPLAY } from '../../scope/display'
 import type { ReportSubject } from '../types'
-import { scopeMeasurementSections, scopeSections, scopeSettingsRows } from './oscilloscope'
+import {
+  scopeChosenMeasurementSection,
+  scopeMeasurementSections,
+  scopeSections,
+  scopeSettingsRows,
+} from './oscilloscope'
 import { chapterSections } from './index'
 
 const params = JSON.stringify({
@@ -172,6 +177,9 @@ describe('scopeSections', () => {
     const subject = subjectWith(scopeData())
     expect(scopeSections(subject, ['settings']).map((s) => s.title)).toEqual(['Settings'])
     expect(scopeSections(subject, ['measurements']).map((s) => s.title)).toEqual([
+      // The chosen few first and the full set after them: the readout is what the reader was
+      // watching, and a page that opens with forty rows buries it.
+      'Selected measurements',
       'Measurements',
       'The record',
       undefined,
@@ -187,5 +195,75 @@ describe('scopeSections', () => {
   it('still prints its settings for a stored result, which keeps no waveform', () => {
     const sections = chapterSections(subjectWith(scopeData({ record: null })), ['settings', 'measurements'])
     expect(sections.map((s) => s.title)).toEqual(['Settings', 'Measurements'])
+  })
+})
+
+describe('scopeChosenMeasurementSection', () => {
+  const display = {
+    measurements: ['pkpk', 'freq'],
+    measurementStatistics: false,
+    showLeft: true,
+    showRight: true,
+  }
+
+  it('prints the chosen readings per drawn channel, in the catalogue order', () => {
+    const [table] = scopeChosenMeasurementSection(scopeData().record, display, null)
+    expect(table.headers).toEqual(['Measurement', 'Value'])
+    expect(table.cells?.map((row) => row[0])).toEqual([
+      'Left · Pk-Pk',
+      'Right · Pk-Pk',
+      'Left · Freq',
+      'Right · Freq',
+    ])
+    // The second channel's record carries no frequency, which is a dash rather than a blank: in a
+    // set of rows a reader chose, a blank reads as something that failed to arrive.
+    expect(table.cells?.[3][1]).toBe('—')
+  })
+
+  it('quotes the same numbers the screen does', () => {
+    const [table] = scopeChosenMeasurementSection(scopeData().record, display, null)
+    // 2.000 V peak to peak on the left (−1 to +1) and 1.000 kHz, at the magnitude each reads at.
+    expect(table.cells?.[0][1]).toBe('2.000 V')
+    expect(table.cells?.[2][1]).toBe('1.000 kHz')
+  })
+
+  it('leaves the statistics out when nothing has counted any', () => {
+    // Which is every stored result, and any run that was never started. Five columns of dashes say
+    // less than no columns at all.
+    const [table] = scopeChosenMeasurementSection(
+      scopeData().record,
+      { ...display, measurementStatistics: true },
+      null,
+    )
+    expect(table.headers).toEqual(['Measurement', 'Value'])
+  })
+
+  it('prints each statistic in its own row’s units and at its own magnitude', () => {
+    const stats = {
+      'pkpk:ch0': { count: 83, mean: 2.000_1, min: 1.999, max: 2.001, peakToPeak: 0.002, stdev: 0.000_757, last: 2 },
+    }
+    const [table] = scopeChosenMeasurementSection(
+      scopeData().record,
+      { ...display, measurementStatistics: true },
+      stats,
+    )
+    expect(table.headers).toEqual(['Measurement', 'Value', 'Mean', 'Min', 'Max', 'Pk-Pk', 'Stdev', 'Count'])
+    const row = table.cells?.find((cells) => cells[0] === 'Left · Pk-Pk')
+    // The mean in volts and the standard deviation in microvolts, off one formatter -- which is
+    // the whole point of writing a statistic at its own magnitude rather than the value's.
+    expect(row?.[2]).toBe('2.000 V')
+    expect(row?.[6]).toBe('757.0 µV')
+    expect(row?.[7]).toBe((83).toLocaleString())
+    // A row nothing counted still prints, dashed.
+    const other = table.cells?.find((cells) => cells[0] === 'Right · Pk-Pk')
+    expect(other?.[2]).toBe('—')
+  })
+
+  it('is nothing at all when the reader has chosen nothing', () => {
+    expect(scopeChosenMeasurementSection(scopeData().record, { ...display, measurements: [] }, null)).toEqual([])
+  })
+
+  it('is nothing at all for a stored result, which keeps no waveform', () => {
+    expect(scopeChosenMeasurementSection(null, display, null)).toEqual([])
   })
 })

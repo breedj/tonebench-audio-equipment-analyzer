@@ -70,3 +70,76 @@ describe('App.vue restoring a measurement type s display', () => {
     }
   })
 })
+
+/**
+ * The same seven restores, now as a question about where this file <em>declares</em> what they read.
+ *
+ * <p>Each of them is called from an <code>immediate</code> watcher, so each runs <em>during
+ * setup</em> -- and a <code>const</code> is in its temporal dead zone until its own line has run.
+ * A ref one of these writes, declared further down the file, therefore throws
+ * <code>ReferenceError</code>, and the restore stops dead at that line with every assignment after
+ * it never made. <b>Vue catches what a watcher throws</b>, so it reaches the console and nothing
+ * else: the panel draws perfectly, with the rest of the settings it was restoring silently at their
+ * defaults. That is the <code>ScopeConfigPanel</code> fault -- see the <code>defineModel</code>
+ * cases in <code>triggerSpec.test.ts</code>, which pin the same rule one layer in -- and it reached
+ * the scope screen a second time through <code>scopeViewWindow</code>, firing only where setup ran
+ * with a measurement already open. That is Vite HMR rather than a real page load, where the type
+ * arrives asynchronously, so the screen worked until it did not.</p>
+ *
+ * <p>The list is read out of the source rather than written down, so a kind added later is covered
+ * without anyone remembering to come here.</p>
+ */
+const RESTORE_FUNCTIONS = [...appSource.matchAll(/function (applyStored\w*Display)\(/g)].map((m) => m[1])
+
+/** Where App.vue declares `name` at the top level of setup, or -1. */
+function declarationIndex(name: string): number {
+  const m = appSource.match(new RegExp(`^(?:const|let) ${name}\\b`, 'm'))
+  return m?.index ?? -1
+}
+
+/** A restore's body: from its signature to the first `}` in the first column, which closes it. */
+function bodyOf(fn: string): string {
+  const start = appSource.indexOf(`function ${fn}(`)
+  expect(start, fn).toBeGreaterThan(-1)
+  const end = appSource.indexOf('\n}', start)
+  expect(end, fn).toBeGreaterThan(start)
+  return appSource.slice(start, end)
+}
+
+describe('App.vue declaring what its display restores read', () => {
+  it('finds every restore, so the assertions below are not vacuous', () => {
+    expect(RESTORE_FUNCTIONS).toHaveLength(7)
+  })
+
+  it('declares everything a restore touches before the restore itself', () => {
+    let checked = 0
+    for (const fn of RESTORE_FUNCTIONS) {
+      const at = appSource.indexOf(`function ${fn}(`)
+      // Every identifier in the body that this file also declares at the top level of setup.
+      // Anything declared inside the body, imported, or only ever a property name is simply not
+      // found by `declarationIndex` and is skipped.
+      const names = new Set([...bodyOf(fn).matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)].map((m) => m[0]))
+      for (const name of names) {
+        const declared = declarationIndex(name)
+        if (declared === -1) continue
+        checked += 1
+        expect(declared, `${fn} reads ${name}, which is declared below it`).toBeLessThan(at)
+      }
+    }
+    // A guard on the guard: a rename that found nothing would leave this passing over an empty set.
+    expect(checked).toBeGreaterThan(60)
+  })
+
+  it('declares the viewport state the scope screen s immediate watchers reach for', () => {
+    // Named as well as swept above, because these two are the pair that was wrong: the restore
+    // clears `scopeViewWindow`, and the display path's own `immediate` watcher is within reach of
+    // `SCOPE_DEFAULT_COLUMNS`. A plain constant in a dead zone fails exactly as a ref does, which
+    // is why the number is named here too.
+    for (const name of ['scopeViewWindow', 'SCOPE_DEFAULT_COLUMNS']) {
+      const declared = declarationIndex(name)
+      expect(declared, name).toBeGreaterThan(-1)
+      expect(declared, name).toBeLessThan(appSource.indexOf('function applyStoredScopeDisplay('))
+      expect(declared, name).toBeLessThan(appSource.indexOf('void setScopeOverlayPath('))
+    }
+  })
+})

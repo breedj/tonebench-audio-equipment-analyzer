@@ -15,6 +15,7 @@ import { useTrash } from './composables/useTrash'
 import { useProjectSession } from './composables/useProjectSession'
 import { useSpectrumConfig } from './composables/useSpectrumConfig'
 import { useMetricSelection } from './composables/useMetricSelection'
+import { useDiagnostics } from './composables/useDiagnostics'
 import { DEFAULT_LOAD_OHMS, useLoadOhms } from './composables/useLoadOhms'
 import { useScopeDisplay } from './composables/useScopeDisplay'
 import { useChartDisplay } from './composables/useChartDisplay'
@@ -68,6 +69,8 @@ import ScopeOverviewStrip from './components/ScopeOverviewStrip.vue'
 import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
 import ScopeMeasurementsPanel from './components/ScopeMeasurementsPanel.vue'
+import ScopeMeasurementTable from './components/ScopeMeasurementTable.vue'
+import ScopeMeasurementPickerDialog from './components/ScopeMeasurementPickerDialog.vue'
 import { useOscilloscope } from './composables/useOscilloscope'
 import { useScopeStimulus } from './composables/useScopeStimulus'
 import { scopeGeneratorFromParams, scopeGeneratorToParams } from './scope/generator'
@@ -82,6 +85,9 @@ import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
+import { scopeCaptureSignature, type ScopeCaptureFacts } from './scope/persistence'
+import { scopeMeasurementRows, scopeStatsSignature } from './scope/measurementRows'
+import { useScopeMeasurements } from './composables/useScopeMeasurements'
 import { DEFAULT_SCOPE_PATH, pathQuery, pathSummary, type ScopeSignalPathSettings } from './scope/signalPath'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
 import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
@@ -265,6 +271,14 @@ const { config: spectrumConfig, load: reloadSpectrumConfig } = useSpectrumConfig
 const { selectedMetrics, applyLoaded: applyLoadedMetrics } = useMetricSelection()
 // For the report's Metrics element — the power tiles need the load the Generator pane names.
 const { loadOhms } = useLoadOhms()
+
+// The oscilloscope's capture-rate badge is off unless Configuration ▸ Diagnostics says otherwise.
+// Loaded here rather than waiting for that dialog to be opened, or a bench that had switched it on
+// would see nothing until it went looking for the switch again. The same module singleton the
+// dialog writes, so toggling it there reaches the badge with no second source of truth.
+const { captureRate: captureRateConfig, loadCaptureRate } = useDiagnostics()
+void loadCaptureRate()
+const captureRateShown = computed(() => captureRateConfig.value?.enabled === true)
 const { scopePeriods, applyLoaded: applyLoadedScopePeriods } = useScopeDisplay()
 const {
   yTop: chartYTop,
@@ -2091,8 +2105,19 @@ const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
  * it is not stored with the measurement any more than the picture is.
  */
 const scopePersistenceCleared = ref(0)
+/**
+ * What the analyzer is capturing with, as the last Run or retune asked for it.
+ *
+ * <p>Folded into the persistence key below, so changing a capture setting throws the accumulated
+ * picture away — see <code>scopeCaptureSignature</code> for why the chart's own pixel signature
+ * cannot notice that on its own. Taken from the request rather than from the models beside it
+ * because the request is the only thing that carries the whole configuration, the slope, the
+ * holdoff and the width bounds included.</p>
+ */
+const scopeCaptureFacts = ref<ScopeCaptureFacts | null>(null)
 const scopePersistenceKey = computed(
-  () => `${currentTypeId.value ?? 0}:${scopePersistenceCleared.value}`,
+  () =>
+    `${currentTypeId.value ?? 0}:${scopePersistenceCleared.value}:${scopeCaptureSignature(scopeCaptureFacts.value)}:${scopePath.value.coupling}`,
 )
 const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
@@ -2101,6 +2126,35 @@ const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 const scopePath = ref<ScopeSignalPathSettings>({ ...DEFAULT_SCOPE_PATH })
 /** How the chart joins one sample to the next. See scope/interpolation.ts. */
 const scopeDrawing = ref(DEFAULT_SCOPE_DISPLAY.drawing)
+
+/**
+ * The window the chart is actually showing, which is <b>not</b> always the display panel's pair.
+ *
+ * <p>A drag-zoom moves uPlot’s scales in place and deliberately does not write the panel’s
+ * boxes — only "Set axis" does that, so a zoom does not mark the measurement dirty. The zoom bar
+ * has to show where the chart really is, so this is the one value both writers keep: the chart
+ * reports it after any gesture, and the strip sets it with the panel’s pair when its box is
+ * dragged. Null before the chart has reported anything, where the panel’s pair is the answer.</p>
+ *
+ * <p><b>It is declared here, a long way from the zoom bar it belongs to, because the restore below
+ * writes it during setup.</b> <code>applyStoredScopeDisplay</code> clears it, and the watcher that
+ * calls that is <code>immediate</code> — so with the declaration further down the file it was in
+ * its own temporal dead zone, and the restore threw <code>ReferenceError</code> out of setup and
+ * left every ref below it unassigned. That is the <code>ScopeConfigPanel</code> fault one layer
+ * out, and silent in the same way: Vue catches what a watcher throws, so it reached the console and
+ * nothing else. It fired only where setup ran with a measurement already open, which is Vite HMR
+ * rather than a real page load — so the screen worked until it did not, and the fix is an order
+ * rather than a line. <code>storedDisplayDefaults.test.ts</code> reads this file as text and pins
+ * it, nothing else being able to see the order of two declarations.</p>
+ */
+const scopeViewWindow = ref<ScopeTimeWindow | null>(null)
+
+/**
+ * What the X-Y view asks for, the waveform chart’s own width deciding it everywhere else. Up here
+ * for the reason above: the display path’s own <code>immediate</code> watcher is within reach of
+ * it, and a constant in a dead zone fails exactly as a ref does.
+ */
+const SCOPE_DEFAULT_COLUMNS = 1600
 
 /** What is in the path, for the chart's badge and the measurements panel's note. */
 const scopePathNote = computed(() => pathSummary(scopePath.value))
@@ -2264,6 +2318,18 @@ const scopeXyChart = ref<InstanceType<typeof ScopeXyChart> | null>(null)
 /** The eye, mounted only while it is the view on screen. See scope/eye.ts. */
 const scopeEyeChart = ref<InstanceType<typeof ScopeEyeChart> | null>(null)
 
+/**
+ * The readout under the chart: which readings it shows, and their statistics.
+ *
+ * <p>The rows are built here rather than in the table because this is the one place that knows all
+ * four things they depend on — the record, which inputs are drawn, whether the cursors are gating,
+ * and the capture configuration the statistics are counted against. It is also what keeps the
+ * accumulation out of a component: a mounted table must not be what decides whether a record was
+ * counted.</p>
+ */
+const scopeMeasurementSelection = useScopeMeasurements()
+const scopeMeasurementPickerOpen = ref(false)
+
 const {
   record: scopeRecord,
   overview: scopeOverview,
@@ -2273,7 +2339,9 @@ const {
   runError: scopeRunError,
   progressLabel: scopeProgressLabel,
   recordsTaken: scopeRecordsTaken,
+  captureRates: scopeCaptureRates,
   recordBounds: scopeRecordBounds,
+  window: scopeFetchedWindow,
   sampleRateHz: scopeSampleRateHz,
   start: startOscilloscope,
   retune: retuneOscilloscope,
@@ -2289,6 +2357,78 @@ const {
   setEye: setOscilloscopeEye,
   setPath: setOscilloscopePath,
 } = useOscilloscope()
+
+/**
+ * Whether the figures on screen are the cursors' or the whole window's.
+ *
+ * <p>Read off the <b>slice</b> and not off the cursors, the Measurements panel's own rule: the gate
+ * rides on the same fetch as the picture, so a slice carrying a gated set is a slice whose gated
+ * set is of that record. Keying on the cursors instead would label the previous capture's figures
+ * "between the cursors" for one tick after a drag.</p>
+ */
+const scopeGated = computed(() =>
+  (scopeRecord.value?.channels ?? []).some((slice) => slice.gated !== null),
+)
+
+/** The chosen readings of the record on screen — what the table draws and the statistics count. */
+const scopeMeasurementTableRows = computed(() =>
+  scopeMeasurementRows(scopeRecord.value, scopeMeasurementSelection.selected.value, {
+    showLeft: scopeShowLeft.value,
+    showRight: scopeShowRight.value,
+    source: scopeGated.value ? 'gate' : 'window',
+  }),
+)
+
+/**
+ * Folds each arriving record into the statistics.
+ *
+ * <p>Watching the <b>record</b> rather than the rows: the rows change for display reasons too — a
+ * channel ticked off, a measurement added — and counting on those would put one record into the
+ * mean several times. A record object is replaced once per fetch and each one is a distinct
+ * capture, so this counts captures.</p>
+ *
+ * <p>Statistics are kept whether or not the checkbox is showing them, so ticking it mid-run shows
+ * what the run has already done rather than starting from one. What <i>does</i> start them again is
+ * the signature moving, which is anything that makes the records stop being comparable.</p>
+ */
+/** The record the statistics last counted, so one capture is counted once however often it is re-fetched. */
+let scopeRecordsCounted = -1
+
+/**
+ * The statistics belong to the measurement, so a switch away from it throws them out.
+ *
+ * <p>Here and not in <code>applyLoaded</code>, which is where it was first put and is wrong: that
+ * runs on every re-apply of the stored display, and the autosave is one — it rewrites
+ * <code>params_json</code>, the screen reads it back, and the count went to zero every time a
+ * display control was touched. Everything short of a measurement switch is already covered by the
+ * statistics signature, which clears them whenever a reading stops meaning the same thing.</p>
+ */
+watch(currentTypeId, () => {
+  scopeMeasurementSelection.resetStats()
+  scopeRecordsCounted = -1
+})
+
+watch(scopeRecord, (record) => {
+  if (!isOscilloscope.value || !record) return
+
+  // One capture counted once. The record object is replaced by every re-fetch, not only by a new
+  // capture -- ticking Residual, turning the math channel on or moving the cursors all ask for the
+  // same record again -- and counting those would put one record into the mean several times. The
+  // run's own counter is what says a capture is new; it stops moving on a held Single, which is
+  // exactly when there is nothing further to count.
+  if (scopeRecordsTaken.value === scopeRecordsCounted) return
+  scopeRecordsCounted = scopeRecordsTaken.value
+
+  scopeMeasurementSelection.accumulate(
+    scopeMeasurementTableRows.value,
+    scopeStatsSignature(
+      scopeCaptureSignature(scopeCaptureFacts.value),
+      record,
+      scopeGated.value ? 'gate' : 'window',
+      scopeFetchedWindow.value,
+    ),
+  )
+})
 
 function currentScopeDisplay() {
   return {
@@ -2311,6 +2451,8 @@ function currentScopeDisplay() {
     drawing: scopeDrawing.value,
     showLeft: scopeShowLeft.value,
     showRight: scopeShowRight.value,
+    measurements: [...scopeMeasurementSelection.selected.value],
+    measurementStatistics: scopeMeasurementSelection.statistics.value,
   }
 }
 
@@ -2343,6 +2485,9 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeDrawing.value = display.drawing
   scopeShowLeft.value = display.showLeft
   scopeShowRight.value = display.showRight
+  // The selection comes back with the measurement, and the statistics start again with it: a mean
+  // carried across a measurement switch would be of the other measurement's records.
+  scopeMeasurementSelection.applyLoaded(display.measurements, display.measurementStatistics)
   void nextTick(() => {
     scopeDisplayRestoring = false
   })
@@ -2428,7 +2573,10 @@ watch(
  * asks for it.
  */
 watch(
-  scopeXyShowing,
+  // The goniometer needs the figure to draw; the Channel delay readings need it to read. Either
+  // asks for it, because the phase, the skew and the correlation are measured off that same figure
+  // -- one fetch, so a reading and the picture it came from cannot disagree.
+  () => scopeXyShowing.value || scopeMeasurementSelection.needsPair.value,
   (on) => {
     if (isOscilloscope.value) void setOscilloscopeXy(on).catch(() => undefined)
   },
@@ -2455,9 +2603,10 @@ watch(
     if (!isOscilloscope.value) return
     void setOscilloscopePath(pathQuery(settings)).catch(() => undefined)
     // And the references, which have to be read through the same path or the comparison is of two
-    // different things. The path alone: this watcher is `immediate`, so it runs during setup, where
-    // `scopeViewWindow` and `SCOPE_DEFAULT_COLUMNS` are declared further down and still in their
-    // temporal dead zone — reading either threw out of setup and left every ref below unassigned.
+    // different things. The path alone, and that stands on its own: a function that needs no window
+    // must not reach for one. It was also the reading that made `scopeViewWindow` and
+    // `SCOPE_DEFAULT_COLUMNS` safe to touch here at all, before they were hoisted to the top of
+    // this screen's state -- this watcher is `immediate`, so it runs during setup.
     void setScopeOverlayPath(pathQuery(settings)).catch(() => undefined)
   },
   { immediate: true, deep: true },
@@ -2485,6 +2634,10 @@ async function runOscilloscope(request: import('./api/client').OscilloscopeStart
   const withGenerator = generator
     ? { ...request, generatorLeft: generator.left, generatorRight: generator.right, snapToBin: generator.snapToBin }
     : request
+
+  // Before the request, not after: the haze belongs to the configuration it was accumulated
+  // under, and a record from the new one can arrive before an awaited start has returned.
+  scopeCaptureFacts.value = request
 
   try {
     await startOscilloscope(withGenerator)
@@ -2516,6 +2669,8 @@ async function onScopeRetune(request: import('./api/client').OscilloscopeStartRe
     return
   }
 
+  scopeCaptureFacts.value = request
+
   try {
     await retuneOscilloscope(request)
   } catch {
@@ -2523,24 +2678,6 @@ async function onScopeRetune(request: import('./api/client').OscilloscopeStartRe
     // the user cannot act on is worse than silence.
   }
 }
-
-/**
- * The release of a trigger-line drag: whatever the debounce still owes, sent now.
- *
- * <p>The level is written live so the line and the box cannot disagree mid-drag, and the
- * <em>capture</em> follows on a debounce so a drag costs one request rather than one per pointer
- * move. Flushing on the release is what keeps the two from disagreeing after the user has let go.</p>
- */
-/**
- * The window the chart is actually showing, which is <b>not</b> always the display panel's pair.
- *
- * <p>A drag-zoom moves uPlot's scales in place and deliberately does not write the panel's boxes —
- * only "Set axis" does that, so a zoom does not mark the measurement dirty. The zoom bar has to
- * show where the chart really is, so this is the one value both writers keep: the chart reports it
- * after any gesture, and the strip sets it with the panel's pair when its box is dragged. Null
- * before the chart has reported anything, where the panel's pair is the answer.</p>
- */
-const scopeViewWindow = ref<ScopeTimeWindow | null>(null)
 
 /** What the zoom bar draws its box from — the chart's own window, or the panel's before there is one. */
 const scopeStripWindow = computed<ScopeTimeWindow>(
@@ -2563,6 +2700,13 @@ function onScopeStripWindow(next: ScopeTimeWindow) {
   scopeViewWindow.value = clamped
 }
 
+/**
+ * The release of a trigger-line drag: whatever the debounce still owes, sent now.
+ *
+ * <p>The level is written live so the line and the box cannot disagree mid-drag, and the
+ * <em>capture</em> follows on a debounce so a drag costs one request rather than one per pointer
+ * move. Flushing on the release is what keeps the two from disagreeing after the user has let go.</p>
+ */
 function onScopeTriggerLevelCommitted() {
   scopeConfigPanel.value?.flushRetune()
 }
@@ -2595,6 +2739,9 @@ function onScopeAxisWindow(window: ScopeAxisWindow) {
   scopeVoltOffsetV.value = fit.offsetV
 }
 
+let scopeWindowHandle: ReturnType<typeof setTimeout> | null = null
+let scopeWindowAsked: string | null = null
+
 /**
  * Asks the server for the slice the window on screen covers.
  *
@@ -2611,12 +2758,6 @@ function onScopeAxisWindow(window: ScopeAxisWindow) {
  * already showing whenever a record arrives in it. The *token* inside the composable is what stops
  * a late answer winning; this is only about not asking.</p>
  */
-/** What the X-Y view asks for, the waveform chart's own width deciding it everywhere else. */
-const SCOPE_DEFAULT_COLUMNS = 1600
-
-let scopeWindowHandle: ReturnType<typeof setTimeout> | null = null
-let scopeWindowAsked: string | null = null
-
 function requestScopeSlice(window: { fromS: number; toS: number } | null, columns: number) {
   const key = window ? `${window.fromS}:${window.toS}:${columns}` : `whole:${columns}`
   if (key === scopeWindowAsked) return
@@ -3614,6 +3755,10 @@ function issueReportClientState(): unknown {
       impulse: impulseRunning.value,
       outputImpedance: outputImpedanceRunning.value,
     },
+    // The third capture rate, which the server cannot see: how many records reached this browser.
+    // Its own log line carries the other two and deliberately does not invent this one, so a report
+    // sent in is where the three meet. Null whenever no scope run is going.
+    scopeCaptureRates: scopeCaptureRates.value,
     lastError: error.value ?? null,
   }
 }
@@ -3670,6 +3815,13 @@ function buildLiveSubject(): ReportSubject | null {
       // window *is* the measurement being reported rather than a view of a wider one.
       record: scopeRecord.value,
       display: currentScopeDisplay(),
+      // Only what the table is actually showing: a statistic for a row nobody chose would be
+      // printed by nothing and is the kind of thing that quietly grows a report.
+      measurementStats: Object.fromEntries(
+        scopeMeasurementTableRows.value
+          .map((row) => [row.key, scopeMeasurementSelection.stat(row.key)] as const)
+          .filter((pair): pair is readonly [string, NonNullable<(typeof pair)[1]>] => pair[1] !== null),
+      ),
       triggerLevelV: scopeTriggerLevelV.value,
       triggerHysteresisV: scopeTriggerHysteresisV.value,
       triggerSource: scopeTriggerSource.value,
@@ -6163,6 +6315,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :show-left="scopeShowLeft"
                   :show-right="scopeShowRight"
                   :path-note="scopePathNote"
+                  @pick-measurements="scopeMeasurementPickerOpen = true"
                 />
               </template>
 
@@ -6254,11 +6407,14 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :accumulation="scopeAccumulation"
                   :average-count="scopeAverageCount"
                   :persistence-key="scopePersistenceKey"
+                  :capture-rates="captureRateShown ? scopeCaptureRates : null"
                   @axis-window="onScopeAxisWindow"
                   @viewport="onScopeViewport"
                   @trigger-level-committed="onScopeTriggerLevelCommitted"
                   @cursors-committed="onScopeCursorsCommitted"
                 />
+
+                <ScopeMeasurementTable :rows="scopeMeasurementTableRows" :gated="scopeGated" />
 
                 <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />
@@ -7202,6 +7358,10 @@ onBeforeUnmount(() => stopLoadPolling?.())
     />
     <ConfirmDialog />
     <MetricPickerDialog :open="metricPickerOpen" @close="metricPickerOpen = false" />
+    <ScopeMeasurementPickerDialog
+      :open="scopeMeasurementPickerOpen"
+      @close="scopeMeasurementPickerOpen = false"
+    />
     <ReportDialog
       :open="reportOpen"
       :live-subject="reportLiveSubject"

@@ -307,7 +307,7 @@ public static class ScopeFrameBuilder
         if (values is null)
             return null;
 
-        var measurements = ScopeSliceMeasurements.Of(values, record.SampleRateHz);
+        var measurements = ScopeSliceMeasurements.Of(values, record.SampleRateHz, slice.X0);
         var unit = WaveformMath.UnitOf(operation);
 
         // The same shape as the slice by construction rather than by repeating its own test: two
@@ -339,7 +339,7 @@ public static class ScopeFrameBuilder
         if (values is null)
             return null;
 
-        return ScopeSliceMeasurements.Of(values, record.SampleRateHz);
+        return ScopeSliceMeasurements.Of(values, record.SampleRateHz, record.TimeAt(range.First));
     }
 
     /// <summary>
@@ -687,7 +687,9 @@ public static class ScopeFrameBuilder
         }
 
         return ScopeSliceMeasurements.Of(
-            record.Channels[channel].AsSpan(range.First, range.Count), record.SampleRateHz);
+            record.Channels[channel].AsSpan(range.First, range.Count),
+            record.SampleRateHz,
+            record.TimeAt(range.First));
     }
 
     /// <summary>
@@ -744,7 +746,7 @@ public static class ScopeFrameBuilder
                 ScopeSliceMeasurements.OfEnvelope(low, source));
         }
 
-        var measurements = ScopeSliceMeasurements.Of(source, record.SampleRateHz);
+        var measurements = ScopeSliceMeasurements.Of(source, record.SampleRateHz, x0);
 
         if (frameCount <= maxColumns * RawSamplesPerColumn)
         {

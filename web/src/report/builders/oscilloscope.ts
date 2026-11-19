@@ -4,6 +4,9 @@ import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
 import { xyReadings, xyTruncationNote } from '../../scope/xy'
 import { pathSummary } from '../../scope/signalPath'
 import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
+import { scopeMeasurementRows } from '../../scope/measurementRows'
+import { SCOPE_MEASUREMENT_ABSENT } from '../../scope/measurementCatalogue'
+import { SCOPE_STAT_COLUMNS, type ScopeMeasurementStat } from '../../scope/measurementStats'
 import type { ReportElementId } from '../elements'
 import type { ReportSubject } from '../types'
 import { descriptionSections, genericSettingsSection } from './generic'
@@ -209,6 +212,77 @@ export function scopeMeasurementSections(
   return sections
 }
 
+/**
+ * The readout under the chart as the report prints it.
+ *
+ * <p><b>The rows are rebuilt here rather than copied from the screen</b>, from the same record and
+ * the same display the chapter already carries and through the same function the table draws from —
+ * so the paper and the screen cannot quote different numbers or call them different things. Only
+ * the statistics are handed over, because they are the one part that is a history of the run rather
+ * than a property of the capture and cannot be derived from anything stored.</p>
+ *
+ * <p>Measurements down the page and statistics across it, the table's own way round and for its own
+ * reason: a reader compares the two channels' figure for one reading, and that comparison across
+ * a page's width is no comparison at all.</p>
+ */
+export function scopeChosenMeasurementSection(
+  record: ScopeRecordResponse | null,
+  display: { measurements: string[]; measurementStatistics: boolean; showLeft: boolean; showRight: boolean },
+  stats: Record<string, ScopeMeasurementStat> | null | undefined,
+): ReportSection[] {
+  if (!record || display.measurements.length === 0) return []
+
+  const gated = record.channels.some((slice) => slice.gated !== null)
+  const rows = scopeMeasurementRows(record, display.measurements, {
+    showLeft: display.showLeft,
+    showRight: display.showRight,
+    source: gated ? 'gate' : 'window',
+  })
+  if (rows.length === 0) return []
+
+  // Statistics only where something was actually counted. A run that was never started, and every
+  // stored result, has none -- and five columns of dashes say less than no columns at all.
+  const withStats = display.measurementStatistics && rows.some((row) => stats?.[row.key])
+
+  const headers = ['Measurement', 'Value']
+  if (withStats) headers.push(...SCOPE_STAT_COLUMNS.map((c) => c.label), 'Count')
+
+  const sections: ReportSection[] = [
+    {
+      kind: 'table',
+      title: 'Selected measurements',
+      headers,
+      cells: rows.map((row) => {
+        const cells = [`${row.sourceLabel} · ${row.label}`, row.text]
+        if (withStats) {
+          const stat = stats?.[row.key] ?? null
+          for (const column of SCOPE_STAT_COLUMNS) {
+            cells.push(stat ? row.format(stat[column.key]) : SCOPE_MEASUREMENT_ABSENT)
+          }
+          cells.push(stat ? stat.count.toLocaleString() : SCOPE_MEASUREMENT_ABSENT)
+        }
+        return cells
+      }),
+    },
+  ]
+
+  if (gated) {
+    sections.push({
+      kind: 'paragraph',
+      text: 'Measured between the cursors rather than over the whole window, on the samples in that stretch.',
+    })
+  }
+
+  if (withStats) {
+    sections.push({
+      kind: 'paragraph',
+      text: 'The statistics are of the records this screen read while the run was going, since the count was last reset — not of the records the analyzer committed, which it does faster than a browser polls. Anything that changed what a reading is, a capture setting or the window being measured, started the count again on its own.',
+    })
+  }
+
+  return sections
+}
+
 /** Every section of an oscilloscope chapter except the chart, in report order, for the chosen elements. */
 export function scopeSections(subject: ReportSubject, elements: readonly ReportElementId[]): ReportSection[] {
   const sections: ReportSection[] = []
@@ -221,7 +295,10 @@ export function scopeSections(subject: ReportSubject, elements: readonly ReportE
   }
 
   if (elements.includes('measurements') && subject.data.kind === 'scope') {
-    const { record, display } = subject.data
+    const { record, display, measurementStats } = subject.data
+    // The chosen few first and the full set after it: the readout is what the reader was watching,
+    // and a page that opens with forty rows buries it.
+    sections.push(...scopeChosenMeasurementSection(record, display, measurementStats))
     sections.push(
       ...scopeMeasurementSections(
         record,

@@ -69,9 +69,11 @@ public sealed class StimulusTrigger : IScanTrigger
     ///
     /// <para>The phase is the absolute frame clock's, so a reset — a dropped block, a range step —
     /// leaves it exactly where it was, which is the point: the generator did not stop counting
-    /// either. The holdoff is kept for the same reason, being a count on the same clock.</para>
+    /// either. The holdoff is kept for the same reason, being a count on the same clock, which is
+    /// why <paramref name="keepHoldoff"/> is accepted and ignored: this scanner has behaved that
+    /// way since it was written, and the flag exists so the other five can.</para>
     /// </summary>
-    public void Reset()
+    public void Reset(bool keepHoldoff = false)
     {
     }
 

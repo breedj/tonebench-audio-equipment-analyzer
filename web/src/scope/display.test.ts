@@ -266,3 +266,44 @@ describe('the chart asks for the gate', () => {
     expect(chart).toContain('capturedScopeChannels(record?.channels)')
   })
 })
+
+describe('the chosen measurements', () => {
+  it('comes back as it was stored, in the catalogue order', () => {
+    const stored = JSON.stringify({ chartMeasurements: ['freq', 'pkpk'], chartMeasurementStatistics: true })
+    const display = scopeDisplayFromParams(stored)
+    expect(display.measurements).toEqual(['pkpk', 'freq'])
+    expect(display.measurementStatistics).toBe(true)
+  })
+
+  it('opens on this build default when the measurement was saved before the readout existed', () => {
+    // Absent is not an empty table: a screen that shows nothing under its chart reads as a feature
+    // that failed rather than as one nobody has set up.
+    const display = scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.5 }))
+    expect(display.measurements).toEqual([...DEFAULT_SCOPE_DISPLAY.measurements])
+    expect(display.measurementStatistics).toBe(false)
+  })
+
+  it('keeps an empty list empty, which is a reader who cleared it', () => {
+    expect(scopeDisplayFromParams(JSON.stringify({ chartMeasurements: [] })).measurements).toEqual([])
+  })
+
+  it('drops an id this build cannot read rather than carrying a row that is always blank', () => {
+    const stored = JSON.stringify({ chartMeasurements: ['pkpk', 'fromTheFuture'] })
+    expect(scopeDisplayFromParams(stored).measurements).toEqual(['pkpk'])
+  })
+
+  it('round-trips through the save path', () => {
+    const display = { ...DEFAULT_SCOPE_DISPLAY, measurements: ['rms', 'phase'], measurementStatistics: true }
+    const back = scopeDisplayFromParams(JSON.stringify(scopeDisplayToParams(display)))
+    expect(back.measurements).toEqual(['rms', 'phase'])
+    expect(back.measurementStatistics).toBe(true)
+  })
+
+  it('copies the list rather than handing the default out to be mutated', () => {
+    // The frozen-default trap: a caller that pushed onto this would change what every later
+    // measurement opens with.
+    const a = scopeDisplayFromParams(null)
+    a.measurements.push('max')
+    expect(scopeDisplayFromParams(null).measurements).toEqual([...DEFAULT_SCOPE_DISPLAY.measurements])
+  })
+})

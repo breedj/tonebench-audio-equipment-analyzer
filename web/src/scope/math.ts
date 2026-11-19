@@ -237,6 +237,7 @@ export function mathUnitSuffix(unit: ScopeMathUnit): string {
 
 /** The SI prefixes a magnitude is written with, from the smallest up. */
 const PREFIXES: readonly { scale: number; prefix: string }[] = Object.freeze([
+  { scale: 1e-12, prefix: 'p' },
   { scale: 1e-9, prefix: 'n' },
   { scale: 1e-6, prefix: 'µ' },
   { scale: 1e-3, prefix: 'm' },
@@ -244,6 +245,31 @@ const PREFIXES: readonly { scale: number; prefix: string }[] = Object.freeze([
   { scale: 1e3, prefix: 'k' },
   { scale: 1e6, prefix: 'M' },
 ])
+
+/**
+ * A figure at its own magnitude: four significant figures under the largest SI prefix it still
+ * reads as at least one of.
+ *
+ * <p>Exported because the measurement readout under the chart needs the same ladder for seconds and
+ * hertz, and for the reason the readout exists at all: a <em>statistic</em> of a reading is
+ * routinely orders below the reading, so the axis formatters — which write in the unit the
+ * graticule is in, deliberately — would print a spread of 40 mHz as <code>0.00 Hz</code> and a
+ * jitter of 800 ps as <code>0.00 µs</code>. Those are exactly the figures a statistics column is
+ * read for.</p>
+ */
+export function formatSiValue(value: number, suffix: string): string {
+  if (!Number.isFinite(value)) return '—'
+  const magnitude = Math.abs(value)
+  if (magnitude === 0) return suffix ? `0.000 ${suffix}` : '0.000'
+
+  let chosen = PREFIXES[0]
+  for (const candidate of PREFIXES) {
+    if (magnitude >= candidate.scale) chosen = candidate
+  }
+  const written = sig(value / chosen.scale)
+  const unit = `${chosen.prefix}${suffix}`
+  return unit ? `${written} ${unit}` : written
+}
 
 /** Four significant figures, which is what every reading on this screen is written to. */
 function sig(value: number): string {
@@ -272,16 +298,7 @@ export function formatMathValue(value: number, unit: ScopeMathUnit): string {
     return `${sig(value)} V/s`
   }
 
-  const suffix = mathUnitSuffix(unit)
-  const magnitude = Math.abs(value)
-  if (magnitude === 0) return `0.000 ${suffix}`
-
-  // The largest prefix the figure still reads as at least one of.
-  let chosen = PREFIXES[0]
-  for (const candidate of PREFIXES) {
-    if (magnitude >= candidate.scale) chosen = candidate
-  }
-  return `${sig(value / chosen.scale)} ${chosen.prefix}${suffix}`
+  return formatSiValue(value, mathUnitSuffix(unit))
 }
 
 /**

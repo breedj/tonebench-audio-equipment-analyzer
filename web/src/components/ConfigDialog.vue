@@ -53,6 +53,8 @@ const {
   setCapture: setRecordCapture,
   openRecordingsFolder,
   openDiagnosticsFolder,
+  captureRate,
+  setCaptureRate,
 } = useDiagnostics()
 void loadDiagnostics()
 const { fixture, hasCalibration, error: fixtureError, load: loadFixture, save: saveFixture, clear: clearFixture } =
@@ -623,6 +625,24 @@ async function clearStoredCalibration() {
               </button>
             </div>
             <p v-if="diagnosticLoggingError" class="text-xs text-red-600 dark:text-red-400">{{ diagnosticLoggingError }}</p>
+          </div>
+
+          <div class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+            <label
+              class="flex items-center gap-2"
+              title="Puts a badge on the oscilloscope's chart while a run is going, reading how many records the trigger engine committed, how many the run collected, and how many reached the chart, per second. The three fall in that order, and the last is what the persistence haze accumulates at — so this is what says how fast an intensity-graded picture can build."
+            >
+              <input
+                type="checkbox"
+                :checked="captureRate?.enabled ?? false"
+                @change="setCaptureRate(($event.target as HTMLInputElement).checked)"
+              />
+              Show the oscilloscope's capture rate
+            </label>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400">
+              Off by default. The same three figures are written to the log at the end of every
+              oscilloscope run, whether or not the badge is shown.
+            </p>
           </div>
 
           <div class="flex flex-col gap-1.5 border-t border-neutral-200 pt-3 dark:border-neutral-800">

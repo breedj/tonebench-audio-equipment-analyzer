@@ -197,6 +197,24 @@ public sealed record DiagnosticLoggingConfig(bool Enabled = true)
 }
 
 /// <summary>
+/// Whether the oscilloscope shows its capture rate: how many records the trigger engine committed,
+/// how many the run collected, and how many reached the chart, per second.
+///
+/// <para><b>Off by default</b>, and a switch rather than always on, because the three figures are a
+/// bench diagnostic rather than a reading every session needs -- the chart header is otherwise kept
+/// for things that change what a trace <i>means</i>. What it answers is why an intensity-graded
+/// persistence picture builds at the speed it does: the haze accumulates per record drawn, which is
+/// the last and smallest of the three.</para>
+///
+/// <para>Persisted, so a bench that is chasing this keeps it across a restart -- the half of the
+/// detailed-logging reasoning that still applies to a figure nobody can reproduce on demand.</para>
+/// </summary>
+public sealed record CaptureRateConfig(bool Enabled = false)
+{
+    public static CaptureRateConfig Default { get; } = new();
+}
+
+/// <summary>
 /// Whether every acquisition is recorded to disk as a pair of WAV files -- the input stream as the
 /// analyzer digitized it and the stimulus as the DAC was told to play it -- and how large one of
 /// those files may get before recording stops.
@@ -905,6 +923,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The stream recorder's key. One document, see <see cref="StreamRecordingConfig"/>.</summary>
     public const string StreamRecordingKey = "diagnostics.streamRecording";
+
+    /// <summary>The capture-rate readout's key. One document, see <see cref="CaptureRateConfig"/>.</summary>
+    public const string CaptureRateKey = "diagnostics.captureRate";
 
     /// <summary>The date/time format's key. One document, see <see cref="DateTimeFormatConfig"/>.</summary>
     public const string DateTimeFormatKey = "ui.dateTimeFormat";

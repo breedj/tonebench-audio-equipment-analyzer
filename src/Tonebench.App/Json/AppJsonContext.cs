@@ -157,6 +157,7 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(LoadStatusResponse))]
 [JsonSerializable(typeof(LoadReadingResponse))]
 [JsonSerializable(typeof(DiagnosticLoggingConfig))]
+[JsonSerializable(typeof(CaptureRateConfig))]
 [JsonSerializable(typeof(StreamRecordingConfig))]
 [JsonSerializable(typeof(StreamRecordingStatus))]
 [JsonSerializable(typeof(AppIdentity))]

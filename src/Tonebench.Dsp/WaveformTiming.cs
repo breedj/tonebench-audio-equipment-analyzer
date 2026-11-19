@@ -19,6 +19,19 @@ namespace Tonebench.Dsp;
 /// How far the record goes past the top, as a percentage of the amplitude. Zero when it does not.
 /// </param>
 /// <param name="PreshootPercent">The same below the base.</param>
+/// <param name="NegativeDutyPercent">
+/// The negative width as a percentage of the period — the other half of <paramref name="DutyPercent"/>.
+///
+/// <para>Measured from the negative width rather than written as <c>100 − duty</c>, which is the
+/// same number only because the two widths are built to add up to the period. Deriving it would
+/// make it agree with the positive duty by construction instead of by measurement, which is the one
+/// thing a second reading of the same cycle is for.</para>
+/// </param>
+/// <param name="CycleFirstSample">
+/// The first whole sample of the cycle the period was measured over, or null where there is no
+/// cycle. Carried so the per-cycle levels are taken over exactly the stretch this timing describes.
+/// </param>
+/// <param name="CycleSampleCount">How many samples that cycle spans, rounded to whole ones.</param>
 public readonly record struct WaveformTiming(
     double? PeriodS,
     double? FrequencyHz,
@@ -28,7 +41,10 @@ public readonly record struct WaveformTiming(
     double? RiseTimeS,
     double? FallTimeS,
     double? OvershootPercent,
-    double? PreshootPercent);
+    double? PreshootPercent,
+    double? NegativeDutyPercent = null,
+    int? CycleFirstSample = null,
+    int? CycleSampleCount = null);
 
 /// <summary>
 /// Period, width, duty and edge timing from one captured record and the two levels it settles at.
@@ -107,6 +123,23 @@ public static class WaveformTimingMeasure
         double? duty = period > 0 && positive is { } pos ? pos / period * 100.0 : null;
         double? negative = period is { } p && positive is { } pw ? p - pw : null;
 
+        // The cycle the period was measured over, in whole samples. Rounded rather than
+        // interpolated at its ends: the error is under half a sample at each, which at 192 kS/s is
+        // 2.6 us against a period of tens or thousands of them -- and the readings taken over it are
+        // means, where a fractional end sample moves the answer by its own weight in the average.
+        int? cycleFirst = null;
+        int? cycleCount = null;
+        if (firstRise is { } cycleStart && secondRise is { } cycleEnd && cycleEnd > cycleStart)
+        {
+            int first = (int)Math.Round(cycleStart, MidpointRounding.AwayFromZero);
+            int last = (int)Math.Round(cycleEnd, MidpointRounding.AwayFromZero);
+            if (first >= 0 && last <= samples.Length && last - first >= 2)
+            {
+                cycleFirst = first;
+                cycleCount = last - first;
+            }
+        }
+
         return new WaveformTiming(
             PeriodS: period,
             FrequencyHz: period > 0 ? 1.0 / period : null,
@@ -116,7 +149,10 @@ public static class WaveformTimingMeasure
             RiseTimeS: EdgeTime(samples, sampleRateHz, low, high, rising: true),
             FallTimeS: EdgeTime(samples, sampleRateHz, low, high, rising: false),
             OvershootPercent: Beyond(samples, topV, amplitude, above: true),
-            PreshootPercent: Beyond(samples, baseV, amplitude, above: false));
+            PreshootPercent: Beyond(samples, baseV, amplitude, above: false),
+            NegativeDutyPercent: period > 0 && negative is { } neg and > 0 ? neg / period * 100.0 : null,
+            CycleFirstSample: cycleFirst,
+            CycleSampleCount: cycleCount);
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
 import { runTint } from '../charts/runTint'
 import { onScopeGrid } from '../scope/references'
+import { captureRateLabel, type ScopeCaptureRates } from '../scope/captureRates'
 import { accumulationBadge, type ScopeAccumulation } from '../scope/acquisition'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
 import { CHART_EXPORT_HEADER_PX, composeChartPng, nextPaint, type ChartExportOptions } from '../charts/exportChart'
@@ -166,6 +167,11 @@ const props = withDefaults(defineProps<{
    * record. Shown as a badge, because the path changes what every reading beside it means.
    */
   pathNote?: string | null
+  /**
+   * Committed, collected and drawn per second, or null when the readout is switched off, the run is
+   * stopped, or the window is too short to divide by. See scope/captureRates.ts.
+   */
+  captureRates?: ScopeCaptureRates | null
   /** How one sample is joined to the next. See scope/interpolation.ts. */
   drawing?: ScopeDrawing
   /** Which accumulation the run asked for — what the badge is about. See scope/acquisition.ts. */
@@ -202,6 +208,7 @@ const props = withDefaults(defineProps<{
   intensityPalette: 'Jet',
   mathOperation: 'Off',
   pathNote: null,
+  captureRates: null,
   drawing: 'Linear',
   accumulation: 'Normal',
   averageCount: 1,
@@ -1843,6 +1850,42 @@ const recordNote = computed(() => {
  * <p>The sentence is not lost: it is this badge's tooltip, and the Measurements panel prints it in
  * full under the readings it qualifies.</p>
  */
+/**
+ * The capture-rate badge: how many records were committed, collected and drawn per second.
+ *
+ * <p>Null unless the readout is switched on in Configuration &gt; Diagnostics <i>and</i> there is a
+ * live window to divide by — a stopped run stops being polled, so a badge left on screen would be
+ * a figure nothing is measuring any more, which reads exactly like a live one.</p>
+ *
+ * <p><b>Suppressed in Roll</b>, where none of the three means what the badge says: Roll never
+ * reaches the commit path, so committed is 0, and its collected count is roll steps rather than
+ * records. Explicit rather than left to the module's backwards-counter rule, which would hide it
+ * by accident rather than on purpose.</p>
+ */
+const rateBadge = computed(() => {
+  const rates = props.captureRates
+  if (!rates || props.record?.rolled) return null
+
+  const lost = Math.max(0, rates.committed - rates.collected)
+  return {
+    label: captureRateLabel(rates),
+    detail:
+      `Records per second over the last ${(rates.spanMs / 1000).toFixed(1)} s: ` +
+      `${rates.committedPerS.toFixed(1)} committed by the trigger, ` +
+      `${rates.collectedPerS.toFixed(1)} collected by the run, ` +
+      `${rates.drawnPerS.toFixed(1)} drawn here ` +
+      `(${rates.committed}, ${rates.collected} and ${rates.drawn} in that window).\n\n` +
+      'None can exceed the one before it, and they are equal when nothing is being lost. The ' +
+      'trigger finishes at most one record per block of samples ' +
+      'the device delivers; the run looks for a finished one every 10 ms and the engine holds only ' +
+      'one, so anything faster is replaced uncollected' +
+      (lost > 0 ? ` — ${lost} were, in this window` : '') +
+      '; and this browser asks for one about eight times a second.\n\n' +
+      'The persistence haze accumulates per record drawn, so the last figure is what decides how ' +
+      'fast an intensity-graded picture builds — not the first.',
+  }
+})
+
 const recordFlag = computed(() => {
   const record = props.record
 
@@ -1908,6 +1951,16 @@ const windowNote = computed(
         class="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300"
         title="Something in the display path is changing this trace, so every reading beside it is of the filtered waveform. What is stored is always the unfiltered capture."
         >{{ pathNote }}</span
+      >
+      <!-- Last of the badges, so a warning always keeps the leftmost position and a diagnostic
+           never pushes one rightward. Neutral rather than amber or blue: those two already mean
+           "this changes what the trace means" on this row, and a third colour saying "a reading"
+           must not read as a third fault. -->
+      <span
+        v-if="rateBadge"
+        class="shrink-0 rounded bg-neutral-500/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-neutral-600 dark:text-neutral-300"
+        :title="rateBadge.detail"
+        >{{ rateBadge.label }}</span
       >
       <span class="truncate">
         {{ timebaseLabel }} · {{ verticalLabel }} · {{ windowNote }} · {{ recordNote }}

@@ -43,6 +43,18 @@ namespace Tonebench.App.Streaming;
 /// <param name="FallTimeS">90 % to 10 % of the first clean falling one.</param>
 /// <param name="OvershootPercent">How far past the top the record goes, against the amplitude.</param>
 /// <param name="PreshootPercent">The same below the base.</param>
+/// <param name="NegativeDutyPercent">The negative width as a percentage of the period.</param>
+/// <param name="TimeAtMaxS">
+/// When the maximum fell, in the same seconds the chart's x axis is drawn in — negative anywhere in
+/// the pre-trigger. The first such sample where several share the value, so a clipped flat top
+/// reports where the clipping began.
+/// </param>
+/// <param name="TimeAtMinS">The same for the minimum.</param>
+/// <param name="CycleMeanV">The mean over one period rather than over the window — see <see cref="WaveformCycleMeasure"/> for why that is a different number and frequently the right one.</param>
+/// <param name="CycleRmsV">True RMS over that same period.</param>
+/// <param name="CycleStdevV">RMS about the cycle's own mean.</param>
+/// <param name="AreaVs">The window's integral, in volt-seconds.</param>
+/// <param name="CycleAreaVs">One period's integral.</param>
 public sealed record ScopeSliceMeasurements(
     double MaxV,
     double MinV,
@@ -62,7 +74,15 @@ public sealed record ScopeSliceMeasurements(
     double? RiseTimeS,
     double? FallTimeS,
     double? OvershootPercent,
-    double? PreshootPercent)
+    double? PreshootPercent,
+    double? NegativeDutyPercent = null,
+    double? TimeAtMaxS = null,
+    double? TimeAtMinS = null,
+    double? CycleMeanV = null,
+    double? CycleRmsV = null,
+    double? CycleStdevV = null,
+    double? AreaVs = null,
+    double? CycleAreaVs = null)
 {
     /// <summary>What an empty window reads: nothing at all, rather than zeros that look measured.</summary>
     public static ScopeSliceMeasurements Empty { get; } =
@@ -76,7 +96,14 @@ public sealed record ScopeSliceMeasurements(
     /// contiguous array per channel per fetch, which is microseconds and is paid only when a
     /// client asks for a slice rather than on every captured record.</para>
     /// </summary>
-    public static ScopeSliceMeasurements Of(ReadOnlySpan<double> samples, double sampleRateHz)
+    /// <param name="windowStartS">
+    /// When the window's first sample sits, relative to the trigger — what <c>Time@max</c> and
+    /// <c>Time@min</c> are offset by, so they read on the same axis the chart draws and the cursors
+    /// quote. Zero means "measure from the start of what you were given", which is what a caller
+    /// with no record behind it (a test, a bare span) wants.
+    /// </param>
+    public static ScopeSliceMeasurements Of(
+        ReadOnlySpan<double> samples, double sampleRateHz, double windowStartS = 0.0)
     {
         if (samples.IsEmpty)
             return Empty;
@@ -89,6 +116,13 @@ public sealed record ScopeSliceMeasurements(
         var timing = pair is { } p
             ? WaveformTimingMeasure.Measure(samples, sampleRateHz, p.TopV, p.BaseV)
             : default;
+
+        // One more pass, and only when there is a cycle to take it over.
+        var cycle = timing.CycleFirstSample is { } cycleFirst && timing.CycleSampleCount is { } cycleCount
+            ? WaveformCycleMeasure.Measure(samples, cycleFirst, cycleCount, sampleRateHz)
+            : null;
+
+        bool haveRate = sampleRateHz > 0.0 && double.IsFinite(sampleRateHz);
 
         return new ScopeSliceMeasurements(
             MaxV: levels.MaxV,
@@ -109,7 +143,17 @@ public sealed record ScopeSliceMeasurements(
             RiseTimeS: Finite(timing.RiseTimeS),
             FallTimeS: Finite(timing.FallTimeS),
             OvershootPercent: Finite(timing.OvershootPercent),
-            PreshootPercent: Finite(timing.PreshootPercent));
+            PreshootPercent: Finite(timing.PreshootPercent),
+            NegativeDutyPercent: Finite(timing.NegativeDutyPercent),
+            TimeAtMaxS: haveRate ? Finite(windowStartS + (levels.MaxIndex / sampleRateHz)) : null,
+            TimeAtMinS: haveRate ? Finite(windowStartS + (levels.MinIndex / sampleRateHz)) : null,
+            CycleMeanV: Finite(cycle?.MeanV),
+            CycleRmsV: Finite(cycle?.RmsV),
+            CycleStdevV: Finite(cycle?.StdevV),
+            // Mean times duration, which is the integral exactly for the rectangle rule this sums
+            // with -- so it costs nothing beyond the mean that was measured anyway.
+            AreaVs: haveRate ? Finite(levels.MeanV * (samples.Length / sampleRateHz)) : null,
+            CycleAreaVs: Finite(cycle?.AreaVs));
     }
 
     /// <summary>

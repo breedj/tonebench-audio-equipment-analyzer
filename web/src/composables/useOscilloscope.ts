@@ -6,6 +6,12 @@ import {
   type ResponsePhaseName,
   type ScopeRecordResponse,
 } from '../api/client'
+import {
+  captureRates as deriveCaptureRates,
+  pushRateSample,
+  type ScopeCaptureRates,
+  type ScopeRateSample,
+} from '../scope/captureRates'
 import type { CursorGate } from '../scope/cursors'
 import type { ScopeTimeWindow } from '../scope/timeAxis'
 
@@ -143,9 +149,33 @@ let fetchedFor = -1
 /** The same for the overview, which only has to follow the record and not the window. */
 let overviewFetchedFor = -1
 
+/**
+ * Distinct records that have reached `record.value`, i.e. the chart and its persistence buffer.
+ *
+ * Counted here rather than taken from the server, which cannot see it: this is the third of the
+ * three capture rates, and the one that decides how fast an intensity-graded picture builds.
+ */
+let recordsDrawn = 0
+
+let rateSamples: ScopeRateSample[] = []
+
+/** The three capture rates over the last couple of seconds, or null while there is nothing to divide by. */
+const captureRateReadings = shallowRef<ScopeCaptureRates | null>(null)
+
+function resetCaptureRates() {
+  recordsDrawn = 0
+  rateSamples = []
+  captureRateReadings.value = null
+}
+
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 function stopPolling() {
+  // Cleared here rather than left to age out, so the badge vanishes on STOP instead of freezing a
+  // rate nothing is measuring any more -- a stale number on an idle screen reads exactly like a
+  // live one, which is the fault the drop counters already cost a bench session over.
+  resetCaptureRates()
+
   if (pollHandle !== null) {
     clearInterval(pollHandle)
     pollHandle = null
@@ -159,7 +189,14 @@ function isRunning(next: OscilloscopeStatus | null): boolean {
 
 async function fetchRecord(force = false): Promise<void> {
   const taken = status.value?.recordsTaken ?? -1
-  if (!force && taken === fetchedFor) return
+
+  // Decided BEFORE the early return, and the whole reason this is not just `!force`. Eight callers
+  // pass force -- setWindow, setGate, setPath, setMath, setXy, setEye, cancel, switchOwner -- and
+  // every one of them assigns record.value again with no new capture behind it. Counting those
+  // would make dragging the trigger level inflate the drawn rate, so the diagnostic would report
+  // the opposite of the truth precisely while somebody was watching it.
+  const isNewRecord = taken !== fetchedFor
+  if (!force && !isNewRecord) return
 
   const token = ++fetchToken
   try {
@@ -175,6 +212,7 @@ async function fetchRecord(force = false): Promise<void> {
     )
     if (token !== fetchToken) return
     record.value = next
+    if (isNewRecord) recordsDrawn++
     fetchedFor = taken
 
     // The whole record for the strip. The windowed fetch above *is* the whole record when nothing
@@ -207,6 +245,19 @@ async function refresh(): Promise<void> {
     record.value = null
     overview.value = null
   }
+
+  // After the fetch above, so this sample's drawn count includes the record this very poll
+  // collected. performance.now() rather than Date.now() -- monotonic -- and stamped when the
+  // status arrived rather than when setInterval fired: the interval can overlap an async callback,
+  // and timing off the tick would make a slow poll read high.
+  rateSamples = pushRateSample(rateSamples, {
+    atMs: performance.now(),
+    committed: next.recordsCommitted ?? 0,
+    collected: next.recordsTaken,
+    drawn: recordsDrawn,
+  })
+  captureRateReadings.value = deriveCaptureRates(rateSamples)
+
   if (!isRunning(next)) stopPolling()
 }
 
@@ -225,6 +276,11 @@ function invalidateRecord() {
   fetchToken++
   fetchedFor = -1
   overviewFetchedFor = -1
+
+  // Here rather than in start/clear/switchOwner one by one: all three already funnel through this,
+  // it already means "forget what is on screen", and the server restarts all three counters at the
+  // same three moments. A fourth caller therefore cannot forget it.
+  resetCaptureRates()
 }
 
 export function useOscilloscope() {
@@ -418,6 +474,11 @@ export function useOscilloscope() {
     spliced: computed(() => status.value?.spliced ?? false),
     /** Auto's timeout took it; nothing crossed the level, so the trace is aligned to nothing. */
     forced: computed(() => status.value?.forced ?? false),
+    /**
+     * Committed, collected and drawn per second, or null while a run is stopped or the window is
+     * too short to divide by. See `scope/captureRates.ts`.
+     */
+    captureRates: captureRateReadings,
     sampleRateHz: computed(() => status.value?.sampleRateHz ?? 0),
     /** Why the run stopped, as the runner put it — distinct from `error`, which belongs to this composable's own requests. */
     runError: computed(() => status.value?.error ?? null),

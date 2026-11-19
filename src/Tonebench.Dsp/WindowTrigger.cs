@@ -77,7 +77,7 @@ public sealed class WindowTrigger : IScanTrigger
         _innerHysteresis = Math.Min(spec.HysteresisV, (_high - _low) * 0.499);
     }
 
-    public void Reset()
+    public void Reset(bool keepHoldoff = false)
     {
         _hasPrev = false;
         _prev = 0.0;
@@ -85,7 +85,8 @@ public sealed class WindowTrigger : IScanTrigger
         _wasInside = false;
         _armedEnter = false;
         _armedExit = false;
-        _holdoffUntil = 0;
+        if (!keepHoldoff)
+            _holdoffUntil = 0;
     }
 
     public bool Scan(ReadOnlySpan<double> samples, long firstAbsoluteIndex, out TriggerHit hit)

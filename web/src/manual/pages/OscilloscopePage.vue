@@ -148,6 +148,16 @@ const { showPage } = useManual()
       <strong>Roll</strong> (below) is the one exception to all of this &mdash; no trigger, and the
       record is simply the newest window.
     </p>
+    <p>
+      You do not have to take any of those figures on trust. Configuration &rsaquo; Diagnostics has
+      <strong>Show the oscilloscope's capture rate</strong>, which puts a badge on the chart while a
+      run is going reading all three per second &mdash; committed, collected, drawn &mdash; with the
+      breakdown and the counts behind them in its tooltip. It is off by default, it costs no extra
+      requests (the figures ride on polls that already happen), and the same three are written to
+      the log at the end of every run whether or not the badge is shown. The last of the three is
+      the one that decides how fast <strong>Persistence</strong> builds a picture, since the haze
+      accumulates once per record drawn.
+    </p>
 
     <h2>Acquisition</h2>
     <table>
@@ -1084,7 +1094,8 @@ const { showPage } = useManual()
 
     <h2>Measurements</h2>
     <p>
-      Nineteen readings per drawn channel, and <strong>every one of them is measured on the
+      The <strong>Measurements</strong> panel in the display rail lists every reading the window
+      has, per drawn channel, and <strong>every one of them is measured on the
       analyzer rather than read off the picture</strong>. Maximum, minimum and peak to peak would
       survive the drawing — both extremes of every column are kept — and nothing else would: an
       average of column maxima is an average of the envelope, and a rise time read off a column
@@ -1135,6 +1146,29 @@ const { showPage } = useManual()
           <td>Overshoot, Preshoot</td>
           <td>How far past the top, and below the base, the record goes — as a percentage of the amplitude.</td>
         </tr>
+        <tr>
+          <td>Cycle mean, Cycle RMS, Cycle stdev</td>
+          <td>
+            The same three levels over <em>one period</em> rather than over the window, and
+            frequently the right ones. A timebase almost never leaves a whole number of cycles on
+            screen, and what the part-cycle contributes biases the whole-window RMS of a periodic
+            signal — by up to 0.4 % with ten cycles in view, 1.9 % with two and 3.6 % with one,
+            worst an eighth of a cycle past a whole number and exactly nothing at a whole number or
+            a quarter past it. On a <em>transient</em> the reverse holds and the window's own figure
+            is the one that means something, which is why both are reported.
+          </td>
+        </tr>
+        <tr>
+          <td>Time@max, Time@min</td>
+          <td>
+            When the extremes fell, on the chart's own axis — negative anywhere in the pre-trigger.
+            The <em>first</em> such sample, so a clipped flat top says where the clipping began.
+          </td>
+        </tr>
+        <tr>
+          <td>Area, Cycle area</td>
+          <td>The integral of the window, and of one period, in volt-seconds.</td>
+        </tr>
       </tbody>
     </table>
     <p>
@@ -1155,6 +1189,91 @@ const { showPage } = useManual()
         Measure DC with a multimeter.
       </p>
     </div>
+
+    <h2>The readout under the chart</h2>
+    <p>
+      The panel above lists everything; the <strong>Selected measurements</strong> table under the
+      chart shows the few you are watching, large enough to read at a glance. Press
+      <strong>Choose measurements…</strong> in the Measurements panel to pick them from a figure of
+      each — the four tabs are <strong>Vertical</strong> (how tall),
+      <strong>Horizontal</strong> (how long), <strong>Miscellaneous</strong> and
+      <strong>Channel delay</strong>.
+    </p>
+    <p>
+      Each chosen reading appears for <em>every input the chart is drawing</em>, and for the math
+      trace when one is — so taking a reading off the table is the same gesture as taking that
+      channel off the screen. The Channel delay group is the exception: a phase, a skew or a
+      correlation is not a reading either channel has on its own, so it has one row.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Channel delay</th>
+          <th>What it is</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Phase</td>
+          <td>
+            How far the right input lags the left, from the argument of each channel's own
+            single-bin transform. Absent where the two disagree about their frequency, where either
+            is silent, or where one number is not this figure's phase.
+          </td>
+        </tr>
+        <tr>
+          <td>Skew</td>
+          <td>
+            That same lag written as a time. It is the phase divided by the frequency rather than a
+            second measurement, so it is defined exactly where the phase is and carries the same
+            ambiguity beyond half a period.
+          </td>
+        </tr>
+        <tr>
+          <td>Correlation, R/L ratio</td>
+          <td>
+            Pearson's r over the pair, and the right input's AC RMS over the left's. The
+            correlation is the one figure here that is always meaningful.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Statistics</h3>
+    <p>
+      Tick <strong>Statistics</strong> in the Measurements panel and each row gains its mean, its
+      extremes, how far it has wandered (<strong>Pk-Pk</strong>), its standard deviation and a
+      count. What a single reading says is what this capture was; what a column of them says is
+      whether the DUT is steady — a peak-to-peak that reads 306 mV every record and one that reads
+      306 mV on average while wandering over 3 mV are two different amplifiers, and nothing on a
+      per-record display tells them apart. <strong>Reset statistics</strong> starts the count again.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>Count is records this screen read, not records the run committed.</strong> A record
+        is fetched when the run's own counter moves, so every one counted is a distinct capture —
+        but a run commits faster than a browser polls and the ones in between are never fetched.
+        Every figure beside the count is of those same records.
+      </p>
+      <p>
+        The count starts again on its own whenever a reading stops meaning the same thing: a
+        capture setting, the stretch of the record being measured, the cursors, the math channel. A
+        mean over two configurations is a mean of two different measurements, and the figure would
+        not say so.
+      </p>
+    </div>
+    <p>
+      A reading the waveform has not got shows a <strong>dash</strong> here, where the panel above
+      leaves it out altogether. The difference is that here somebody asked for it: in a list nobody
+      chose, a short list is honest; in a fixed set of rows a reader picked, a blank reads as
+      something that failed to arrive.
+    </p>
+    <p>
+      Which measurements are shown, and whether statistics are kept, are saved with the measurement
+      and printed in a report. What they have <em>averaged to</em> is not: that is a history of a
+      run rather than of the capture, which is why a reopened result shows its chosen rows and no
+      statistics.
+    </p>
 
     <h2>The math channel</h2>
     <p>

@@ -346,7 +346,20 @@ public sealed record OscilloscopeRequest(
 /// <param name="SampleRateHz">The rate it is streaming at, or 0 before a run.</param>
 /// <param name="RecordFrames">The record length in frames, or 0 before a run.</param>
 /// <param name="PreTriggerFrames">How many of those sit before the trigger.</param>
-/// <param name="RecordsTaken">How many records this run has committed — the count a Normal run's "still alive" reads from.</param>
+/// <param name="RecordsTaken">
+/// How many records this run has <b>collected</b> — the count a Normal run's "still alive" reads
+/// from, and what the client watches to know there is a newer one to fetch. Not what the trigger
+/// found: see <paramref name="RecordsCommitted"/>.
+/// </param>
+/// <param name="RecordsCommitted">
+/// How many the trigger engine committed over the same acquisition, which is the capture rate the
+/// hardware is managing.
+///
+/// <para>The engine holds <b>one</b> record and overwrites it, so the difference between the two is
+/// captures that existed and were replaced before anything collected them — invisible without this,
+/// and indistinguishable from a device that simply did not trigger. Zero in Roll, which commits
+/// nothing at all and whose <paramref name="RecordsTaken"/> counts roll steps instead.</para>
+/// </param>
 /// <param name="HasRecord">Whether a record is on hand to be drawn or saved.</param>
 /// <param name="Spliced">The record on hand spans a dropped chunk or block.</param>
 /// <param name="Forced">The record on hand was taken by Auto's timeout; nothing qualified.</param>
@@ -377,7 +390,8 @@ public sealed record OscilloscopeStatus(
     bool Rolled = false,
     string Accumulation = nameof(RecordAccumulation.Normal),
     int AveragesTaken = 0,
-    int AverageCount = 1);
+    int AverageCount = 1,
+    int RecordsCommitted = 0);
 
 /// <summary>The acknowledgement a start returns, so the client knows what it actually got.</summary>
 /// <param name="SampleRateHz">The rate the run is streaming at.</param>

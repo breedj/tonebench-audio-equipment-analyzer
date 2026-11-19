@@ -62,7 +62,7 @@ public sealed class DropoutTrigger : IScanTrigger
         _timeoutFrames = spec.WidthLoS * sampleRateHz;
     }
 
-    public void Reset()
+    public void Reset(bool keepHoldoff = false)
     {
         _hasPrev = false;
         _prev = 0.0;
@@ -70,7 +70,8 @@ public sealed class DropoutTrigger : IScanTrigger
         _armedRising = false;
         _armedFalling = false;
         _countingFrom = null;
-        _holdoffUntil = 0;
+        if (!keepHoldoff)
+            _holdoffUntil = 0;
     }
 
     public bool Scan(ReadOnlySpan<double> samples, long firstAbsoluteIndex, out TriggerHit hit)

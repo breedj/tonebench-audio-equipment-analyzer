@@ -155,6 +155,9 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   display: { icon: 'eye', tone: 'pink' },
 
   measurements: { icon: 'ruler', tone: 'indigo' },
+  // The oscilloscope's readout under the chart -- the few a reader chose, against the rail's
+  // own panel, which lists every reading the window has.
+  'selected measurements': { icon: 'ruler', tone: 'indigo' },
   measurement: { icon: 'ruler', tone: 'indigo' },
   component: { icon: 'component', tone: 'indigo' },
   'equivalent circuit': { icon: 'component', tone: 'indigo' },

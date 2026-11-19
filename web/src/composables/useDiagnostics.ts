@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { api, type DiagnosticsStatus, type StreamRecordingStatus } from '../api/client'
+import { api, type CaptureRateConfig, type DiagnosticsStatus, type StreamRecordingStatus } from '../api/client'
 
 /**
  * Configuration ▸ Diagnostics, the two switches beside "Detailed logging" (which has its own
@@ -18,6 +18,7 @@ import { api, type DiagnosticsStatus, type StreamRecordingStatus } from '../api/
  */
 const recording = ref<StreamRecordingStatus | null>(null)
 const capture = ref<DiagnosticsStatus | null>(null)
+const captureRate = ref<CaptureRateConfig | null>(null)
 const error = ref<string | null>(null)
 let loadPromise: Promise<void> | null = null
 
@@ -32,9 +33,40 @@ export function useDiagnostics() {
   async function refresh() {
     // Settled, not all: a build whose diagnostics endpoint is missing should still show the
     // recording switch rather than leaving the whole section blank.
-    const [r, c] = await Promise.allSettled([api.getStreamRecording(), api.getDiagnostics()])
+    const [r, c, t] = await Promise.allSettled([
+      api.getStreamRecording(),
+      api.getDiagnostics(),
+      api.getCaptureRateConfig(),
+    ])
     if (r.status === 'fulfilled') recording.value = r.value
     if (c.status === 'fulfilled') capture.value = c.value
+    if (t.status === 'fulfilled') captureRate.value = t.value
+  }
+
+  /**
+   * Just the capture-rate switch, for App.vue at startup.
+   *
+   * Separate from `load`, which also fetches the recorder's state and its counters: the badge has
+   * to know this on the first screen, and nothing else in that pair is worth two requests before
+   * anybody has opened Configuration. The dialog's own `refresh` writes the same ref, so toggling
+   * it there reaches the badge with no second source of truth.
+   */
+  async function loadCaptureRate() {
+    try {
+      captureRate.value = await api.getCaptureRateConfig()
+    } catch {
+      // A build without the endpoint simply leaves the badge off, which is its default anyway.
+    }
+  }
+
+  /** Shows or hides the oscilloscope's capture-rate badge. Persisted, so it survives a restart. */
+  async function setCaptureRate(enabled: boolean) {
+    error.value = null
+    try {
+      captureRate.value = await api.setCaptureRateConfig({ enabled })
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
   }
 
   async function setRecording(enabled: boolean, maxFileMegabytes?: number) {
@@ -80,11 +112,14 @@ export function useDiagnostics() {
   return {
     recording,
     capture,
+    captureRate,
     error,
     load,
     refresh,
     setRecording,
     setCapture,
+    loadCaptureRate,
+    setCaptureRate,
     openRecordingsFolder,
     openDiagnosticsFolder,
   }

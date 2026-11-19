@@ -13,13 +13,24 @@ namespace Tonebench.Dsp;
 /// </param>
 /// <param name="RmsV">True RMS, DC included.</param>
 /// <param name="AcRmsV">RMS about the mean, i.e. with DC removed. Equals <paramref name="RmsV"/> on a record with no offset.</param>
+/// <param name="MaxIndex">
+/// Which sample the maximum fell on -- the first of them, where several share the value.
+///
+/// <para>Carried because <i>where</i> a peak is is a reading in its own right: on a transient it is
+/// the whole point, and on a record that holds one glitch it is the only way to find it without
+/// hunting with a cursor. The <b>first</b> rather than the last or the middle, so a flat-topped
+/// clipped waveform reports where the clipping started.</para>
+/// </param>
+/// <param name="MinIndex">The same for the minimum.</param>
 public readonly record struct WaveformLevels(
     double MaxV,
     double MinV,
     double PeakToPeakV,
     double MeanV,
     double RmsV,
-    double AcRmsV)
+    double AcRmsV,
+    int MaxIndex = 0,
+    int MinIndex = 0)
 {
     /// <summary>
     /// Peak over true RMS, the usual quotation. Null when the RMS is zero, which is a record of
@@ -71,6 +82,8 @@ public static class WaveformMeasure
 
         double min = double.PositiveInfinity;
         double max = double.NegativeInfinity;
+        int minIndex = 0;
+        int maxIndex = 0;
         double sum = 0.0;
         double sumSquares = 0.0;
 
@@ -78,9 +91,17 @@ public static class WaveformMeasure
         {
             double v = samples[i];
             if (v < min)
+            {
                 min = v;
+                minIndex = i;
+            }
+
             if (v > max)
+            {
                 max = v;
+                maxIndex = i;
+            }
+
             sum += v;
             sumSquares += v * v;
         }
@@ -100,6 +121,8 @@ public static class WaveformMeasure
             PeakToPeakV: max - min,
             MeanV: mean,
             RmsV: Math.Sqrt(sumSquares / samples.Length),
-            AcRmsV: Math.Sqrt(sumCentredSquares / samples.Length));
+            AcRmsV: Math.Sqrt(sumCentredSquares / samples.Length),
+            MaxIndex: maxIndex,
+            MinIndex: minIndex);
     }
 }

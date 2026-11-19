@@ -24,6 +24,7 @@ import type { ResponseDisplay } from '../response/display'
 import type { SweepDisplay } from '../sweep/display'
 import type { SweepTraceFamily } from '../sweep/points'
 import type { ScopeDisplay } from '../scope/display'
+import type { ScopeMeasurementStat } from '../scope/measurementStats'
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, ScopeFrame, SpectrumFrame, MultitoneFrame } from '../streaming/protocol'
 import type { SpectrumDisplaySource } from '../composables/useChartDisplay'
 import type { StimulusSummary } from '../metrics'
@@ -174,6 +175,18 @@ export type ReportSubjectData =
       /** What the settings ask for, which is the axis an empty chart draws. */
       recordSeconds: number
       preTriggerFraction: number
+      /**
+       * The accumulated statistics, by row key — the one part of the readout a builder cannot work
+       * out for itself.
+       *
+       * <p>Everything else in that table is derived from the record and the display, which the
+       * subject already carries, so it is recomputed rather than copied and the paper and the
+       * screen cannot disagree about a figure. The statistics are a history of the run: they exist
+       * only in the composable that counted them, and a stored result has none at all — which is
+       * why this is optional rather than empty, and why the report says so where a reader would
+       * otherwise wonder.</p>
+       */
+      measurementStats?: Record<string, ScopeMeasurementStat> | null
     }
   | {
       kind: 'crosstalk'

@@ -68,6 +68,16 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
     private long _droppedAtArm;
     private long _droppedSeen;
 
+    /// <summary>
+    /// Records committed this acquisition, whether or not anything ever took them.
+    ///
+    /// <para>The point of counting it at all is that <see cref="_record"/> is <b>one</b> slot and
+    /// <see cref="FillIfReady"/> overwrites it: a consumer slower than the commit rate loses the
+    /// ones in between, and nothing downstream can see that it happened. Against
+    /// <c>OscilloscopeRunner</c>'s own collected count, the difference <i>is</i> that loss.</para>
+    /// </summary>
+    private long _commits;
+
     /// <summary>Scratch for the trigger scan, grown to the largest block seen.</summary>
     private double[] _scan = new double[4096];
 
@@ -105,7 +115,21 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         _droppedSeen = droppedTotal;
 
         lock (_handoff)
+        {
             _record = null;
+
+            // Zeroed HERE and deliberately not in Take, which an arm and every Retune both end in.
+            // Reset there, the count would restart on each turn of a knob -- and a trigger level is
+            // SET by dragging it, so the figure would be wrong precisely while somebody watches it.
+            // Per acquisition, for the reason the drop counters are: a stale count reads exactly
+            // like one that just happened.
+            //
+            // Not in Disarm either (the end-of-run log line reads it afterwards), nor in ReArm /
+            // ReArmScanner, which run after every committed record in Auto and Normal -- a reset
+            // there would pin this at 1 for ever. And not in TakeRecord: this counts commits, not
+            // handovers, which is the whole of what it is for.
+            _commits = 0;
+        }
 
         Take(spec, scanner);
 
@@ -291,6 +315,27 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
                     return 0;
                 return Math.Max(0, (_buffer.Newest - _armedAt) / _spec.RollStepFrames);
             }
+        }
+    }
+
+    /// <summary>
+    /// How many records this acquisition has committed, whatever a consumer managed to collect.
+    ///
+    /// <para><b>This is the capture rate the hardware is actually managing</b>, and it is bounded
+    /// by the stream rather than by the trigger: <see cref="Advance"/> can reach a commit at most
+    /// once per <see cref="Write"/>, so it is one record per device block — about 47 a second on a
+    /// QA403 at 192 kS/s, against four times that on a sound card, whose block is a quarter the
+    /// size. A measured rate sitting <i>at</i> that ceiling is itself the finding.</para>
+    ///
+    /// <para>Zero under <see cref="ScopeRunMode.Roll"/>, which commits nothing at all — see
+    /// <see cref="NewestWindow"/>.</para>
+    /// </summary>
+    public long RecordsCommitted
+    {
+        get
+        {
+            lock (_handoff)
+                return _commits;
         }
     }
 
@@ -568,6 +613,10 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         lock (_handoff)
         {
             _record = record;
+
+            // In the lock that already holds the assignment, and on the one line that assigns it on
+            // the committed path, so the count cannot drift from the commits it counts.
+            _commits++;
             _state = _spec.Mode == ScopeRunMode.Single ? ScopeEngineState.Held : ScopeEngineState.Waiting;
         }
 
@@ -582,9 +631,26 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
             _state = ScopeEngineState.Waiting;
     }
 
+    /// <summary>
+    /// Back to scanning after a record: the stream state is forgotten and <b>the holdoff is
+    /// not</b>.
+    ///
+    /// <para>That second half is the whole of what makes a holdoff a holdoff here. It is a dead
+    /// time measured from the trigger <i>event</i>, and this runs the moment the record that event
+    /// triggered has filled — so a plain <c>Reset()</c> cleared the countdown before it had ever
+    /// had anything to suppress, and the only thing that ever delayed the next trigger was the
+    /// fill. The setting was accepted, stored, logged and reported on screen and did nothing at
+    /// all, on every mode: Auto and Normal re-arm here after every record, and Single takes one
+    /// record and never re-arms. <see cref="StimulusTrigger"/> was the exception, its own
+    /// <c>Reset</c> having kept the holdoff since it was written.</para>
+    ///
+    /// <para>A holdoff shorter than the post-trigger fill still buys nothing, which is correct
+    /// rather than a limitation: a scope cannot re-trigger before it has finished acquiring, and
+    /// that bound is the acquisition's, not the trigger's.</para>
+    /// </summary>
     private void ReArmScanner()
     {
-        _scanner?.Reset();
+        _scanner?.Reset(keepHoldoff: true);
         _armedAt = _buffer.Newest;
         _droppedAtArm = _droppedSeen;
         _forced = false;

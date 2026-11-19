@@ -35,9 +35,10 @@ public class ScopeTriggerEngineTests
         ScopeRunMode mode = ScopeRunMode.Single,
         long autoTimeoutFrames = 0,
         long discontinuityHoldoffFrames = 0,
-        long settleFrames = 0) =>
+        long settleFrames = 0,
+        int holdoffFrames = 0) =>
         new(
-            TriggerSpec.Edge(0.0),
+            TriggerSpec.Edge(0.0) with { HoldoffFrames = holdoffFrames },
             TriggerChannel: 0,
             RecordFrames: recordFrames,
             PreTriggerFrames: preTriggerFrames,
@@ -67,6 +68,85 @@ public class ScopeTriggerEngineTests
         }
 
         return records;
+    }
+
+    [Fact]
+    public void AHoldoffLongerThanTheRecord_SuppressesTheTriggersInsideIt()
+    {
+        // THE regression, and it was total: the holdoff did nothing at all, on any mode and any
+        // trigger kind but Stimulus. ReArmScanner ran a plain Reset() after every committed
+        // record, which cleared the scanner's own countdown -- and the engine re-arms the moment a
+        // record has filled, so the countdown was thrown away before it had ever had anything to
+        // suppress. The only thing that ever delayed the next trigger was the fill.
+        //
+        // A square wave of half-period 512 frames has a rising edge every 1024. The record is 1024
+        // frames with 256 of pre-trigger, so the fill is over 768 frames after the event and the
+        // next edge is free to fire; a 5000-frame holdoff has to swallow the four edges inside it.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(recordFrames: 1024, preTriggerFrames: 256, mode: ScopeRunMode.Normal), 0);
+
+        var records = Feed(engine, blocks: 8, halfPeriod: 512);
+
+        var (_, held) = NewEngine();
+        held.Arm(
+            Spec(recordFrames: 1024, preTriggerFrames: 256, mode: ScopeRunMode.Normal, holdoffFrames: 5000),
+            0);
+
+        var heldRecords = Feed(held, blocks: 8, halfPeriod: 512);
+
+        Assert.True(records.Count > heldRecords.Count,
+            $"the holdoff suppressed nothing: {records.Count} records without it, {heldRecords.Count} with.");
+
+        // And what it does keep is spaced by the holdoff rather than by the fill: every pair of
+        // successive triggers is at least the holdoff apart.
+        for (int i = 1; i < heldRecords.Count; i++)
+        {
+            double gap = heldRecords[i].TriggerPosition - heldRecords[i - 1].TriggerPosition;
+            Assert.True(gap >= 5000, $"records {i - 1} and {i} are {gap} frames apart, inside the 5000-frame holdoff.");
+        }
+    }
+
+    [Fact]
+    public void AHoldoffShorterThanTheFill_ChangesNothing()
+    {
+        // The bound a scope cannot beat, stated so it is not mistaken for the bug above: it cannot
+        // re-trigger before it has finished acquiring, so a holdoff inside the post-trigger fill is
+        // correctly invisible. 768 frames of fill here against a 300-frame holdoff.
+        var (_, plain) = NewEngine();
+        plain.Arm(Spec(recordFrames: 1024, preTriggerFrames: 256, mode: ScopeRunMode.Normal), 0);
+
+        var (_, held) = NewEngine();
+        held.Arm(
+            Spec(recordFrames: 1024, preTriggerFrames: 256, mode: ScopeRunMode.Normal, holdoffFrames: 300),
+            0);
+
+        Assert.Equal(
+            Feed(plain, blocks: 8, halfPeriod: 512).Select(r => r.TriggerPosition),
+            Feed(held, blocks: 8, halfPeriod: 512).Select(r => r.TriggerPosition));
+    }
+
+    [Fact]
+    public void ABreakInTheStream_ClearsTheHoldoffRatherThanCarryingItOver()
+    {
+        // The other side of keepHoldoff, and why the discontinuity path does not pass it: across a
+        // hole the sample index has advanced by fewer frames than the wall clock has, so a holdoff
+        // carried over one would hold for longer than it was set to. The stream state goes with it,
+        // which is what Reset has always been for.
+        var (buffer, engine) = NewEngine();
+        engine.Arm(
+            Spec(recordFrames: 1024, preTriggerFrames: 256, mode: ScopeRunMode.Normal, holdoffFrames: 5000),
+            0);
+
+        Feed(engine, blocks: 2, halfPeriod: 512);
+
+        // A block flagged as following a break: the scanner is fully reset, holdoff included.
+        engine.Write(Square(2L * BlockFrames, BlockFrames, 512), default, startsAfterDiscontinuity: true, 0);
+        _ = buffer;
+
+        // The first record after the break is taken on the next edge rather than waiting out the
+        // rest of a holdoff booked before it.
+        var after = Feed(engine, blocks: 3, halfPeriod: 512, firstIndex: 3L * BlockFrames);
+        Assert.NotEmpty(after);
     }
 
     [Fact]
@@ -664,5 +744,75 @@ public class ScopeTriggerEngineTests
         Feed(engine, blocks: 2);
 
         Assert.Equal(afterArm, buffer.ContiguousFrom);
+    }
+
+    [Fact]
+    public void EveryCommittedRecord_IsCounted()
+    {
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        var records = Feed(engine, blocks: 6);
+
+        Assert.True(records.Count > 1, "the feed has to commit more than once for the count to mean anything");
+        Assert.Equal(records.Count, engine.RecordsCommitted);
+    }
+
+    [Fact]
+    public void TheCommitCount_AdvancesWhileNothingTakesTheRecords()
+    {
+        // The property the whole capture-rate diagnostic exists to show, pinned here rather than
+        // inferred from a rate on screen. `_record` is ONE slot and FillIfReady overwrites it, so a
+        // consumer slower than the commit rate silently loses the ones in between -- and until this
+        // counter existed, nothing downstream could tell that from a device that had simply not
+        // triggered. Note the deliberate absence of TakeRecord in the loop: that is the point.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        for (int b = 0; b < 6; b++)
+            engine.Write(Square(b * BlockFrames, BlockFrames, halfPeriod: 512), default, startsAfterDiscontinuity: false, 0);
+
+        Assert.True(engine.RecordsCommitted > 1, $"expected several commits, got {engine.RecordsCommitted}");
+
+        // And exactly one survives to be collected, however many were committed.
+        Assert.NotNull(engine.TakeRecord());
+        Assert.Null(engine.TakeRecord());
+    }
+
+    [Fact]
+    public void Arming_ZeroesTheCommitCount()
+    {
+        // Per acquisition, for the reason the drop counters are: a stale count reads exactly like
+        // one that just happened, and this one's whole job is to be compared against another.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+        Feed(engine, blocks: 4);
+        Assert.True(engine.RecordsCommitted > 0);
+
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+
+        Assert.Equal(0, engine.RecordsCommitted);
+    }
+
+    [Fact]
+    public void Retuning_DoesNotZeroTheCommitCount()
+    {
+        // The trap. Retune lands in ApplyPending, which calls Take -- and Take is also the last
+        // thing Arm does, so zeroing in Take would look right and would reset the count on every
+        // turn of a knob. A trigger level is SET by dragging it, so the figure would be wrong
+        // precisely while somebody is watching it. Fails against that implementation.
+        var (_, engine) = NewEngine();
+        engine.Arm(Spec(mode: ScopeRunMode.Normal), droppedTotal: 0);
+        Feed(engine, blocks: 4);
+
+        long before = engine.RecordsCommitted;
+        Assert.True(before > 0, "the feed has to commit before a retune can be shown to keep the count");
+
+        engine.Retune(Spec(mode: ScopeRunMode.Normal, preTriggerFrames: 512));
+        Feed(engine, blocks: 2);
+
+        Assert.True(
+            engine.RecordsCommitted >= before,
+            $"a retune must carry the count, not restart it: {before} before, {engine.RecordsCommitted} after");
     }
 }

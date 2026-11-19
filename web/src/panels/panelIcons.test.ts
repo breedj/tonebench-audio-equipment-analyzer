@@ -41,6 +41,8 @@ describe('panelIconFor', () => {
     const titles = [
       'Display',
       'Measurements',
+      // The oscilloscope's readout under the chart, against the rail's own panel above.
+      'Selected measurements',
       'Measurement',
       'Sweep',
       'Measurement settings',

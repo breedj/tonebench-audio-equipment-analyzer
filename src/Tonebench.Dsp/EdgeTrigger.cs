@@ -44,14 +44,15 @@ public sealed class EdgeTrigger : IScanTrigger
         _spec = spec;
     }
 
-    public void Reset()
+    public void Reset(bool keepHoldoff = false)
     {
         _hasPrev = false;
         _prev = 0.0;
         _prevIndex = 0;
         _armedRising = false;
         _armedFalling = false;
-        _holdoffUntil = 0;
+        if (!keepHoldoff)
+            _holdoffUntil = 0;
     }
 
     public bool Scan(ReadOnlySpan<double> samples, long firstAbsoluteIndex, out TriggerHit hit)

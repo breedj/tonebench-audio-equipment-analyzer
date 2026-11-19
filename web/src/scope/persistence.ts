@@ -387,3 +387,78 @@ export function hexRgb(hex: string): [number, number, number] {
   const v = parseInt(m[1], 16)
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255]
 }
+
+/**
+ * What the analyzer is capturing with, as one string — so the accumulated picture can be thrown
+ * away the moment the records stop being comparable.
+ *
+ * <p><b>The signature above this one covers the picture; this one covers the capture.</b>
+ * <code>intensitySignature</code> is in pixels, so it already clears on a resize, a zoom or a V/div
+ * step — anything that stops a pixel meaning the same volts and the same time. What it cannot see
+ * is a change to the <em>record</em>: a sample rate, a record length, a pre-trigger fraction, a
+ * trigger level or a switch to Envelope all leave every axis exactly where it was while making the
+ * traces already accumulated a picture of something else. A haze of 128 records taken at 48 kS/s
+ * under a live trace at 192 is the plausible wrong answer this screen's rules exist to prevent, and
+ * nothing on it would say so.</p>
+ *
+ * <p>Built from the <b>request</b> rather than from the panel's own refs, and that is the whole
+ * reason it is here: Run and every retune carry the complete capture configuration, including the
+ * half the config panel keeps to itself — the slope, the holdoff, the width bounds, the dropout
+ * timeout, which inputs are captured. A signature assembled from the models App.vue happens to hold
+ * would silently miss those, which is exactly the kind of gap that is noticed years later.</p>
+ *
+ * <p>The generator is deliberately <b>not</b> in it. A stimulus change does change the trace, and it
+ * is also the one thing a reader turns while <em>watching</em> the haze — sweeping a level to see
+ * where a DUT starts clipping is a reading of the accumulation, not a reason to throw it away. The
+ * stimulus is edited through <code>/api/generator</code> rather than a retune in any case, so it
+ * never reaches this request while a capture is running.</p>
+ */
+export function scopeCaptureSignature(request: ScopeCaptureFacts | null | undefined): string {
+  if (!request) return ''
+  const r = request
+  // Spelled out rather than JSON.stringify(request): a field added to the request later should be
+  // considered rather than folded in silently, and the generator blocks must stay out.
+  return [
+    r.sampleRateHz,
+    r.recordSeconds,
+    r.preTriggerFraction,
+    r.mode,
+    r.triggerKind,
+    r.triggerSource,
+    r.triggerSlope,
+    r.triggerLevelV,
+    r.triggerHysteresisV ?? 0,
+    r.triggerLevelLowV ?? 0,
+    r.pulseWidthLoSeconds ?? 0,
+    r.pulseWidthHiSeconds ?? 0,
+    r.dropoutSeconds ?? 0,
+    r.holdoffSeconds ?? 0,
+    r.accumulation ?? 'Normal',
+    r.averageCount ?? 0,
+    r.processLeft !== false,
+    r.processRight === true,
+  ].join('|')
+}
+
+/** The half of an <code>OscilloscopeStartRequest</code> that decides what a record is. */
+export type ScopeCaptureFacts = Pick<
+  import('../api/client').OscilloscopeStartRequest,
+  | 'sampleRateHz'
+  | 'recordSeconds'
+  | 'preTriggerFraction'
+  | 'mode'
+  | 'triggerKind'
+  | 'triggerSource'
+  | 'triggerSlope'
+  | 'triggerLevelV'
+  | 'triggerHysteresisV'
+  | 'triggerLevelLowV'
+  | 'pulseWidthLoSeconds'
+  | 'pulseWidthHiSeconds'
+  | 'dropoutSeconds'
+  | 'holdoffSeconds'
+  | 'accumulation'
+  | 'averageCount'
+  | 'processLeft'
+  | 'processRight'
+>

@@ -1076,6 +1076,38 @@ public static class ConfigEndpoints
         // The Screenshot dialog's remembered answers -- size, aspect ratio, destination, and the
         // title when the dialog was told to keep it. Same contract as the rest: defaults rather than
         // 404, and an unreadable document is the defaults.
+        // The oscilloscope's capture-rate readout. Nothing on the server reads this -- it gates a
+        // badge -- so it is persisted and handed back rather than kept in a Setting singleton the
+        // way the detailed-logging switch is, which the host's own logger has to be told about.
+        group.MapGet("/capture-rate", async (ConfigRepository repo, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.CaptureRateKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(CaptureRateConfig.Default);
+
+            try
+            {
+                var config = JsonSerializer.Deserialize(stored, AppJsonContext.Default.CaptureRateConfig);
+                return Results.Ok(config ?? CaptureRateConfig.Default);
+            }
+            catch (JsonException)
+            {
+                // A hand-edited document costs the default rather than the Diagnostics tab.
+                return Results.Ok(CaptureRateConfig.Default);
+            }
+        });
+
+        group.MapPut("/capture-rate", async (
+            CaptureRateConfig config, ConfigRepository repo, CancellationToken ct) =>
+        {
+            await repo.SetAsync(
+                ConfigRepository.CaptureRateKey,
+                JsonSerializer.Serialize(config, AppJsonContext.Default.CaptureRateConfig),
+                ct);
+
+            return Results.Ok(config);
+        });
+
         group.MapGet("/screenshot-settings", async (
             ConfigRepository repo, CancellationToken ct) =>
         {

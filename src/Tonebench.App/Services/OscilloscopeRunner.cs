@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Tonebench.App.Streaming;
@@ -51,6 +52,13 @@ public sealed class OscilloscopeRunner(
     private int _recordFrames;
     private int _preTriggerFrames;
     private int _recordsTaken;
+
+    /// <summary>
+    /// The engine's commit count, mirrored here so <see cref="Status"/> never reads the engine —
+    /// see the comment at that call site for why that is correctness rather than style. Zeroed
+    /// wherever <see cref="_recordsTaken"/> is, and parked beside it.
+    /// </summary>
+    private long _recordsCommitted;
     private ScopeRecord? _record;
     private OscilloscopeRequest? _lastRequest;
 
@@ -168,7 +176,11 @@ public sealed class OscilloscopeRunner(
                         // Refused with Roll by Validate, so there is nothing to report.
                         Accumulation: nameof(RecordAccumulation.Normal),
                         AveragesTaken: ready ? 1 : 0,
-                        AverageCount: 1);
+                        AverageCount: 1,
+                        // Named rather than defaulted: Roll never reaches FillIfReady, so it
+                        // commits nothing -- and the counter beside this one is roll steps rather
+                        // than records, so the pair would not be two readings of one quantity.
+                        RecordsCommitted: 0);
                 }
 
                 return new OscilloscopeStatus(
@@ -187,7 +199,14 @@ public sealed class OscilloscopeRunner(
                     Rolled: record?.Rolled ?? false,
                     Accumulation: (_accumulator?.Mode ?? RecordAccumulation.Normal).ToString(),
                     AveragesTaken: record?.AveragesTaken ?? 0,
-                    AverageCount: _accumulator?.Count ?? 1);
+                    AverageCount: _accumulator?.Count ?? 1,
+                    // The mirrored field, never engine.RecordsCommitted. The engine goes on holding
+                    // the last run's figure after that run ends, so reading it here would report it
+                    // beside a collected count of 0 the moment SwitchOwner moves to a measurement
+                    // that has never run -- a fabricated gap, on the one readout whose whole
+                    // subject is being honest about gaps. Mirroring makes it park, clear and reset
+                    // with everything it has to agree with.
+                    RecordsCommitted: (int)Math.Min(int.MaxValue, _recordsCommitted));
             }
         }
     }
@@ -223,6 +242,7 @@ public sealed class OscilloscopeRunner(
                 _recordFrames = recordFrames;
                 _preTriggerFrames = preTriggerFrames;
                 _recordsTaken = 0;
+                _recordsCommitted = 0;
                 _record = null;
                 _lastRequest = request;
                 _mode = request.Mode;
@@ -365,6 +385,7 @@ public sealed class OscilloscopeRunner(
         {
             _record = null;
             _recordsTaken = 0;
+            _recordsCommitted = 0;
             _phase = FrequencyResponsePhase.Idle;
             _error = null;
             // So the next run starts its average or its envelope from nothing, rather than from a
@@ -388,7 +409,7 @@ public sealed class OscilloscopeRunner(
 
             var current = _record is null
                 ? null
-                : new ParkedRun(_phase, _error, _sampleRateHz, _recordFrames, _preTriggerFrames, _recordsTaken, _record, _lastRequest);
+                : new ParkedRun(_phase, _error, _sampleRateHz, _recordFrames, _preTriggerFrames, _recordsTaken, _recordsCommitted, _record, _lastRequest);
 
             var outcome = _parking.Switch(owner, current);
             if (!outcome.Changed)
@@ -402,6 +423,7 @@ public sealed class OscilloscopeRunner(
                 _recordFrames = parked.RecordFrames;
                 _preTriggerFrames = parked.PreTriggerFrames;
                 _recordsTaken = parked.RecordsTaken;
+                _recordsCommitted = parked.RecordsCommitted;
                 _record = parked.Record;
                 _lastRequest = parked.LastRequest;
             }
@@ -448,6 +470,7 @@ public sealed class OscilloscopeRunner(
         _recordFrames = 0;
         _preTriggerFrames = 0;
         _recordsTaken = 0;
+        _recordsCommitted = 0;
         _mode = ScopeRunMode.Single;
         _accumulator = null;
         _aligner.Reset();
@@ -458,6 +481,7 @@ public sealed class OscilloscopeRunner(
     {
         var savedOptions = pipeline.Options;
         bool startedAcquisition = false;
+        long startedAtTicks = Stopwatch.GetTimestamp();
 
         var terminalPhase = FrequencyResponsePhase.Failed;
         string? terminalError = null;
@@ -523,9 +547,20 @@ public sealed class OscilloscopeRunner(
             {
                 if (engine.TakeRecord() is { } record)
                 {
+                    // Read AFTER the take, and mirrored here as well as at the foot of the loop.
+                    // Both halves are load-bearing. Here, because a Single run returns from inside
+                    // this block and would otherwise never reach the mirror below -- its status
+                    // would report nothing committed beside a record it is holding. After the take
+                    // rather than before, because the engine runs on the acquisition thread and a
+                    // commit landing between the two reads would leave committed below collected,
+                    // which is the one ordering this pair must never show.
+                    long committedNow = engine.RecordsCommitted;
+
                     bool single;
                     lock (_stateLock)
                     {
+                        _recordsCommitted = committedNow;
+
                         // Folded before it is published, so what the screen holds is what the mode
                         // asked for -- and a spliced record is left out rather than averaged in:
                         // two non-adjacent pieces of the stream are not the same point on the
@@ -568,8 +603,16 @@ public sealed class OscilloscopeRunner(
                 // "capturing" -- a level nothing reaches is a setting to fix, and a fill that never
                 // completes is a fault.
                 var engineState = engine.State;
+
+                // Mirrored every iteration rather than only when a record arrives, which is the
+                // whole point: a run whose commits are being dropped collects nothing, so a mirror
+                // hung off the arrival of a record would never show the gap moving. Read outside
+                // _stateLock, beside the state, so Status stays a plain field read.
+                long committed = engine.RecordsCommitted;
+
                 lock (_stateLock)
                 {
+                    _recordsCommitted = committed;
                     _phase = engineState switch
                     {
                         ScopeEngineState.Waiting => FrequencyResponsePhase.WaitingForTrigger,
@@ -621,7 +664,48 @@ public sealed class OscilloscopeRunner(
                 _phase = terminalPhase;
                 _error = terminalError;
             }
+
+            LogCaptureRates(startedAtTicks);
         }
+    }
+
+    /// <summary>
+    /// What the run managed, written once when it ends.
+    ///
+    /// <para><b>Information rather than Debug, and it exists because the badge cannot be read from
+    /// a log file sent in</b> — the same division of labour the drop counters have: the screen is
+    /// live, the log is what survives being posted to somebody else.</para>
+    ///
+    /// <para>It states the two figures this process owns and <b>does not invent the third</b>. How
+    /// many records reached the chart is the browser's own count, and guessing it from the poll
+    /// interval would be a fabricated number in a line whose whole subject is honesty about
+    /// numbers; it rides in an issue report's client state instead, and the line says so.</para>
+    /// </summary>
+    private void LogCaptureRates(long startedAtTicks)
+    {
+        int taken;
+        long committed;
+        lock (_stateLock)
+        {
+            taken = _recordsTaken;
+            committed = _recordsCommitted;
+        }
+
+        // A refused run logs nothing: zeros here would read as an instrument that triggered on
+        // nothing, which is a different fault from one that never started.
+        if (committed <= 0 && taken <= 0)
+            return;
+
+        double seconds = Stopwatch.GetElapsedTime(startedAtTicks).TotalSeconds;
+        double perSecond = seconds > 0.0 ? 1.0 / seconds : 0.0;
+
+        logger.LogInformation(
+            "Oscilloscope run ended after {Seconds:0.0} s: {Committed} records committed on the acquisition "
+                + "thread ({CommitRate:0.0}/s), {Taken} collected by the {PollMs} ms poll ({TakenRate:0.0}/s), "
+                + "{Lost} replaced before anything took them. What reached the chart is the browser's own "
+                + "count and is not visible from here — it rides in an issue report's client state.",
+            seconds, committed, committed * perSecond, taken, PollMs, taken * perSecond,
+            Math.Max(0, committed - taken));
     }
 
     /// <summary>
@@ -699,5 +783,6 @@ public sealed class OscilloscopeRunner(
 
     private sealed record ParkedRun(
         FrequencyResponsePhase Phase, string? Error, double SampleRateHz, int RecordFrames,
-        int PreTriggerFrames, int RecordsTaken, ScopeRecord Record, OscilloscopeRequest? LastRequest);
+        int PreTriggerFrames, int RecordsTaken, long RecordsCommitted, ScopeRecord Record,
+        OscilloscopeRequest? LastRequest);
 }

@@ -8,6 +8,8 @@ import {
   intensityPaletteIndex,
   intensityPixels,
   intensitySignature,
+  scopeCaptureSignature,
+  type ScopeCaptureFacts,
   persistenceDecay,
   persistenceDraws,
   ScopeIntensityBuffer,
@@ -378,6 +380,25 @@ describe('what the charts throw the picture away for', () => {
     expect(waveform.match(/intensityChannels\.value/g)?.length).toBe(2)
   })
 
+  it('folds the capture configuration into the key, so a changed setting throws the picture away', () => {
+    // The chart's own signature is in pixels, so it clears on a resize, a zoom or a V/div step and
+    // cannot see a sample rate, a record length or a trigger level move -- each of which leaves
+    // every axis exactly where it was while making the traces already accumulated a picture of
+    // something else. The coupling is in it for the same reason: AC moves the whole trace by the
+    // record's own mean.
+    expect(app).toContain('scopeCaptureSignature(scopeCaptureFacts.value)')
+    expect(app).toContain('${scopePath.value.coupling}')
+  })
+
+  it('takes those facts from the request, which is the only thing that carries all of them', () => {
+    // Half the capture configuration never reaches App.vue as a model -- the slope, the holdoff,
+    // the width bounds, which inputs are captured all live inside ScopeConfigPanel's own form. A
+    // signature assembled from the refs beside it would silently miss them.
+    expect(app).toContain('scopeCaptureFacts.value = request')
+    // Both ways a configuration reaches the analyzer: a fresh Run, and a retune of one in flight.
+    expect(app.match(/scopeCaptureFacts\.value = request/g)?.length).toBe(2)
+  })
+
   it('has every persistence chart watch the key, not only fold it into the signature', () => {
     // A signature is read when a record arrives. A Clear pressed on a stopped capture has no
     // record coming, so without the watcher it would clear nothing until the next one.
@@ -395,5 +416,61 @@ describe('what the charts throw the picture away for', () => {
     // that reached only the view on screen would leave the other two holding a stale picture.
     expect(app).toContain('const scopePersistenceKey = computed(')
     expect(app.match(/:persistence-key="scopePersistenceKey"/g)?.length).toBe(3)
+  })
+})
+
+describe('scopeCaptureSignature', () => {
+  const base: ScopeCaptureFacts = {
+    sampleRateHz: 192_000,
+    recordSeconds: 0.02,
+    preTriggerFraction: 0.25,
+    mode: 'Auto',
+    triggerKind: 'Edge',
+    triggerSource: 'ChannelA',
+    triggerSlope: 'Rising',
+    triggerLevelV: 0,
+  }
+
+  it('is stable for a configuration that has not moved', () => {
+    expect(scopeCaptureSignature({ ...base })).toBe(scopeCaptureSignature({ ...base }))
+  })
+
+  it('answers an empty string before anything has been captured', () => {
+    expect(scopeCaptureSignature(null)).toBe('')
+  })
+
+  // Each of these leaves every axis exactly where it was, which is why the chart's own pixel
+  // signature cannot notice them -- and each makes the records already accumulated a picture of
+  // something else.
+  const moves: [string, Partial<ScopeCaptureFacts>][] = [
+    ['the sample rate', { sampleRateHz: 48_000 }],
+    ['the record length', { recordSeconds: 0.05 }],
+    ['the pre-trigger fraction', { preTriggerFraction: 0.5 }],
+    ['the run mode', { mode: 'Normal' }],
+    ['the trigger kind', { triggerKind: 'PulseWidth' }],
+    ['the trigger source', { triggerSource: 'ChannelB' }],
+    ['the slope', { triggerSlope: 'Falling' }],
+    ['the trigger level', { triggerLevelV: 0.1 }],
+    ['the hysteresis', { triggerHysteresisV: 0.01 }],
+    ['the second threshold', { triggerLevelLowV: -0.1 }],
+    ['the width condition', { pulseWidthLoSeconds: 1e-4 }],
+    ['its upper bound', { pulseWidthHiSeconds: 2e-4 }],
+    ['the dropout timeout', { dropoutSeconds: 0.01 }],
+    ['the holdoff', { holdoffSeconds: 0.005 }],
+    ['the accumulation', { accumulation: 'Average' }],
+    ['the average count', { averageCount: 16 }],
+    ['which inputs are captured', { processRight: true }],
+  ]
+
+  it.each(moves)('changes when %s does', (_what, change) => {
+    expect(scopeCaptureSignature({ ...base, ...change })).not.toBe(scopeCaptureSignature(base))
+  })
+
+  it('leaves the generator out, so sweeping a stimulus keeps the picture it is being read against', () => {
+    const withGenerator = {
+      ...base,
+      generatorLeft: { enabled: true, tones: [{ frequencyHz: 1000, amplitudeDbv: -6 }] },
+    } as ScopeCaptureFacts
+    expect(scopeCaptureSignature(withGenerator)).toBe(scopeCaptureSignature(base))
   })
 })

@@ -1284,7 +1284,10 @@ public sealed record OscilloscopeParameters(
     bool? ChartThickLines = null,
     bool? ChartShowDataPoints = null,
     bool? ChartShowTriggerLevel = null,
-    bool? ChartAutofitOnDone = null,
+    // ChartAutofitOnDone was here. The control and the behaviour were both removed on 2026-11-19:
+    // this screen has Autofit, Autoset and the zoom bar as deliberate presses, and an automatic fit
+    // throws away a window the reader has just chosen. A measurement saved before that keeps the
+    // field in its params_json, where nothing reads it -- the ChartDecayLightAzimuthDeg precedent.
     /// <summary>
     /// Whether each captured input was drawn. The display rail's own pair, not the Acquisition
     /// panel's Left and Right — those decide what is captured, and a channel that is not captured

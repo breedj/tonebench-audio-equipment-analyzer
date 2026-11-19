@@ -2006,7 +2006,8 @@ export interface OscilloscopeParameters {
   chartThickLines?: boolean | null
   chartShowDataPoints?: boolean | null
   chartShowTriggerLevel?: boolean | null
-  chartAutofitOnDone?: boolean | null
+  // chartAutofitOnDone was here; the control and the behaviour both went on 2026-11-19. A
+  // measurement saved before that keeps the field in its params_json, where nothing reads it.
   /** Whether each captured input is drawn — the display rail's own pair, not the Acquisition boxes. */
   chartShowLeft?: boolean | null
   chartShowRight?: boolean | null

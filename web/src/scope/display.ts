@@ -46,8 +46,6 @@ export interface ScopeDisplay {
   showDataPoints: boolean
   /** Whether the draggable trigger line and its hysteresis band are drawn over the trace. */
   showTriggerLevel: boolean
-  /** Whether a finished capture fits both axes to itself. */
-  autofitOnDone: boolean
   /**
    * Whether each captured input is drawn.
    *
@@ -184,10 +182,14 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   voltOffsetV: 0,
   timeFromS: DEFAULT_WINDOW.fromS,
   timeToS: DEFAULT_WINDOW.toS,
-  thickLines: false,
+  /**
+   * On. A one-pixel trace is a hairline on a dense modern panel, and the thing a reader is
+   * following across the graticule is the trace -- this is the one display preference whose cost
+   * is nothing and whose benefit is on every screen.
+   */
+  thickLines: true,
   showDataPoints: false,
   showTriggerLevel: true,
-  autofitOnDone: true,
   showLeft: true,
   showRight: true,
   showResidual: false,
@@ -216,11 +218,12 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   /** The three a scope is read for at a glance; the picker is one press away for the rest. */
   measurements: [...DEFAULT_SCOPE_MEASUREMENTS],
   /**
-   * Off. Statistics answer "is this steady", which is a question a reader asks on purpose — and
-   * five more columns under every chart for a reader who has not asked is the clutter this app
-   * already refuses elsewhere.
+   * On. The argument for off was that five more columns are clutter for a reader who has not asked
+   * — but the question they answer, "is this steady", is one a reader of a live trace is asking
+   * whether or not they thought to tick a box, and the columns sit in a table that is already
+   * there rather than taking anything off the chart.
    */
-  measurementStatistics: false,
+  measurementStatistics: true,
   /** Whatever the table's first row is, until a reader picks one. */
   trendRow: '',
   /**
@@ -297,7 +300,6 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartThickLines === 'boolean') display.thickLines = stored.chartThickLines
   if (typeof stored.chartShowDataPoints === 'boolean') display.showDataPoints = stored.chartShowDataPoints
   if (typeof stored.chartShowTriggerLevel === 'boolean') display.showTriggerLevel = stored.chartShowTriggerLevel
-  if (typeof stored.chartAutofitOnDone === 'boolean') display.autofitOnDone = stored.chartAutofitOnDone
   if (typeof stored.chartShowLeft === 'boolean') display.showLeft = stored.chartShowLeft
   if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
   if (typeof stored.chartShowResidual === 'boolean') display.showResidual = stored.chartShowResidual
@@ -375,7 +377,6 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartThickLines: display.thickLines,
     chartShowDataPoints: display.showDataPoints,
     chartShowTriggerLevel: display.showTriggerLevel,
-    chartAutofitOnDone: display.autofitOnDone,
     chartShowLeft: display.showLeft,
     chartShowRight: display.showRight,
     chartShowResidual: display.showResidual,

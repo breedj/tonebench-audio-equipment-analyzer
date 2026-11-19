@@ -779,8 +779,12 @@ const { showPage } = useManual()
           <td>Line weight, and a marker per sample — drawn only where the window is tight enough for the chart to hold real samples, because a marker on a min/max column would mark the column.</td>
         </tr>
         <tr>
-          <td>Autofit / Autofit when measurement done</td>
-          <td>Fits both axes to what is on screen: the time window to the whole record, the V/div and centre to the visible traces. The checkbox does it as a run starts, which also ends any zoom.</td>
+          <td>Autofit</td>
+          <td>
+            Fits both axes to what is on screen: the time window to the whole record, the V/div and
+            centre to the visible traces. A press, never automatic — see <strong>Autoset</strong>
+            in the run row for the other way to frame an unknown signal.
+          </td>
         </tr>
       </tbody>
     </table>

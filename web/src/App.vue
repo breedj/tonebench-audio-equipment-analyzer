@@ -2100,7 +2100,6 @@ const scopeTimeToS = ref(DEFAULT_SCOPE_DISPLAY.timeToS)
 const scopeThickLines = ref(DEFAULT_SCOPE_DISPLAY.thickLines)
 const scopeShowDataPoints = ref(DEFAULT_SCOPE_DISPLAY.showDataPoints)
 const scopeShowTriggerLevel = ref(DEFAULT_SCOPE_DISPLAY.showTriggerLevel)
-const scopeAutofitOnDone = ref(DEFAULT_SCOPE_DISPLAY.autofitOnDone)
 const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
 const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
 const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
@@ -2534,7 +2533,6 @@ function currentScopeDisplay() {
     thickLines: scopeThickLines.value,
     showDataPoints: scopeShowDataPoints.value,
     showTriggerLevel: scopeShowTriggerLevel.value,
-    autofitOnDone: scopeAutofitOnDone.value,
     showResidual: scopeShowResidual.value,
     persistence: scopePersistence.value,
     intensityMode: scopeIntensityMode.value,
@@ -2570,7 +2568,6 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeThickLines.value = display.thickLines
   scopeShowDataPoints.value = display.showDataPoints
   scopeShowTriggerLevel.value = display.showTriggerLevel
-  scopeAutofitOnDone.value = display.autofitOnDone
   // A window belonging to the measurement being left would put the arriving one's box in the
   // wrong place until its chart reported for itself.
   scopeViewWindow.value = null
@@ -2617,7 +2614,6 @@ watch(
     scopeThickLines,
     scopeShowDataPoints,
     scopeShowTriggerLevel,
-    scopeAutofitOnDone,
     scopeShowLeft,
     scopeShowRight,
     scopeShowResidual,
@@ -6649,7 +6645,6 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:thick-lines="scopeThickLines"
                   v-model:show-data-points="scopeShowDataPoints"
                   v-model:show-trigger-level="scopeShowTriggerLevel"
-                  v-model:autofit-on-done="scopeAutofitOnDone"
                   v-model:show-left="scopeShowLeft"
                   v-model:show-right="scopeShowRight"
                   v-model:show-residual="scopeShowResidual"

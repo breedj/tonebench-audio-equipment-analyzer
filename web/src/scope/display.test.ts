@@ -17,10 +17,29 @@ describe('DEFAULT_SCOPE_DISPLAY', () => {
     expect(DEFAULT_SCOPE_DISPLAY.timeToS).toBeCloseTo(0.015, 12)
   })
 
-  it('autofits, unlike the FFT screen', () => {
-    // A scope is pointed at an unknown signal; a window left over from the last one draws a flat
-    // line, which reads as a dead probe.
-    expect(DEFAULT_SCOPE_DISPLAY.autofitOnDone).toBe(true)
+  /**
+    * Thick lines and statistics both changed default on 2026-11-19, so both are pinned: a default
+    * is what a NEW measurement is seeded with and what a stored null reads as, and the half that is
+    * easy to break is the second one — see 'keeps a deliberate false rather than reading it as
+    * absent' below.
+    */
+  it('draws a thick trace, because a hairline is what a reader is trying to follow', () => {
+    expect(DEFAULT_SCOPE_DISPLAY.thickLines).toBe(true)
+  })
+
+  it('keeps statistics beside each reading', () => {
+    expect(DEFAULT_SCOPE_DISPLAY.measurementStatistics).toBe(true)
+  })
+
+  /**
+   * And nothing fits a finished capture on its own any more. The control and the behaviour were
+   * both removed; a stored chartAutofitOnDone is left in params_json where nothing reads it, which
+   * is what this pins — reading it back must not resurrect a field.
+   */
+  it('has no autofit-when-done, and does not read a stored one', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartAutofitOnDone: true }))
+    expect('autofitOnDone' in display).toBe(false)
+    expect(scopeDisplayToParams(display)).not.toHaveProperty('chartAutofitOnDone')
   })
 
   it('draws the trigger level, which is the control a user drags', () => {
@@ -59,13 +78,17 @@ describe('scopeDisplayFromParams', () => {
     expect(display.thickLines).toBe(true)
     expect(display.showDataPoints).toBe(true)
     expect(display.showTriggerLevel).toBe(false)
-    expect(display.autofitOnDone).toBe(false)
   })
 
   it('keeps a deliberate false rather than reading it as absent', () => {
     // The half a changed default can break: `?? base` on a boolean reads `false` as "not stored".
-    const display = scopeDisplayFromParams(JSON.stringify({ chartAutofitOnDone: false }))
-    expect(display.autofitOnDone).toBe(false)
+    // Both of these now default to TRUE, so a stored false is exactly the case at risk -- a bench's
+    // own measurements must not have their settings rewritten by a default moving under them.
+    const display = scopeDisplayFromParams(
+      JSON.stringify({ chartThickLines: false, chartMeasurementStatistics: false }),
+    )
+    expect(display.thickLines).toBe(false)
+    expect(display.measurementStatistics).toBe(false)
   })
 
   it('takes the time window as a pair or not at all', () => {
@@ -137,7 +160,6 @@ describe('scopeDisplayToParams', () => {
       thickLines: true,
       showDataPoints: true,
       showTriggerLevel: false,
-      autofitOnDone: false,
     }
 
     const back = scopeDisplayFromParams(JSON.stringify(scopeDisplayToParams(display)))
@@ -280,7 +302,7 @@ describe('the chosen measurements', () => {
     // that failed rather than as one nobody has set up.
     const display = scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.5 }))
     expect(display.measurements).toEqual([...DEFAULT_SCOPE_DISPLAY.measurements])
-    expect(display.measurementStatistics).toBe(false)
+    expect(display.measurementStatistics).toBe(DEFAULT_SCOPE_DISPLAY.measurementStatistics)
   })
 
   it('keeps an empty list empty, which is a reader who cleared it', () => {

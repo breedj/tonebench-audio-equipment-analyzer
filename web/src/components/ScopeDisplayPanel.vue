@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
@@ -57,7 +57,6 @@ const timeToS = defineModel<number>('timeToS', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
 const showDataPoints = defineModel<boolean>('showDataPoints', { required: true })
 const showTriggerLevel = defineModel<boolean>('showTriggerLevel', { required: true })
-const autofitOnDone = defineModel<boolean>('autofitOnDone', { required: true })
 const showLeft = defineModel<boolean>('showLeft', { required: true })
 const showRight = defineModel<boolean>('showRight', { required: true })
 const showResidual = defineModel<boolean>('showResidual', { required: true })
@@ -135,7 +134,7 @@ const props = defineProps<{
   maskTally?: { passed: number; failed: number }
 }>()
 
-const { record, recordBounds, running } = useOscilloscope()
+const { record, recordBounds } = useOscilloscope()
 
 /**
  * The bounds a window is clamped to: the record's own span, or — before anything is captured — the
@@ -302,30 +301,15 @@ function autofitAll() {
   autofitVolts()
 }
 
-watch(running, (isRunning, wasRunning) => {
-  if (wasRunning && !isRunning && autofitOnDone.value) autofitAll()
-})
-
-/**
- * In <b>Auto</b> and <b>Normal</b> the run never ends, so the watcher above would never fire — and
- * a scope whose Autofit only works on a Single capture is a scope whose Autofit does not work. The
- * first record of a run fits instead, and only the first: re-fitting on every capture would make
- * the graticule hunt while the signal was being adjusted, which is the opposite of what a V/div
- * control is for.
+/*
+ * Nothing fits a finished capture on its own. There was an "Autofit when measurement done"
+ * checkbox here until 2026-11-19, and it is gone -- control and behaviour both.
+ *
+ * This screen already has three deliberate ways to frame a trace: Autofit, Autoset and the zoom
+ * bar. An automatic fit fights all three, because it throws away a window the reader has just
+ * chosen, at the one moment they are looking at it. chartAutofitOnDone stays readable in a stored
+ * params_json and is simply not read here -- the ChartDecayLightAzimuthDeg precedent.
  */
-let fittedForRun = -1
-watch(
-  () => record.value,
-  (next) => {
-    if (!next || !autofitOnDone.value) return
-    if (fittedForRun >= 0) return
-    fittedForRun = 0
-    autofitAll()
-  },
-)
-watch(running, (isRunning) => {
-  if (isRunning) fittedForRun = -1
-})
 
 const verticalLabel = computed(() => formatVoltsPerDivision(voltsPerDivision.value))
 
@@ -534,9 +518,6 @@ function onVoltsPerDivisionChange(event: Event) {
   </CollapsibleSection>
 
   <CollapsibleSection title="Display">
-    <label class="tb-check-row">
-      <input v-model="autofitOnDone" type="checkbox" class="tb-check" /> Autofit when measurement done
-    </label>
     <label class="tb-check-row">
       <input v-model="showTriggerLevel" type="checkbox" class="tb-check" /> Trigger level
     </label>

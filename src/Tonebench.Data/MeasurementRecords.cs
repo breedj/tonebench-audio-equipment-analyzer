@@ -1380,7 +1380,28 @@ public sealed record OscilloscopeParameters(
     /// </summary>
     IReadOnlyList<string>? ChartMeasurements = null,
     /// <summary>Whether that readout keeps statistics across records beside each value.</summary>
-    bool? ChartMeasurementStatistics = null);
+    bool? ChartMeasurementStatistics = null,
+    /// <summary>
+    /// Which of those readings the plot under the table is of, by its row key — the catalogue id
+    /// and the trace it was read from, as <c>pkpk:ch0</c> or <c>phase:pair</c>.
+    ///
+    /// <para>A display preference like the set above. A key naming a row that is no longer on offer
+    /// — a measurement unticked since, or a channel the capture no longer carries — falls back to
+    /// the first row rather than drawing nothing, and the fallback is written back, so the
+    /// dropdown's value and the plot can never disagree.</para>
+    /// </summary>
+    string? ChartTrendRow = null,
+    /// <summary>
+    /// Whether that plot is the trend (each record's reading against the record) or the
+    /// distribution (how often each value came up).
+    ///
+    /// <para>Two views of one series rather than two plots, because only one of them can be read at
+    /// a time and a card holding both would be half the height for each. What the plot
+    /// <i>accumulates</i> is not stored, on the persistence picture's own grounds: it is a history
+    /// of a run, it cannot be re-derived from anything saved, and it is thrown away the moment a
+    /// capture setting makes the records stop being comparable.</para>
+    /// </summary>
+    string? ChartTrendView = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the

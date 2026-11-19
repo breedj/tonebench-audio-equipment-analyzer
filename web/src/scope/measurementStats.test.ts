@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   addStatSample,
   newStatAccumulator,
+  SCOPE_SERIES_CAPACITY,
   SCOPE_STAT_COLUMNS,
+  seriesFirstRecord,
+  seriesOf,
   statOf,
 } from './measurementStats'
 
@@ -97,5 +100,80 @@ describe('SCOPE_STAT_COLUMNS', () => {
     for (const column of SCOPE_STAT_COLUMNS) {
       expect(Number.isFinite(s[column.key])).toBe(true)
     }
+  })
+})
+
+describe('the kept series', () => {
+  function series(values: readonly (number | null)[]) {
+    const acc = newStatAccumulator()
+    for (const v of values) addStatSample(acc, v)
+    return acc
+  }
+
+  it('keeps the readings in the order they were folded in', () => {
+    expect(Array.from(seriesOf(series([1, 2, 3])))).toEqual([1, 2, 3])
+  })
+
+  /**
+   * The rule the trend rests on: a record with no reading keeps its place as a gap, so the series
+   * is against records rather than against its own non-empty subset.
+   */
+  it('keeps a record with no reading as a gap rather than skipping it', () => {
+    const kept = Array.from(seriesOf(series([1, null, 3])))
+
+    expect(kept).toHaveLength(3)
+    expect(kept[0]).toBe(1)
+    expect(Number.isNaN(kept[1])).toBe(true)
+    expect(kept[2]).toBe(3)
+  })
+
+  it('does not let that gap into the statistics', () => {
+    const acc = series([1, null, 3])
+
+    expect(statOf(acc)!.count).toBe(2)
+    expect(statOf(acc)!.mean).toBe(2)
+  })
+
+  it('is empty before anything has been folded in', () => {
+    expect(seriesOf(newStatAccumulator())).toHaveLength(0)
+    expect(seriesOf(undefined)).toHaveLength(0)
+    expect(seriesFirstRecord(newStatAccumulator())).toBe(0)
+  })
+
+  it('counts from record one until it wraps', () => {
+    expect(seriesFirstRecord(series([1, 2, 3]))).toBe(1)
+  })
+
+  /** The bound is what makes a long run affordable; what it costs is the start of the run. */
+  it('keeps the newest readings once it is full, and says which record they start at', () => {
+    const acc = newStatAccumulator()
+    const total = SCOPE_SERIES_CAPACITY + 10
+    for (let i = 1; i <= total; i += 1) addStatSample(acc, i)
+
+    const kept = seriesOf(acc)
+    expect(kept).toHaveLength(SCOPE_SERIES_CAPACITY)
+    expect(kept[0]).toBe(11)
+    expect(kept[kept.length - 1]).toBe(total)
+    expect(seriesFirstRecord(acc)).toBe(11)
+  })
+
+  /** Every record counts, including the ones the ring has dropped. */
+  it('goes on counting records the series no longer keeps', () => {
+    const acc = newStatAccumulator()
+    const total = SCOPE_SERIES_CAPACITY + 10
+    for (let i = 1; i <= total; i += 1) addStatSample(acc, i)
+
+    expect(statOf(acc)!.count).toBe(total)
+    expect(statOf(acc)!.min).toBe(1)
+  })
+
+  /** A caller that held the ring itself would be reading a buffer the next record overwrites. */
+  it('hands out a copy rather than the ring', () => {
+    const acc = series([1, 2, 3])
+    const kept = seriesOf(acc)
+
+    addStatSample(acc, 4)
+
+    expect(Array.from(kept)).toEqual([1, 2, 3])
   })
 })

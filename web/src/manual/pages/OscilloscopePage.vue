@@ -1275,6 +1275,65 @@ const { showPage } = useManual()
       statistics.
     </p>
 
+    <h3>Reading over time</h3>
+    <p>
+      Under that table, <strong>Reading over time</strong> plots one of the chosen readings against
+      the records it came from. Pick the reading from the dropdown — it offers exactly the rows the
+      table is showing — and the plot either way:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Plot</th><th>What it shows</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Trend</td>
+          <td>
+            Each record's reading against the record it came from, with the mean dashed and ±1σ
+            shaded. Drift, a step, a once-an-hour glitch.
+          </td>
+        </tr>
+        <tr>
+          <td>Distribution</td>
+          <td>
+            How often each value came up. A bell is noise; two groups with a gap between them are
+            something switching; a long tail on one side is a reading that is usually fine and
+            occasionally much worse.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Why this is here at all.</strong> Mean, Min, Max, Pk-Pk and Stdev are <em>order-free
+      and shape-free</em>: a reading that drifted steadily across a run, one that sat still and
+      jumped once, and one that alternates between two values every record give the same five
+      figures — and so do a bell and two clusters a long way apart whose mean no record ever read.
+      Those are four different faults and each of them is one glance at a plot.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>The axis is labelled against its own middle.</strong> Every reading on this screen
+        is written to four significant figures, which is right for a reading and useless for an axis
+        fitted to a spread: a peak-to-peak of 1.419 V that wanders over 44 µV would have three ticks
+        all reading <code>1.419 V</code>. So the middle tick is the value and the others are signed
+        offsets from it — <code>1.419 V</code> with <code>+43.67 µV</code> above and
+        <code>−43.67 µV</code> below.
+      </p>
+      <p>
+        A record the measurement had no reading on is a <strong>gap in the trend</strong>, never a
+        zero and never joined across: a frequency that keeps losing its second crossing is exactly
+        what this is reached for. The distribution leaves those records out instead, having no place
+        on a value axis to put them.
+      </p>
+    </div>
+    <p>
+      The plot keeps the newest <strong>1024</strong> readings; the statistics beside it go on
+      counting every record read, and the caption says so when the two differ. Which reading is
+      plotted and which of the two pictures is drawn are saved with the measurement. What the plot
+      has <em>accumulated</em> is not — a history of a run rather than of a capture, and thrown away
+      whenever a capture setting makes the records stop being comparable.
+    </p>
+
     <h2>The math channel</h2>
     <p>
       <strong>Math</strong> draws one more trace, computed from the two captured waveforms. A is the

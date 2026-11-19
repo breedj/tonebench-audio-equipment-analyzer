@@ -70,6 +70,7 @@ import ScopeConfigPanel from './components/ScopeConfigPanel.vue'
 import ScopeDisplayPanel from './components/ScopeDisplayPanel.vue'
 import ScopeMeasurementsPanel from './components/ScopeMeasurementsPanel.vue'
 import ScopeMeasurementTable from './components/ScopeMeasurementTable.vue'
+import ScopeTrendPanel from './components/ScopeTrendPanel.vue'
 import ScopeMeasurementPickerDialog from './components/ScopeMeasurementPickerDialog.vue'
 import { useOscilloscope } from './composables/useOscilloscope'
 import { useScopeStimulus } from './composables/useScopeStimulus'
@@ -2128,6 +2129,17 @@ const scopePath = ref<ScopeSignalPathSettings>({ ...DEFAULT_SCOPE_PATH })
 const scopeDrawing = ref(DEFAULT_SCOPE_DISPLAY.drawing)
 
 /**
+ * Which chosen reading the plot under the measurement table is of, and which of its two pictures.
+ *
+ * <p>Declared up here with the rest of the scope's display state, above
+ * <code>applyStoredScopeDisplay</code>, for the reason the window below it carries at length: that
+ * restore runs during setup from an <code>immediate</code> watcher, and a <code>const</code> it
+ * reads from further down the file is in its own temporal dead zone.</p>
+ */
+const scopeTrendRow = ref(DEFAULT_SCOPE_DISPLAY.trendRow)
+const scopeTrendView = ref(DEFAULT_SCOPE_DISPLAY.trendView)
+
+/**
  * The window the chart is actually showing, which is <b>not</b> always the display panel's pair.
  *
  * <p>A drag-zoom moves uPlot’s scales in place and deliberately does not write the panel’s
@@ -2453,6 +2465,8 @@ function currentScopeDisplay() {
     showRight: scopeShowRight.value,
     measurements: [...scopeMeasurementSelection.selected.value],
     measurementStatistics: scopeMeasurementSelection.statistics.value,
+    trendRow: scopeTrendRow.value,
+    trendView: scopeTrendView.value,
   }
 }
 
@@ -2488,6 +2502,8 @@ function applyStoredScopeDisplay(paramsJson: string) {
   // The selection comes back with the measurement, and the statistics start again with it: a mean
   // carried across a measurement switch would be of the other measurement's records.
   scopeMeasurementSelection.applyLoaded(display.measurements, display.measurementStatistics)
+  scopeTrendRow.value = display.trendRow
+  scopeTrendView.value = display.trendView
   void nextTick(() => {
     scopeDisplayRestoring = false
   })
@@ -2528,6 +2544,11 @@ watch(
     // change to the measurement -- and both are bound here rather than inside the panel's form.
     scopeAccumulation,
     scopeAverageCount,
+    // Which reading the plot under the table is of, and which picture -- display preferences like
+    // the pair above them, and in this list for the same reason: both are bound outside the
+    // panel's own form, so nothing else would notice them moving.
+    scopeTrendRow,
+    scopeTrendView,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -6415,6 +6436,12 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 />
 
                 <ScopeMeasurementTable :rows="scopeMeasurementTableRows" :gated="scopeGated" />
+
+                <ScopeTrendPanel
+                  :rows="scopeMeasurementTableRows"
+                  v-model:row-key="scopeTrendRow"
+                  v-model:view="scopeTrendView"
+                />
 
                 <MeasurementNotesPanel />
                 <MeasurementHistoryPanel @error="reportError" @report="openReport" />

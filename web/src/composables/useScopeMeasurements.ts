@@ -8,6 +8,8 @@ import {
 import {
   addStatSample,
   newStatAccumulator,
+  seriesFirstRecord,
+  seriesOf,
   statOf,
   type ScopeMeasurementStat,
   type ScopeStatAccumulator,
@@ -133,6 +135,24 @@ export function useScopeMeasurements() {
     return statOf(accumulators.get(key))
   }
 
+  /**
+   * One row's readings in the order they were taken — what the trend and the distribution are
+   * drawn from. NaN where a record had no reading, which the trend draws as a gap.
+   *
+   * <p>Bounded, so a long run keeps its newest readings and <code>seriesStart</code> says which
+   * record they begin at; the statistics beside them go on counting every record read.</p>
+   */
+  function series(key: string): Float64Array {
+    void version.value
+    return seriesOf(accumulators.get(key))
+  }
+
+  /** Which record that series begins at, counting from one, or 0 with nothing read. */
+  function seriesStart(key: string): number {
+    void version.value
+    return seriesFirstRecord(accumulators.get(key))
+  }
+
   /** How many records the statistics have counted — the largest count any row has reached. */
   const statCount = computed(() => {
     void version.value
@@ -155,6 +175,8 @@ export function useScopeMeasurements() {
     resetStats,
     accumulate,
     stat,
+    series,
+    seriesStart,
     statCount,
     needsPair,
   }

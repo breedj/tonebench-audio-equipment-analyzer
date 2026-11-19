@@ -307,3 +307,46 @@ describe('the chosen measurements', () => {
     expect(scopeDisplayFromParams(null).measurements).toEqual([...DEFAULT_SCOPE_DISPLAY.measurements])
   })
 })
+
+describe('the plot under the table', () => {
+  it('comes back as it was stored', () => {
+    const stored = JSON.stringify({ chartTrendRow: 'pkpk:ch1', chartTrendView: 'Distribution' })
+    const display = scopeDisplayFromParams(stored)
+
+    expect(display.trendRow).toBe('pkpk:ch1')
+    expect(display.trendView).toBe('Distribution')
+  })
+
+  it('opens on the trend of whatever is first when the measurement was saved before the plot existed', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.5 }))
+
+    expect(display.trendRow).toBe('')
+    expect(display.trendView).toBe('Trend')
+  })
+
+  /**
+   * A row key names a catalogue id and a source, and which sources exist depends on what the
+   * capture carries rather than on any table — so this one is deliberately not validated here, and
+   * the panel's fallback to its first row is what makes an unknown key harmless.
+   */
+  it('keeps a row key naming something this build has never heard of', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartTrendRow: 'fromTheFuture:ch9' }))
+
+    expect(display.trendRow).toBe('fromTheFuture:ch9')
+  })
+
+  /** Unlike the key, the view is one of two and a third would reach the painter as neither. */
+  it('refuses a view it cannot draw', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartTrendView: 'Waterfall' }))
+
+    expect(display.trendView).toBe(DEFAULT_SCOPE_DISPLAY.trendView)
+  })
+
+  it('round-trips through the save path', () => {
+    const display = { ...DEFAULT_SCOPE_DISPLAY, trendRow: 'freq:ch0', trendView: 'Distribution' as const }
+    const back = scopeDisplayFromParams(JSON.stringify(scopeDisplayToParams(display)))
+
+    expect(back.trendRow).toBe('freq:ch0')
+    expect(back.trendView).toBe('Distribution')
+  })
+})

@@ -2031,6 +2031,10 @@ export interface OscilloscopeParameters {
   chartMeasurements?: string[] | null
   /** Whether that readout keeps statistics across records beside each value. */
   chartMeasurementStatistics?: boolean | null
+  /** Which reading the plot under the table is of, by its row key — `pkpk:ch0`, `phase:pair`. */
+  chartTrendRow?: string | null
+  /** Whether that plot is the trend or the distribution. */
+  chartTrendView?: string | null
 }
 
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */

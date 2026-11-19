@@ -32,6 +32,11 @@ import { DEFAULT_SCOPE_MEASUREMENTS, parseScopeMeasurementIds } from './measurem
  * the convention the decay surfaces' head start already uses and the one the server's
  * <code>fromS</code>/<code>toS</code> carry.</p>
  */
+/** The two pictures the plot under the measurement table draws. */
+export type ScopeTrendView = 'Trend' | 'Distribution'
+
+export const SCOPE_TREND_VIEWS: readonly ScopeTrendView[] = Object.freeze(['Trend', 'Distribution'])
+
 export interface ScopeDisplay {
   voltsPerDivision: number
   voltOffsetV: number
@@ -122,6 +127,17 @@ export interface ScopeDisplay {
   measurements: string[]
   /** Whether that readout keeps statistics across records beside each value. */
   measurementStatistics: boolean
+  /**
+   * Which of those readings the plot under the table is of, by its row key — the catalogue id and
+   * the trace it was read from, as <code>pkpk:ch0</code> or <code>phase:pair</code>.
+   *
+   * <p>A key naming a row that is no longer on offer falls back to the first one and is written
+   * back, so the dropdown and the plot cannot disagree. Empty means "whatever is first", which is
+   * what a measurement saved before the plot existed asks for.</p>
+   */
+  trendRow: string
+  /** Whether that plot is the trend or the distribution. See scope/trend.ts and scope/distribution.ts. */
+  trendView: ScopeTrendView
 }
 
 /**
@@ -192,6 +208,13 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
    * already refuses elsewhere.
    */
   measurementStatistics: false,
+  /** Whatever the table's first row is, until a reader picks one. */
+  trendRow: '',
+  /**
+   * The trend. It is the one of the two that answers a question a reader did not have to think of
+   * first — "has this moved" — where a distribution is reached for once something has.
+   */
+  trendView: 'Trend',
 })
 
 /**
@@ -300,6 +323,13 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartMeasurementStatistics === 'boolean')
     display.measurementStatistics = stored.chartMeasurementStatistics
 
+  // Not validated against the catalogue, unlike every other stored string here: a row key is an id
+  // and a source ("pkpk:ch0"), and which sources exist depends on what the capture carries rather
+  // than on any table. The panel's own fallback is what makes an unknown key harmless.
+  if (typeof stored.chartTrendRow === 'string') display.trendRow = stored.chartTrendRow
+  if (typeof stored.chartTrendView === 'string' && (SCOPE_TREND_VIEWS as string[]).includes(stored.chartTrendView))
+    display.trendView = stored.chartTrendView as ScopeTrendView
+
   return display
 }
 
@@ -326,6 +356,8 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartDrawing: display.drawing,
     chartMeasurements: [...display.measurements],
     chartMeasurementStatistics: display.measurementStatistics,
+    chartTrendRow: display.trendRow,
+    chartTrendView: display.trendView,
   }
 }
 

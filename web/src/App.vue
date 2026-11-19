@@ -6622,7 +6622,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @cursors-committed="onScopeCursorsCommitted"
                 />
 
-                <ScopeMeasurementTable :rows="scopeMeasurementTableRows" :gated="scopeGated" />
+                <ScopeMeasurementTable
+                  :rows="scopeMeasurementTableRows"
+                  :gated="scopeGated"
+                  @pick-measurements="scopeMeasurementPickerOpen = true"
+                />
 
                 <ScopeTrendPanel
                   :rows="scopeMeasurementTableRows"

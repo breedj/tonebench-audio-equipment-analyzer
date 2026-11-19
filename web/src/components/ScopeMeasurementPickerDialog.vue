@@ -72,7 +72,9 @@ function clearAll() {
 </script>
 
 <template>
-  <Modal :open="props.open" title="Add or remove measurements" icon="ruler" @close="emit('close')">
+  <!-- size="lg": the tiles are half again as big as they were, and three to a row at the default
+       width would leave the labels truncating on the longer ones. -->
+  <Modal :open="props.open" title="Add or remove measurements" icon="ruler" size="lg" @close="emit('close')">
     <div class="flex flex-col gap-3 text-sm">
       <div class="flex flex-wrap gap-1">
         <button
@@ -88,12 +90,16 @@ function clearAll() {
         </button>
       </div>
 
-      <div class="grid max-h-96 grid-cols-2 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-3">
+      <!-- Every size here moves together, and the icon's is a prop rather than its own class --
+           see ScopeMeasurementIcon. The figure is what the tile is scanned by: thirty-one entries
+           named +Width, -Width, +Duty, -Duty, Top, Base and Amplitude differ by one character, so a
+           list of them is read rather than scanned, and the drawing is what makes it a glance. -->
+      <div class="grid max-h-[36rem] grid-cols-2 gap-2.5 overflow-y-auto pr-1 sm:grid-cols-3">
         <button
           v-for="def in entries"
           :key="def.id"
           type="button"
-          class="flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-[13px] transition-colors"
+          class="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-[15px] transition-colors"
           :class="
             staged.has(def.id)
               ? 'border-blue-500 bg-blue-500/10 text-blue-700 dark:border-blue-400 dark:text-blue-300'
@@ -103,7 +109,7 @@ function clearAll() {
           :aria-pressed="staged.has(def.id)"
           @click="toggle(def.id)"
         >
-          <ScopeMeasurementIcon :name="def.icon" />
+          <ScopeMeasurementIcon :name="def.icon" size="lg" />
           <span class="min-w-0 truncate">{{ def.label }}</span>
         </button>
       </div>

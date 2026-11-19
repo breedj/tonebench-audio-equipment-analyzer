@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import CollapsibleSection from './CollapsibleSection.vue'
 import ScopeMeasurementIcon from './ScopeMeasurementIcon.vue'
+import ToolbarIcon from './ToolbarIcon.vue'
 import { useScopeMeasurements } from '../composables/useScopeMeasurements'
 import { scopeMeasurement, SCOPE_MEASUREMENT_ABSENT } from '../scope/measurementCatalogue'
 import { SCOPE_STAT_COLUMNS } from '../scope/measurementStats'
@@ -44,10 +45,32 @@ function statCountOf(row: ScopeMeasurementRow): string {
 function iconOf(row: ScopeMeasurementRow): string {
   return scopeMeasurement(row.id)?.icon ?? ''
 }
+
+/**
+ * Opens the picker from the table it fills.
+ *
+ * <p>A second entry point beside the rail's own <b>Choose measurements…</b>, not a replacement:
+ * the rail's button is where the setting lives, and this is where a reader is looking when they
+ * notice a reading is missing. It goes in the header's own slot, which stays clickable without
+ * toggling the section.</p>
+ */
+const emit = defineEmits<{ pickMeasurements: [] }>()
 </script>
 
 <template>
   <CollapsibleSection title="Selected measurements">
+    <template #header-right>
+      <button
+        type="button"
+        class="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        title="Add or remove measurements…"
+        aria-label="Add or remove measurements"
+        @click="emit('pickMeasurements')"
+      >
+        <ToolbarIcon name="plus" />
+      </button>
+    </template>
+
     <p
       v-if="gated && rows.length > 0"
       class="mb-2 rounded bg-teal-500/10 px-1.5 py-1 text-[11px] leading-snug text-teal-700 dark:text-teal-300"
@@ -125,8 +148,8 @@ function iconOf(row: ScopeMeasurementRow): string {
     </div>
 
     <p v-else-if="selected.length === 0" class="text-xs text-neutral-400 dark:text-neutral-600">
-      Nothing chosen. Press <strong>Choose measurements…</strong> under Measurements in the display
-      rail to put a reading here.
+      Nothing chosen. Press <strong>+</strong> above, or <strong>Choose measurements…</strong>
+      under Measurements in the display rail, to put a reading here.
     </p>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">Nothing captured yet.</p>
 

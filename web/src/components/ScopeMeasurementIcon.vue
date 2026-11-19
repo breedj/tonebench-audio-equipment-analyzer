@@ -10,7 +10,25 @@ import { ICON_HEIGHT, ICON_WIDTH, scopeMeasurementIcon } from '../scope/measurem
  * against a panel, inside a chosen card and in either theme without a palette of its own.</p>
  */
 
-const props = defineProps<{ name: string }>()
+const props = withDefaults(
+  defineProps<{
+    name: string
+    /**
+     * How big to draw it.
+     *
+     * <p><b>At the call site rather than in here</b>, because the two places this is used want
+     * different answers and the component has no way to tell them apart: the picker's tiles are
+     * read while choosing and want a figure big enough to recognise, while the readings table puts
+     * one in a 24 px column beside each row. Growing the component's own class would grow the table
+     * rows with it.</p>
+     *
+     * <p>The size is <b>CSS only</b>. <code>ICON_WIDTH</code>/<code>ICON_HEIGHT</code> are the
+     * viewBox, and all 31 shape tables plus their test are written in that 24x16 space.</p>
+     */
+    size?: 'sm' | 'lg'
+  }>(),
+  { size: 'sm' },
+)
 
 const shapes = computed(() => scopeMeasurementIcon(props.name))
 
@@ -21,10 +39,11 @@ const TICK = 2
 <template>
   <svg
     :viewBox="`0 0 ${ICON_WIDTH} ${ICON_HEIGHT}`"
-    class="h-4 w-6 shrink-0 overflow-visible"
+    class="shrink-0 overflow-visible"
+    :class="props.size === 'lg' ? 'h-6 w-9' : 'h-4 w-6'"
     fill="none"
     stroke="currentColor"
-    stroke-width="1"
+    :stroke-width="props.size === 'lg' ? 0.75 : 1"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"

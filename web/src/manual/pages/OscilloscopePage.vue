@@ -1209,8 +1209,9 @@ const { showPage } = useManual()
     <h2>The readout under the chart</h2>
     <p>
       The panel above lists everything; the <strong>Selected measurements</strong> table under the
-      chart shows the few you are watching, large enough to read at a glance. Press
-      <strong>Choose measurements…</strong> in the Measurements panel to pick them from a figure of
+      chart shows the few you are watching, large enough to read at a glance. Press the
+      <strong>+</strong> in that table's own header, or <strong>Choose measurements…</strong> in
+      the Measurements panel, to pick them from a figure of
       each — the four tabs are <strong>Vertical</strong> (how tall),
       <strong>Horizontal</strong> (how long), <strong>Miscellaneous</strong> and
       <strong>Channel delay</strong>.

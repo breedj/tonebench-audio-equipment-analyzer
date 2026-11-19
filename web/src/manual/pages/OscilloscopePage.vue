@@ -1535,6 +1535,33 @@ const { showPage } = useManual()
       draws its own results.
     </p>
 
+    <h2>Autoset</h2>
+    <p>
+      <strong>Autoset</strong>, under the run buttons, is one press that makes an unknown signal
+      readable and standing still: it fits the vertical to the measured extremes, puts about three
+      of the signal's own cycles on screen, and sets the trigger level to the middle of it. The line
+      under the button says how many cycles it landed on.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>It is not Autofit.</strong> Autofit, at the top of the display rail, frames the
+        <em>record</em> — the whole of it across. That is the right answer for looking at a capture
+        and the wrong one for looking at a waveform: a 20 ms record of a 1 kHz tone drawn whole is
+        twenty cycles in a few hundred pixels, where nothing about the shape of one can be read.
+      </p>
+      <p>
+        Autoset reads the record on screen, so capture something first — the button is disabled
+        until there is one. Every figure it uses is measured: the extremes, the frequency and the
+        midpoint are the same ones the Measurements panel and the 50 % button read.
+      </p>
+    </div>
+    <p>
+      A record too short for three cycles simply shows what it has; the window is clamped into the
+      capture rather than reaching past it, and <strong>Record (ms)</strong> is the control that
+      fixes that. With no frequency measured — noise, DC, silence — the window is left at the whole
+      record and the other two are still set.
+    </p>
+
     <h2>The pass/fail mask</h2>
     <p>
       Tick <strong>Compare against the reference</strong> in the Mask panel and every record is

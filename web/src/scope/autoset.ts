@@ -16,7 +16,7 @@
  * level to the settings rail, and the arithmetic belongs to neither.</p>
  */
 
-import { fitVoltWindow } from './voltAxis'
+import { fitVoltWindow, roundVoltsForWindow } from './voltAxis'
 import { fiftyPercentLevel } from './triggerSpec'
 
 /** How many periods of the measured signal Autoset puts on screen. */
@@ -45,6 +45,11 @@ export interface ScopeAutoset {
    * <p>Never null: the extremes are checked before anything here runs, and a record with one level
    * has a midpoint like any other. A trigger set on a flat record's own level crosses nothing,
    * which is the honest answer rather than a reason to leave the control alone.</p>
+   *
+   * <p><b>Rounded against the span it was taken from</b>, as the 50 % button's own write is: the
+   * midpoint of two measured extremes carries every digit the arithmetic produced, and
+   * <code>0.0052837500000000315</code> in the box is a reading of the noise floor rather than a
+   * level anybody set.</p>
    */
   triggerLevelV: number
   /** Null where no frequency was measured: the window is then the record, and this says so. */
@@ -113,7 +118,10 @@ export function scopeAutoset(input: ScopeAutosetInput): ScopeAutoset | null {
     offsetV: fit.offsetV,
     fromS,
     toS,
-    triggerLevelV: fiftyPercentLevel(input.maxV, input.minV) as number,
+    triggerLevelV: roundVoltsForWindow(
+      fiftyPercentLevel(input.maxV, input.minV) as number,
+      Math.abs(input.maxV - input.minV),
+    ),
     periodS,
   }
 }

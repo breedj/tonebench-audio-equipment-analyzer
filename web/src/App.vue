@@ -88,6 +88,7 @@ import {
   type ScopeMaskTally,
   type ScopeMaskVerdict,
 } from './scope/mask'
+import { autosetNote, scopeAutoset } from './scope/autoset'
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
@@ -2495,6 +2496,8 @@ let scopeRecordsCounted = -1
 watch(currentTypeId, () => {
   scopeMeasurementSelection.resetStats()
   scopeRecordsCounted = -1
+  // The Autoset line describes a press that was about the measurement being left.
+  scopeAutosetNote.value = null
 })
 
 watch(scopeRecord, (record) => {
@@ -2816,6 +2819,60 @@ function onScopeStripWindow(next: ScopeTimeWindow) {
  */
 function onScopeTriggerLevelCommitted() {
   scopeConfigPanel.value?.flushRetune()
+}
+
+/**
+ * What the last Autoset did, for the line under the button, or null before one has run.
+ *
+ * <p>Session state like the cursors: it describes a press rather than the measurement, so it is
+ * not stored and not in a report. Cleared on a measurement switch, the press having been about the
+ * measurement being left.</p>
+ */
+const scopeAutosetNote = ref<string | null>(null)
+
+/**
+ * One press that makes an unknown signal readable and standing still.
+ *
+ * <p><b>Against Autofit, which is already on the display rail.</b> Autofit frames the
+ * <em>record</em> — the whole of it across — which is the right answer for looking at a capture and
+ * the wrong one for looking at a waveform: twenty cycles in a few hundred pixels says nothing about
+ * the shape of one. Autoset shows a few cycles, taken from the measured frequency, and sets the
+ * trigger to the middle of the signal so they stand still. See scope/autoset.ts.</p>
+ *
+ * <p><b>In the run row rather than the display rail</b>, which is where a bench instrument puts it
+ * and is the honest place: what it writes crosses two panels — the vertical and the window belong
+ * to the display, the trigger level to the settings — so it belongs to neither.</p>
+ */
+function autosetOscilloscope() {
+  const extremes = scopeExtremes.value
+  const bounds = scopeRecordBounds.value
+  if (!extremes || !bounds) return
+
+  const channel = scopeTriggerSource.value === 'ChannelB' ? 1 : 0
+  const result = scopeAutoset({
+    maxV: extremes.maxV,
+    minV: extremes.minV,
+    frequencyHz:
+      scopeRecord.value?.channels.find((slice) => slice.channel === channel)?.measurements
+        ?.frequencyHz ?? null,
+    recordFromS: bounds.fromS,
+    recordToS: bounds.toS,
+  })
+  if (!result) return
+
+  scopeVoltsPerDivision.value = result.voltsPerDivision
+  scopeVoltOffsetV.value = result.offsetV
+  scopeTimeFromS.value = result.fromS
+  scopeTimeToS.value = result.toS
+  // The zoom goes with it, or a window dragged on the chart would go on overriding the one Autoset
+  // has just chosen and the press would read as having done nothing.
+  scopeViewWindow.value = null
+  scopeTriggerLevelV.value = result.triggerLevelV
+  // A level only takes effect on the next arm, so a run already going is retuned -- which is what
+  // the dragged level's own commit does.
+  onScopeTriggerLevelCommitted()
+
+  scopeAutosetNote.value = autosetNote(result)
 }
 
 /**
@@ -6381,6 +6438,31 @@ onBeforeUnmount(() => stopLoadPolling?.())
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg>
                     Stop
                   </button>
+                </div>
+
+                <!-- AUTOSET. In the run row rather than the display rail, which is where a bench
+                     instrument puts it and is the honest place: what it writes crosses two panels.
+                     Disabled with nothing captured, because every figure it uses is measured. -->
+                <div class="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    class="btn-secondary w-full"
+                    :disabled="!scopeExtremes"
+                    :title="
+                      scopeExtremes
+                        ? 'Fits the vertical to the signal, puts about three of its cycles on screen and sets the trigger to the middle of it.'
+                        : 'Capture something first — Autoset reads the record on screen.'
+                    "
+                    @click="autosetOscilloscope"
+                  >
+                    Autoset
+                  </button>
+                  <p
+                    v-if="scopeAutosetNote"
+                    class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400"
+                  >
+                    {{ scopeAutosetNote }}
+                  </p>
                 </div>
 
                 <GeneratorPanel

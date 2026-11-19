@@ -28,6 +28,18 @@ describe('scopeAutoset', () => {
     expect(scopeAutoset({ ...TONE, maxV: 1.2, minV: 0.2 })!.triggerLevelV).toBeCloseTo(0.7, 6)
   })
 
+  /**
+   * Rounded against the span, as the 50 % button's own write is: the midpoint of two measured
+   * extremes carries every digit the arithmetic produced, and a box full of them is a reading of
+   * the noise floor rather than a level anybody set.
+   */
+  it('rounds the trigger level the way a typed one is rounded', () => {
+    const level = scopeAutoset({ ...TONE, maxV: 0.70528375, minV: -0.69471625 })!.triggerLevelV
+
+    // The midpoint is 0.0052837500000000315; what the box gets is a level, not the arithmetic.
+    expect(level).toBe(0.005)
+  })
+
   it('fits the vertical to the measured extremes', () => {
     const set = scopeAutoset(TONE)!
 

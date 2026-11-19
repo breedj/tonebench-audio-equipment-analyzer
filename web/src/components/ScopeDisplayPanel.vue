@@ -96,6 +96,11 @@ const persistenceOn = computed(() => persistenceDraws(persistence.value))
 /** The cursors. See scope/cursors.ts — session state, so they are not in <code>params_json</code>. */
 const cursors = defineModel<ScopeCursors>('cursors', { required: true })
 
+/** The pass/fail mask. See scope/mask.ts — the tolerance is a specification, so it is stored. */
+const maskOn = defineModel<boolean>('maskOn', { required: true })
+const maskToleranceV = defineModel<number>('maskToleranceV', { required: true })
+const maskToleranceS = defineModel<number>('maskToleranceS', { required: true })
+
 const emit = defineEmits<{
   /**
    * A cursor has been moved, or switched on or off: the parent gates the measurements once.
@@ -118,6 +123,16 @@ const props = defineProps<{
   /** The record the settings ask for, so the window can be fitted before anything is captured. */
   recordSeconds: number
   preTriggerFraction: number
+  /**
+   * What the mask is built from: the name of the first checked history item, or null where none is
+   * checked.
+   *
+   * <p>The <em>first</em> rather than one chosen here, which is what lets the setting be stored
+   * without a result id in it — see scope/mask.ts and the stored display's own note.</p>
+   */
+  maskReferenceName?: string | null
+  /** How the run has gone so far: records that stayed inside the band, and records that did not. */
+  maskTally?: { passed: number; failed: number }
 }>()
 
 const { record, recordBounds, running } = useOscilloscope()
@@ -361,6 +376,32 @@ function toggleVoltCursors(on: boolean) {
 function setCursor(field: 'timeAS' | 'timeBS' | 'voltAV' | 'voltBV', value: number) {
   cursors.value = { ...cursors.value, [field]: value }
   emit('cursorsCommitted')
+}
+
+/**
+ * The mask's time tolerance in the same unit as every other time box on this rail.
+ *
+ * <p>Clamped at zero on the way in rather than bounded by a <code>min</code> attribute: a `min`
+ * anchors the spinner's own step grid, which is this project's documented number-input trap, and a
+ * negative tolerance is not a narrower band but no band at all.</p>
+ */
+const maskToleranceBoxValue = computed(() => toBox(maskToleranceS.value))
+
+function onMaskTimeChange(event: Event) {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed) || typed < 0) {
+    ;(event.target as HTMLInputElement).value = String(maskToleranceBoxValue.value)
+    return
+  }
+  maskToleranceS.value = fromBox(typed)
+}
+
+function clampMaskTolerance(event: Event, _unit: 'volts') {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed) || typed < 0) {
+    maskToleranceV.value = 0
+    ;(event.target as HTMLInputElement).value = '0'
+  }
 }
 
 /** The time boxes are in the window boxes' own unit, so the four figures can be compared by eye. */
@@ -769,6 +810,67 @@ function onVoltsPerDivisionChange(event: Event) {
     <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       Switch a pair on and drag the lettered grips on the chart - time along the bottom, level down
       the left.
+    </p>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Mask" size="xs" icon="shield" tone="red">
+    <label class="tb-check-row">
+      <input
+        v-model="maskOn"
+        type="checkbox"
+        class="tb-check"
+        title="Judges every record against a band built from the reference on the chart: the reference opened out by the two tolerances below. The chart says pass or fail per record and the count here is of the run."
+      />
+      Compare against the reference
+    </label>
+
+    <p
+      v-if="maskOn && !maskReferenceName"
+      class="text-[11px] leading-snug text-amber-700 dark:text-amber-300"
+    >
+      Tick a history item to compare against — the first one checked is the one the band is built
+      from.
+    </p>
+    <p v-else-if="maskOn" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      Against <strong>{{ maskReferenceName }}</strong>.
+    </p>
+
+    <div v-if="maskOn" class="grid grid-cols-2 gap-2.5">
+      <label class="tb-field">
+        Level (V)
+        <input
+          v-model.number="maskToleranceV"
+          type="number"
+          step="0.01"
+          class="tb-input"
+          title="How far above and below the reference the trace may go."
+          @change="clampMaskTolerance($event, 'volts')"
+        />
+      </label>
+      <label class="tb-field">
+        Time ({{ boxScale.label }})
+        <input
+          :value="maskToleranceBoxValue"
+          type="number"
+          :step="boxStep"
+          class="tb-input"
+          title="How far early or late the trace may be. This opens the band to the whole height of whatever the reference does within it, so an edge is allowed to move rather than only to sit at a different level."
+          @change="onMaskTimeChange($event)"
+        />
+      </label>
+    </div>
+
+    <p
+      v-if="maskOn && maskTally && maskTally.passed + maskTally.failed > 0"
+      class="text-[11px] leading-snug"
+      :class="
+        maskTally.failed > 0
+          ? 'text-red-700 dark:text-red-300'
+          : 'text-emerald-700 dark:text-emerald-300'
+      "
+    >
+      {{ maskTally.passed.toLocaleString() }} passed, {{ maskTally.failed.toLocaleString() }} failed
+      — of the records this screen read.
     </p>
   </CollapsibleSection>
 

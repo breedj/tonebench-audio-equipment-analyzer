@@ -69,6 +69,29 @@ describe('buildScopeMask', () => {
     expect(mask.columns).toBe(2)
   })
 
+  /**
+   * A band built from the maxima alone is narrower at the bottom than the capture it came from, so
+   * a live trace that reproduced that capture exactly would fail against it.
+   */
+  it('is dilated from both outlines of a decimated reference', () => {
+    const max = [1, 1, 1]
+    const min = [-1, -1, -1]
+
+    const mask = buildScopeMask(max, 1, 0, 0, min)
+
+    expect(mask.upper).toEqual([1, 1, 1])
+    expect(mask.lower).toEqual([-1, -1, -1])
+    // And the capture it was taken from passes against it.
+    expect(maskVerdict(mask, max, min).failed).toBe(0)
+  })
+
+  it('reads one array as both outlines, which is what a raw slice has', () => {
+    const mask = buildScopeMask([2, 2], 1, 0.5, 0)
+
+    expect(mask.upper).toEqual([2.5, 2.5])
+    expect(mask.lower).toEqual([1.5, 1.5])
+  })
+
   it('skips a gap inside the dilation window rather than being stopped by it', () => {
     const mask = buildScopeMask([0, 1, null, 3], 1, 0, 1)
 

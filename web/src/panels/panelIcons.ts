@@ -183,6 +183,9 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   'transfer function': { icon: 'formula', tone: 'indigo' },
   'poles and zeros': { icon: 'roots', tone: 'violet' },
   stability: { icon: 'shield', tone: 'red' },
+  // The oscilloscope's pass/fail band. The stability panel's glyph and hue, which is the same
+  // thing one screen along: a limit, and whether the measurement stayed inside it.
+  mask: { icon: 'shield', tone: 'red' },
 }
 
 /**

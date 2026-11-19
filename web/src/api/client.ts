@@ -2035,6 +2035,12 @@ export interface OscilloscopeParameters {
   chartTrendRow?: string | null
   /** Whether that plot is the trend or the distribution. */
   chartTrendView?: string | null
+  /** Whether the live trace is judged against a mask built from the reference on the chart. */
+  chartMaskOn?: boolean | null
+  /** The band's level tolerance either side of the reference, in volts. */
+  chartMaskToleranceV?: number | null
+  /** And its time tolerance, in seconds. */
+  chartMaskToleranceS?: number | null
 }
 
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */

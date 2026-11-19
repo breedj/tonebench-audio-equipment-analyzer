@@ -52,16 +52,24 @@ export const NO_MASK_VERDICT: ScopeMaskVerdict = Object.freeze({
 /**
  * Builds the band from a reference already on the live trace's x array.
  *
+ * <p><b>A decimated reference is dilated from both of its outlines.</b> Where the window is wide
+ * the analyzer sends a min and a max per column, and a band built from the maxima alone would be
+ * narrower at the bottom than the capture it was taken from — so a live trace that reproduced the
+ * reference exactly would fail against it. With one array the same values serve both ends, which
+ * is what a raw slice has.</p>
+ *
  * @param reference The reference's own values per column, null where it has none.
  * @param dxS Seconds per column, which is what the time tolerance is converted through.
  * @param toleranceV The level tolerance, either side. Negative is read as zero.
  * @param toleranceS The time tolerance, either side.
+ * @param lowerReference The reference's lower outline where it has one; its own values otherwise.
  */
 export function buildScopeMask(
   reference: readonly (number | null)[],
   dxS: number,
   toleranceV: number,
   toleranceS: number,
+  lowerReference?: readonly (number | null)[] | null,
 ): ScopeMask {
   const count = reference.length
   const upper = new Array<number | null>(count).fill(null)
@@ -84,15 +92,17 @@ export function buildScopeMask(
     const own = reference[i]
     if (own === null || own === undefined || !Number.isFinite(own)) continue
 
+    // The column's own lower value where the reference carries one, and its own value otherwise —
+    // which is what a raw slice has, there being nothing left to summarise in a single sample.
     let high = own
-    let low = own
+    let low = finiteOr(lowerReference?.[i], own) ?? own
     const from = Math.max(0, i - half)
     const to = Math.min(count - 1, i + half)
     for (let j = from; j <= to; j += 1) {
-      const v = reference[j]
-      if (v === null || v === undefined || !Number.isFinite(v)) continue
-      if (v > high) high = v
-      if (v < low) low = v
+      const top = reference[j]
+      if (top !== null && top !== undefined && Number.isFinite(top) && top > high) high = top
+      const bottom = finiteOr(lowerReference?.[j], top)
+      if (bottom !== null && bottom < low) low = bottom
     }
 
     upper[i] = high + volts
@@ -101,6 +111,13 @@ export function buildScopeMask(
   }
 
   return { upper, lower, columns }
+}
+
+/** A value where it is a real number, and the fallback where it is not. */
+function finiteOr(value: number | null | undefined, fallback: number | null | undefined): number | null {
+  if (value !== null && value !== undefined && Number.isFinite(value)) return value
+  if (fallback !== null && fallback !== undefined && Number.isFinite(fallback)) return fallback
+  return null
 }
 
 /**

@@ -1401,7 +1401,27 @@ public sealed record OscilloscopeParameters(
     /// of a run, it cannot be re-derived from anything saved, and it is thrown away the moment a
     /// capture setting makes the records stop being comparable.</para>
     /// </summary>
-    string? ChartTrendView = null);
+    string? ChartTrendView = null,
+    /// <summary>
+    /// Whether the live trace is judged against a pass/fail mask built from the reference on the
+    /// chart — see <c>scope/mask.ts</c> for what the band is and why it is a dilation.
+    ///
+    /// <para>No reference <i>id</i> is stored, deliberately: the mask is built from the first
+    /// checked history item, so there is no stored id to go stale against a deleted result or to
+    /// name a different run after an import — the two faults an
+    /// <see cref="ImpulseResponseParameters.ReferenceCalibrationId"/> has to be documented around.
+    /// What is stored is the tolerance, which is a specification and belongs to the
+    /// measurement.</para>
+    /// </summary>
+    bool? ChartMaskOn = null,
+    /// <summary>The band's level tolerance either side of the reference, in volts.</summary>
+    double? ChartMaskToleranceV = null,
+    /// <summary>
+    /// And its time tolerance, in seconds — which opens the band to the height of whatever the
+    /// reference does within it, so an edge is allowed to arrive early or late rather than only to
+    /// sit at a different level.
+    /// </summary>
+    double? ChartMaskToleranceS = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the

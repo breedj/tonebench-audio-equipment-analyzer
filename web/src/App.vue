@@ -82,6 +82,12 @@ import {
   type ScopeAxisWindow,
 } from './scope/display'
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
+import {
+  addMaskVerdict,
+  newMaskTally,
+  type ScopeMaskTally,
+  type ScopeMaskVerdict,
+} from './scope/mask'
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
@@ -2140,6 +2146,27 @@ const scopeTrendRow = ref(DEFAULT_SCOPE_DISPLAY.trendRow)
 const scopeTrendView = ref(DEFAULT_SCOPE_DISPLAY.trendView)
 
 /**
+ * The pass/fail mask: whether it is on and how wide the band is. See scope/mask.ts.
+ *
+ * <p>Which reference it is built from is deliberately not among these — it is the first checked
+ * history item, so nothing is stored that could go stale against a deleted result or name a
+ * different run after an import.</p>
+ */
+const scopeMaskOn = ref(DEFAULT_SCOPE_DISPLAY.maskOn)
+const scopeMaskToleranceV = ref(DEFAULT_SCOPE_DISPLAY.maskToleranceV)
+const scopeMaskToleranceS = ref(DEFAULT_SCOPE_DISPLAY.maskToleranceS)
+
+/**
+ * What the run has come to against that band, and the latest record's own verdict.
+ *
+ * <p>The tally is a history of a run, like the statistics and the persistence picture: not stored,
+ * not in a report, and thrown away whenever the records stop being comparable — here, whenever the
+ * measurement changes or the mask itself does, since a count that spans two tolerances is a count
+ * of two different tests.</p>
+ */
+const scopeMaskTally = ref<ScopeMaskTally>(newMaskTally())
+
+/**
  * The window the chart is actually showing, which is <b>not</b> always the display panel's pair.
  *
  * <p>A drag-zoom moves uPlot’s scales in place and deliberately does not write the panel’s
@@ -2382,6 +2409,56 @@ const scopeGated = computed(() =>
   (scopeRecord.value?.channels ?? []).some((slice) => slice.gated !== null),
 )
 
+/**
+ * Which reference the pass/fail mask is built from: the first checked history item, or null.
+ *
+ * <p><b>The first rather than one picked from a list</b>, which is what lets the setting be stored
+ * with no result id in it — see scope/mask.ts. Null whenever the mask is off, which is what the
+ * chart reads as "no band".</p>
+ */
+const scopeMaskReferenceId = computed(() =>
+  scopeMaskOn.value ? (visibleScopeOverlays.value[0]?.id ?? null) : null,
+)
+const scopeMaskReferenceName = computed(() =>
+  scopeMaskOn.value ? (visibleScopeOverlays.value[0]?.detail.name ?? null) : null,
+)
+
+/** The record the tally last counted, so one capture is counted once however often it is re-fetched. */
+let scopeMaskCounted = -1
+
+/**
+ * Folds one record's verdict into the run's tally.
+ *
+ * <p>Its own counter rather than the statistics' own, so neither depends on which watcher runs
+ * first: the chart emits once per arriving record and this is deduped against the run's counter
+ * exactly as the statistics are.</p>
+ */
+function onScopeMaskVerdict(verdict: ScopeMaskVerdict) {
+  if (scopeRecordsTaken.value === scopeMaskCounted) return
+  scopeMaskCounted = scopeRecordsTaken.value
+  addMaskVerdict(scopeMaskTally.value, verdict)
+  // Replaced rather than mutated, so the panel's own computed sees it move.
+  scopeMaskTally.value = { ...scopeMaskTally.value }
+}
+
+/**
+ * A tally spans one test. The measurement, the band and what it is built from each change what a
+ * pass means, so each of them starts the count again — the statistics' own rule.
+ */
+watch(
+  () => [
+    currentTypeId.value,
+    scopeMaskOn.value,
+    scopeMaskToleranceV.value,
+    scopeMaskToleranceS.value,
+    scopeMaskReferenceId.value,
+  ],
+  () => {
+    scopeMaskTally.value = newMaskTally()
+    scopeMaskCounted = -1
+  },
+)
+
 /** The chosen readings of the record on screen — what the table draws and the statistics count. */
 const scopeMeasurementTableRows = computed(() =>
   scopeMeasurementRows(scopeRecord.value, scopeMeasurementSelection.selected.value, {
@@ -2467,6 +2544,9 @@ function currentScopeDisplay() {
     measurementStatistics: scopeMeasurementSelection.statistics.value,
     trendRow: scopeTrendRow.value,
     trendView: scopeTrendView.value,
+    maskOn: scopeMaskOn.value,
+    maskToleranceV: scopeMaskToleranceV.value,
+    maskToleranceS: scopeMaskToleranceS.value,
   }
 }
 
@@ -2504,6 +2584,9 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeMeasurementSelection.applyLoaded(display.measurements, display.measurementStatistics)
   scopeTrendRow.value = display.trendRow
   scopeTrendView.value = display.trendView
+  scopeMaskOn.value = display.maskOn
+  scopeMaskToleranceV.value = display.maskToleranceV
+  scopeMaskToleranceS.value = display.maskToleranceS
   void nextTick(() => {
     scopeDisplayRestoring = false
   })
@@ -2549,6 +2632,9 @@ watch(
     // panel's own form, so nothing else would notice them moving.
     scopeTrendRow,
     scopeTrendView,
+    scopeMaskOn,
+    scopeMaskToleranceV,
+    scopeMaskToleranceS,
   ],
   () => {
     if (!scopeDisplayRestoring && isOscilloscope.value) markDirty()
@@ -6425,6 +6511,10 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :path-note="scopePathNote"
                   :drawing="scopeDrawing"
                   :references="visibleScopeOverlays"
+                  :mask-reference-id="scopeMaskReferenceId"
+                  :mask-tolerance-v="scopeMaskToleranceV"
+                  :mask-tolerance-s="scopeMaskToleranceS"
+                  @mask-verdict="onScopeMaskVerdict"
                   :accumulation="scopeAccumulation"
                   :average-count="scopeAverageCount"
                   :persistence-key="scopePersistenceKey"
@@ -6470,6 +6560,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:path="scopePath"
                   v-model:drawing="scopeDrawing"
                   v-model:cursors="scopeCursors"
+                  v-model:mask-on="scopeMaskOn"
+                  v-model:mask-tolerance-v="scopeMaskToleranceV"
+                  v-model:mask-tolerance-s="scopeMaskToleranceS"
+                  :mask-reference-name="scopeMaskReferenceName"
+                  :mask-tally="scopeMaskTally"
                   @cursors-committed="onScopeCursorsCommitted"
                   @clear-persistence="scopePersistenceCleared++"
                 />

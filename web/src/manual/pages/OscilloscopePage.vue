@@ -1535,6 +1535,65 @@ const { showPage } = useManual()
       draws its own results.
     </p>
 
+    <h2>The pass/fail mask</h2>
+    <p>
+      Tick <strong>Compare against the reference</strong> in the Mask panel and every record is
+      judged against a band built from the reference on the chart. The chart says
+      <strong>Mask pass</strong> or <strong>Mask fail</strong> per record, its tooltip says how many
+      columns left the band and by how much, and the panel counts the run.
+    </p>
+    <p>
+      The band is built from the <strong>first</strong> checked history item. That is why there is
+      no reference to pick here: nothing is stored that could go stale against a result you later
+      delete, or name a different run after an import. Tick the golden run and the panel names it.
+    </p>
+    <table>
+      <thead>
+        <tr><th>Tolerance</th><th>What it allows</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Level</td>
+          <td>How far above and below the reference the trace may go, in volts.</td>
+        </tr>
+        <tr>
+          <td>Time</td>
+          <td>
+            How far early or late it may be. This opens the band to the whole height of whatever the
+            reference does within that time, so an <em>edge</em> is allowed to move rather than only
+            to sit at a different level.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Why the band is a dilation and not two offset copies.</strong> A DUT whose output is a
+      millivolt low everywhere fails a ±1 mV level tolerance; one whose output is identical but
+      arrives 2 µs late fails it far harder, because near an edge a couple of microseconds is most
+      of the amplitude. So at each column the band runs from the lowest the reference reaches
+      anywhere within ±Δt, less ΔV, up to the highest it reaches in that same stretch, plus ΔV. On a
+      flat stretch that is simply ±ΔV; on an edge it opens to the whole height of the edge.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>Both outlines of a wide window are judged</strong>, not just the line that is drawn.
+        Where the window is wide the analyzer sends a min and a max per column, and a spike that
+        lives inside one column is exactly what a mask is pointed at.
+      </p>
+      <p>
+        A column the reference has nothing to say about — one outside the stored capture's own
+        stretch — has <strong>no band</strong> and is not judged. A record where nothing could be
+        judged is neither a pass nor a failure, which is why the count beside the verdict is of
+        columns rather than of the whole window.
+      </p>
+    </div>
+    <p>
+      The tolerances are saved with the measurement, which is right: they are a specification. The
+      count is not — a history of a run, like the statistics, and it starts again whenever the
+      measurement, the band or the reference changes, because a count that spans two tolerances is a
+      count of two different tests. It counts the records this screen read, as the statistics do.
+    </p>
+
     <h2>Persistence</h2>
     <p>
       With <strong>Keep</strong> set to anything but Off, the chart stops drawing each record over

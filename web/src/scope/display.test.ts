@@ -350,3 +350,59 @@ describe('the plot under the table', () => {
     expect(back.trendView).toBe('Distribution')
   })
 })
+
+describe('the pass/fail mask', () => {
+  it('comes back as it was stored', () => {
+    const stored = JSON.stringify({
+      chartMaskOn: true,
+      chartMaskToleranceV: 0.02,
+      chartMaskToleranceS: 5e-6,
+    })
+    const display = scopeDisplayFromParams(stored)
+
+    expect(display.maskOn).toBe(true)
+    expect(display.maskToleranceV).toBe(0.02)
+    expect(display.maskToleranceS).toBe(5e-6)
+  })
+
+  it('opens off, at 50 mV and nothing in time, when the measurement was saved before it existed', () => {
+    const display = scopeDisplayFromParams(JSON.stringify({ chartVoltsPerDivision: 0.5 }))
+
+    expect(display.maskOn).toBe(false)
+    expect(display.maskToleranceV).toBe(0.05)
+    expect(display.maskToleranceS).toBe(0)
+  })
+
+  /** A negative tolerance is not a narrower band, it is no band — and a box must not be able to show one. */
+  it('refuses a negative tolerance', () => {
+    const stored = JSON.stringify({ chartMaskToleranceV: -1, chartMaskToleranceS: -1 })
+    const display = scopeDisplayFromParams(stored)
+
+    expect(display.maskToleranceV).toBe(DEFAULT_SCOPE_DISPLAY.maskToleranceV)
+    expect(display.maskToleranceS).toBe(DEFAULT_SCOPE_DISPLAY.maskToleranceS)
+  })
+
+  /**
+   * No result id is stored, which is the point: nothing can go stale against a deleted result or
+   * name a different run after an import.
+   */
+  it('stores no reference of its own', () => {
+    const params = scopeDisplayToParams({ ...DEFAULT_SCOPE_DISPLAY, maskOn: true })
+
+    expect(JSON.stringify(params)).not.toMatch(/referenceid|resultid/i)
+  })
+
+  it('round-trips through the save path', () => {
+    const display = {
+      ...DEFAULT_SCOPE_DISPLAY,
+      maskOn: true,
+      maskToleranceV: 0.1,
+      maskToleranceS: 1e-5,
+    }
+    const back = scopeDisplayFromParams(JSON.stringify(scopeDisplayToParams(display)))
+
+    expect(back.maskOn).toBe(true)
+    expect(back.maskToleranceV).toBe(0.1)
+    expect(back.maskToleranceS).toBe(1e-5)
+  })
+})

@@ -44,6 +44,7 @@ describe('panelIconFor', () => {
       // The oscilloscope's readout under the chart, against the rail's own panel above.
       'Selected measurements',
       'Reading over time',
+      'Mask',
       'Measurement',
       'Sweep',
       'Measurement settings',

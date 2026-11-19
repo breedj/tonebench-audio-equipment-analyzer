@@ -7,6 +7,7 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
 import { runTint } from '../charts/runTint'
 import { onScopeGrid } from '../scope/references'
+import { buildScopeMask, maskVerdict, NO_MASK_VERDICT, type ScopeMaskVerdict } from '../scope/mask'
 import { captureRateLabel, type ScopeCaptureRates } from '../scope/captureRates'
 import { accumulationBadge, type ScopeAccumulation } from '../scope/acquisition'
 import { useResultChartHeight } from '../charts/useResultChartHeight'
@@ -188,6 +189,15 @@ const props = withDefaults(defineProps<{
    */
   references?: OverlayEntry[]
   /**
+   * Which of those references the pass/fail mask is built from, by its result id, or null for no
+   * mask at all. See scope/mask.ts.
+   */
+  maskReferenceId?: number | null
+  /** The band's level tolerance, either side of the reference. */
+  maskToleranceV?: number
+  /** And its time tolerance, which opens the band to the height of whatever the reference does within it. */
+  maskToleranceS?: number
+  /**
    * Anything outside this chart that makes an accumulated picture stop meaning what it meant — in
    * practice the open measurement, and the display rail's own Clear.
    *
@@ -213,6 +223,9 @@ const props = withDefaults(defineProps<{
   accumulation: 'Normal',
   averageCount: 1,
   references: () => [],
+  maskReferenceId: null,
+  maskToleranceV: 0.05,
+  maskToleranceS: 0,
   persistenceKey: 0,
 })
 
@@ -239,6 +252,18 @@ const emit = defineEmits<{
    * upstream for exactly that reason, which is `SpectrumChart.reportViewport`'s own.</p>
    */
   viewport: [window: ScopeViewport]
+  /**
+   * How this record came out against the pass/fail mask.
+   *
+   * <p>Emitted rather than worked out upstream, for the viewport's own reason: the band and the
+   * trace have to be on <b>one</b> x array to be compared at all, and this chart is the only thing
+   * that has put them there. A second mapping in the parent would be a second chance to map
+   * differently, and a mask that is quietly a column out passes everything.</p>
+   *
+   * <p>Once per arriving record, not once per redraw — the parent still dedupes against the run's
+   * own counter, because a record object is replaced by every re-fetch.</p>
+   */
+  maskVerdict: [verdict: ScopeMaskVerdict]
 }>()
 
 /** What `viewport` carries: the window on screen in seconds, and the width to cut it into. */
@@ -334,6 +359,16 @@ const MATH_COLOR = '#a855f7'
  */
 const REFERENCE_TINT = 0.55
 
+/**
+ * The pass/fail band.
+ *
+ * <p>Red, and the one place on this chart that colour is used: everything else here is a
+ * measurement, where red means a limit. Dashed as well as coloured, so the band survives a
+ * black-and-white report and cannot be read as a third trace.</p>
+ */
+const MASK_COLOR = '#dc2626'
+const MASK_DASH = [5, 4]
+
 /** The scale the math trace is drawn against, which is its own. See ChannelSeries.scale. */
 const MATH_SCALE = 'm'
 
@@ -372,7 +407,7 @@ const series = computed(() => {
   // The references, resolved before the x array is chosen: with no live record they are the whole
   // of what is on the chart, so they have to be able to decide its geometry. Each is a stored
   // capture the analyzer cut to this same window.
-  const references: { label: string; slice: ScopeChannelSlice; run: number }[] = []
+  const references: { label: string; slice: ScopeChannelSlice; run: number; resultId: number }[] = []
   props.references.forEach((entry, index) => {
     // One behind the live trace when there is one, taking its place when there is not -- the sweep
     // chart's own rule, so a run's dash means the same thing on both screens.
@@ -388,12 +423,13 @@ const series = computed(() => {
         label: `${entry.detail.name} · ${slice.channel === 0 ? 'Left' : 'Right'}`,
         slice,
         run,
+        resultId: entry.id,
       })
     }
   })
 
   if (!drawn.length && !references.length) {
-    return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+    return { xMs: [] as number[], channels: [] as ChannelSeries[], mask: NO_MASK_VERDICT }
   }
 
   // The x array is the live record's wherever there is one, so the trace being measured is never
@@ -408,7 +444,8 @@ const series = computed(() => {
       longest = slice
     }
   }
-  if (!longest || count === 0) return { xMs: [] as number[], channels: [] as ChannelSeries[] }
+  if (!longest || count === 0)
+    return { xMs: [] as number[], channels: [] as ChannelSeries[], mask: NO_MASK_VERDICT }
 
   const xMs = sliceXMs(longest, count)
   const channels: ChannelSeries[] = []
@@ -423,16 +460,29 @@ const series = computed(() => {
   // its own sample rate, so a 48 kS/s one beside a 192 kS/s live record holds a quarter as many
   // samples over the same window. See scope/references.ts.
   const grid = { x0S: longest.x0, dxS: longest.dx, count }
+  // The chosen reference's own line per channel, collected as it is resolved rather than mapped a
+  // second time: the mask has to be on exactly the grid the trace it judges is drawn on, and a
+  // second call with the same arguments is a second chance to pass different ones.
+  const maskSource = new Map<number, { upper: (number | null)[]; lower: (number | null)[] | null }>()
   for (const reference of references) {
     const slice = reference.slice
     const source = { x0S: slice.x0, dxS: slice.dx, length: sliceLength(slice) }
+    const line = slice.raw
+      ? onScopeGrid(slice.samples, source, grid, 'interpolate')
+      : onScopeGrid(slice.max, source, grid, 'nearest')
+    if (reference.resultId === props.maskReferenceId) {
+      // Both outlines where the reference is decimated, so a band built from a wide window is as
+      // wide as that capture really was rather than as wide as its maxima.
+      maskSource.set(slice.channel, {
+        upper: line,
+        lower: slice.raw ? null : onScopeGrid(slice.min, source, grid, 'nearest'),
+      })
+    }
     channels.push({
       index: slice.channel,
       label: reference.label,
       color: runTint(CHANNEL_COLORS[slice.channel] ?? CHANNEL_COLORS[0], reference.run, REFERENCE_TINT),
-      line: slice.raw
-        ? onScopeGrid(slice.samples, source, grid, 'interpolate')
-        : onScopeGrid(slice.max, source, grid, 'nearest'),
+      line,
       // Its min/max band only where it is the one reference on the chart -- the spectrum chart's
       // own rule (soleBandOverlay) and for its reason: a stored trace plotted as maxima alone
       // reads several dB quiet at the floor, so the band is worth drawing, and three translucent
@@ -501,6 +551,65 @@ const series = computed(() => {
     })
   }
 
+  // The pass/fail mask, built from the chosen reference and judged against the live traces. After
+  // the live channels are pushed so it can read what they ended up as, and BEFORE the sinc
+  // reconstruction below: the verdict has to be of the samples the analyzer sent rather than of
+  // the curve drawn through them, or a reconstruction's own overshoot would read as the DUT's.
+  let verdict = NO_MASK_VERDICT
+  if (maskSource.size > 0) {
+    const bands: ChannelSeries[] = []
+    for (const live of channels) {
+      if (live.reference || live.residual || live.math) continue
+      const source = maskSource.get(live.index)
+      if (!source) continue
+
+      const mask = buildScopeMask(
+        source.upper,
+        longest.dx,
+        props.maskToleranceV,
+        props.maskToleranceS,
+        source.lower,
+      )
+      if (mask.columns === 0) continue
+
+      const one = maskVerdict(mask, live.line, live.band)
+      verdict = {
+        checked: verdict.checked + one.checked,
+        failed: verdict.failed + one.failed,
+        // The first failure on the chart, which with two channels is the earlier column rather
+        // than whichever channel was pushed first.
+        firstFailIndex:
+          one.firstFailIndex === null
+            ? verdict.firstFailIndex
+            : verdict.firstFailIndex === null
+              ? one.firstFailIndex
+              : Math.min(verdict.firstFailIndex, one.firstFailIndex),
+        worstExcess: Math.max(verdict.worstExcess, one.worstExcess),
+      }
+
+      // Two series rather than one with a band: the min/max band plugin draws a *column's* extent,
+      // where these two are the edges of a tolerance and are read as lines.
+      for (const [edge, values] of [
+        ['upper', mask.upper],
+        ['lower', mask.lower],
+      ] as const) {
+        bands.push({
+          index: live.index,
+          label: `Mask ${edge === 'upper' ? 'high' : 'low'} · ${live.label}`,
+          color: MASK_COLOR,
+          line: values,
+          band: null,
+          raw: live.raw,
+          reference: true,
+          dash: MASK_DASH,
+        })
+      }
+    }
+    // Behind everything, like the references: what is being read is the live trace, and a band
+    // drawn over it would hide the very excursion it is there to catch.
+    channels.unshift(...bands)
+  }
+
   // The band-limited reconstruction, applied last so every trace on the chart -- the waveforms,
   // the residual, the math channel -- lands on one x array. Only where the slice is raw: on
   // min/max columns the samples are gone, and which values fell where inside a column is exactly
@@ -509,10 +618,11 @@ const series = computed(() => {
     return {
       xMs: sincResampleX(xMs),
       channels: channels.map((channel) => ({ ...channel, line: sincResample(channel.line) })),
+      mask: verdict,
     }
   }
 
-  return { xMs, channels }
+  return { xMs, channels, mask: verdict }
 })
 
 /**
@@ -1765,6 +1875,9 @@ watch(
 // A record arriving keeps whatever window is on screen; see refresh().
 watch(() => props.record, () => {
   refresh()
+  // Read after the refresh, so the verdict is of the series this record produced rather than of
+  // the one before it: `series` is a computed, and reading it here re-evaluates it if it is dirty.
+  if (props.maskReferenceId !== null) emit('maskVerdict', series.value.mask)
   // Queued, so the samples are measured against the scales they are about to be drawn against:
   // uPlot commits a scale on a microtask, and reading valToPos before that commit would place
   // every hit in the window being left.
@@ -1923,6 +2036,36 @@ const recordFlag = computed(() => {
   return null
 })
 
+/**
+ * The mask's verdict on the record on screen, as a badge.
+ *
+ * <p>Its own badge rather than a third entry in <code>recordFlag</code>: that one says what is odd
+ * about the <em>capture</em>, where this is a judgement on the signal, and the two can be true at
+ * once — an untriggered record that also left the band is two things worth knowing. Green as well
+ * as red, which nothing else on this row is, because a pass is the answer a reader is waiting for
+ * rather than the absence of a fault.</p>
+ */
+const maskBadge = computed(() => {
+  if (props.maskReferenceId === null || !props.record) return null
+  const verdict = series.value.mask
+  if (verdict.checked === 0) return null
+
+  if (verdict.failed === 0)
+    return {
+      label: 'Mask pass',
+      pass: true,
+      detail: `Every one of the ${verdict.checked.toLocaleString()} columns judged stayed inside the band.`,
+    }
+
+  return {
+    label: 'Mask fail',
+    pass: false,
+    detail:
+      `${verdict.failed.toLocaleString()} of ${verdict.checked.toLocaleString()} columns left the band, ` +
+      `the worst by ${formatVolts(verdict.worstExcess, props.voltsPerDivision)}.`,
+  }
+})
+
 /** The window in the one place a reader needs it spelled out — what fromChartMs is for. */
 const windowNote = computed(
   () =>
@@ -1943,6 +2086,17 @@ const windowNote = computed(
         class="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
         :title="recordFlag.detail"
         >{{ recordFlag.label }}</span
+      >
+      <span
+        v-if="maskBadge"
+        class="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium"
+        :class="
+          maskBadge.pass
+            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+            : 'bg-red-500/15 text-red-700 dark:text-red-300'
+        "
+        :title="maskBadge.detail"
+        >{{ maskBadge.label }}</span
       >
       <!-- A badge rather than a line, for recordFlag's reason: a note that comes and goes above the
            plot takes its height off the canvas every time it appears. -->

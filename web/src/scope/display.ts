@@ -138,6 +138,19 @@ export interface ScopeDisplay {
   trendRow: string
   /** Whether that plot is the trend or the distribution. See scope/trend.ts and scope/distribution.ts. */
   trendView: ScopeTrendView
+  /**
+   * Whether the live trace is judged against a pass/fail mask built from the reference on the
+   * chart. See scope/mask.ts.
+   *
+   * <p>Which reference is <b>not</b> stored: the mask is built from the first checked history item,
+   * so there is no id to go stale against a deleted result or to name a different run after an
+   * import. What is stored is the tolerance, which is a specification.</p>
+   */
+  maskOn: boolean
+  /** The band's level tolerance, either side of the reference, in volts. */
+  maskToleranceV: number
+  /** And its time tolerance, in seconds. */
+  maskToleranceS: number
 }
 
 /**
@@ -215,6 +228,17 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
    * first — "has this moved" — where a distribution is reached for once something has.
    */
   trendView: 'Trend',
+  /** Off: a mask needs a golden run to compare against, which is a thing a reader sets up. */
+  maskOn: false,
+  /**
+   * 50 mV and nothing in time.
+   *
+   * <p>A level tolerance is the half everybody expects and is safe to default; a time tolerance
+   * opens the band to the whole height of every edge it reaches across, so a default above zero
+   * would quietly make the mask pass things near an edge before anybody had asked it to.</p>
+   */
+  maskToleranceV: 0.05,
+  maskToleranceS: 0,
 })
 
 /**
@@ -330,6 +354,14 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartTrendView === 'string' && (SCOPE_TREND_VIEWS as string[]).includes(stored.chartTrendView))
     display.trendView = stored.chartTrendView as ScopeTrendView
 
+  if (typeof stored.chartMaskOn === 'boolean') display.maskOn = stored.chartMaskOn
+  // A negative tolerance is not a narrower band, it is no band — buildScopeMask reads it as zero
+  // either way, and keeping it out of the stored display means the box cannot show one.
+  if (typeof stored.chartMaskToleranceV === 'number' && stored.chartMaskToleranceV >= 0)
+    display.maskToleranceV = stored.chartMaskToleranceV
+  if (typeof stored.chartMaskToleranceS === 'number' && stored.chartMaskToleranceS >= 0)
+    display.maskToleranceS = stored.chartMaskToleranceS
+
   return display
 }
 
@@ -358,6 +390,9 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartMeasurementStatistics: display.measurementStatistics,
     chartTrendRow: display.trendRow,
     chartTrendView: display.trendView,
+    chartMaskOn: display.maskOn,
+    chartMaskToleranceV: display.maskToleranceV,
+    chartMaskToleranceS: display.maskToleranceS,
   }
 }
 

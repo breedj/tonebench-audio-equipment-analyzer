@@ -30,7 +30,7 @@ import {
   pathSummary,
   type ScopeSignalPathSettings,
 } from '../scope/signalPath'
-import { SCOPE_DRAWINGS, drawingNeedsSamples, type ScopeDrawing } from '../scope/interpolation'
+import { SCOPE_DRAWINGS, drawingNeedsRawSlice, type ScopeDrawing } from '../scope/interpolation'
 import {
   SCOPE_MATH_OPERATIONS,
   mathDraws,
@@ -75,7 +75,7 @@ const drawing = defineModel<ScopeDrawing>('drawing', { required: true })
  * sends both extremes of each column instead. So the rail says when the setting is not in force
  * rather than leaving a control that silently does nothing.</p>
  */
-const drawingInForce = computed(() => !drawingNeedsSamples(drawing.value) || record.value?.channels?.[0]?.raw === true)
+const drawingInForce = computed(() => !drawingNeedsRawSlice(drawing.value) || record.value?.channels?.[0]?.raw === true)
 
 /**
  * The display path, applied by the analyzer to the whole record before anything is drawn.

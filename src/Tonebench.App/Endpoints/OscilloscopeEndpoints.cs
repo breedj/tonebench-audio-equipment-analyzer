@@ -143,7 +143,8 @@ public static class OscilloscopeEndpoints
             bool? xy,
             bool? eye,
             string? coupling,
-            int? maxColumns) =>
+            int? maxColumns,
+            int? marginSamples) =>
         {
             if (runner.Record is not { } raw)
                 return Results.NoContent();
@@ -170,6 +171,11 @@ public static class OscilloscopeEndpoints
 
             int columns = Math.Clamp(maxColumns ?? ScopeFrameBuilder.DefaultMaxColumns, 1, 4096);
 
+            // Context for the client's sin(x)/x kernel, asked for only by the one drawing mode that
+            // reconstructs -- see ScopeFrameSlice.LeadSamples. Bounded well above the kernel's own
+            // reach so a client cannot ask for a slice's worth of margin by typing a large number.
+            int margin = Math.Clamp(marginSamples ?? 0, 0, 256);
+
             var channels = new List<ScopeChannelSlice>(record.ChannelCount);
             ScopeFrameSlice? geometry = null;
             // Which channel that geometry belongs to, for the eye diagram: it is drawn for one
@@ -181,7 +187,7 @@ public static class OscilloscopeEndpoints
                     continue;
 
                 var slice = fromS is { } from && toS is { } to
-                    ? ScopeFrameBuilder.Window(record, ch, from, to, columns)
+                    ? ScopeFrameBuilder.Window(record, ch, from, to, columns, margin)
                     : ScopeFrameBuilder.Overview(record, ch, columns);
                 geometry ??= slice;
                 drawnChannel ??= ch;
@@ -218,7 +224,9 @@ public static class OscilloscopeEndpoints
                             left.FitAmplitudeVpk,
                             left.FitOffsetV,
                             left.ResidualRmsV,
-                            left.ResidualPercent)));
+                            left.ResidualPercent),
+                    slice.LeadSamples,
+                    slice.TrailSamples));
             }
 
             // One math trace per record rather than one per channel, because it is not a channel:
@@ -432,6 +440,14 @@ public static class OscilloscopeEndpoints
 /// fundamental to remove, which is the honest answer on noise, on DC and on anything with one
 /// settled level.
 /// </param>
+/// <param name="LeadSamples">
+/// Real samples immediately before this window, never drawn — context for the client's sin(x)/x
+/// reconstruction, so a zoomed window's left-hand end is reconstructed from the signal that really
+/// continues there rather than from a kernel that has run out of array. Null unless the request
+/// asked for a margin, and null at the record's own start. See
+/// <see cref="ScopeFrameSlice.LeadSamples"/> for why it is a field of its own.
+/// </param>
+/// <param name="TrailSamples">The same, immediately after.</param>
 public sealed record ScopeChannelSlice(
     int Channel,
     double X0,
@@ -442,7 +458,9 @@ public sealed record ScopeChannelSlice(
     float[]? Max,
     ScopeSliceMeasurements Measurements,
     ScopeSliceMeasurements? Gated = null,
-    ScopeResidualSlice? Residual = null);
+    ScopeResidualSlice? Residual = null,
+    float[]? LeadSamples = null,
+    float[]? TrailSamples = null);
 
 /// <summary>
 /// The residual as the client draws it: the same <c>X0</c>, <c>Dx</c> and raw-or-columns shape as

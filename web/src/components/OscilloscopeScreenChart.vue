@@ -60,8 +60,11 @@ import {
 } from '../scope/persistence'
 import type { DecayPalette } from '../api/client'
 import {
+  SINC_TAPS,
+  SINC_UPSAMPLE,
+  type SincContext,
   drawingJoins,
-  drawingNeedsSamples,
+  drawingReconstructs,
   sincResample,
   sincResampleX,
   type ScopeDrawing,
@@ -327,6 +330,17 @@ interface ChannelSeries {
   reference?: boolean
   /** The dash that tells one reference from another, and from the live trace, in a report with no colour. */
   dash?: number[]
+  /**
+   * Real samples either side of this trace, for sin(x)/x to reach into at the ends.
+   *
+   * <p><b>Captured channels only.</b> The residual, the math trace and the mask's edges are built
+   * server-side <em>on the slice's own geometry</em> and so have none to be given — widening the
+   * residual's sine fit or the math combine to a padded range would change what those readings are
+   * <em>of</em>, which is exactly what the margin's separate fields exist to avoid. Those three
+   * rely on the kernel renormalising instead, which leaves them well-behaved rather than exact.
+   * A reference is somebody else's capture and gets none for the same reason.</p>
+   */
+  context?: SincContext
 }
 
 /**
@@ -508,6 +522,13 @@ const series = computed(() => {
       line: slice.raw ? pad(slice.samples) : pad(slice.max),
       band: slice.raw ? null : pad(slice.min),
       raw: slice.raw,
+      // Only where this trace fills the shared x array: a slice shorter than the others is padded
+      // with nulls above, so gluing its trail on at the array's end would put those samples a gap
+      // away from where they belong.
+      context:
+        slice.raw && length === count
+          ? { lead: slice.leadSamples, trail: slice.trailSamples }
+          : undefined,
     })
 
     // The residual, on the same x array by construction: the server builds it from the very slice
@@ -614,15 +635,19 @@ const series = computed(() => {
   // the residual, the math channel -- lands on one x array. Only where the slice is raw: on
   // min/max columns the samples are gone, and which values fell where inside a column is exactly
   // what the decimation left out, so there is nothing to reconstruct from.
-  if (drawingNeedsSamples(props.drawing) && channels.length > 0 && channels.every((c) => c.raw)) {
+  if (drawingReconstructs(props.drawing) && channels.length > 0 && channels.every((c) => c.raw)) {
     return {
       xMs: sincResampleX(xMs),
-      channels: channels.map((channel) => ({ ...channel, line: sincResample(channel.line) })),
+      channels: channels.map((channel) => ({
+        ...channel,
+        line: sincResample(channel.line, SINC_UPSAMPLE, SINC_TAPS, channel.context),
+      })),
       mask: verdict,
+      resampled: true,
     }
   }
 
-  return { xMs, channels, mask: verdict }
+  return { xMs, channels, mask: verdict, resampled: false }
 })
 
 /**
@@ -635,6 +660,29 @@ const series = computed(() => {
 const dotsOnly = computed(
   () => props.drawing === 'Dots' && !drawingJoins(props.drawing) && props.record?.channels?.[0]?.raw === true,
 )
+
+/**
+ * Which points get a marker: the captured samples, never the reconstruction between them.
+ *
+ * <p>Under sin(x)/x the series carries <code>SINC_UPSAMPLE</code> output points for every sample,
+ * so an unfiltered marker set draws eight times too many and what a reader takes for "where the
+ * analyzer sampled" is mostly interpolation. Stepping by the upsample factor lands exactly on the
+ * input grid, which <code>sincResample</code> guarantees by short-circuiting those positions to
+ * the sample itself.</p>
+ *
+ * <p><b>It answers <code>show</code>.</b> uPlot's <code>drawSeries</code> reads
+ * <code>if (show || idxs)</code>, so a filter that always returns a list turns the markers on and
+ * leaves <code>show: false</code> doing nothing — this project has paid for that once already, on
+ * the frequency-response chart's own Show data points.</p>
+ */
+function sampleMarkers(u: uPlot, _seriesIdx: number, show: boolean): number[] | null {
+  if (!show) return null
+  const step = series.value.resampled ? SINC_UPSAMPLE : 1
+  const count = u.data[0]?.length ?? 0
+  const idxs: number[] = []
+  for (let i = 0; i < count; i += step) idxs.push(i)
+  return idxs
+}
 
 /**
  * Whether a math trace is on the chart.
@@ -1319,6 +1367,15 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         points: {
           show: (props.showDataPoints || dotsOnly.value) && channel.raw && !channel.residual && !channel.reference,
           size: dotsOnly.value ? 3 : 4,
+          // A marker belongs on a captured sample, and under sin(x)/x there are eight output
+          // points for every one of those -- so without this, Show data points marks the
+          // reconstruction rather than the measurement, eight times over.
+          //
+          // It MUST answer `show`: uPlot's drawSeries reads `if (show || idxs)`, so a filter that
+          // returns its list unconditionally forces the markers on and `show: false` stops doing
+          // anything at all. The third argument is the resolved `show`, which is why it is read
+          // here rather than the prop being tested again.
+          filter: sampleMarkers,
         },
       })),
     ],

@@ -89,6 +89,7 @@ import {
   type ScopeMaskVerdict,
 } from './scope/mask'
 import { autosetNote, scopeAutoset } from './scope/autoset'
+import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathQueryValue } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
@@ -2396,6 +2397,7 @@ const {
   setXy: setOscilloscopeXy,
   setEye: setOscilloscopeEye,
   setPath: setOscilloscopePath,
+  setMargin: setOscilloscopeMargin,
 } = useOscilloscope()
 
 /**
@@ -2689,6 +2691,23 @@ watch(
   () => scopeXyShowing.value || scopeMeasurementSelection.needsPair.value,
   (on) => {
     if (isOscilloscope.value) void setOscilloscopeXy(on).catch(() => undefined)
+  },
+  { immediate: true },
+)
+
+/**
+ * The reconstruction kernel's context, asked for only by the one drawing mode that reconstructs.
+ *
+ * <p>sin(x)/x sums sixteen samples either side of every output point, and at the edge of a slice it
+ * has nothing to reach into — so it renormalises over a one-sided kernel, which is honest and still
+ * biased. For a window <em>inside</em> a record those samples exist on the analyzer, so it sends
+ * them and the ends are reconstructed like the middle. Zero for Lines and for Dots, whose fetches
+ * are then byte-identical to what they were before this existed.</p>
+ */
+watch(
+  () => (drawingReconstructs(scopeDrawing.value) ? SINC_TAPS : 0),
+  (margin) => {
+    if (isOscilloscope.value) void setOscilloscopeMargin(margin).catch(() => undefined)
   },
   { immediate: true },
 )

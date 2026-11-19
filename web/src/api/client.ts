@@ -1750,6 +1750,19 @@ export interface ScopeChannelSlice {
   samples: number[] | null
   min: number[] | null
   max: number[] | null
+  /**
+   * Real samples immediately before this window, which are never drawn.
+   *
+   * <p>Context for the sin(x)/x reconstruction at the left-hand end: the kernel reaches sixteen
+   * samples either side, and at a slice's edge it has nothing to reach into, so it renormalises
+   * over a one-sided kernel — honest, and still biased. For a window <em>inside</em> a record the
+   * missing samples genuinely exist, so the analyzer sends them and the end is reconstructed like
+   * the middle. Null unless the fetch asked for a margin, null on a decimated slice, and null at
+   * the record's own start, where there is nothing outside to send.</p>
+   */
+  leadSamples?: number[] | null
+  /** The same, immediately after. */
+  trailSamples?: number[] | null
 }
 
 export interface ScopeRecordResponse {
@@ -5185,6 +5198,7 @@ export const api = {
     xy?: boolean,
     eye?: boolean,
     path?: Record<string, string>,
+    marginSamples?: number,
   ) => {
     const query = new URLSearchParams()
     if (window) {
@@ -5212,6 +5226,10 @@ export const api = {
     // anything is drawn or measured. See scope/signalPath.ts.
     for (const [key, value] of Object.entries(path ?? {})) query.set(key, value)
     if (maxColumns !== undefined) query.set('maxColumns', String(maxColumns))
+    // Context for the reconstruction kernel, asked for only by the one drawing mode that
+    // reconstructs — see ScopeChannelSlice.leadSamples. Absent otherwise, so every other mode's
+    // fetch is byte-identical to what it was before this existed.
+    if (marginSamples) query.set('marginSamples', String(marginSamples))
 
     const suffix = query.size > 0 ? `?${query}` : ''
     return request<ScopeRecordResponse | null>(`/oscilloscope/record${suffix}`)

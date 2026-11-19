@@ -33,6 +33,133 @@ public class ScopeFrameBuilderTests
             Forced: false);
     }
 
+    /// <summary>
+    /// The margin the client's sin(x)/x reconstruction reaches into at the ends of a window.
+    ///
+    /// <para>The left channel is a ramp of frame indices, so a margin sample's own value says which
+    /// frame it came from — which is what makes "immediately before" and "immediately after"
+    /// checkable rather than merely present.</para>
+    /// </summary>
+    [Fact]
+    public void AWindowInsideTheRecord_CarriesRealSamplesEitherSideOfIt()
+    {
+        var record = Record();
+
+        var slice = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: 0.0, toS: 0.001, maxColumns: 600, marginSamples: 16);
+
+        Assert.True(slice.IsRaw);
+        Assert.Equal(16, slice.LeadSamples!.Length);
+        Assert.Equal(16, slice.TrailSamples!.Length);
+
+        // The sixteen frames before the window, in order, ending one short of its first sample.
+        Assert.Equal(slice.FirstFrame - 16, (int)slice.LeadSamples[0]);
+        Assert.Equal(slice.FirstFrame - 1, (int)slice.LeadSamples[^1]);
+
+        // And the sixteen after it, starting one past its last.
+        Assert.Equal(slice.FirstFrame + slice.FrameCount, (int)slice.TrailSamples[0]);
+        Assert.Equal(slice.FirstFrame + slice.FrameCount + 15, (int)slice.TrailSamples[^1]);
+    }
+
+    /// <summary>
+    /// And the window itself does not move, which is the whole care in this.
+    ///
+    /// <para>Four things are built "on the slice's own geometry" from <c>FirstFrame</c> and
+    /// <c>FrameCount</c> — the residual, the math trace, the X–Y figure and the eye — and
+    /// <c>Measurements</c> is explicitly of the window. Widen that pair to carry the margin and all
+    /// five silently change what they are of, which is a reading that is wrong rather than a picture
+    /// that is coarse.</para>
+    /// </summary>
+    [Fact]
+    public void TheMarginDoesNotMoveTheWindowItIsAMarginOf()
+    {
+        var record = Record();
+
+        var plain = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0.0, toS: 0.001, maxColumns: 600);
+        var padded = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: 0.0, toS: 0.001, maxColumns: 600, marginSamples: 16);
+
+        Assert.Equal(plain.FirstFrame, padded.FirstFrame);
+        Assert.Equal(plain.FrameCount, padded.FrameCount);
+        Assert.Equal(plain.X0, padded.X0);
+        Assert.Equal(plain.Samples!.Length, padded.Samples!.Length);
+        Assert.Equal(plain.Measurements.MaxV, padded.Measurements.MaxV);
+
+        // And asking for none is exactly what it was before any of this existed.
+        Assert.Null(plain.LeadSamples);
+        Assert.Null(plain.TrailSamples);
+    }
+
+    /// <summary>
+    /// At the record's own ends there is nothing outside to send, and that is not an error — it is
+    /// the one case the client's kernel has to answer for itself.
+    /// </summary>
+    [Fact]
+    public void AtTheRecordsOwnEnds_ThereIsNoMarginToGive()
+    {
+        var record = Record(frames: 2_000, preTrigger: 0);
+
+        var atStart = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: 0.0, toS: 100 / SampleRateHz, maxColumns: 600, marginSamples: 16);
+
+        Assert.Null(atStart.LeadSamples);
+        Assert.NotNull(atStart.TrailSamples);
+
+        // The whole record is both ends at once.
+        var whole = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: -10.0, toS: 10.0, maxColumns: 4_000, marginSamples: 16);
+
+        Assert.Null(whole.LeadSamples);
+        Assert.Null(whole.TrailSamples);
+    }
+
+    /// <summary>
+    /// A decimated slice gets none: there are no samples on it to reconstruct between, so the client
+    /// falls back to lines there and a margin would be bytes nothing could read.
+    /// </summary>
+    [Fact]
+    public void ADecimatedWindow_GetsNoMargin()
+    {
+        var record = Record();
+
+        var slice = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: 0.0, toS: 0.5, maxColumns: 600, marginSamples: 16);
+
+        Assert.False(slice.IsRaw);
+        Assert.Null(slice.LeadSamples);
+        Assert.Null(slice.TrailSamples);
+    }
+
+    /// <summary>
+    /// And the raw-or-columns decision is taken on the window that was asked for, never on the
+    /// padded one — a margin is context for drawing and has no business deciding that.
+    /// </summary>
+    [Fact]
+    public void TheMarginDoesNotPushAWindowOverTheRawFloor()
+    {
+        var record = Record();
+        const int budget = 600;
+
+        // Exactly at the floor: 1200 samples against 600 columns at two samples a column.
+        double toS = (budget * ScopeFrameBuilder.RawSamplesPerColumn) / SampleRateHz;
+
+        var padded = ScopeFrameBuilder.Window(
+            record, channel: 0, fromS: 0.0, toS: toS, maxColumns: budget, marginSamples: 64);
+
+        Assert.True(padded.IsRaw);
+        Assert.Equal(64, padded.LeadSamples!.Length);
+    }
+
+    /// <summary>The overview is the whole record, so it has no outside and asks for none.</summary>
+    [Fact]
+    public void TheOverview_HasNoMargin()
+    {
+        var slice = ScopeFrameBuilder.Overview(Record(), channel: 0);
+
+        Assert.Null(slice.LeadSamples);
+        Assert.Null(slice.TrailSamples);
+    }
+
     [Fact]
     public void TheOverviewIsAlwaysColumns_NeverTheWholeRecord()
     {

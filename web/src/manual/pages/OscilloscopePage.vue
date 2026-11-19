@@ -823,6 +823,18 @@ const { showPage } = useManual()
         sample drawn</em>.
       </p>
     </div>
+    <div class="manual-note">
+      <p>
+        <strong>What happens at the ends of the window.</strong> The reconstruction sums sixteen
+        samples either side of every point it draws, and at the edge of what is on screen it would
+        have nothing to reach into — so the analyzer sends a margin of real samples beyond the
+        window, which are never drawn. That makes the ends of a zoomed window as exact as its
+        middle. At the <em>record's</em> own ends there genuinely is nothing outside, and the
+        reconstruction falls back to what it can see; the residual error there is largest on a
+        signal near the top of the band, which is also where you are most likely to be using this
+        mode. If an end looks wrong, widen the capture rather than the window.
+      </p>
+    </div>
 
     <h2>The signal path</h2>
     <p>

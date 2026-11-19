@@ -20,6 +20,25 @@ namespace Tonebench.App.Streaming;
 /// envelope, a period read off a column pair is a reading of the column width, and an RMS over
 /// maxima is an RMS of nothing — each of them confidently wrong rather than merely coarse.
 /// </param>
+/// <param name="LeadSamples">
+/// Real samples immediately before the window, for the client's sin(x)/x reconstruction to reach
+/// into at the left-hand end. Never drawn, and null on anything but a raw slice.
+///
+/// <para><b>Its own field rather than a widening of <see cref="ScopeFrameSlice.FirstFrame"/> and
+/// <see cref="ScopeFrameSlice.FrameCount"/>, which is the whole care in this.</b> Four things are
+/// built "on the slice's own geometry" from that pair — the residual, the math trace, the X–Y
+/// figure and the eye — and <see cref="ScopeFrameSlice.Measurements"/> is explicitly of the
+/// <i>window</i>. Widen the pair and all five silently change what they are of, which is a reading
+/// that is wrong rather than a picture that is coarse.</para>
+///
+/// <para>Why it exists: the reconstruction kernel reaches sixteen samples either side, and at the
+/// edge of a slice it has nothing to reach into, so it renormalises over a one-sided kernel. That
+/// is honest but still biased — and for a window <i>inside</i> a record the missing samples
+/// genuinely exist here. This is the "filter in context" answer <c>ScopeSignalPath</c>'s own note
+/// says is the right one, and it is far cheaper here, because that note is about a record having
+/// no outside while this is a window that usually does.</para>
+/// </param>
+/// <param name="TrailSamples">The same, immediately after the window.</param>
 public sealed record ScopeFrameSlice(
     double X0,
     double Dx,
@@ -27,7 +46,9 @@ public sealed record ScopeFrameSlice(
     float[]? Samples,
     int FirstFrame,
     int FrameCount,
-    ScopeSliceMeasurements Measurements)
+    ScopeSliceMeasurements Measurements,
+    float[]? LeadSamples = null,
+    float[]? TrailSamples = null)
 {
     /// <summary>True when the window was tight enough to send the waveform itself.</summary>
     public bool IsRaw => Samples is not null;
@@ -642,22 +663,38 @@ public static class ScopeFrameBuilder
         }
     }
 
-    /// <summary>Cuts the whole record, for the overview a chart and the zoom strip both draw.</summary>
+    /// <summary>
+    /// Cuts the whole record, for the overview a chart and the zoom strip both draw.
+    ///
+    /// <para>No margin is taken: this already <i>is</i> the whole record, so there is nothing
+    /// outside it to reach into. The client's kernel renormalises there, which is the whole of the
+    /// answer at a record's own ends.</para>
+    /// </summary>
     public static ScopeFrameSlice Overview(ScopeRecord record, int channel, int maxColumns = DefaultMaxColumns) =>
-        Build(record, channel, 0, record.FrameCount, maxColumns);
+        Build(record, channel, 0, record.FrameCount, maxColumns, marginSamples: 0);
 
     /// <summary>
     /// Cuts the window <paramref name="fromS"/>..<paramref name="toS"/>, measured against the
     /// trigger at t = 0. A window reaching outside the record is clamped to it; one that selects
     /// nothing comes back as the whole record, since an empty chart is never the useful answer.
     /// </summary>
+    /// <param name="marginSamples">
+    /// How many real samples either side to send alongside, for the client's sin(x)/x
+    /// reconstruction — see <see cref="ScopeFrameSlice.LeadSamples"/>. Zero asks for none, which
+    /// is what every mode but that one wants.
+    /// </param>
     public static ScopeFrameSlice Window(
-        ScopeRecord record, int channel, double fromS, double toS, int maxColumns = DefaultMaxColumns)
+        ScopeRecord record,
+        int channel,
+        double fromS,
+        double toS,
+        int maxColumns = DefaultMaxColumns,
+        int marginSamples = 0)
     {
         if (FrameRange(record, fromS, toS) is not { } range)
             return Overview(record, channel, maxColumns);
 
-        return Build(record, channel, range.First, range.Count, maxColumns);
+        return Build(record, channel, range.First, range.Count, maxColumns, marginSamples);
     }
 
     /// <summary>
@@ -717,7 +754,8 @@ public static class ScopeFrameBuilder
         return (first, last - first);
     }
 
-    private static ScopeFrameSlice Build(ScopeRecord record, int channel, int firstFrame, int frameCount, int maxColumns)
+    private static ScopeFrameSlice Build(
+        ScopeRecord record, int channel, int firstFrame, int frameCount, int maxColumns, int marginSamples)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maxColumns, 1);
 
@@ -748,13 +786,28 @@ public static class ScopeFrameBuilder
 
         var measurements = ScopeSliceMeasurements.Of(source, record.SampleRateHz, x0);
 
+        // Tested on the REQUESTED count, never the padded one: the margin is context for drawing
+        // and has no business deciding whether this window is narrow enough to be sent raw.
         if (frameCount <= maxColumns * RawSamplesPerColumn)
         {
             var samples = new float[frameCount];
             for (int i = 0; i < frameCount; i++)
                 samples[i] = (float)source[i];
 
-            return new ScopeFrameSlice(x0, samplePeriod, Columns: null, samples, firstFrame, frameCount, measurements);
+            return new ScopeFrameSlice(
+                x0,
+                samplePeriod,
+                Columns: null,
+                samples,
+                firstFrame,
+                frameCount,
+                measurements,
+                Margin(record, channel, firstFrame - Math.Min(marginSamples, firstFrame), Math.Min(marginSamples, firstFrame)),
+                Margin(
+                    record,
+                    channel,
+                    firstFrame + frameCount,
+                    Math.Min(marginSamples, record.FrameCount - (firstFrame + frameCount))));
         }
 
         int columnCount = Math.Min(maxColumns, frameCount);
@@ -766,6 +819,23 @@ public static class ScopeFrameBuilder
         // axis; this one matches what the encoder documents.
         double dx = frameCount * samplePeriod / columnCount;
         return new ScopeFrameSlice(x0, dx, columns, Samples: null, firstFrame, frameCount, measurements);
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> samples from <paramref name="first"/>, or null where there are
+    /// none to give — which is the ordinary answer at either end of the record.
+    /// </summary>
+    private static float[]? Margin(ScopeRecord record, int channel, int first, int count)
+    {
+        if (count <= 0 || first < 0 || first + count > record.FrameCount)
+            return null;
+
+        var source = record.Channels[channel].AsSpan(first, count);
+        var margin = new float[count];
+        for (int i = 0; i < count; i++)
+            margin[i] = (float)source[i];
+
+        return margin;
     }
 
     /// <summary>

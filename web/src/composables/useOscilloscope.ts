@@ -134,6 +134,16 @@ const wantEye = ref(false)
 const wantPath = shallowRef<Record<string, string>>({})
 
 /**
+ * How many real samples either side of the window the fetch asks for.
+ *
+ * <p>Context for the sin(x)/x reconstruction's ends, and nothing else reads it — see
+ * <code>ScopeChannelSlice.leadSamples</code>. Zero for every other drawing mode, so their fetches
+ * are byte-identical to what they were before this existed, which is the point of asking for it
+ * rather than always sending it.</p>
+ */
+const wantMargin = ref(0)
+
+/**
  * Which fetch is the current one.
  *
  * <p>Dragging a window queues several and they do not come back in order; without this the slice on
@@ -209,6 +219,7 @@ async function fetchRecord(force = false): Promise<void> {
       wantXy.value,
       wantEye.value,
       wantPath.value,
+      wantMargin.value,
     )
     if (token !== fetchToken) return
     record.value = next
@@ -412,6 +423,21 @@ export function useOscilloscope() {
     await fetchRecord(true)
   }
 
+  /**
+   * Sets how much context either side the fetch asks for, and re-fetches.
+   *
+   * <p>Driven by the drawing mode: sin(x)/x wants it, the other two have no use for it. Re-fetches
+   * on a change for the eye's reason — switching the mode on a held record has no next poll to
+   * wait for, and a trace that kept its old ends until the next capture would read as the fix not
+   * having worked.</p>
+   */
+  async function setMargin(samples: number): Promise<void> {
+    const next = Math.max(0, Math.round(samples))
+    if (wantMargin.value === next) return
+    wantMargin.value = next
+    await fetchRecord(true)
+  }
+
   /** Asks for a different slice of the same record — a zoom, a reset, or a resized chart. */
   async function setWindow(next: ScopeTimeWindow | null, columns?: number): Promise<void> {
     window.value = next
@@ -490,6 +516,7 @@ export function useOscilloscope() {
     setXy,
     setEye,
     setPath,
+    setMargin,
     setResidual,
     start,
     retune,

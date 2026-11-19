@@ -159,3 +159,46 @@ describe('formatSliderValue', () => {
     expect(formatSliderValue(Number.POSITIVE_INFINITY)).toBe('')
   })
 })
+
+/**
+ * The third audit here, and the one that catches a box you cannot type into.
+ *
+ * <p>Vue's patchProp carries a carve-out past its own equality check for `value`, and patchDOMProp
+ * then writes the element whenever it differs from the binding — which, half way through typing, it
+ * always does. So a `:value`-bound number input on a panel that re-renders several times a second
+ * is re-stamped with the committed figure between keystrokes. Reported from the bench on the scope
+ * rail's mask Time box, which is the one that shows it because the pass/fail tally beside it is
+ * replaced on every record.</p>
+ *
+ * <p>Scoped to that rail rather than to every component, because the rule is not "every number box
+ * needs a draft" — it is "a box on a panel that re-renders while you are typing does". The other
+ * rails do not read a live record. A box that can use `v-model` is exempt and does not appear here,
+ * since Vue's own vModelText skips its write while the element is focused.</p>
+ */
+describe('a number box on a rail that re-renders per record', () => {
+  const rail = readFileSync(resolve(import.meta.dirname, 'components/ScopeDisplayPanel.vue'), 'utf8')
+
+  it('holds what is being typed, on every box the fault can reach', () => {
+    // Each `:value="drafts.show('name', ...)"` must have the handlers that keep and release it.
+    const shown = [...rail.matchAll(/:value="drafts\.show\('([a-zA-Z]+)'/g)].map((m) => m[1])
+
+    expect(shown.length).toBeGreaterThanOrEqual(8)
+    for (const name of shown) {
+      expect(rail).toContain(`@input="drafts.type('${name}', $event)"`)
+      expect(rail).toContain(`@blur="drafts.end('${name}')"`)
+      // Released BEFORE the owner's own handler, which is free to write a rejected value straight
+      // back into the element -- the next render then agrees with it rather than with the draft.
+      expect(rail).toContain(`@change="drafts.end('${name}');`)
+    }
+  })
+
+  it('leaves no :value-bound number box without one', () => {
+    // Every number input on this rail, by its binding.
+    const bound = [...rail.matchAll(/<input\s+:value="([^"]+)"[\s\S]{0,400}?type="number"/g)].map((m) => m[1])
+
+    expect(bound.length).toBeGreaterThan(0)
+    for (const binding of bound) {
+      expect(binding, `:value="${binding}" is re-stamped between keystrokes`).toContain('drafts.show(')
+    }
+  })
+})

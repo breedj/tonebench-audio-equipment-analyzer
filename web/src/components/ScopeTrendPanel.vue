@@ -37,6 +37,31 @@ const view = defineModel<'Trend' | 'Distribution'>('view', { required: true })
 
 const { series, seriesStart, stat, statsVersion } = useScopeMeasurements()
 
+/**
+ * What the Reading dropdown's option list says, as one string.
+ *
+ * <p><b>The flicker fix, and it has to be v-memo rather than v-once.</b> Vue's <code>patchProp</code>
+ * carries an explicit carve-out past its own equality check for <code>value</code> — a DOM
+ * element's value property and its attribute genuinely can disagree, so it will not trust a
+ * sameness test — and the attribute sync that follows is a bare <code>setAttribute</code> with no
+ * guard of its own. So every re-render rewrites every <code>&lt;option value&gt;</code>, and an
+ * <em>open</em> select popup is re-laid out when its options mutate, which redraws the highlighted
+ * row. Measured on the Math dropdown: 88 attribute writes across 11 options over 8 records.</p>
+ *
+ * <p>That one was fixed with <code>v-once</code>, which works because its options are a frozen
+ * module-level table. These are not — they come from <code>props.rows</code>, which App.vue
+ * recomputes from the record, so the array has a new identity on <em>every</em> capture even when
+ * nothing about it has changed. Hence a signature by value, and <code>v-memo</code>, which skips
+ * the patch of the subtree outright.</p>
+ *
+ * <p><code>rowKey</code> is in that list and must stay: v-memo skips the <code>v-model</code>
+ * select directive's own updated hook as well, so without it a row change made anywhere but this
+ * dropdown would never reach <code>selectedIndex</code>.</p>
+ */
+const optionsSignature = computed(() =>
+  props.rows.map((row) => `${row.key}|${row.label}|${row.sourceLabel}`).join(';'),
+)
+
 const VIEWS = [
   {
     value: 'Trend' as const,
@@ -107,7 +132,7 @@ const boundNote = computed(() => {
       <div class="mb-2 flex flex-wrap items-end gap-3">
         <label class="tb-field min-w-[12rem] flex-1">
           <span class="tb-field-label">Reading</span>
-          <select v-model="rowKey" class="tb-input">
+          <select v-model="rowKey" v-memo="[rowKey, optionsSignature]" class="tb-input">
             <option v-for="option in rows" :key="option.key" :value="option.key">
               {{ option.label }} · {{ option.sourceLabel }}
             </option>

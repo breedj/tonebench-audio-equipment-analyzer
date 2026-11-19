@@ -724,7 +724,12 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
     <label v-if="status" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="analyzerSwitchTitle">
       Analyzer
       <select :class="BAR_SELECT" :value="status.deviceKind" :disabled="status.acquiring" @change="onDeviceKindChange">
-        <option v-for="kind in DEVICE_KINDS" :key="kind.value" :value="kind.value">{{ kind.label }}</option>
+        <!-- v-once: these are a module-level table, and Vue rewrites every option's value
+             attribute on every re-render because patchProp carves `value` out of its own equality
+             check. This bar re-renders several times a second from the status poll, and an OPEN
+             select popup is re-laid out when its options mutate -- which repaints the highlighted
+             row. The Math dropdown's own fix, found again here while verifying it. -->
+        <option v-for="kind in DEVICE_KINDS" :key="kind.value" v-once :value="kind.value">{{ kind.label }}</option>
       </select>
     </label>
     <!-- The QA40x's own settings, in the same place and with the same glyph as the sound card's
@@ -877,7 +882,12 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
       >
         DUT
         <select :class="BAR_SELECT" :value="status.simulatedDut ?? 'StraightWire'" @change="onSimulatedDutChange">
-          <optgroup v-for="group in DUT_GROUPS" :key="group" :label="group">
+        <!-- v-once: these are a module-level table, and Vue rewrites every option's value
+             attribute on every re-render because patchProp carves `value` out of its own equality
+             check. This bar re-renders several times a second from the status poll, and an OPEN
+             select popup is re-laid out when its options mutate -- which repaints the highlighted
+             row. The Math dropdown's own fix, found again here while verifying it. -->
+          <optgroup v-for="group in DUT_GROUPS" :key="group" v-once :label="group">
             <option
               v-for="model in DUT_MODELS.filter((m) => m.group === group)"
               :key="model.value"
@@ -1200,7 +1210,12 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
     <label v-if="status && !isSoundCard" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="rangingTitle">
       Ranging
       <select :class="BAR_SELECT" :value="status.rangingMode" :disabled="rangesLocked" @change="onRangingModeChange">
-        <option v-for="mode in RANGING_MODES" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+        <!-- v-once: these are a module-level table, and Vue rewrites every option's value
+             attribute on every re-render because patchProp carves `value` out of its own equality
+             check. This bar re-renders several times a second from the status poll, and an OPEN
+             select popup is re-laid out when its options mutate -- which repaints the highlighted
+             row. The Math dropdown's own fix, found again here while verifying it. -->
+        <option v-for="mode in RANGING_MODES" :key="mode.value" v-once :value="mode.value">{{ mode.label }}</option>
       </select>
     </label>
     <span v-if="!isSoundCard" class="flex items-center gap-1.5" :class="BAR_LABEL" :title="attenuationTitle">

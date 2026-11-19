@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
+import { useNumberDrafts } from '../composables/useNumberDrafts'
 import { useOscilloscope } from '../composables/useOscilloscope'
 import { recordExtremes } from '../scope/measurements'
 import {
@@ -135,6 +136,19 @@ const props = defineProps<{
 }>()
 
 const { record, recordBounds } = useOscilloscope()
+
+/**
+ * What is being typed into each number box on this rail, until it is committed.
+ *
+ * <p>Every box here is <code>:value</code> + <code>@change</code> rather than <code>v-model</code>,
+ * because each converts — seconds to the rail's own time unit, a tolerance to the same. That is
+ * exactly the shape Vue's <code>value</code> carve-out eats: this panel re-renders several times a
+ * second, since it reads the record, the drawing's raw-ness, the math clamp count, the window span
+ * and the mask tally, and each of those renders re-stamps the committed figure over whatever is
+ * half typed. Reported from the bench on the mask's Time box — which is the one that shows it,
+ * because the tally beside it is replaced on <em>every</em> record. See useNumberDrafts.ts.</p>
+ */
+const drafts = useNumberDrafts()
 
 /**
  * The bounds a window is clamped to: the record's own span, or — before anything is captured — the
@@ -477,12 +491,14 @@ function onVoltsPerDivisionChange(event: Event) {
              knob is read: "bring it down two squares". A fixed step is a different distance at
              every V/div, and at the bottom of the ladder it is 10 000 of them. -->
         <input
-          :value="voltOffsetV"
+          :value="drafts.show('offset', voltOffsetV)"
           type="number"
           :step="voltsPerDivision"
           class="tb-input"
           title="Where the middle of the graticule sits. A DUT with a DC offset is brought back on screen with this rather than by widening the V/div. The arrows move it one division at a time."
-          @change="onOffsetChange"
+          @input="drafts.type('offset', $event)"
+          @change="drafts.end('offset'); onOffsetChange($event)"
+          @blur="drafts.end('offset')"
         />
       </label>
     </div>
@@ -498,17 +514,27 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         From
         <input
-          :value="fromBoxValue"
+          :value="drafts.show('from', fromBoxValue)"
           type="number"
           :step="boxStep"
           class="tb-input"
           title="Negative is before the trigger."
-          @change="onFromChange"
+          @input="drafts.type('from', $event)"
+          @change="drafts.end('from'); onFromChange($event)"
+          @blur="drafts.end('from')"
         />
       </label>
       <label class="tb-field">
         To
-        <input :value="toBoxValue" type="number" :step="boxStep" class="tb-input" @change="onToChange" />
+        <input
+          :value="drafts.show('to', toBoxValue)"
+          type="number"
+          :step="boxStep"
+          class="tb-input"
+          @input="drafts.type('to', $event)"
+          @change="drafts.end('to'); onToChange($event)"
+          @blur="drafts.end('to')"
+        />
       </label>
     </div>
     <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
@@ -728,21 +754,25 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         A ({{ boxScale.label }})
         <input
-          :value="cursorABoxValue"
+          :value="drafts.show('cursorA', cursorABoxValue)"
           type="number"
           :step="boxStep"
           class="tb-input"
-          @change="onCursorTimeChange($event, 'timeAS')"
+          @input="drafts.type('cursorA', $event)"
+          @change="drafts.end('cursorA'); onCursorTimeChange($event, 'timeAS')"
+          @blur="drafts.end('cursorA')"
         />
       </label>
       <label class="tb-field">
         B ({{ boxScale.label }})
         <input
-          :value="cursorBBoxValue"
+          :value="drafts.show('cursorB', cursorBBoxValue)"
           type="number"
           :step="boxStep"
           class="tb-input"
-          @change="onCursorTimeChange($event, 'timeBS')"
+          @input="drafts.type('cursorB', $event)"
+          @change="drafts.end('cursorB'); onCursorTimeChange($event, 'timeBS')"
+          @blur="drafts.end('cursorB')"
         />
       </label>
     </div>
@@ -761,21 +791,25 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         A (V)
         <input
-          :value="cursors.voltAV"
+          :value="drafts.show('voltA', cursors.voltAV)"
           type="number"
           :step="cursorVoltStep"
           class="tb-input"
-          @change="onCursorVoltChange($event, 'voltAV')"
+          @input="drafts.type('voltA', $event)"
+          @change="drafts.end('voltA'); onCursorVoltChange($event, 'voltAV')"
+          @blur="drafts.end('voltA')"
         />
       </label>
       <label class="tb-field">
         B (V)
         <input
-          :value="cursors.voltBV"
+          :value="drafts.show('voltB', cursors.voltBV)"
           type="number"
           :step="cursorVoltStep"
           class="tb-input"
-          @change="onCursorVoltChange($event, 'voltBV')"
+          @input="drafts.type('voltB', $event)"
+          @change="drafts.end('voltB'); onCursorVoltChange($event, 'voltBV')"
+          @blur="drafts.end('voltB')"
         />
       </label>
     </div>
@@ -831,12 +865,14 @@ function onVoltsPerDivisionChange(event: Event) {
       <label class="tb-field">
         Time ({{ boxScale.label }})
         <input
-          :value="maskToleranceBoxValue"
+          :value="drafts.show('maskTime', maskToleranceBoxValue)"
           type="number"
           :step="boxStep"
           class="tb-input"
           title="How far early or late the trace may be. This opens the band to the whole height of whatever the reference does within it, so an edge is allowed to move rather than only to sit at a different level."
-          @change="onMaskTimeChange($event)"
+          @input="drafts.type('maskTime', $event)"
+          @change="drafts.end('maskTime'); onMaskTimeChange($event)"
+          @blur="drafts.end('maskTime')"
         />
       </label>
     </div>

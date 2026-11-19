@@ -31,6 +31,7 @@ import {
   pathSummary,
   type ScopeSignalPathSettings,
 } from '../scope/signalPath'
+import ScopeToggleIcon from './ScopeToggleIcon.vue'
 import { SCOPE_DRAWINGS, drawingNeedsRawSlice, type ScopeDrawing } from '../scope/interpolation'
 import {
   SCOPE_MATH_OPERATIONS,
@@ -325,6 +326,73 @@ function autofitAll() {
  * params_json and is simply not read here -- the ChartDecayLightAzimuthDeg precedent.
  */
 
+/**
+ * The trace colours, for the lit Channels buttons.
+ *
+ * <p>Repeated from OscilloscopeScreenChart rather than imported from it, which is this project's
+ * usual answer for a constant a component and a chart both need: the chart is where they are the
+ * stroke of a series, and a rail importing a chart to colour a button would be the wrong way
+ * round. Two entries, and a channel beyond them is simply not coloured.</p>
+ */
+const CHANNEL_INK = ['#3b82f6', '#f59e0b']
+
+/** Which figure stands for each drawing mode — see scope/displayIcons.ts. */
+const DRAWING_ICONS: Record<ScopeDrawing, string> = {
+  Linear: 'drawLines',
+  Sinc: 'drawSinc',
+  Dots: 'drawDots',
+}
+
+/**
+ * The three plain on/off toggles, as data.
+ *
+ * <p>A list rather than three copies of the same markup, so the button, its figure, its name and
+ * its tooltip are declared together and a fourth cannot be added with one of them missing. The
+ * <code>label</code> is the <code>aria-label</code> — what a screen reader hears in place of the
+ * label text these buttons no longer carry — and the <code>title</code> is the longer sentence a
+ * checkbox never had room for.</p>
+ */
+const showToggles = computed(() => [
+  {
+    icon: 'triggerLevel',
+    label: 'Trigger level',
+    title: 'Trigger level — draws the level line and its hysteresis band over the trace, with the grip that drags it.',
+    on: showTriggerLevel.value,
+    toggle: () => {
+      showTriggerLevel.value = !showTriggerLevel.value
+    },
+  },
+  {
+    icon: 'residual',
+    label: 'Residual',
+    title:
+      'Residual — draws each channel again with its fitted fundamental subtracted, so what is left is the distortion and the noise. The fit is a least-squares sine with its frequency refined, so a tone off a bin cancels too; a record with no fundamental has nothing to remove and nothing is drawn.',
+    on: showResidual.value,
+    toggle: () => {
+      showResidual.value = !showResidual.value
+    },
+  },
+  {
+    icon: 'thickLines',
+    label: 'Thick lines',
+    title: 'Thick lines — a heavier trace, which is easier to follow across the graticule.',
+    on: thickLines.value,
+    toggle: () => {
+      thickLines.value = !thickLines.value
+    },
+  },
+  {
+    icon: 'dataPoints',
+    label: 'Show data points',
+    title:
+      'Show data points — a marker on every captured sample. Drawn only where the window is tight enough for the chart to hold real samples, because a marker on a min/max column would mark the column.',
+    on: showDataPoints.value,
+    toggle: () => {
+      showDataPoints.value = !showDataPoints.value
+    },
+  },
+])
+
 const verticalLabel = computed(() => formatVoltsPerDivision(voltsPerDivision.value))
 
 /** The window's own reading, so a zoom can be seen in the rail as well as on the chart. */
@@ -543,64 +611,104 @@ function onVoltsPerDivisionChange(event: Event) {
     </p>
   </CollapsibleSection>
 
+  <!-- Icon buttons rather than a column of checkboxes (Joost, 2026-11-19). Six labelled rows is
+       the most legible thing there is and also the tallest, on a rail whose whole problem is
+       height; these put the same six controls in three short rows. The name a label carried is the
+       button's own tooltip AND its aria-label, so nothing is lost to a reader who hovers or to a
+       screen reader, only to one who is scanning -- which is what the figure is for. Lit is the
+       accent and unlit is the track's own recess, the idiom .btn-toggle-off already carries, so
+       the state does not rest on colour alone and survives a monochrome screenshot. -->
   <CollapsibleSection title="Display">
-    <label class="tb-check-row">
-      <input v-model="showTriggerLevel" type="checkbox" class="tb-check" /> Trigger level
-    </label>
     <div class="tb-field">
       <span class="tb-group">Channels</span>
-      <label class="tb-check-row">
-        <input
-          v-model="showLeft"
-          type="checkbox"
-          class="tb-check"
+      <!-- A letter rather than a figure: L and R are what a scope has always called its inputs,
+           and a drawing of a channel would be a drawing of nothing. Lit, each takes its own
+           trace colour, which is the other thing a reader matches them by. -->
+      <div class="tb-segment-track grid grid-cols-2">
+        <button
+          type="button"
+          class="tb-segment font-semibold"
+          :class="showLeft && captured.left ? 'tb-segment-on' : ''"
+          :style="showLeft && captured.left ? { color: CHANNEL_INK[0] } : undefined"
           :disabled="!captured.left"
-          :title="captured.left ? 'Draw the left input.' : 'Not being captured — tick Left under Acquisition ▸ Channels.'"
-        />
-        Left
-      </label>
-      <label class="tb-check-row">
-        <input
-          v-model="showRight"
-          type="checkbox"
-          class="tb-check"
+          :aria-pressed="showLeft && captured.left"
+          :aria-label="'Draw the left input'"
+          :title="
+            captured.left
+              ? 'Draw the left input.'
+              : 'Not being captured — tick Left under Acquisition ▸ Channels.'
+          "
+          @click="showLeft = !showLeft"
+        >
+          L
+        </button>
+        <button
+          type="button"
+          class="tb-segment font-semibold"
+          :class="showRight && captured.right ? 'tb-segment-on' : ''"
+          :style="showRight && captured.right ? { color: CHANNEL_INK[1] } : undefined"
           :disabled="!captured.right"
-          :title="captured.right ? 'Draw the right input.' : 'Not being captured — tick Right under Acquisition ▸ Channels.'"
-        />
-        Right
-      </label>
+          :aria-pressed="showRight && captured.right"
+          :aria-label="'Draw the right input'"
+          :title="
+            captured.right
+              ? 'Draw the right input.'
+              : 'Not being captured — tick Right under Acquisition ▸ Channels.'
+          "
+          @click="showRight = !showRight"
+        >
+          R
+        </button>
+      </div>
     </div>
 
-    <label class="tb-check-row">
-      <input
-        v-model="showResidual"
-        type="checkbox"
-        class="tb-check"
-        title="Draws each channel again with its fitted fundamental subtracted - what is left is the distortion and the noise. The fit is a least-squares sine with its frequency refined, so a tone off a bin cancels too; a record with no fundamental has nothing to remove and nothing is drawn."
-      />
-      Residual
-    </label>
-
     <div class="tb-field">
-      <span class="tb-group">Style</span>
-      <label class="tb-field">
-        Drawing
-        <select v-model="drawing" class="tb-input">
-          <!-- v-once, as Math's list: a frozen table, rendered once rather than rewritten per record. -->
-          <option v-for="option in SCOPE_DRAWINGS" v-once :key="option.value" :value="option.value" :title="option.title">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+      <span class="tb-group">Drawing</span>
+      <div class="tb-segment-track grid grid-cols-3">
+        <!-- NOT v-once, although the list behind it is frozen: that is right for an <option>,
+             whose rendered content never depends on state, and wrong for a button whose lit class
+             and aria-pressed do. Tried it; the group rendered once and then looked dead while the
+             mode underneath it changed. There is nothing to gain here anyway -- the flicker
+             v-once answers is an open select popup being re-laid out, which a row of buttons has
+             no equivalent of. -->
+        <button
+          v-for="option in SCOPE_DRAWINGS"
+          :key="option.value"
+          type="button"
+          class="tb-segment flex items-center justify-center"
+          :class="drawing === option.value ? 'tb-segment-on' : ''"
+          :aria-pressed="drawing === option.value"
+          :aria-label="option.label"
+          :title="option.label + ' — ' + option.title"
+          @click="drawing = option.value"
+        >
+          <ScopeToggleIcon :name="DRAWING_ICONS[option.value]" />
+        </button>
+      </div>
       <p v-if="!drawingInForce" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
         Lines for now: this window is wide enough that the analyzer is sending both extremes of
         each column rather than the samples, and which values fell where inside one is what that
         leaves out. Zoom in until the header says every sample is drawn.
       </p>
-      <label class="tb-check-row"><input v-model="thickLines" type="checkbox" class="tb-check" /> Thick lines</label>
-      <label class="tb-check-row">
-        <input v-model="showDataPoints" type="checkbox" class="tb-check" /> Show data points
-      </label>
+    </div>
+
+    <div class="tb-field">
+      <span class="tb-group">Show</span>
+      <div class="flex flex-wrap gap-1.5">
+        <button
+          v-for="toggle in showToggles"
+          :key="toggle.icon"
+          type="button"
+          class="flex h-[34px] w-[34px] items-center justify-center rounded-lg border transition"
+          :class="toggle.on ? 'btn-action' : 'btn-toggle-off'"
+          :aria-pressed="toggle.on"
+          :aria-label="toggle.label"
+          :title="toggle.title"
+          @click="toggle.toggle()"
+        >
+          <ScopeToggleIcon :name="toggle.icon" />
+        </button>
+      </div>
     </div>
     <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       Data points are drawn only where the window is tight enough for the chart to hold real samples

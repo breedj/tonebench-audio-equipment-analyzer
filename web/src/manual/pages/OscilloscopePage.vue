@@ -706,8 +706,11 @@ const { showPage } = useManual()
           <td>Both ends relative to the trigger, negative to its left, in the unit the record is read in.</td>
         </tr>
         <tr>
-          <td>Channels</td>
-          <td>Which captured inputs are drawn. A channel that is not being captured is listed but disabled, and says where to turn it on.</td>
+          <td>Channels (L / R)</td>
+          <td>
+            Which captured inputs are drawn, each in its own trace colour while it is. An input
+            that is not being captured is still shown, greyed, and says where to turn it on.
+          </td>
         </tr>
         <tr>
           <td>Trigger level</td>
@@ -775,8 +778,12 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Thick lines, Show data points</td>
-          <td>Line weight, and a marker per sample — drawn only where the window is tight enough for the chart to hold real samples, because a marker on a min/max column would mark the column.</td>
+          <td>Show</td>
+          <td>
+            Four buttons: the trigger level, the residual, thick lines, and a marker per sample.
+            The last is drawn only where the window is tight enough for the chart to hold real
+            samples, because a marker on a min/max column would mark the column.
+          </td>
         </tr>
         <tr>
           <td>Autofit</td>
@@ -788,6 +795,15 @@ const { showPage } = useManual()
         </tr>
       </tbody>
     </table>
+
+    <div class="manual-note">
+      <p>
+        <strong>The Display panel is buttons rather than tick boxes</strong>, because six labelled
+        rows is the tallest way to put six settings on a rail whose problem is height. Each button
+        is lit when it is on and recessed when it is off, so the state does not depend on telling
+        two colours apart; hovering one names it and says what it does.
+      </p>
+    </div>
 
     <h2>How the trace is drawn</h2>
     <p>

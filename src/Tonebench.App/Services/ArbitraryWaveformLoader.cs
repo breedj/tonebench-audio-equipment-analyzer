@@ -45,8 +45,14 @@ public static class ArbitraryWaveformLoader
     /// The table for <paramref name="settings"/> at <paramref name="targetRateHz"/>, read from disk
     /// the first time and from the cache after.
     /// </summary>
+    /// <param name="projectFilePath">
+    /// The open project, which a <b>relative</b> stored path is resolved against — see
+    /// <see cref="ArbitraryPath"/>. Null where no project is open, which leaves a relative path as
+    /// it stands and lets the refusal below name it.
+    /// </param>
     /// <exception cref="WaveFileException">The file is missing, unreadable, or not one this can play.</exception>
-    public static ArbitraryWaveformTable Load(ArbitrarySettings settings, double targetRateHz)
+    public static ArbitraryWaveformTable Load(
+        ArbitrarySettings settings, double targetRateHz, string? projectFilePath = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -55,9 +61,18 @@ public static class ArbitraryWaveformLoader
         if (!(targetRateHz > 0.0))
             throw new WaveFileException($"The analyzer's sample rate is {targetRateHz} Hz.");
 
-        var info = new FileInfo(settings.Path);
+        string resolved = ArbitraryPath.ForLoading(settings.Path, projectFilePath);
+
+        var info = new FileInfo(resolved);
         if (!info.Exists)
-            throw new WaveFileException($"The file is no longer there: {settings.Path}");
+        {
+            // Both forms where they differ: the stored path is what the measurement holds and what
+            // a user would go and correct, and the resolved one is where it was actually looked for.
+            throw new WaveFileException(
+                resolved == settings.Path
+                    ? $"The file is no longer there: {settings.Path}"
+                    : $"The file is no longer there: {settings.Path} (looked in {resolved})");
+        }
 
         // The write time and the length are in the key so a file edited in place is re-read. A path
         // alone would serve a stale table for the life of the process, which on a bench where the
@@ -77,7 +92,7 @@ public static class ArbitraryWaveformLoader
             }
         }
 
-        var built = Build(WaveFileReader.Read(settings.Path), settings.Channel, targetRateHz);
+        var built = Build(WaveFileReader.Read(resolved), settings.Channel, targetRateHz);
 
         lock (Gate)
         {

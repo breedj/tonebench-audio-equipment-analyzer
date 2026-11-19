@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using Tonebench.App.Services;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
@@ -324,7 +324,7 @@ public class OscilloscopeRunnerTests
     {
         var request = Request() with { TriggerSource = TriggerSource.ChannelB, ProcessRight = false };
 
-        Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Throws<ArgumentException>(() => request.Validate());
     }
 
     [Fact]
@@ -332,7 +332,7 @@ public class OscilloscopeRunnerTests
     {
         var request = Request() with { ProcessLeft = false, ProcessRight = false };
 
-        Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Throws<ArgumentException>(() => request.Validate());
     }
 
     [Fact]
@@ -342,7 +342,7 @@ public class OscilloscopeRunnerTests
         // inside one. The message names the control rather than the field.
         var request = Request() with { TriggerKind = TriggerKind.Window, TriggerLevelV = 0.5, TriggerLevelLowV = 0.5 };
 
-        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        var ex = Assert.Throws<ArgumentException>(() => request.Validate());
         Assert.Contains("two levels must differ", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         (request with { TriggerLevelLowV = -0.5 }).Validate();
@@ -357,7 +357,7 @@ public class OscilloscopeRunnerTests
         // not there.
         var request = Request() with { TriggerKind = TriggerKind.Runt, TriggerLevelV = 0.5, TriggerLevelLowV = 0.5 };
 
-        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        var ex = Assert.Throws<ArgumentException>(() => request.Validate());
         Assert.Contains("runt", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("window", ex.Message, StringComparison.OrdinalIgnoreCase);
 
@@ -371,7 +371,7 @@ public class OscilloscopeRunnerTests
         // a trigger that fires constantly while claiming to report an absence.
         var request = Request() with { TriggerKind = TriggerKind.Dropout };
 
-        var ex = Assert.Throws<ArgumentOutOfRangeException>(request.Validate);
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => request.Validate());
         Assert.Contains("timeout above zero", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         (request with { DropoutSeconds = 0.05 }).Validate();
@@ -384,7 +384,7 @@ public class OscilloscopeRunnerTests
         // trailing edges instead -- and silent if it were allowed.
         var request = Request() with { TriggerKind = TriggerKind.PulseWidth };
 
-        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        var ex = Assert.Throws<ArgumentException>(() => request.Validate());
         Assert.Contains("width condition", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         // Either bound on its own is a condition.
@@ -402,7 +402,7 @@ public class OscilloscopeRunnerTests
             PulseWidthHiSeconds = 30e-6,
         };
 
-        Assert.Throws<ArgumentException>(request.Validate);
+        Assert.Throws<ArgumentException>(() => request.Validate());
     }
 
     [Fact]
@@ -449,7 +449,7 @@ public class OscilloscopeRunnerTests
         // cycle. It has a crossing to trigger on instead, which the message says.
         var tone = Request() with { TriggerSource = TriggerSource.Stimulus };
 
-        var ex = Assert.Throws<ArgumentException>(tone.Validate);
+        var ex = Assert.Throws<ArgumentException>(() => tone.Validate());
         Assert.Contains("repeat is exact", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         // A square is built to an exact frame count, so it is one this can lock to.
@@ -484,7 +484,7 @@ public class OscilloscopeRunnerTests
                 new ChannelGeneratorConfig(false, [])),
         };
 
-        var ex = Assert.Throws<ArgumentException>(request.Validate);
+        var ex = Assert.Throws<ArgumentException>(() => request.Validate());
         Assert.Contains("generator's own repeat", ex.Message, StringComparison.Ordinal);
     }
 

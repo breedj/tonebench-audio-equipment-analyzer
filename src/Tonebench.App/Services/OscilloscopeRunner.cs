@@ -213,7 +213,7 @@ public sealed class OscilloscopeRunner(
 
     public async Task<OscilloscopeStarted> StartAsync(OscilloscopeRequest request, CancellationToken ct)
     {
-        request.Validate();
+        request.Validate(session.ProjectFilePath);
 
         if (!session.Connected)
             throw new InvalidOperationException("No device is connected.");
@@ -283,7 +283,7 @@ public sealed class OscilloscopeRunner(
     /// </summary>
     public OscilloscopeStatus Retune(OscilloscopeRequest request)
     {
-        request.Validate();
+        request.Validate(session.ProjectFilePath);
 
         lock (_stateLock)
         {
@@ -304,7 +304,7 @@ public sealed class OscilloscopeRunner(
 
             // The engine validates and builds the scanner on this thread and applies both on the
             // stream's, so a trigger it cannot honour is this request's error -- see Retune there.
-            engine.Retune(BuildSpec(request, recordFrames, preTriggerFrames));
+            engine.Retune(BuildSpec(request, recordFrames, preTriggerFrames, session.ProjectFilePath));
 
             // Which channels the pipeline analyses is the ranger's business rather than the
             // capture's: the buffer is fed whole blocks either way. It still has to follow, or
@@ -540,7 +540,7 @@ public sealed class OscilloscopeRunner(
             }
 
             engine.Arm(
-                BuildSpec(request, recordFrames, preTriggerFrames, settleFrames),
+                BuildSpec(request, recordFrames, preTriggerFrames, session.ProjectFilePath, settleFrames),
                 session.DroppedRxChunks + session.DroppedBlocks);
 
             while (!ct.IsCancellationRequested)
@@ -730,8 +730,12 @@ public sealed class OscilloscopeRunner(
         _ => string.Empty,
     };
 
+    /// <param name="projectFilePath">
+    /// The open project, for an arbitrary stimulus's stored path — see <see cref="ArbitraryPath"/>.
+    /// </param>
     private static ScopeCaptureSpec BuildSpec(
-        OscilloscopeRequest request, int recordFrames, int preTriggerFrames, long settleFrames = 0)
+        OscilloscopeRequest request, int recordFrames, int preTriggerFrames, string? projectFilePath,
+        long settleFrames = 0)
     {
         var trigger = new TriggerSpec(
             request.TriggerKind,
@@ -778,7 +782,7 @@ public sealed class OscilloscopeRunner(
             // Read off the staged generator's settings rather than measured, because every periodic
             // stimulus here is built to an exact frame count. Zero where the source is not the
             // stimulus, which is where the engine does not look at it.
-            StimulusPeriodFrames: request.StimulusPeriodFrames() ?? 0);
+            StimulusPeriodFrames: request.StimulusPeriodFrames(projectFilePath) ?? 0);
     }
 
     private sealed record ParkedRun(

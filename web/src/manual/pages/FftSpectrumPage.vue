@@ -391,6 +391,15 @@ const { showPage } = useManual()
       it could not find. It still opens, so the path is on screen to be corrected.
     </p>
     <p>
+      <strong>And that path is relative when the waveform lives with the project</strong> — in the
+      project's own folder, or under it. Keep your waveforms there and the whole folder is portable:
+      copy it to another machine or another drive and the measurements still find their files. A
+      waveform kept somewhere else is stored by its full path, which is right for a shared library
+      of test signals and is the thing to be aware of when sending a project to somebody else. If a
+      relative file cannot be found, the message names both what the measurement stores and where
+      it looked.
+    </p>
+    <p>
       <strong>It is resampled to the analyzer's rate and looped.</strong> The loop is a whole number
       of samples, which is what keeps the stimulus exactly periodic: every line of whatever is in
       the file lands on a multiple of the loop rate, so the spectrum holds the file's own content

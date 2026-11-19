@@ -137,7 +137,12 @@ public sealed record OscilloscopeRequest(
     /// a panel is the continuous kind and genuinely has no repeat. The arm is kept because the
     /// rule is about the <i>stimulus</i> rather than about which screen composed it.</para>
     /// </summary>
-    public long? StimulusPeriodFrames()
+    /// <param name="projectFilePath">
+    /// The open project, for an arbitrary stimulus whose stored path is relative to it. Null is
+    /// "no project", which leaves a relative path unresolvable and so answers null — the refusal
+    /// <see cref="Validate"/> then gives names the file.
+    /// </param>
+    public long? StimulusPeriodFrames(string? projectFilePath = null)
     {
         if (Generator is null)
             return null;
@@ -156,7 +161,7 @@ public sealed record OscilloscopeRequest(
         }
 
         if (channel.Kind == GeneratorKind.Arbitrary)
-            return ArbitraryPeriodFrames(channel.Arbitrary);
+            return ArbitraryPeriodFrames(channel.Arbitrary, projectFilePath);
 
         return channel.Kind switch
         {
@@ -183,7 +188,7 @@ public sealed record OscilloscopeRequest(
     /// inside <see cref="Validate"/>: the refusal a user needs there is about the file, and
     /// <see cref="Validate"/> says so by name rather than blaming the trigger.</para>
     /// </summary>
-    private int? ArbitraryPeriodFrames(ArbitrarySettings? arbitrary)
+    private int? ArbitraryPeriodFrames(ArbitrarySettings? arbitrary, string? projectFilePath)
     {
         if (arbitrary is null || string.IsNullOrWhiteSpace(arbitrary.Path))
             return null;
@@ -193,7 +198,9 @@ public sealed record OscilloscopeRequest(
 
         try
         {
-            int frames = ArbitraryWaveformLoader.Load(arbitrary, SampleRateHz).Frames;
+            // The project rather than nothing: a stored path is relative to it, and a trigger that
+            // could not find the file would refuse a run the generator is about to start happily.
+            int frames = ArbitraryWaveformLoader.Load(arbitrary, SampleRateHz, projectFilePath).Frames;
             return frames > 1 ? frames : null;
         }
         catch (WaveFileException)
@@ -202,7 +209,12 @@ public sealed record OscilloscopeRequest(
         }
     }
 
-    public void Validate()
+    /// <param name="projectFilePath">
+    /// The open project, passed through to <see cref="StimulusPeriodFrames"/> so an arbitrary
+    /// stimulus stored relative to it can be found. Defaults to null, which every caller that has
+    /// no project — and every test — is right to leave alone.
+    /// </param>
+    public void Validate(string? projectFilePath = null)
     {
         if (!(SampleRateHz > 0.0))
             throw new ArgumentOutOfRangeException(nameof(SampleRateHz), SampleRateHz, "The sample rate must be above zero.");
@@ -333,7 +345,7 @@ public sealed record OscilloscopeRequest(
                     nameof(TriggerSource));
             }
 
-            if (StimulusPeriodFrames() is null)
+            if (StimulusPeriodFrames(projectFilePath) is null)
             {
                 // A file names itself: "no repeat" would send the reader looking at the trigger
                 // when what is wrong is the path, and the file is the thing they can fix.

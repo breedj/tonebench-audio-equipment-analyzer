@@ -1,5 +1,6 @@
 ﻿using Tonebench.App.Endpoints;
 using Tonebench.App.Diagnostics;
+using Tonebench.Data;
 using Tonebench.App.Streaming;
 using Tonebench.Device;
 using Tonebench.Device.Hardware;
@@ -20,7 +21,7 @@ public sealed class DeviceSessionService(
     ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
     SoundCardSetting? soundCard = null, StreamRecorder? streamRecorder = null,
     AutoRangeStepDownDelaySetting? stepDownDelay = null, SplitDeviceSetting? split = null,
-    ScopeTriggerEngine? scopeEngine = null)
+    ScopeTriggerEngine? scopeEngine = null, CurrentProjectFile? projectFile = null)
     : IDisposable, IMeasurementRun
 {
     /// <summary>
@@ -315,9 +316,9 @@ public sealed class DeviceSessionService(
     public DeviceSessionService(
         IAnalyzerDevice device, SpectrumPipeline spectrumPipeline, CaptureDelaySetting captureDelay,
         ILogger<DeviceSessionService> logger, ExternalGainSetting? externalGain = null,
-        ScopeTriggerEngine? scopeEngine = null)
+        ScopeTriggerEngine? scopeEngine = null, CurrentProjectFile? projectFile = null)
         : this(AnalyzerDeviceFactory.Pinned(device), spectrumPipeline, captureDelay, logger, externalGain,
-            scopeEngine: scopeEngine)
+            scopeEngine: scopeEngine, projectFile: projectFile)
     {
     }
 
@@ -344,6 +345,14 @@ public sealed class DeviceSessionService(
     /// read it to size their per-point timeouts; the discard itself is applied here, not by them.
     /// </summary>
     public double CaptureDelayMs => captureDelay.Ms;
+
+    /// <summary>
+    /// The open project file, or null. Read by the oscilloscope runner, which has to resolve an
+    /// arbitrary stimulus's stored path the same way the generator does — see
+    /// <see cref="ArbitraryPath"/>; a trigger that could not find the file would refuse a run the
+    /// generator is about to start happily.
+    /// </summary>
+    public string? ProjectFilePath => projectFile?.Path;
 
     /// <summary>The gain in front of the left input, in dB -- see <see cref="ExternalGainSetting"/>.</summary>
     public double ExternalGainLeftDb => _externalGain.LeftDb;
@@ -1824,8 +1833,17 @@ public sealed class DeviceSessionService(
 
         ChannelGeneratorConfig ResolveArbitrary(ChannelGeneratorConfig channel)
         {
-            if (channel.Arbitrary is not { } arbitrary)
+            if (channel.Arbitrary is not { } arbitrary || string.IsNullOrWhiteSpace(arbitrary.Path))
                 return channel;
+
+            // The STORED form, before anything else and whether or not this channel is playing: a
+            // waveform that lives with the project is held relative to it, so the folder is
+            // portable (see ArbitraryPath). Rewritten here rather than at the endpoint because this
+            // is the one place that knows the open project -- and done for a silenced channel too,
+            // since params_json is written from whatever this config holds and a measurement saved
+            // before its first Run must store the same thing as one saved after.
+            arbitrary = arbitrary with { Path = ArbitraryPath.ForStorage(arbitrary.Path, projectFile?.Path) };
+            channel = channel with { Arbitrary = arbitrary };
 
             // A silenced channel is never loaded, and that is not an optimisation: Stop and every
             // measurement switch disable both channels unconditionally and must never fail, so a
@@ -1836,7 +1854,7 @@ public sealed class DeviceSessionService(
             // Throws WaveFileException -- an InvalidOperationException -- which every caller of
             // ConfigureGeneratorAsync already turns into a refusal carrying its message. Silence
             // would be the wrong answer here: a stimulus that is not playing has to say so.
-            var table = ArbitraryWaveformLoader.Load(arbitrary, sampleRateHz);
+            var table = ArbitraryWaveformLoader.Load(arbitrary, sampleRateHz, projectFile?.Path);
 
             // No tone list: a recorded waveform has no single line to name, and a figure invented
             // for one would be read as the fundamental by the trigger and the Gen tile alike.

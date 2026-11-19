@@ -189,8 +189,8 @@ public class ScopeEnvelopeSliceTests
         var roll = Request(ScopeRunMode.Roll, RecordAccumulation.Envelope);
         var auto = Request(ScopeRunMode.Auto, RecordAccumulation.Average);
 
-        Assert.Throws<ArgumentException>(single.Validate);
-        Assert.Throws<ArgumentException>(roll.Validate);
+        Assert.Throws<ArgumentException>(() => single.Validate());
+        Assert.Throws<ArgumentException>(() => roll.Validate());
         auto.Validate();
     }
 

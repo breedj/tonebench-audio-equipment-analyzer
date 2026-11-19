@@ -5,6 +5,7 @@ using Tonebench.App.Endpoints;
 using Tonebench.App.Json;
 using Tonebench.App.Services;
 using Tonebench.App.Streaming;
+using Tonebench.Data;
 using Tonebench.Device;
 using Tonebench.Device.Simulation;
 
@@ -20,6 +21,7 @@ public class ArbitraryStimulusTests : IDisposable
     private const double SampleRateHz = 48_000.0;
 
     private readonly List<string> _files = [];
+    private readonly List<string> _folders = [];
 
     public void Dispose()
     {
@@ -33,6 +35,17 @@ public class ArbitraryStimulusTests : IDisposable
             catch (IOException)
             {
                 // A temp file that will not delete is the OS's business, not this test's.
+            }
+        }
+
+        foreach (string folder in _folders)
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (IOException)
+            {
             }
         }
 
@@ -74,11 +87,13 @@ public class ArbitraryStimulusTests : IDisposable
         return path;
     }
 
-    private static async Task<DeviceSessionService> ConnectedSessionAsync()
+    private static async Task<DeviceSessionService> ConnectedSessionAsync(string? projectFile = null)
     {
         var pipeline = new SpectrumPipeline(new SpectrumBroadcastHub(), NullLogger<SpectrumPipeline>.Instance);
         var session = new DeviceSessionService(
-            new SimulatedDevice(), pipeline, NullLogger<DeviceSessionService>.Instance);
+            new SimulatedDevice(), pipeline, new CaptureDelaySetting(),
+            NullLogger<DeviceSessionService>.Instance,
+            projectFile: projectFile is null ? null : CurrentProjectFile.At(projectFile));
         await session.ConnectAsync(CancellationToken.None);
         return session;
     }
@@ -90,9 +105,10 @@ public class ArbitraryStimulusTests : IDisposable
             Arbitrary = new ArbitrarySettings { Path = path, LevelDbv = -12.0 },
         };
 
-    private static async Task<DeviceStatusResponse> PlayAsync(ChannelGeneratorConfig channel)
+    private static async Task<DeviceStatusResponse> PlayAsync(
+        ChannelGeneratorConfig channel, string? projectFile = null)
     {
-        var session = await ConnectedSessionAsync();
+        var session = await ConnectedSessionAsync(projectFile);
         await session.ConfigureGeneratorAsync(
             new GeneratorConfig(channel, ChannelGeneratorConfig.Off) { SnapToBin = false },
             CancellationToken.None,
@@ -246,6 +262,139 @@ public class ArbitraryStimulusTests : IDisposable
 
         Assert.NotSame(before, after);
         Assert.Equal(960, after.Frames);
+    }
+
+
+    // ------------------------------------------------- stored relative to the project
+
+    /// <summary>
+    /// <b>A waveform that lives with the project is stored relative to it</b>, so the folder is
+    /// portable — copy it to another machine or another drive and the measurement still finds its
+    /// file. The rewrite happens where the project is known, which is here, and the stored form is
+    /// what <c>params_json</c> then carries.
+    /// </summary>
+    [Fact]
+    public async Task AWaveformBesideTheProject_IsHeldRelativeToIt()
+    {
+        var bench = Bench();
+        string wav = bench.Wav("waves/step.wav");
+
+        var status = await PlayAsync(Channel(wav), bench.ProjectFile);
+
+        Assert.Equal(Path.Combine("waves", "step.wav"), status.GeneratorLeft.Arbitrary.Path);
+
+        // And it played: the relative path is what the loader was given and it found the file.
+        Assert.Equal(480, status.GeneratorLeft.Arbitrary.Frames);
+    }
+
+    /// <summary>
+    /// A waveform somewhere else keeps its absolute path. <c>..\..\..\Music\sweep.wav</c> is
+    /// longer, harder to read and no more likely to survive a move than the absolute form it would
+    /// replace — the test is "at or below the project's folder", not "can a relative path be
+    /// computed".
+    /// </summary>
+    [Fact]
+    public async Task AWaveformSomewhereElse_KeepsItsAbsolutePath()
+    {
+        var bench = Bench();
+        string wav = WriteSine(frames: 480);
+
+        var status = await PlayAsync(Channel(wav), bench.ProjectFile);
+
+        Assert.Equal(wav, status.GeneratorLeft.Arbitrary.Path);
+        Assert.Equal(480, status.GeneratorLeft.Arbitrary.Frames);
+    }
+
+    /// <summary>
+    /// And the point of the whole thing: the same stored measurement under a project folder that
+    /// has <b>moved</b> finds its waveform in the new home. An absolute path could not.
+    /// </summary>
+    [Fact]
+    public async Task AMovedProjectFolder_StillPlaysItsWaveform()
+    {
+        var bench = Bench();
+        bench.Wav("waves/step.wav");
+
+        // What the measurement stores, under the project where it was made.
+        var stored = new ChannelGeneratorConfig(true, [])
+        {
+            Kind = GeneratorKind.Arbitrary,
+            Arbitrary = new ArbitrarySettings { Path = Path.Combine("waves", "step.wav"), LevelDbv = -12.0 },
+        };
+
+        // The whole folder copied somewhere else, project file and waveform together.
+        var moved = Bench();
+        Directory.CreateDirectory(Path.GetDirectoryName(moved.Wav("waves/step.wav"))!);
+
+        var status = await PlayAsync(stored, moved.ProjectFile);
+
+        Assert.Equal(Path.Combine("waves", "step.wav"), status.GeneratorLeft.Arbitrary.Path);
+        Assert.Equal(480, status.GeneratorLeft.Arbitrary.Frames);
+    }
+
+    /// <summary>
+    /// With no project open nothing is made relative — there is nothing to be relative to — and the
+    /// absolute path still plays.
+    /// </summary>
+    [Fact]
+    public async Task WithNoProjectOpen_ThePathIsLeftAsItIs()
+    {
+        string wav = WriteSine(frames: 480);
+
+        var status = await PlayAsync(Channel(wav));
+
+        Assert.Equal(wav, status.GeneratorLeft.Arbitrary.Path);
+    }
+
+    /// <summary>
+    /// A relative path whose file is not there names <b>both</b> forms: the stored one is what the
+    /// measurement holds and what a user would go and correct, and the resolved one is where it was
+    /// actually looked for — which is the question "why is it not finding it" asks.
+    /// </summary>
+    [Fact]
+    public async Task AMissingRelativeFile_NamesWhatIsStoredAndWhereItLooked()
+    {
+        var bench = Bench();
+        Directory.CreateDirectory(Path.GetDirectoryName(bench.ProjectFile)!);
+
+        var session = await ConnectedSessionAsync(bench.ProjectFile);
+        var channel = new ChannelGeneratorConfig(true, [])
+        {
+            Kind = GeneratorKind.Arbitrary,
+            Arbitrary = new ArbitrarySettings { Path = Path.Combine("waves", "gone.wav") },
+        };
+
+        var ex = await Assert.ThrowsAsync<WaveFileException>(() => session.ConfigureGeneratorAsync(
+            new GeneratorConfig(channel, ChannelGeneratorConfig.Off),
+            CancellationToken.None,
+            new AcquisitionConfig(SampleRateHz, 2, 4096)));
+
+        Assert.Contains(Path.Combine("waves", "gone.wav"), ex.Message);
+        Assert.Contains("looked in", ex.Message);
+    }
+
+    /// <summary>A throwaway project folder, with a place to put waveforms under it.</summary>
+    private sealed record TestBench(string ProjectFile, Func<string, string> Wav);
+
+    /// <summary>
+    /// A project folder of this test's own, cleaned up with the rest. The project file itself is
+    /// never written — nothing here opens it, and what the path rule needs is only the folder.
+    /// </summary>
+    private TestBench Bench()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"tonebench-proj-{Guid.NewGuid():N}");
+        _folders.Add(folder);
+        Directory.CreateDirectory(folder);
+
+        return new TestBench(
+            Path.Combine(folder, "amp.tbench"),
+            relative =>
+            {
+                string full = Path.Combine(folder, relative.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                File.Copy(WriteSine(frames: 480), full, overwrite: true);
+                return full;
+            });
     }
 
     // ---------------------------------------------------------------- the wire

@@ -203,7 +203,10 @@ const recordFacts = computed(() => {
 </script>
 
 <template>
-  <CollapsibleSection title="Measurements">
+  <CollapsibleSection
+    title="Measurements"
+    hint="Every figure here is measured on the analyzer, on the samples of the window on screen at full resolution. A reading a waveform does not have is left out rather than dashed — a period needs two crossings, an edge needs two settled levels, and a record with one level has neither. The mean is the input’s own residual offset on a quiet input, both this analyzer and a sound card being AC-coupled, and nothing corrects it."
+  >
     <!-- What the readout under the chart shows, and whether it keeps statistics. Above the readings
          because it is a setting rather than a figure, and because the list below is long. -->
     <div class="mb-2 flex flex-wrap items-center gap-2 border-b border-neutral-200 pb-2 dark:border-neutral-800">
@@ -386,15 +389,6 @@ const recordFacts = computed(() => {
         nothing. The readings are still the record's own.
       </p>
 
-      <p class="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        The mean is measured on the samples themselves. Both this analyzer and a sound card are
-        AC-coupled, so on a quiet input it is the input's own residual offset rather than the DUT's
-        DC — a few millivolts is ordinary, and nothing corrects it.
-      </p>
-      <p class="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        A reading a waveform does not have is left out rather than dashed — a period needs two
-        crossings, an edge needs two settled levels, and a record with one level has neither.
-      </p>
     </template>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">Nothing captured yet.</p>
   </CollapsibleSection>

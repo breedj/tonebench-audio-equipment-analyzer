@@ -41,6 +41,23 @@ const props = withDefaults(
     icon?: PanelIconName
     /** Override the title-derived accent. */
     tone?: MeasurementKindTone
+    /**
+     * What the panel is, in a sentence, shown on hovering its icon.
+     *
+     * <p><b>Where a panel’s explanatory caption goes.</b> A rail whose sections each carry a
+     * paragraph explaining how their controls work spends a great deal of height on text a reader
+     * needs once — so the explanation moves here and the icon becomes the place to hover for it
+     * (asked for 2026-11-19). What does <em>not</em> move is anything the panel is saying about the
+     * present: a warning, a count, a state line. The rule is <b>state stays on screen, explanation
+     * moves to the hint</b>, and it decides each case on its own.</p>
+     *
+     * <p>On a wrapper around the icon rather than on the header button, because that is what was
+     * asked for and because <code>PanelIcon</code> is <code>aria-hidden</code> with no
+     * <code>title</code> of its own — a title written at its call site would land on a hidden
+     * element. The same sentence is repeated into a visually hidden span beside the title, so the
+     * explanation is still in the accessibility tree rather than only in a tooltip.</p>
+     */
+    hint?: string
   }>(),
   { size: 'sm', padding: 'p-3', defaultOpen: true },
 )
@@ -61,7 +78,13 @@ const bodyPadding = computed(() => (props.padding === 'p-4' ? 'px-4 pb-4' : 'px-
            which is a far easier target than the chevron and is what the mockup implies by putting
            no affordance on the title itself. -->
       <button type="button" class="flex min-w-0 flex-1 items-center gap-2.5 text-left" @click="open = !open">
-        <PanelIcon :icon="icon" :tone="tone" :size="size === 'xs' ? 24 : 28" />
+        <!-- The hint hangs on a wrapper, not on PanelIcon: that component is aria-hidden and takes
+             no title, so one written at its call site would land on a hidden element. The sr-only
+             copy keeps the sentence in the accessibility tree, where a tooltip never is. -->
+        <span v-if="hint" :title="hint" class="flex shrink-0 cursor-help">
+          <PanelIcon :icon="icon" :tone="tone" :size="size === 'xs' ? 24 : 28" />
+        </span>
+        <PanelIcon v-else :icon="icon" :tone="tone" :size="size === 'xs' ? 24 : 28" />
         <h2
           class="min-w-0 truncate font-semibold text-neutral-900 dark:text-neutral-100"
           :class="size === 'xs' ? 'text-[13px]' : 'text-sm'"
@@ -70,6 +93,10 @@ const bodyPadding = computed(() => (props.padding === 'p-4' ? 'px-4 pb-4' : 'px-
           <span v-if="suffix" class="font-normal text-neutral-500 dark:text-neutral-400">{{ suffix }}</span>
         </h2>
       </button>
+      <!-- Outside the button on purpose: inside it, the sentence joins the toggle's accessible
+           name, so a screen-reader user tabbing to a collapse control hears a whole paragraph. Out
+           here it is read as the header's own text, where the explanation belongs. -->
+      <span v-if="hint" class="sr-only">{{ hint }}</span>
       <div class="flex shrink-0 items-center gap-2">
         <slot name="header-right" />
         <button

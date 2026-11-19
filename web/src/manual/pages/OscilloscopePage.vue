@@ -803,6 +803,12 @@ const { showPage } = useManual()
         is lit when it is on and recessed when it is off, so the state does not depend on telling
         two colours apart; hovering one names it and says what it does.
       </p>
+      <p>
+        <strong>The same goes for the panels themselves.</strong> What a panel is for is on its
+        round icon — hover it and the sentence that used to sit under the controls appears. What a
+        panel is saying about <em>right now</em> stays where you can see it: a warning, a count,
+        which coupling is in the path.
+      </p>
     </div>
 
     <h2>How the trace is drawn</h2>

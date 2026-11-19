@@ -526,7 +526,11 @@ function onVoltsPerDivisionChange(event: Event) {
     Autofit
   </button>
 
-  <CollapsibleSection title="View" size="xs">
+  <CollapsibleSection
+    title="View"
+    size="xs"
+    hint="The waveform against time, which is an oscilloscope’s ordinary picture; the two inputs against each other as a shape; or every cycle folded on the signal’s own period. One at a time rather than three charts, so whichever is on screen keeps the full height."
+  >
     <!-- A scope's mode button, not two charts: the two are the same record drawn two ways and only
          one of them can be read at a time, so a toggle keeps the chart its full height. -->
     <SegmentedToggle
@@ -534,15 +538,19 @@ function onVoltsPerDivisionChange(event: Event) {
       group-label="Chart view"
       :options="SCOPE_VIEWS.map((v) => ({ value: v.value, label: v.label, title: v.title }))"
     />
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      {{ SCOPE_VIEWS.find((v) => v.value === chartView)?.title }}
-    </p>
+    <!-- No paragraph under the buttons: SegmentedToggle already puts each option’s own title on
+         its own button, and that text IS what this said. What the three views are is the panel’s
+         hint. -->
     <p v-if="xyOn && !bothCaptured" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
       Nothing to draw: an X–Y figure needs both inputs. Tick them under Acquisition ▸ Channels.
     </p>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Vertical" size="xs">
+  <CollapsibleSection
+    title="Vertical"
+    size="xs"
+    :hint="`Eight divisions, so the window is ${verticalLabel} × 8 centred on the figure beside it.`"
+  >
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         V/div
@@ -570,12 +578,13 @@ function onVoltsPerDivisionChange(event: Event) {
         />
       </label>
     </div>
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Eight divisions, so the window is {{ verticalLabel }} × 8 centred on the figure beside it.
-    </p>
   </CollapsibleSection>
 
-  <CollapsibleSection :title="`Time window (${boxScale.label})`" size="xs">
+  <CollapsibleSection
+    :title="`Time window (${boxScale.label})`"
+    size="xs"
+    :hint="`${windowSpan} over ten divisions. Tighten it far enough and the chart draws every sample instead of a min/max column pair.`"
+  >
     <!-- Both ends relative to the trigger at t = 0, negative to its left — the same convention the
          decay surfaces' head start uses, and the one the server's own fromS/toS carry. -->
     <div class="grid grid-cols-2 gap-2.5">
@@ -605,10 +614,6 @@ function onVoltsPerDivisionChange(event: Event) {
         />
       </label>
     </div>
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      {{ windowSpan }} over ten divisions. Tighten it far enough and the chart draws every sample
-      instead of a min/max column pair.
-    </p>
   </CollapsibleSection>
 
   <!-- Icon buttons rather than a column of checkboxes (Joost, 2026-11-19). Six labelled rows is
@@ -618,7 +623,10 @@ function onVoltsPerDivisionChange(event: Event) {
        screen reader, only to one who is scanning -- which is what the figure is for. Lit is the
        accent and unlit is the track's own recess, the idiom .btn-toggle-off already carries, so
        the state does not rest on colour alone and survives a monochrome screenshot. -->
-  <CollapsibleSection title="Display">
+  <CollapsibleSection
+    title="Display"
+    hint="What the chart draws and how. Data points appear only where the window is tight enough for the chart to hold real samples, because a marker on a min/max column would mark the column rather than a sample."
+  >
     <div class="tb-field">
       <span class="tb-group">Channels</span>
       <!-- A letter rather than a figure: L and R are what a scope has always called its inputs,
@@ -710,14 +718,14 @@ function onVoltsPerDivisionChange(event: Event) {
         </button>
       </div>
     </div>
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Data points are drawn only where the window is tight enough for the chart to hold real samples
-      — a marker on a min/max column would mark the column, not a sample.
-    </p>
   </CollapsibleSection>
 
 
-  <CollapsibleSection title="Signal path" size="xs">
+  <CollapsibleSection
+    title="Signal path"
+    size="xs"
+    hint="Runs on the analyzer, over the whole record, before anything is drawn or measured — so the picture and every figure beside it are of one waveform. Every level reading below is of the coupled trace, moved by the record’s own mean; what is stored is always the capture as it arrived."
+  >
     <!-- It runs on the analyzer, over the whole record, before anything is drawn or measured:
          doing it on the client would change the picture and leave every reading describing
          something else. See scope/signalPath.ts, which also records what the in-path filter that
@@ -736,16 +744,21 @@ function onVoltsPerDivisionChange(event: Event) {
       </select>
     </label>
 
+    <!-- State stays, explanation moved to the hint: what is in the path right now is the panel
+         talking about the present, and what that costs every reading is read once. -->
     <p v-if="pathNote" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-      In the path: {{ pathNote }}. Every level reading below is of the coupled trace, moved by the
-      record's own mean. What is <strong>stored</strong> is always the capture as it arrived.
+      In the path: {{ pathNote }}.
     </p>
     <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
       Nothing in the path: the trace is the record, standing offset and all.
     </p>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Math" size="xs">
+  <CollapsibleSection
+    title="Math"
+    size="xs"
+    hint="A is the left input and B the right. The derived trace is drawn in violet against its own axis on the right, because a derived quantity is frequently not in volts and, even when it is, routinely far smaller than what it came from."
+  >
     <!-- The derived waveform is computed server-side on the samples, never on the drawn columns:
          the difference of two envelopes is not the envelope of a difference, and on a differential
          pair that error is the entire reading. See scope/math.ts. -->
@@ -774,9 +787,6 @@ function onVoltsPerDivisionChange(event: Event) {
     </label>
 
     <template v-if="mathDraws(mathOperation)">
-      <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        A is the left input and B the right. {{ math.title }}
-      </p>
       <p v-if="mathMissing.length" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
         Nothing to draw: this needs the {{ mathMissing.join(' and the ') }} input, which this
         measurement is not capturing. Tick it under Acquisition ▸ Channels.
@@ -786,14 +796,14 @@ function onVoltsPerDivisionChange(event: Event) {
         zero there. A ratio is only meaningful where B is a settled level; for a transfer function
         use the frequency-response measurement.
       </p>
-      <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-        Drawn in violet against its own axis on the right, because a derived quantity is frequently
-        not in volts and, even when it is, routinely far smaller than what it came from.
-      </p>
     </template>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Persistence" size="xs">
+  <CollapsibleSection
+    title="Persistence"
+    size="xs"
+    hint="How often the trace passes through a pixel decides how it is painted, so a steady waveform burns in bright and jitter, noise or a once-in-a-while glitch shows as a haze around it. The newest record is always drawn on top at full strength."
+  >
     <!-- A history of a *display*, not of a capture: the setting is stored with the measurement, and
          what it accumulates is thrown away whenever a pixel would stop meaning the same time and
          the same level. -->
@@ -838,14 +848,13 @@ function onVoltsPerDivisionChange(event: Event) {
       </button>
     </template>
 
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      How often the trace passes through a pixel decides how it is painted, so a steady waveform
-      burns in bright and jitter, noise or a once-in-a-while glitch shows as a haze around it. The
-      newest record is always drawn on top at full strength.
-    </p>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Cursors" size="xs">
+  <CollapsibleSection
+    title="Cursors"
+    size="xs"
+    hint="Two pairs of measuring lines, dragged by the lettered grips on the chart — time along the bottom, level down the left. The time pair also gates the readings under the chart to the stretch between them, re-measured on the samples in it."
+  >
     <!-- A cursor is a transient reading that belongs to the session, not a note that belongs to the
          measurement - so none of this is in params_json, and none of it is in a report. -->
     <label class="tb-check-row">
@@ -930,13 +939,15 @@ function onVoltsPerDivisionChange(event: Event) {
         </tr>
       </tbody>
     </table>
-    <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Switch a pair on and drag the lettered grips on the chart - time along the bottom, level down
-      the left.
-    </p>
   </CollapsibleSection>
 
-  <CollapsibleSection title="Mask" size="xs" icon="shield" tone="red">
+  <CollapsibleSection
+    title="Mask"
+    size="xs"
+    icon="shield"
+    tone="red"
+    hint="Judges every record against the first history item ticked, opened out by the two tolerances below — a level, and a time that lets an edge arrive early or late rather than only sit at a different level."
+  >
     <label class="tb-check-row">
       <input
         v-model="maskOn"

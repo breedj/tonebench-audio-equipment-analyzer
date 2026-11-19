@@ -243,9 +243,9 @@ public class PeriodicWaveTests
     [InlineData(750.0, 16)]
     // The ceiling: four frames a cycle leaves only the fundamental under Nyquist.
     [InlineData(40_000.0, 1)]
-    public void HarmonicsBelowNyquist_CountsTheOddOnesThatFit(double freqHz, int expected)
+    public void HarmonicsBelowNyquist_ForAnOddOnlyShape_CountsTheOddOnesThatFit(double freqHz, int expected)
     {
-        Assert.Equal(expected, PeriodicWave.HarmonicsBelowNyquist(freqHz, SampleRateHz));
+        Assert.Equal(expected, PeriodicWave.HarmonicsBelowNyquist(GeneratorKind.Square, freqHz, SampleRateHz));
     }
 
     /// <summary>

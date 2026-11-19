@@ -114,9 +114,12 @@ const { showPage } = useManual()
             <strong>Sine tones</strong> — one or more tones, each with its own frequency and level.
             <strong>Multitone</strong> — a comb of tones across 5 Hz–20 kHz.
             <strong>White noise</strong> — flat noise at a set level.
-            <strong>Square</strong> and <strong>Triangle</strong> — one hard-switched waveform at a
-            set frequency and level, for looking at edges rather than at a spectrum (see
-            <em>Square and triangle</em> below).
+            <strong>Square</strong>, <strong>Triangle</strong>, <strong>Sawtooth</strong> and
+            <strong>Pulse</strong> — one hard-switched waveform at a set frequency and level, for
+            looking at edges rather than at a spectrum (see <em>The shapes</em> below).
+            <strong>Tone burst</strong> — a sine gated on for a few cycles and off for a few more,
+            which is how an amplifier's recovery, rail sag and thermal behaviour show themselves.
+            <strong>DC level</strong> — a constant voltage, for offset and bias checks.
           </td>
         </tr>
         <tr>
@@ -176,14 +179,37 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Frequency, Level (rms)</td>
+          <td>Frequency, Level (rms), Duty (%)</td>
           <td>
-            Square and triangle only. The level is the waveform's <em>rms</em>, like every other
-            stimulus here, so one level means three different peaks: a square's peak equals its rms,
-            a triangle's is 1.73 times it and a sine's 1.41. The grey lines beneath report what is
-            really playing — the frequency after rounding, the samples per cycle, how many harmonics
-            fit below Nyquist, the peak volts, and the levels an ideal shape's first harmonics sit
+            The four shapes. The level is the waveform's <em>rms</em>, like every other stimulus
+            here, so one level means different peaks: a square's and a pulse's peak equal their rms,
+            a triangle's and a sawtooth's are 1.73 times it, a sine's 1.41. <strong>Duty</strong> is
+            the pulse's alone — how much of each cycle sits at the top — and 50 % makes a pulse
+            exactly a square. The grey lines beneath report what is really playing: the frequency
+            after rounding, the samples per cycle, how many harmonics fit below Nyquist, the width
+            and DC for a pulse, the peak volts, and the levels an ideal shape's first harmonics sit
             at, to compare the Harmonics table against.
+          </td>
+        </tr>
+        <tr>
+          <td>Cycles on, Cycles off, Carrier level</td>
+          <td>
+            Tone burst only. Whole cycles of carrier, then whole cycles of silence, repeating — whole
+            so that both edges of the gate fall on a zero crossing of the carrier and there is no
+            step to ring on. <strong>Carrier level</strong> is the level <em>while the burst
+            plays</em>, not the stimulus's average, so a burst and a continuous tone at the same
+            setting drive the DUT to the same amplitude: that is the comparison the test is. The
+            lines beneath give the repetition rate, which is what to set the oscilloscope's timebase
+            from, and the overall rms, which is lower by the square root of the duty.
+          </td>
+        </tr>
+        <tr>
+          <td>Level (V)</td>
+          <td>
+            DC level only, and the one level on this panel that is in volts rather than dBV — a DC
+            level has a sign, and dBV cannot carry one. Nothing in this app reads it back: both
+            analyzer inputs are AC-coupled, so measure it at the DUT with a meter. A sound card's
+            output is AC-coupled too and will not pass it at all.
           </td>
         </tr>
         <tr>
@@ -199,9 +225,9 @@ const { showPage } = useManual()
       </tbody>
     </table>
 
-    <h2>Square and triangle</h2>
+    <h2>The shapes</h2>
     <p>
-      These two are transient tests rather than spectral ones. A square's edge excites everything at
+      These are transient tests rather than spectral ones. A square's edge excites everything at
       once, so overshoot, ringing, tilt and asymmetry on the oscilloscope say in one glance what a
       frequency sweep says in a minute: a flat top with a clean corner is a wide, well damped
       amplifier; a rounded corner is a limited high end; a few cycles of ringing on the step is a
@@ -209,6 +235,27 @@ const { showPage } = useManual()
       the rising and falling edges is an asymmetry in the output stage. A triangle has the same odd
       harmonics falling away far faster (1/n² instead of 1/n), so it asks much less of the high end
       and is the gentler probe when the square's own edge is what you keep measuring.
+    </p>
+    <p>
+      <strong>A sawtooth is the one that has even harmonics.</strong> A square and a triangle are
+      symmetric about the half cycle — the second half is the first upside down — and that symmetry
+      is exactly what kills every even harmonic, so neither of them can tell you anything about a
+      DUT's second-order behaviour: there is no H2 in the stimulus to distort. A sawtooth is not
+      symmetric that way, so it carries every harmonic, falling as 1/n: −6.0 dBc at H2, −9.5 at H3,
+      −12.0 at H4. That makes it the shape to reach for on a single-ended stage, where the
+      second-order term is most of the character.
+    </p>
+    <p>
+      <strong>A pulse is a square with a width.</strong> At 50 % it <em>is</em> a square; narrow it
+      and the DUT gets time to come to rest between edges, which is what you want for rise time,
+      overshoot and settling — a square asks for the next edge half a period later, so a slow
+      recovery and a slow edge are hard to tell apart. Two things follow from the width. Its
+      spectrum gains nulls at every 1/duty-th harmonic (a quarter-duty pulse has no H4, H8 or H12),
+      which is a quick confirmation that the width is what you set. And it gains <strong>DC</strong>:
+      the waveform swings between the same two levels at any width, so at a 25 % duty it sits at
+      −0.5 of peak on average and at 10 % at −0.8. Nothing in this app reads that back — both inputs
+      are AC-coupled — but the DUT feels it. The level, the peak and the output range do <em>not</em>
+      move with the duty, which is what makes the control safe to turn.
     </p>
     <p>
       <strong>The frequency is rounded, on purpose.</strong> One cycle is built from a whole, even
@@ -223,13 +270,16 @@ const { showPage } = useManual()
     <p>
       <strong>The harmonics are known, which is what makes the reading useful.</strong> An ideal
       square has only odd harmonics, each 1/n of the fundamental: −9.5 dBc at H3, −14.0 at H5, −16.9
-      at H7. A triangle has 1/n²: −19.1, −28.0, −33.8. Whatever your DUT does to those levels is its
+      at H7. A triangle has 1/n²: −19.1, −28.0, −33.8. A sawtooth has 1/n at every harmonic: −6.0,
+      −9.5, −12.0. A pulse's ladder moves with its width, and the panel prints the first three it
+      actually has. Whatever your DUT does to those levels is its
       own high-frequency response, read straight off the harmonics table. Two caveats. The folding
       above lifts the top of the series slightly — 0.17 dB by H7 at 20 samples a cycle, more as the
       harmonic approaches Nyquist — so compare the lower harmonics, not the last ones. And THD+N,
       SNR, N+D, N−D and the noise tiles read <code>n/a</code>: the stimulus <em>is</em> harmonics, so
-      an ideal square reads THD+N around 48 % and SNR around 6 dB however clean the amplifier is
-      (a little less in a narrower measurement bandwidth, which leaves the top of the series out).
+      an ideal square reads THD+N around 48 % and SNR around 6 dB however clean the amplifier is, a
+      triangle 12 %, a sawtooth 80 % (a little less in a narrower measurement bandwidth, which
+      leaves the top of the series out).
       The <strong>THD</strong> tile is a different sum again — only the harmonics the analyzer
       tracks, a dozen by default — so it reads lower still, around 44 % on an ideal square. Compare
       the harmonics line by line rather than reading one number.
@@ -257,6 +307,50 @@ const { showPage } = useManual()
       where it takes off bounds the slew rate at 2·π·f·V<sub>peak</sub>. That is the classical
       power-bandwidth measurement, and it is a real number from this analyzer rather than a reading
       of its own DAC.
+    </p>
+
+    <h2>Tone burst</h2>
+    <p>
+      A steady tone tells you what an amplifier does once it has settled. A burst tells you what it
+      does on the way there and on the way back, which is where several faults live that no
+      steady-state measurement can see: a power supply whose rails sag under a few cycles of load
+      and recover between bursts, a thermal shift in the bias that follows the envelope, a
+      protection circuit that engages and lets go, and recovery from clipping — how long the output
+      takes to come back after it has been driven into the rails.
+    </p>
+    <p>
+      <strong>Set it in cycles, read it on the oscilloscope.</strong> Cycles rather than
+      milliseconds because the gate has to open and close on a whole cycle: the carrier starts at
+      zero and rises, so at a whole number of cycles both edges of the gate fall on a zero crossing
+      and the burst has no step of its own to ring on. The panel converts that to a repetition rate
+      — set the scope's timebase from it, or pick <strong>Stimulus</strong> as the trigger source on
+      the oscilloscope screen, which locks to the generator's own repeat and needs no level at all.
+    </p>
+    <p>
+      <strong>The level is the carrier's, and there are three numbers.</strong> What you type is the
+      level the carrier reaches while it is playing, so a burst and a continuous tone at the same
+      setting drive the DUT to the same amplitude — which is the whole point, since the comparison
+      between the two is the measurement. The stimulus's <em>overall</em> rms is lower by the square
+      root of the duty (5 cycles on, 20 off is a fifth, i.e. 7 dB down) and the panel says so. And
+      the <em>carrier line</em> in a spectrum is lower again, by the duty itself (14 dB for that same
+      burst), because the gating moves the rest of the energy into sidebands at multiples of the
+      repetition rate either side of the carrier. Those sidebands are the burst, not a fault — which
+      is why THD+N, SNR and the noise tiles read <code>n/a</code> on this stimulus too.
+    </p>
+
+    <h2>DC level</h2>
+    <p>
+      A constant voltage, in volts and signed. It is here for offset and bias checks — what a
+      coupling capacitor is blocking, what sits across an output before anything is connected to
+      it, whether a bias supply is where it should be.
+    </p>
+    <p>
+      <strong>You cannot read it back through the analyzer.</strong> Both inputs are AC-coupled with
+      a corner near 0.2 Hz, so a DC level applied to one moves the trace for about a second and it
+      returns to where it was; what is left is the front end's own offset, a few millivolts, which
+      is not the DUT's. Measure DC at the DUT with a meter. And a <strong>sound card cannot play it
+      at all</strong>: its output is AC-coupled in hardware, so the level decays to nothing within a
+      second of being set, with nothing on screen to say why.
     </p>
 
     <h2>FFT settings panel</h2>

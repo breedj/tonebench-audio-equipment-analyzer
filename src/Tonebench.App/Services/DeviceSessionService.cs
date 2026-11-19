@@ -1021,16 +1021,23 @@ public sealed class DeviceSessionService(
     /// below are the kinds that are immune for a reason that can be stated: <c>Tones</c> and
     /// <c>Multitone</c> both reduce to summing the configured tones (see
     /// <c>Qa40xGeneratorWaveform</c>) and are snapped to <i>analysis</i> bins by <c>SnapTones</c>,
-    /// so they are coherent in the record whatever rate synthesized them; <c>Square</c> and
-    /// <c>Triangle</c> were never periodic over the analysis record even on one rate, their
-    /// guarantee being that every harmonic lands on a multiple of the generator's own fs/M, which
-    /// is a property of that clock alone and survives any capture rate.</para>
+    /// so they are coherent in the record whatever rate synthesized them; every hard-switched shape
+    /// was never periodic over the analysis record even on one rate, its guarantee being that every
+    /// harmonic lands on a multiple of the generator's own fs/M, which is a property of that clock
+    /// alone and survives any capture rate; and <c>DcLevel</c> has no period to be wrong about.</para>
     /// </summary>
     private static bool PlaysAPeriodicStimulus(ChannelGeneratorConfig channel) =>
         channel.Enabled && channel.Kind switch
         {
             GeneratorKind.Off or GeneratorKind.Tones or GeneratorKind.Multitone
-                or GeneratorKind.Square or GeneratorKind.Triangle => false,
+                or GeneratorKind.Square or GeneratorKind.Triangle
+                or GeneratorKind.Sawtooth or GeneratorKind.Pulse
+                or GeneratorKind.DcLevel => false,
+
+            // A burst IS periodic over a whole number of frames, and over a long one -- its repeat
+            // is (on + off) carrier cycles, so a pairing at two rates really would drift. It is the
+            // first kind to reach the default arm by meaning it rather than by being new.
+            GeneratorKind.ToneBurst => true,
             GeneratorKind.WhiteNoise or GeneratorKind.PinkNoise => (channel.Noise?.PeriodFrames ?? 0) > 0,
             GeneratorKind.EchoChirp => (channel.Chirp?.RepeatFrames ?? 0) > 0,
             _ => true,
@@ -1401,7 +1408,14 @@ public sealed class DeviceSessionService(
         var multitone = config.Multitone ?? new MultitoneSettings();
         var noise = config.Noise ?? new WhiteNoiseSettings();
         var chirp = config.Chirp ?? new EchoChirpSettings();
+        // The duty through PeriodicWave's own rule, which is where the reasoning lives: a document
+        // written before the field existed has no dutyPercent, and an absent property comes back as
+        // 0 rather than as this record's 50 -- so the panel would open a stored square showing a
+        // width it would then refuse to run.
         var wave = config.Wave ?? new PeriodicWaveSettings();
+        wave = wave with { DutyPercent = PeriodicWave.ResolveDutyPercent(wave.DutyPercent) };
+        var burst = config.Burst ?? new ToneBurstSettings();
+        var dc = config.Dc ?? new DcLevelSettings();
 
         return new GeneratorChannelResponse(
             config.Enabled,
@@ -1410,7 +1424,9 @@ public sealed class DeviceSessionService(
             new MultitoneResponse(multitone.TonesPerOctave, multitone.TotalRmsDbv, multitone.RolloffDbPerOctave),
             new WhiteNoiseResponse(noise.LevelDbv),
             new EchoChirpResponse(chirp.AmplitudeDbv, chirp.StartFrequencyHz, chirp.EndFrequencyHz, chirp.Smoothing),
-            new PeriodicWaveResponse(wave.FrequencyHz, wave.LevelDbv));
+            new PeriodicWaveResponse(wave.FrequencyHz, wave.LevelDbv, wave.DutyPercent),
+            new ToneBurstResponse(burst.FrequencyHz, burst.LevelDbv, burst.CyclesOn, burst.CyclesOff),
+            new DcLevelResponse(dc.Volts));
     }
 
     /// <summary>
@@ -1698,8 +1714,9 @@ public sealed class DeviceSessionService(
     }
 
     /// <summary>
-    /// Fills in what a square or triangle channel really plays: its frequency quantised to a whole
-    /// even sample period, and the level of its fundamental, as a one-entry effective tone list.
+    /// Fills in what a hard-switched shape or a tone burst really plays: its frequency quantised to
+    /// a whole even sample period, and the level of its fundamental, as a one-entry effective tone
+    /// list.
     ///
     /// <para>Here rather than in the device for the reason the multitone comb is built in the
     /// endpoint: this is the one place that knows the sample rate the stimulus will be played at, and
@@ -1722,6 +1739,9 @@ public sealed class DeviceSessionService(
 
         ChannelGeneratorConfig Resolve(ChannelGeneratorConfig channel)
         {
+            if (channel.Kind == GeneratorKind.ToneBurst)
+                return ResolveBurst(channel);
+
             if (!PeriodicWave.IsWaveKind(channel.Kind) || channel.Wave is not { } wave)
                 return channel;
 
@@ -1731,13 +1751,42 @@ public sealed class DeviceSessionService(
 
             // With the period, so the level reported is the line the analyzer will really read and
             // not the textbook one -- 0.9 dB apart at the top of the band. See FundamentalDbv.
-            double fundamentalDbv = PeriodicWave.FundamentalDbv(
-                channel.Kind, wave.LevelDbv, PeriodicWave.PeriodFrames(wave.FrequencyHz, sampleRateHz));
+            int period = PeriodicWave.PeriodFrames(wave.FrequencyHz, sampleRateHz);
+
+            // And with the width, for the pulse: a narrow pulse puts most of its energy in the
+            // harmonics, so its fundamental is far below the level that was typed -- 10.2 dB at a
+            // 10 % duty. The width is rewritten too, as the frequency is, so the figure the
+            // synthesizer uses and the figure status reports are one number.
+            int width = PeriodicWave.WidthFrames(wave.DutyPercent, period);
+            double fundamentalDbv = PeriodicWave.FundamentalDbv(channel.Kind, wave.LevelDbv, period, width);
+
+            double effectiveDuty = channel.Kind == GeneratorKind.Pulse
+                ? PeriodicWave.EffectiveDutyPercent(wave.DutyPercent, period)
+                : wave.DutyPercent;
 
             return channel with
             {
-                Wave = wave with { FrequencyHz = effectiveHz },
+                Wave = wave with { FrequencyHz = effectiveHz, DutyPercent = effectiveDuty },
                 Tones = [new GeneratorTone(effectiveHz, fundamentalDbv)],
+            };
+        }
+
+        ChannelGeneratorConfig ResolveBurst(ChannelGeneratorConfig channel)
+        {
+            if (channel.Burst is not { } burst)
+                return channel;
+
+            double effectiveHz = ToneBurst.EffectiveFrequencyHz(burst, sampleRateHz);
+            if (effectiveHz <= 0.0)
+                return channel with { Tones = [] };
+
+            // The carrier line as a spectrum reads it, which is the level times the duty -- see
+            // ToneBurst.CarrierLineDbv. A burst is a time-domain stimulus, so this figure is
+            // provenance for the trigger and the Gen tile rather than something to measure against.
+            return channel with
+            {
+                Burst = burst with { FrequencyHz = effectiveHz },
+                Tones = [new GeneratorTone(effectiveHz, ToneBurst.CarrierLineDbv(burst))],
             };
         }
     }
@@ -2125,7 +2174,8 @@ public sealed class DeviceSessionService(
                 + "external gain {GainLeft:0.##}/{GainRight:0.##} dB, capture delay {CaptureDelayMs:0} ms, "
                 + "stream settle {SettleMs:0} ms",
             config.SampleRateHz, config.ChannelCount,
-            DescribeStimulus(_generatorConfig.Left), DescribeStimulus(_generatorConfig.Right),
+            DescribeStimulus(_generatorConfig.Left, _lastSampleRateHz),
+            DescribeStimulus(_generatorConfig.Right, _lastSampleRateHz),
             InputRangeDbv,
             _device.HasInputAutoRanging ? (AutoRangeEnabled == true ? "auto" : "manual") : "fixed",
             OutputRangeDbv,
@@ -2142,7 +2192,7 @@ public sealed class DeviceSessionService(
     /// sixty tones and the useful part of it is the first few plus the count — the comb's own
     /// parameters above it say the rest.</para>
     /// </summary>
-    private static string DescribeStimulus(ChannelGeneratorConfig channel)
+    private static string DescribeStimulus(ChannelGeneratorConfig channel, double sampleRateHz)
     {
         if (!channel.Enabled || channel.Kind == GeneratorKind.Off)
             return "off";
@@ -2159,13 +2209,35 @@ public sealed class DeviceSessionService(
             case GeneratorKind.PinkNoise when channel.Noise is { } noise:
                 return $"pink noise at {noise.LevelDbv:0.##} dBV rms";
 
-            case GeneratorKind.Square or GeneratorKind.Triangle when channel.Wave is { } wave:
+            case GeneratorKind.Pulse when channel.Wave is { } pulse:
+                // The duty as resolved, so the log names the width that was really played rather
+                // than the one that was typed, and the DC beside it -- which at a narrow duty is
+                // most of the waveform and is the part a DUT feels without any reading showing it.
+                return $"pulse at {pulse.FrequencyHz:0.####} Hz, {pulse.DutyPercent:0.##} % duty, "
+                    + $"{pulse.LevelDbv:0.##} dBV rms "
+                    + $"({PeriodicWave.PeakVolts(channel.Kind, pulse.LevelDbv):0.####} V peak, "
+                    + $"{PeriodicWave.DcVolts(channel.Kind, pulse, sampleRateHz):0.####} V DC)";
+
+            case GeneratorKind.Square or GeneratorKind.Triangle or GeneratorKind.Sawtooth
+                when channel.Wave is { } wave:
                 // The played frequency, not the requested one (ResolveWaves has already rewritten
                 // it), and the peak beside the level: those two differ by shape, and a log that
                 // quoted only the rms could not say what the DUT was actually driven to.
                 return $"{channel.Kind.ToString().ToLowerInvariant()} wave at {wave.FrequencyHz:0.####} Hz, "
                     + $"{wave.LevelDbv:0.##} dBV rms "
                     + $"({PeriodicWave.PeakVolts(channel.Kind, wave.LevelDbv):0.####} V peak)";
+
+            case GeneratorKind.ToneBurst when channel.Burst is { } burst:
+                // Cycles rather than seconds, because that is what was set -- and the repetition
+                // rate beside them, because that is what a scope's timebase has to be set from.
+                return $"tone burst at {burst.FrequencyHz:0.####} Hz, "
+                    + $"{burst.CyclesOn} on / {burst.CyclesOff} off, "
+                    + $"{burst.LevelDbv:0.##} dBV rms carrier "
+                    + $"({ToneBurst.RepetitionHz(burst, sampleRateHz):0.####} Hz repetition, "
+                    + $"{ToneBurst.OverallRmsDbv(burst):0.##} dBV overall)";
+
+            case GeneratorKind.DcLevel when channel.Dc is { } dc:
+                return $"DC at {dc.Volts:0.#####} V";
 
             case GeneratorKind.EchoChirp when channel.Chirp is { } chirp:
                 return $"chirp {chirp.StartFrequencyHz:0.##}-{chirp.EndFrequencyHz:0.##} Hz at "

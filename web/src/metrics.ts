@@ -3,8 +3,14 @@
 // just call these and render the result.
 
 import type { IntermodulationFrame, MetersFrame, NoiseFiguresFrame, MultitoneFrame } from './streaming/protocol'
-import type { AveragingMode, GeneratorKind, GeneratorTone, MultitoneSettings, PeriodicWaveSettings, WhiteNoiseSettings } from './api/client'
-import { isWaveKind, waveEffectiveFreqHz, waveIdealThdPercent } from './periodicWave'
+import type { AveragingMode, DcLevelSettings, GeneratorKind, GeneratorTone, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings } from './api/client'
+import {
+  isWaveKind,
+  pulseEffectiveDutyPercent,
+  waveEffectiveFreqHz,
+  waveIdealThdPercent,
+  wavePeriodFrames,
+} from './periodicWave'
 import { bandwidthLabel, weightingQualifier } from './weighting'
 
 export interface MetricTile {
@@ -97,6 +103,11 @@ export interface StimulusSummary {
   kind: GeneratorKind
   /** How many sine tones the stimulus plays. For Multitone this is the derived comb's length. */
   toneCount: number
+  /**
+   * A pulse's duty, which decides how much of its energy is in the fundamental and so what an ideal
+   * one reads. Absent for every other kind, which has no width to set.
+   */
+  dutyPercent?: number
 }
 
 /**
@@ -129,16 +140,38 @@ export function noiseFigureCaveat(stimulus: StimulusSummary | null | undefined):
     // fundamental, so the notch is in the right place -- but the shape's own harmonic series is the
     // rest of the waveform, so the noise band holds the stimulus rather than the analyzer's or the
     // DUT's floor. An ideal square reads THD+N 48 % and SNR 6.3 dB, an ideal triangle 12 % and
-    // 18.2 dB, whatever is connected. THD and the harmonics table are the figures to read: against
-    // waveIdealThdPercent, the departure from them is the DUT.
-    const shape = stimulus.kind === 'Square' ? 'a square' : 'a triangle'
+    // 18.2 dB, a sawtooth 80 %, whatever is connected. THD and the harmonics table are the figures
+    // to read: against waveIdealThdPercent, the departure from them is the DUT.
+    const shape = WAVE_ARTICLES[stimulus.kind] ?? 'a shaped'
     // The whole-band figure, which is what these tiles integrate -- a narrower measurement bandwidth
     // leaves some of the series out and reads a little lower. The THD tile is a different sum again
     // (only the harmonics the analyzer tracks), which is why no number for it is quoted anywhere.
-    const ideal = waveIdealThdPercent(stimulus.kind)?.toFixed(0)
+    // A pulse's figure moves with its duty, which is why the summary carries one.
+    const ideal = waveIdealThdPercent(stimulus.kind, stimulus.dutyPercent ?? 50)?.toFixed(0)
     return `the stimulus is ${shape} wave, whose own harmonic series fills the noise band -- so these read the stimulus and not the DUT, about ${ideal} % for an ideal one however clean the DUT is; read THD and the harmonics instead`
   }
+  if (stimulus.kind === 'ToneBurst') {
+    // A third case again. The carrier is one tone and the notch finds it, but the gating puts
+    // sidebands at every multiple of the repetition rate either side of it -- the burst's own
+    // spectrum, and the whole of what a gated stimulus is -- so the noise band holds the stimulus
+    // here too. What a burst is read on is the scope screen.
+    return 'the stimulus is a gated burst, whose sidebands fill the noise band -- so these read the gating rather than the DUT; read the burst on the oscilloscope screen instead'
+  }
+  if (stimulus.kind === 'DcLevel') {
+    // And the one case where there is no fundamental at all: ComputeMeters takes the loudest bin
+    // above 200 Hz, which on a DC stimulus is whatever noise happens to be the largest, and notches
+    // that. Every figure built on it is then a reading of the noise floor against itself.
+    return 'the stimulus is DC, so there is no fundamental to measure against and the loudest noise bin is notched in its place; nothing in this panel means anything on a DC stimulus'
+  }
   return null
+}
+
+/** How each shape is named in the caveat above, with its article. */
+const WAVE_ARTICLES: Partial<Record<GeneratorKind, string>> = {
+  Square: 'a square',
+  Triangle: 'a triangle',
+  Sawtooth: 'a sawtooth',
+  Pulse: 'a pulse',
 }
 
 /**
@@ -151,12 +184,17 @@ export function stimulusSummary(
   kind: GeneratorKind,
   tones: readonly GeneratorTone[],
   multitone: MultitoneSettings,
+  /** The shape block, for a pulse's duty. Optional so every older call site is unchanged. */
+  wave?: PeriodicWaveSettings,
 ): StimulusSummary {
-  // A square or triangle plays exactly one fundamental (the staged `tones` list is the sine
+  // A hard-switched shape plays exactly one fundamental (the staged `tones` list is the sine
   // generator's and is not what those kinds play), so its count is 1 and not whatever was last
   // typed into the tone rows -- a staged IMD pair left behind a kind switch would otherwise make
-  // the caveat blame two tones for a one-tone stimulus.
-  if (isWaveKind(kind)) return { kind, toneCount: 1 }
+  // the caveat blame two tones for a one-tone stimulus. A burst is the same: one gated carrier.
+  if (isWaveKind(kind)) return { kind, toneCount: 1, dutyPercent: wave?.dutyPercent }
+  if (kind === 'ToneBurst') return { kind, toneCount: 1 }
+  // And DC plays no tone at all, which is the whole of why its figures mean nothing.
+  if (kind === 'DcLevel') return { kind, toneCount: 0 }
   return { kind, toneCount: kind === 'Multitone' ? multitoneToneCount(multitone.tonesPerOctave) : tones.length }
 }
 
@@ -415,9 +453,11 @@ export function generatorTile(
   tones: GeneratorTone[],
   multitone: MultitoneSettings,
   noise: WhiteNoiseSettings,
-  /** The square/triangle block, and the rate it will be played at (which decides the quantised frequency). Both optional so the three older kinds' call sites are unchanged. */
+  /** The shape block, and the rate it will be played at (which decides the quantised frequency). Both optional so the three older kinds' call sites are unchanged. */
   wave?: PeriodicWaveSettings,
   sampleRateHz?: number,
+  burst?: ToneBurstSettings,
+  dc?: DcLevelSettings,
 ): MetricTile | null {
   switch (kind) {
     case 'Tones': {
@@ -435,16 +475,40 @@ export function generatorTile(
     case 'WhiteNoise':
       return { label: GEN_METRIC_LABEL, value: `White noise, ${noise.levelDbv.toFixed(2)} dBV` }
     case 'Square':
-    case 'Triangle': {
+    case 'Triangle':
+    case 'Sawtooth':
+    case 'Pulse': {
       if (!wave) return null
       // The played frequency when a rate is known, the typed one otherwise: the tile is a summary
       // of what is on the output, and the two differ by a few per cent at the top of the band.
       const freqHz = sampleRateHz ? waveEffectiveFreqHz(wave.freqHz, sampleRateHz) : wave.freqHz
-      const shape = kind === 'Square' ? 'Square' : 'Triangle'
+      // The duty too, and only for the kind that has one -- a "50 %" beside a triangle would be
+      // naming a setting that shape does not read.
+      const duty =
+        kind === 'Pulse'
+          ? `, ${(sampleRateHz
+              ? pulseEffectiveDutyPercent(wave.dutyPercent, wavePeriodFrames(wave.freqHz, sampleRateHz))
+              : wave.dutyPercent
+            ).toFixed(1)} %`
+          : ''
       return {
         label: GEN_METRIC_LABEL,
-        value: `${shape}, ${freqHz.toFixed(3)} Hz, ${wave.levelDbv.toFixed(2)} dBV rms`,
+        value: `${kind}, ${freqHz.toFixed(3)} Hz${duty}, ${wave.levelDbv.toFixed(2)} dBV rms`,
       }
+    }
+    case 'ToneBurst': {
+      if (!burst) return null
+      const freqHz = sampleRateHz ? waveEffectiveFreqHz(burst.freqHz, sampleRateHz) : burst.freqHz
+      // Cycles rather than seconds, because that is what was set -- and the carrier's level, which
+      // is what the burst reaches rather than what it averages.
+      return {
+        label: GEN_METRIC_LABEL,
+        value: `Burst, ${freqHz.toFixed(3)} Hz, ${burst.cyclesOn} on / ${burst.cyclesOff} off, ${burst.levelDbv.toFixed(2)} dBV rms`,
+      }
+    }
+    case 'DcLevel': {
+      if (!dc) return null
+      return { label: GEN_METRIC_LABEL, value: `DC, ${dc.volts.toFixed(4)} V` }
     }
     default:
       return null

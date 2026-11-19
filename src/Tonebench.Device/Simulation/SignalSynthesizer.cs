@@ -66,8 +66,17 @@ internal sealed class SignalSynthesizer(Random random, double sampleRateHz)
             // SimulatedSignalProfile.HarmonicDbc stack is added on top, as ComputeTones does: these
             // shapes are harmonics, 48.3 % of them for a square, so a fake -46 dBc stack under that
             // would be unmeasurable and only muddy the one spectrum whose lines are known exactly.
-            GeneratorKind.Square or GeneratorKind.Triangle =>
+            GeneratorKind.Square or GeneratorKind.Triangle
+                or GeneratorKind.Sawtooth or GeneratorKind.Pulse =>
                 PeriodicWave.Sample(channel.Kind, channel.Wave, frameIndex, sampleRateHz),
+
+            // Also the real TX loop's own call. A burst carries no fake harmonic stack either, and
+            // for a sharper reason than the shapes do: the thing being looked at is the first and
+            // last cycle of the gate, and a -46 dBc stack under it would be measuring the
+            // simulator's idea of an analog stage rather than the envelope.
+            GeneratorKind.ToneBurst => ToneBurst.Sample(channel.Burst, frameIndex, sampleRateHz),
+
+            GeneratorKind.DcLevel => channel.Dc?.Volts ?? 0.0,
 
             _ => 0.0,
         };

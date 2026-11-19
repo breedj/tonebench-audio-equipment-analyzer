@@ -77,8 +77,20 @@ internal sealed class Qa40xGeneratorWaveform(Random random, double sampleRateHz)
             // quantisation and the per-shape peak are arithmetic a second copy could get subtly
             // wrong, and a simulator at a different level or a different frequency than the
             // hardware is a DUT that behaves differently under --simulate.
-            GeneratorKind.Square or GeneratorKind.Triangle =>
+            GeneratorKind.Square or GeneratorKind.Triangle
+                or GeneratorKind.Sawtooth or GeneratorKind.Pulse =>
                 PeriodicWave.Sample(channel.Kind, channel.Wave, frameIndex, sampleRateHz),
+
+            // Shared for the same reason, and with the same consequence if it were not: the gate
+            // counts whole carrier cycles, so a simulator that quantised the carrier differently
+            // would open its gate at a different place in the waveform.
+            GeneratorKind.ToneBurst => ToneBurst.Sample(channel.Burst, frameIndex, sampleRateHz),
+
+            // No arithmetic to share: a level is the level. Note nothing here stops a device whose
+            // output is AC-coupled being asked for one -- see IAnalyzerDevice.MinStimulusFrequencyHz,
+            // which is what says the stimulus will not survive the coupling, and the panel, which
+            // says so where a user can act on it.
+            GeneratorKind.DcLevel => channel.Dc?.Volts ?? 0.0,
 
             _ => 0.0,
         };

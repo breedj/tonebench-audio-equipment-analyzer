@@ -68,6 +68,11 @@ public static class GeneratorEndpoints
             return false;
         }
 
+        if (!TryToBurst(request.Burst, kind, channelName, out var burst, out error))
+            return false;
+        if (!TryToDc(request.Dc, kind, channelName, out var dc, out error))
+            return false;
+
         IReadOnlyList<GeneratorTone> tones = request.Tones is { } requested
             ? requested.Select(t => new GeneratorTone(t.FreqHz, t.AmpDbv)).ToArray()
             : [];
@@ -92,6 +97,8 @@ public static class GeneratorEndpoints
             Noise = noise,
             Chirp = chirp,
             Wave = wave,
+            Burst = burst,
+            Dc = dc,
         };
 
         return true;
@@ -123,11 +130,107 @@ public static class GeneratorEndpoints
         {
             FrequencyHz = request.FreqHz ?? defaults.FrequencyHz,
             LevelDbv = request.LevelDbv ?? defaults.LevelDbv,
+            DutyPercent = request.DutyPercent ?? defaults.DutyPercent,
         };
 
         if (PeriodicWave.IsWaveKind(kind) && !(settings.FrequencyHz > 0.0))
         {
             error = $"{channelName} channel: {kind} FreqHz must be greater than 0 (got {settings.FrequencyHz}).";
+            return false;
+        }
+
+        // The duty is refused rather than clamped, unlike the frequency above, and the difference is
+        // what the two limits are: the frequency's ceiling is fs/4 and the rate is not known here,
+        // so clamping is the only honest answer. A duty outside 1..99 % needs no rate to be wrong,
+        // and a control that silently accepted 150 % would be a control nobody could trust.
+        if (kind == GeneratorKind.Pulse
+            && !(settings.DutyPercent >= PeriodicWave.MinDutyPercent
+                && settings.DutyPercent <= PeriodicWave.MaxDutyPercent))
+        {
+            error = $"{channelName} channel: Pulse DutyPercent must be between "
+                + $"{PeriodicWave.MinDutyPercent} and {PeriodicWave.MaxDutyPercent} (got {settings.DutyPercent}).";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The tone-burst block, validated only for its own kind on the rule above.
+    ///
+    /// <para>Both cycle counts are refused rather than clamped: they are whole cycles a user typed,
+    /// so there is nothing a rate could change about them, and a burst of zero cycles is silence
+    /// with a frequency printed beside it. Zero <i>off</i> is legal and is the continuous tone a
+    /// reader compares the burst against — see <see cref="ToneBurst.MinCyclesOff"/>.</para>
+    /// </summary>
+    private static bool TryToBurst(
+        ToneBurstRequest? request, GeneratorKind kind, string channelName,
+        out ToneBurstSettings settings, out string error)
+    {
+        var defaults = new ToneBurstSettings();
+        settings = defaults;
+        error = "";
+
+        if (request is null)
+            return true;
+
+        settings = defaults with
+        {
+            FrequencyHz = request.FreqHz ?? defaults.FrequencyHz,
+            LevelDbv = request.LevelDbv ?? defaults.LevelDbv,
+            CyclesOn = request.CyclesOn ?? defaults.CyclesOn,
+            CyclesOff = request.CyclesOff ?? defaults.CyclesOff,
+        };
+
+        if (kind != GeneratorKind.ToneBurst)
+            return true;
+
+        if (!(settings.FrequencyHz > 0.0))
+        {
+            error = $"{channelName} channel: ToneBurst FreqHz must be greater than 0 (got {settings.FrequencyHz}).";
+            return false;
+        }
+
+        if (settings.CyclesOn < ToneBurst.MinCyclesOn || settings.CyclesOn > ToneBurst.MaxCycles)
+        {
+            error = $"{channelName} channel: ToneBurst CyclesOn must be between "
+                + $"{ToneBurst.MinCyclesOn} and {ToneBurst.MaxCycles} (got {settings.CyclesOn}).";
+            return false;
+        }
+
+        if (settings.CyclesOff < ToneBurst.MinCyclesOff || settings.CyclesOff > ToneBurst.MaxCycles)
+        {
+            error = $"{channelName} channel: ToneBurst CyclesOff must be between "
+                + $"{ToneBurst.MinCyclesOff} and {ToneBurst.MaxCycles} (got {settings.CyclesOff}).";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The DC block. Only finiteness is checked: a level too big for the DAC is what the output
+    /// range is for, and <see cref="OutputRangeSelector.Clips"/> already says so out loud. Nothing
+    /// here refuses a device whose output cannot pass DC either — see
+    /// <see cref="GeneratorKind.DcLevel"/>, which explains why that is reported where the user is
+    /// rather than refused where they are not.
+    /// </summary>
+    private static bool TryToDc(
+        DcLevelRequest? request, GeneratorKind kind, string channelName,
+        out DcLevelSettings settings, out string error)
+    {
+        var defaults = new DcLevelSettings();
+        settings = defaults;
+        error = "";
+
+        if (request is null)
+            return true;
+
+        settings = defaults with { Volts = request.Volts ?? defaults.Volts };
+
+        if (kind == GeneratorKind.DcLevel && !double.IsFinite(settings.Volts))
+        {
+            error = $"{channelName} channel: DcLevel Volts must be a number (got {settings.Volts}).";
             return false;
         }
 
@@ -203,8 +306,18 @@ public sealed record WhiteNoiseRequest(double? LevelDbv);
 
 public sealed record EchoChirpRequest(double? AmplitudeDbv, double? StartFreqHz, double? EndFreqHz, string? Smoothing);
 
-/// <summary>Square/triangle parameters — see <see cref="PeriodicWaveSettings"/>. <c>LevelDbv</c> is the waveform's total rms, not its peak.</summary>
-public sealed record PeriodicWaveRequest(double? FreqHz, double? LevelDbv);
+/// <summary>
+/// Shape parameters, shared by square, triangle, sawtooth and pulse — see
+/// <see cref="PeriodicWaveSettings"/>. <c>LevelDbv</c> is the waveform's total rms, not its peak;
+/// <c>DutyPercent</c> is read by the pulse alone.
+/// </summary>
+public sealed record PeriodicWaveRequest(double? FreqHz, double? LevelDbv, double? DutyPercent = null);
+
+/// <summary>Tone-burst parameters — see <see cref="ToneBurstSettings"/>. <c>LevelDbv</c> is the carrier's rms while it plays.</summary>
+public sealed record ToneBurstRequest(double? FreqHz, double? LevelDbv, int? CyclesOn, int? CyclesOff);
+
+/// <summary>DC parameters — see <see cref="DcLevelSettings"/>. In volts, signed, because a DC level has a sign and dBV cannot carry one.</summary>
+public sealed record DcLevelRequest(double? Volts);
 
 /// <summary>
 /// One channel's generator request. <c>Kind</c> and the per-kind blocks are optional so the
@@ -217,7 +330,9 @@ public sealed record GeneratorChannelRequest(
     MultitoneRequest? Multitone = null,
     WhiteNoiseRequest? Noise = null,
     EchoChirpRequest? Chirp = null,
-    PeriodicWaveRequest? Wave = null);
+    PeriodicWaveRequest? Wave = null,
+    ToneBurstRequest? Burst = null,
+    DcLevelRequest? Dc = null);
 
 /// <summary>
 /// <c>SampleRateHz</c>/<c>ChannelCount</c>/<c>BlockFrameCount</c> are only a hint for starting a

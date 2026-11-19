@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import type { GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, PeriodicWaveSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
+import type { DcLevelSettings, GeneratorKind, GeneratorTone, ImdMethodName, MultitoneSettings, PeriodicWaveSettings, ToneBurstSettings, WhiteNoiseSettings, EchoChirpSettings, SmoothingOctaves } from '../api/client'
 import type { ImdPresetId } from '../imd/presets'
 import type { GeneratorLevelUnit } from '../generatorLevel'
 
@@ -23,9 +23,17 @@ export function createGeneratorStimulus() {
   const tones = reactive<GeneratorTone[]>([{ freqHz: 1000, ampDbv: -6 }])
   const multitone = reactive<MultitoneSettings>({ tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 })
   const noise = reactive<WhiteNoiseSettings>({ levelDbv: -20 })
-  // Square and triangle share one staged block, as they share one settings record server-side: the
-  // shape is `kind`, so switching between them changes neither the pitch nor the level.
-  const wave = reactive<PeriodicWaveSettings>({ freqHz: 1000, levelDbv: -20 })
+  // All four hard-switched shapes share one staged block, as they share one settings record
+  // server-side: the shape is `kind`, so switching between them changes neither the pitch nor the
+  // level -- which is what makes the dropdown a comparison rather than four separate setups. The
+  // duty is read by the pulse alone and carried by the rest.
+  const wave = reactive<PeriodicWaveSettings>({ freqHz: 1000, levelDbv: -20, dutyPercent: 50 })
+  // The burst gets its own block rather than sharing the shapes': its level means the carrier while
+  // it plays, and its two cycle counts have no counterpart there.
+  const burst = reactive<ToneBurstSettings>({ freqHz: 1000, levelDbv: -20, cyclesOn: 5, cyclesOff: 20 })
+  // In volts and signed, because a DC level has a sign and dBV cannot carry one. It starts at zero,
+  // which is the DAC at rest -- a stimulus nobody asked for should do nothing.
+  const dc = reactive<DcLevelSettings>({ volts: 0 })
   const chirp = reactive<EchoChirpSettings>({
     amplitudeDbv: -20,
     startFreqHz: 20,
@@ -48,7 +56,7 @@ export function createGeneratorStimulus() {
     maxOrder: 5,
   })
 
-  return { kind, tones, multitone, noise, wave, chirp, imd, levelUnit }
+  return { kind, tones, multitone, noise, wave, burst, dc, chirp, imd, levelUnit }
 }
 
 /** What one screen's staged generator form looks like, for a panel that is handed one. */

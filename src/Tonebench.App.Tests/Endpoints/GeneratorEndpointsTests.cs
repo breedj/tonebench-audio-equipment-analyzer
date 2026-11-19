@@ -67,7 +67,9 @@ public class GeneratorEndpointsTests
     }
 
     [Theory]
-    [InlineData("Sawtooth", "Valid values")]
+    // "Sawtooth" was the stand-in here until the kind existed; a name no enum member has is the
+    // point, so this one has to be a name nobody is about to implement.
+    [InlineData("Theremin", "Valid values")]
     [InlineData("", "Valid values")]
     public void TryMapChannel_RejectsAnUnknownKind(string kind, string expectedFragment)
     {

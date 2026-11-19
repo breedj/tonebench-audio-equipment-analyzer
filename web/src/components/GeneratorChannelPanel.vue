@@ -5,12 +5,23 @@ import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composable
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import {
   isWaveKind,
+  pulseEffectiveDutyPercent,
+  pulseWidthFrames,
+  waveDcVolts,
   waveEffectiveFreqHz,
   waveHarmonicsBelowNyquist,
   waveIdealHarmonicsDbc,
   wavePeakVolts,
   wavePeriodFrames,
 } from '../periodicWave'
+import {
+  burstCycleFrames,
+  burstOverallRmsDbv,
+  burstPeakVolts,
+  burstPeriodFrames,
+  burstRepetitionHz,
+  MAX_BURST_CYCLES,
+} from '../toneBurst'
 import { useMetricSelection } from '../composables/useMetricSelection'
 import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquivalentDbv } from '../imd/presets'
 import { generatorLevelFromDbv, generatorLevelToDbv } from '../generatorLevel'
@@ -54,6 +65,10 @@ const KINDS: { value: GeneratorKind; label: string }[] = [
   { value: 'WhiteNoise', label: 'White noise' },
   { value: 'Square', label: 'Square' },
   { value: 'Triangle', label: 'Triangle' },
+  { value: 'Sawtooth', label: 'Sawtooth' },
+  { value: 'Pulse', label: 'Pulse' },
+  { value: 'ToneBurst', label: 'Tone burst' },
+  { value: 'DcLevel', label: 'DC level' },
 ]
 
 const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
@@ -71,7 +86,7 @@ const SMOOTHING: { value: SmoothingOctaves; label: string }[] = [
 // it's a silent no-op for Multitone/WhiteNoise) and with GeneratorMetricsPanel.vue, which needs this
 // staged config reactively even after Stop silences DeviceStatus.generatorLeft/Right — see
 // useGeneratorStimulus.ts.
-const { kind, tones, multitone, noise, wave, chirp, imd, levelUnit } = props.stimulus
+const { kind, tones, multitone, noise, wave, burst, dc, chirp, imd, levelUnit } = props.stimulus
 
 // The rate Run would ask for, not the one the device happens to be streaming at — the quantised
 // frequency depends on it, and the panel has to show the right answer before anything is running.
@@ -87,16 +102,48 @@ const waveReading = computed(() => {
   const fs = stagedSampleRateHz.value
   const periodFrames = wavePeriodFrames(wave.freqHz, fs)
   if (periodFrames <= 0) return null
+  const isPulse = kind.value === 'Pulse'
   return {
     effectiveFreqHz: waveEffectiveFreqHz(wave.freqHz, fs),
     periodFrames,
-    harmonics: waveHarmonicsBelowNyquist(wave.freqHz, fs),
+    harmonics: waveHarmonicsBelowNyquist(kind.value, wave.freqHz, fs),
     peakV: wavePeakVolts(kind.value, wave.levelDbv),
     // Line by line rather than as one THD figure: the THD tile sums only the harmonics the analyzer
     // tracks, so an "ideal THD" quoted here would not be the number beside it on screen -- while
     // these are exactly the rows of the Harmonics table underneath.
-    idealHarmonics: waveIdealHarmonicsDbc(kind.value),
+    idealHarmonics: waveIdealHarmonicsDbc(kind.value, wave.dutyPercent),
     quantised: Math.abs(waveEffectiveFreqHz(wave.freqHz, fs) - wave.freqHz) > 0.0005,
+    // The pulse's own two readings. The width is rounded to a whole sample like the period is, so
+    // at a short period the duties available are coarse -- and the DC it leaves is most of the
+    // waveform at a narrow duty, which nothing else on screen would say.
+    isPulse,
+    widthFrames: isPulse ? pulseWidthFrames(wave.dutyPercent, periodFrames) : 0,
+    effectiveDutyPercent: isPulse ? pulseEffectiveDutyPercent(wave.dutyPercent, periodFrames) : 0,
+    dcV: waveDcVolts(kind.value, wave.levelDbv, wave.dutyPercent, periodFrames),
+    dutyQuantised:
+      isPulse && Math.abs(pulseEffectiveDutyPercent(wave.dutyPercent, periodFrames) - wave.dutyPercent) > 0.05,
+  }
+})
+
+/**
+ * What a tone burst will really play. The carrier goes through the shape family's own quantiser,
+ * so this says the same thing about the frequency that waveReading does — and then the two figures
+ * only a burst has: how often it repeats, which is what a scope's timebase has to be set from, and
+ * its overall rms, which is below the carrier's level by the square root of the duty.
+ */
+const burstReading = computed(() => {
+  if (kind.value !== 'ToneBurst') return null
+  const fs = stagedSampleRateHz.value
+  const cycleFrames = burstCycleFrames(burst.freqHz, fs)
+  if (cycleFrames <= 0) return null
+  return {
+    effectiveFreqHz: waveEffectiveFreqHz(burst.freqHz, fs),
+    cycleFrames,
+    periodFrames: burstPeriodFrames(burst.freqHz, burst.cyclesOn, burst.cyclesOff, fs),
+    repetitionHz: burstRepetitionHz(burst.freqHz, burst.cyclesOn, burst.cyclesOff, fs),
+    overallDbv: burstOverallRmsDbv(burst.levelDbv, burst.cyclesOn, burst.cyclesOff),
+    peakV: burstPeakVolts(burst.levelDbv),
+    quantised: Math.abs(waveEffectiveFreqHz(burst.freqHz, fs) - burst.freqHz) > 0.0005,
   }
 })
 const { selectedMetrics, setSelectedMetrics } = useMetricSelection()
@@ -265,10 +312,20 @@ function currentConfig(): Omit<GeneratorChannelRequest, 'enabled'> {
       return { ...base, noise: { ...noise } }
     case 'Square':
     case 'Triangle':
+    case 'Sawtooth':
+    case 'Pulse':
       return { ...base, wave: { ...wave } }
+    case 'ToneBurst':
+      return { ...base, burst: { ...burst } }
+    case 'DcLevel':
+      return { ...base, dc: { ...dc } }
     case 'EchoChirp':
       return { ...base, chirp: { ...chirp } }
     default:
+      // Off, and nothing else: every kind the picker offers has an arm above. A kind that fell
+      // through here would send no settings block at all and play the server's defaults -- which
+      // is not an error, it is a plausible stimulus that is not the one on screen, so
+      // generatorKinds.test.ts reads this switch as text and fails if a kind is missing from it.
       return base
   }
 }
@@ -456,7 +513,7 @@ defineExpose({ currentConfig, syncFromStatus })
     <!-- Square and triangle share one form, as they share one settings block: the dropdown above is
          the shape. The reading beneath the frequency is not decoration -- the period is quantised to
          a whole even number of samples, so what plays is often not what was typed. -->
-    <div v-else-if="kind === 'Square' || kind === 'Triangle'" class="space-y-2 text-sm">
+    <div v-else-if="isWaveKind(kind)" class="space-y-2 text-sm">
       <label class="flex flex-col gap-1">
         Frequency (Hz)
         <input
@@ -481,6 +538,19 @@ defineExpose({ currentConfig, syncFromStatus })
           <GeneratorLevelUnitSelect @change="emit('change')" />
         </div>
       </label>
+      <!-- Only the pulse has a width; the other three carry the field and never read it. -->
+      <label v-if="kind === 'Pulse'" class="flex flex-col gap-1">
+        Duty (%)
+        <input
+          type="number"
+          min="1"
+          max="99"
+          step="1"
+          v-model.number="wave.dutyPercent"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="emit('change')"
+        />
+      </label>
       <div v-if="waveReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
         <p>
           <span :class="waveReading.quantised ? 'text-amber-600 dark:text-amber-400' : ''">
@@ -488,6 +558,13 @@ defineExpose({ currentConfig, syncFromStatus })
           </span>
           ({{ waveReading.periodFrames }} frames per cycle, {{ waveReading.harmonics }} harmonics below
           Nyquist)
+        </p>
+        <p v-if="waveReading.isPulse">
+          <span :class="waveReading.dutyQuantised ? 'text-amber-600 dark:text-amber-400' : ''">
+            {{ waveReading.effectiveDutyPercent.toFixed(2) }} % duty
+          </span>
+          ({{ waveReading.widthFrames }} of {{ waveReading.periodFrames }} frames) &middot;
+          {{ waveReading.dcV.toPrecision(3) }} V DC
         </p>
         <p>
           {{ waveReading.peakV.toPrecision(4) }} V peak &middot; ideal harmonics
@@ -499,6 +576,111 @@ defineExpose({ currentConfig, syncFromStatus })
       <p class="text-xs text-neutral-400 dark:text-neutral-600">
         Only whole even sample periods exist, so the frequency is rounded to one. THD+N, SNR and the
         noise tiles read the shape's own harmonics and show n/a.
+      </p>
+      <p v-if="kind === 'Pulse'" class="text-xs text-neutral-400 dark:text-neutral-600">
+        A pulse swings between the same two levels at every width, so its loudness and the output
+        range it needs do not move as the duty does &mdash; what moves is its spectrum and its DC,
+        which reaches the DUT even though both analyzer inputs block it.
+      </p>
+    </div>
+
+    <!-- A gated sine: the carrier is quantised like the shapes above, and the gate counts whole
+         cycles so both its edges fall on a zero crossing. -->
+    <div v-else-if="kind === 'ToneBurst'" class="space-y-2 text-sm">
+      <label class="flex flex-col gap-1">
+        Frequency (Hz)
+        <input
+          type="number"
+          min="1"
+          v-model.number="burst.freqHz"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          @change="emit('change')"
+        />
+      </label>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="flex flex-col gap-1">
+          Cycles on
+          <input
+            type="number"
+            min="1"
+            :max="MAX_BURST_CYCLES"
+            step="1"
+            v-model.number="burst.cyclesOn"
+            class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="emit('change')"
+          />
+        </label>
+        <label class="flex flex-col gap-1">
+          Cycles off
+          <input
+            type="number"
+            min="0"
+            :max="MAX_BURST_CYCLES"
+            step="1"
+            v-model.number="burst.cyclesOff"
+            class="w-full rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            @change="emit('change')"
+          />
+        </label>
+      </div>
+      <label class="flex flex-col gap-1">
+        Carrier level (rms)
+        <div class="flex items-center gap-2">
+          <input
+            type="number"
+            :step="levelStep"
+            :value="displayLevel(burst.levelDbv)"
+            class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+            :class="NO_SPINNER"
+            @change="onLevelEdit($event, burst.levelDbv, (v) => (burst.levelDbv = v))"
+          />
+          <GeneratorLevelUnitSelect @change="emit('change')" />
+        </div>
+      </label>
+      <div v-if="burstReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p>
+          <span :class="burstReading.quantised ? 'text-amber-600 dark:text-amber-400' : ''">
+            Playing {{ burstReading.effectiveFreqHz.toFixed(3) }} Hz
+          </span>
+          ({{ burstReading.cycleFrames }} frames per cycle)
+        </p>
+        <p>
+          Repeats every {{ burstReading.periodFrames }} frames &middot;
+          {{ burstReading.repetitionHz.toPrecision(4) }} Hz &middot;
+          {{ burstReading.peakV.toPrecision(4) }} V peak
+        </p>
+        <p v-if="burstReading.overallDbv !== null">
+          Overall {{ burstReading.overallDbv.toFixed(2) }} dBV rms, against the carrier's
+          {{ burst.levelDbv.toFixed(2) }}
+        </p>
+      </div>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">
+        The level is the carrier's while it plays, so a burst and a continuous tone at the same
+        setting drive the DUT to the same amplitude. Read it on the oscilloscope screen: the gating
+        puts sidebands across the band, so the noise tiles show n/a.
+      </p>
+    </div>
+
+    <!-- A constant. The one stimulus here whose level is in volts rather than dBV. -->
+    <div v-else-if="kind === 'DcLevel'" class="space-y-2 text-sm">
+      <label class="flex flex-col gap-1">
+        Level (V)
+        <input
+          type="number"
+          step="0.01"
+          v-model.number="dc.volts"
+          class="w-24 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
+          :class="NO_SPINNER"
+          @change="emit('change')"
+        />
+      </label>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+        {{ Math.abs(dc.volts).toPrecision(4) }} V peak &middot; signed, because a DC level has a sign
+        and dBV cannot carry one
+      </p>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">
+        Measure it at the DUT with a meter: both analyzer inputs are AC-coupled, so nothing here
+        reads DC. A sound card's output is AC-coupled too and will not pass this at all.
       </p>
     </div>
 

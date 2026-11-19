@@ -51,6 +51,49 @@ public enum GeneratorKind
     /// amplifier.
     /// </summary>
     Triangle,
+
+    /// <summary>
+    /// Rising ramp from the same <see cref="PeriodicWaveSettings"/>. The one shape in this family
+    /// that is <b>not</b> half-wave symmetric, so it carries every harmonic rather than the odd ones
+    /// alone, falling as 1/n — which is what it is for: a DUT's second-order behaviour has nothing
+    /// to show against a square or a triangle, both of which supply no even harmonic to distort.
+    /// </summary>
+    Sawtooth,
+
+    /// <summary>
+    /// A square with a settable width: <see cref="PeriodicWaveSettings.DutyPercent"/> of the period
+    /// at +peak and the rest at -peak.
+    ///
+    /// <para>The stimulus for rise time, overshoot, settling and ringing, because a narrow pulse
+    /// lets the DUT come to rest between edges where a square asks for a new edge half a period
+    /// later. A true one-shot step is deliberately not offered: this analyzer streams continuously
+    /// and has no armed single-shot output, and the same measurement is a low-rate pulse read on
+    /// the scope screen in Single.</para>
+    /// </summary>
+    Pulse,
+
+    /// <summary>
+    /// A sine gated on for a whole number of cycles and off for a whole number more — see
+    /// <see cref="ToneBurst"/>.
+    ///
+    /// <para>What a steady tone cannot show: rail sag, thermal modulation, protection circuits and
+    /// recovery from clipping all live in the first and last cycles rather than in the settled
+    /// middle.</para>
+    /// </summary>
+    ToneBurst,
+
+    /// <summary>
+    /// A constant voltage, <see cref="DcLevelSettings.Volts"/> — offset and bias checks, and the one
+    /// stimulus here that is not a signal at all.
+    ///
+    /// <para><b>A sound card cannot play it</b>: its output is AC-coupled in hardware, so the level
+    /// decays to nothing within a second or so of being set and nothing downstream would say why.
+    /// <see cref="IAnalyzerDevice.OutputReachesDc"/> is what says which analyzer can, and the
+    /// generator endpoint refuses the kind on one that cannot rather than letting it play silence.
+    /// Note the <i>inputs</i> are AC-coupled on every analyzer here, so a DC stimulus is measured on
+    /// the DUT's own output with a meter, not read back through the analyzer.</para>
+    /// </summary>
+    DcLevel,
 }
 
 /// <summary>
@@ -141,12 +184,16 @@ public sealed record WhiteNoiseSettings
 }
 
 /// <summary>
-/// Parameters for <see cref="GeneratorKind.Square"/> and <see cref="GeneratorKind.Triangle"/>.
+/// Parameters for every hard-switched shape: <see cref="GeneratorKind.Square"/>,
+/// <see cref="GeneratorKind.Triangle"/>, <see cref="GeneratorKind.Sawtooth"/> and
+/// <see cref="GeneratorKind.Pulse"/>.
 ///
-/// <para>One record for both, for the reason <see cref="WhiteNoiseSettings"/> gives for serving two
-/// noise kinds: a frequency and a level is the whole of what either shape is configured with, and
-/// both mean the same thing by both. The shape is <see cref="ChannelGeneratorConfig.Kind"/>, so
-/// switching between them changes the waveform and neither the pitch nor the loudness.</para>
+/// <para>One record for all four, for the reason <see cref="WhiteNoiseSettings"/> gives for serving
+/// two noise kinds: a frequency and a level is the whole of what any of them is configured with,
+/// and they all mean the same thing by both. The shape is
+/// <see cref="ChannelGeneratorConfig.Kind"/>, so switching between them changes the waveform and
+/// neither the pitch nor the loudness — which is what makes the dropdown a comparison rather than
+/// four separate setups.</para>
 /// </summary>
 public sealed record PeriodicWaveSettings
 {
@@ -167,6 +214,18 @@ public sealed record PeriodicWaveSettings
     /// amplifier.</para>
     /// </summary>
     public double LevelDbv { get; init; } = -20.0;
+
+    /// <summary>
+    /// How much of a <see cref="GeneratorKind.Pulse"/>'s period sits at +peak, in percent; 50 makes
+    /// it a square exactly. Read by that kind alone — the other three shapes in this family have no
+    /// width to set, and carry the field for the reason <see cref="WhiteNoiseSettings"/> carries
+    /// three that only its periodic form reads: one settings record per <i>family</i>, so a kind
+    /// added to the family cannot arrive with a record that has drifted from this one.
+    ///
+    /// <para>Rounded to a whole sample before it is played and <b>reported</b> back, like the
+    /// frequency and for the same reason — at a short period the duties available are coarse.</para>
+    /// </summary>
+    public double DutyPercent { get; init; } = 50.0;
 }
 
 /// <summary>Parameters for <see cref="GeneratorKind.EchoChirp"/>.</summary>
@@ -205,6 +264,46 @@ public sealed record EchoChirpSettings
     public int RepeatFrames { get; init; } = 131072;
 }
 
+/// <summary>Parameters for <see cref="GeneratorKind.ToneBurst"/> — see <see cref="ToneBurst"/>.</summary>
+public sealed record ToneBurstSettings
+{
+    /// <summary>
+    /// Requested carrier. What plays is <see cref="ToneBurst.EffectiveFrequencyHz"/>, the shape
+    /// family's own whole-sample period, so a burst and a square asked for the same frequency play
+    /// the same frequency.
+    /// </summary>
+    public double FrequencyHz { get; init; } = 1000.0;
+
+    /// <summary>
+    /// The <b>carrier's</b> rms while it is playing, dBV — not the stimulus's overall rms, which is
+    /// lower by the square root of the duty. That way a burst and a continuous tone at the same
+    /// setting drive the DUT to the same amplitude, which is the comparison the measurement is.
+    /// </summary>
+    public double LevelDbv { get; init; } = -20.0;
+
+    /// <summary>Whole cycles of carrier per burst. Whole, so both gate edges fall on a zero crossing.</summary>
+    public int CyclesOn { get; init; } = 5;
+
+    /// <summary>
+    /// Whole cycles of silence after each burst. Zero is a continuous tone, which is allowed
+    /// deliberately: it is the control case a reader compares the burst against.
+    /// </summary>
+    public int CyclesOff { get; init; } = 20;
+}
+
+/// <summary>
+/// Parameters for <see cref="GeneratorKind.DcLevel"/>.
+///
+/// <para>In <b>volts</b> rather than dBV, and that is not a convenience: a DC level has a sign, and
+/// dBV cannot carry one — 0 V, the level this starts at, has no dBV at all. It is the one stimulus
+/// in this file whose level is not an rms in dBV, and the panel says so.</para>
+/// </summary>
+public sealed record DcLevelSettings
+{
+    /// <summary>The constant output, in volts. Signed; zero is legal and means the DAC sits at rest.</summary>
+    public double Volts { get; init; }
+}
+
 /// <summary>
 /// One channel's generator state: on/off, which <see cref="GeneratorKind"/> is active, and the
 /// settings for each kind.
@@ -217,12 +316,13 @@ public sealed record EchoChirpSettings
 /// <see cref="Tones"/> is the *effective* tone list: for <see cref="GeneratorKind.Multitone"/> it
 /// holds the comb derived from <see cref="Multitone"/>, so everything downstream that reads the
 /// generator's tones (device status, the UI's fundamental tracking) works for multitone without
-/// knowing anything about how the comb was built. For <see cref="GeneratorKind.Square"/> and
-/// <see cref="GeneratorKind.Triangle"/> it holds the single line those shapes' fundamental produces,
-/// at its own level rather than the waveform's total (<see cref="PeriodicWave.FundamentalDbv"/>) and
-/// at the frequency the quantised period really plays — so the scope trigger, the Gen tile and the
-/// gain reading all describe the line the analyzer measures. The synthesizers ignore it for those
-/// kinds and read <see cref="Wave"/>, so there is no second copy of the stimulus to disagree with.
+/// knowing anything about how the comb was built. For every shape <see cref="PeriodicWave.IsWaveKind"/> names, and
+/// for <see cref="GeneratorKind.ToneBurst"/>, it holds the single line the stimulus's fundamental
+/// produces, at its own level rather than the waveform's total
+/// (<see cref="PeriodicWave.FundamentalDbv"/>) and at the frequency the quantised period really
+/// plays — so the scope trigger, the Gen tile and the gain reading all describe the line the
+/// analyzer measures. The synthesizers ignore it for those kinds and read <see cref="Wave"/> or
+/// <see cref="Burst"/>, so there is no second copy of the stimulus to disagree with.
 /// </remarks>
 public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<GeneratorTone> Tones)
 {
@@ -235,8 +335,14 @@ public sealed record ChannelGeneratorConfig(bool Enabled, IReadOnlyList<Generato
 
     public EchoChirpSettings? Chirp { get; init; }
 
-    /// <summary>Shared by <see cref="GeneratorKind.Square"/> and <see cref="GeneratorKind.Triangle"/> — see <see cref="PeriodicWaveSettings"/>.</summary>
+    /// <summary>Shared by every kind <see cref="PeriodicWave.IsWaveKind"/> names — see <see cref="PeriodicWaveSettings"/>.</summary>
     public PeriodicWaveSettings? Wave { get; init; }
+
+    /// <summary>Parameters for <see cref="GeneratorKind.ToneBurst"/>.</summary>
+    public ToneBurstSettings? Burst { get; init; }
+
+    /// <summary>Parameters for <see cref="GeneratorKind.DcLevel"/>.</summary>
+    public DcLevelSettings? Dc { get; init; }
 
     public static ChannelGeneratorConfig Off { get; } = new(Enabled: false, Tones: []) { Kind = GeneratorKind.Off };
 }

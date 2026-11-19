@@ -144,8 +144,23 @@ public static class OutputRangeSelector
             // dBV) and a triangle's is sqrt(3) times it (4.77 dB more) — PeriodicWave.PeakVolts is
             // the single definition, and using the sine conversion here would park a triangle one
             // whole range step too low and clip every edge of it.
-            GeneratorKind.Square or GeneratorKind.Triangle => channel.Wave is { } wave
+            GeneratorKind.Square or GeneratorKind.Triangle
+                or GeneratorKind.Sawtooth or GeneratorKind.Pulse => channel.Wave is { } wave
                 ? PeriodicWave.PeakVolts(channel.Kind, wave.LevelDbv)
+                : 0.0,
+
+            // The carrier's own peak, at any duty: the level names the carrier while it plays (see
+            // ToneBurst.PeakVolts), so narrowing the burst lowers its energy and leaves the peak the
+            // DAC has to clear exactly where it was. A range derived from the overall rms instead
+            // would step down as the gate closed and clip every burst.
+            GeneratorKind.ToneBurst => channel.Burst is { } burst
+                ? ToneBurst.PeakVolts(burst.LevelDbv)
+                : 0.0,
+
+            // Signed, so the magnitude is what the range has to clear -- and it is a peak already,
+            // not an rms, which is the one place in this switch where no conversion belongs.
+            GeneratorKind.DcLevel => channel.Dc is { } dc && double.IsFinite(dc.Volts)
+                ? Math.Abs(dc.Volts)
                 : 0.0,
 
             _ => 0.0,

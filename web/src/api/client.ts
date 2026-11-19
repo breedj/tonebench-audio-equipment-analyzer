@@ -514,7 +514,18 @@ export type SimulatedOutputStageModel = 'None' | 'SolidState' | 'TubeAmp'
 export type SimulatedLoad = 'Open' | 'EightOhms' | 'FourOhms'
 
 /** Mirrors Tonebench.Device.GeneratorKind — exactly one stimulus is active per channel. */
-export type GeneratorKind = 'Off' | 'Tones' | 'Multitone' | 'WhiteNoise' | 'EchoChirp' | 'Square' | 'Triangle'
+export type GeneratorKind =
+  | 'Off'
+  | 'Tones'
+  | 'Multitone'
+  | 'WhiteNoise'
+  | 'EchoChirp'
+  | 'Square'
+  | 'Triangle'
+  | 'Sawtooth'
+  | 'Pulse'
+  | 'ToneBurst'
+  | 'DcLevel'
 
 /** Mirrors Tonebench.Device.SmoothingOctaves. Stored and round-tripped only; the FR measurement that consumes it is a later phase. */
 export type SmoothingOctaves =
@@ -546,14 +557,44 @@ export interface EchoChirpSettings {
 }
 
 /**
- * Square/triangle parameters, shared by both shapes (the kind is which) — mirrors
+ * Shape parameters, shared by square, triangle, sawtooth and pulse (the kind is which) — mirrors
  * Tonebench.Device.PeriodicWaveSettings.
  */
 export interface PeriodicWaveSettings {
   /** What was asked for. The frequency actually played is quantised to a whole even sample period — see periodicWave.ts. */
   freqHz: number
-  /** The waveform's total rms, dBV. Not a peak: a square's peak equals this, a triangle's is sqrt(3) times it. */
+  /** The waveform's total rms, dBV. Not a peak: a square's and a pulse's peak equal this, a triangle's and a sawtooth's are sqrt(3) times it. */
   levelDbv: number
+  /**
+   * How much of a pulse's period sits at +peak; 50 makes it a square exactly. Read by that kind
+   * alone — the other three shapes carry it because they share one settings record, the way the
+   * noise kinds share theirs.
+   *
+   * On the way *back* from the server this is the duty really played, rounded to a whole sample
+   * like the frequency is.
+   */
+  dutyPercent: number
+}
+
+/**
+ * Tone-burst parameters — mirrors Tonebench.Device.ToneBurstSettings.
+ *
+ * `levelDbv` is the **carrier's** rms while it plays, not the stimulus's overall rms, so a burst
+ * and a continuous tone at the same setting drive the DUT to the same amplitude. See toneBurst.ts.
+ */
+export interface ToneBurstSettings {
+  freqHz: number
+  levelDbv: number
+  cyclesOn: number
+  cyclesOff: number
+}
+
+/**
+ * DC parameters — mirrors Tonebench.Device.DcLevelSettings. In **volts**, signed: a DC level has a
+ * sign and dBV cannot carry one, and 0 V — where this starts — has no dBV at all.
+ */
+export interface DcLevelSettings {
+  volts: number
 }
 
 export interface GeneratorChannelState {
@@ -565,6 +606,8 @@ export interface GeneratorChannelState {
   noise: WhiteNoiseSettings
   chirp: EchoChirpSettings
   wave: PeriodicWaveSettings
+  burst: ToneBurstSettings
+  dc: DcLevelSettings
 }
 
 
@@ -2733,6 +2776,8 @@ export interface GeneratorChannelRequest {
   noise?: Partial<WhiteNoiseSettings>
   chirp?: Partial<EchoChirpSettings>
   wave?: Partial<PeriodicWaveSettings>
+  burst?: Partial<ToneBurstSettings>
+  dc?: Partial<DcLevelSettings>
 }
 
 export interface GeneratorRequest {

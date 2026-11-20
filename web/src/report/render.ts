@@ -586,9 +586,9 @@ export async function renderView(
           showTriggerLevel: display.showTriggerLevel,
           showLeft: display.showLeft,
           showRight: display.showRight,
-          // The math trace is on the record, so a report draws whichever one was fetched -- no
-          // second flag to keep in step, the way the residual needs none.
-          mathOperation: display.mathOperation,
+          // The math traces are on the record, so a report draws whichever ones were fetched --
+          // no second flag to keep in step, the way the residual needs none.
+          maths: display.maths,
           // The record handed to a report has already been through the display path, so the
           // picture is right by construction; what the page needs is the words for it.
           pathNote: pathSummary(display.path),

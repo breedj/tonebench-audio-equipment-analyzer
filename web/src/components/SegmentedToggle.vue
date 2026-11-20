@@ -17,7 +17,7 @@ import { computed } from 'vue'
 import type { SegmentedOption } from '../panels/segmented'
 
 const props = defineProps<{
-  options: SegmentedOption<T>[]
+  options: readonly SegmentedOption<T>[]
   /** Columns in the track's grid. Defaults to one per option, i.e. a single row. */
   columns?: number
   /** Names the group for a screen reader. Spelled `groupLabel` and not `ariaLabel`, which collides

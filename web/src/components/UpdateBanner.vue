@@ -12,7 +12,7 @@ const visible = computed(() => updateAvailable.value && latestVersion.value !== 
 <template>
   <div
     v-if="visible"
-    class="flex items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"
+    class="flex shrink-0 items-center gap-3 border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"
   >
     <span>
       Tonebench - Audio Equipment Analyzer {{ latestVersion }} is available.

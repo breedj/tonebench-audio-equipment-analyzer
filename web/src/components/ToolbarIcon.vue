@@ -22,10 +22,16 @@ export type ToolbarIconName =
   | 'metrics'
   | 'pin'
   | 'plus'
+  | 'statistics'
+  | 'reset'
 
 const PATHS: Record<ToolbarIconName, string[]> = {
   /** A plain cross, for an "add one of these" button beside the list it adds to. */
   plus: ['M12 5v14', 'M5 12h14'],
+  /** Three bars of different heights — what a column of statistics is. */
+  statistics: ['M5 20V10', 'M12 20V4', 'M19 20v-7'],
+  /** A circular arrow: start the count again. */
+  reset: ['M3 12a9 9 0 1 0 2.6-6.4', 'M3 4v5h5'],
   save: [
     'M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z',
     'M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7',

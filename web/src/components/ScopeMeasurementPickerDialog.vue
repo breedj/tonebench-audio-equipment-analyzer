@@ -60,7 +60,12 @@ const tab = ref<ScopeMeasurementGroup>('Vertical')
 const source = ref<string>('ch0')
 
 /** What a source is called when this capture is not offering it, so the control reads the same. */
-const SOURCE_FALLBACK_LABELS: Record<string, string> = { ch0: 'Left', ch1: 'Right', math: 'Math' }
+const SOURCE_FALLBACK_LABELS: Record<string, string> = {
+  ch0: 'Left',
+  ch1: 'Right',
+  math1: 'Math 1',
+  math2: 'Math 2',
+}
 
 const sourceOptions = computed(() =>
   SCOPE_SELECTION_SOURCES.map((key) => {

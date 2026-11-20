@@ -10,16 +10,24 @@ import { TOGGLE_DOT_RADIUS, TOGGLE_ICON_SIZE, scopeToggleIcon } from '../scope/d
  * in a monochrome screenshot — the button's own background is what says which it is.</p>
  */
 
-const props = defineProps<{ name: string }>()
+const props = withDefaults(defineProps<{ name: string; size?: number }>(), { size: 16 })
 
 const shapes = computed(() => scopeToggleIcon(props.name))
+
+/**
+ * The dash a <code>dash</code> shape is stroked with, matching <code>ScopeMeasurementIcon</code>'s.
+ *
+ * <p>Repeated as a figure rather than shared, because the two sets are drawn in boxes of different
+ * sizes and what has to match is the <em>look</em> at the size each is used at, not the number.</p>
+ */
+const DASH = '2 1.5'
 </script>
 
 <template>
   <svg
     :viewBox="`0 0 ${TOGGLE_ICON_SIZE} ${TOGGLE_ICON_SIZE}`"
-    width="16"
-    height="16"
+    :width="size"
+    :height="size"
     fill="none"
     stroke="currentColor"
     stroke-width="1.8"
@@ -29,7 +37,12 @@ const shapes = computed(() => scopeToggleIcon(props.name))
     aria-hidden="true"
   >
     <template v-for="(shape, i) in shapes" :key="i">
-      <path v-if="shape.t === 'path'" :d="shape.d" :stroke-width="shape.w" />
+      <path
+        v-if="shape.t === 'path'"
+        :d="shape.d"
+        :stroke-width="shape.w"
+        :stroke-dasharray="shape.dash ? DASH : undefined"
+      />
       <circle
         v-else
         :cx="shape.x"

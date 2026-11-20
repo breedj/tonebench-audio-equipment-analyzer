@@ -64,14 +64,14 @@ public class ScopeMathTraceTests
         var record = DifferentialPair(96_000);
 
         var columns = ScopeFrameBuilder.Overview(record, channel: 0);
-        var mathColumns = ScopeFrameBuilder.MathTrace(record, columns, WaveformOperation.AMinusB);
+        var mathColumns = ScopeFrameBuilder.MathTrace(record, columns, 1, WaveformOperation.AMinusB, 0, 1);
         Assert.NotNull(mathColumns);
         Assert.Null(mathColumns!.Samples);
         Assert.Equal(columns.Columns!.Length, mathColumns.Columns!.Length);
 
         var raw = ScopeFrameBuilder.Window(record, channel: 0, fromS: 0.0, toS: 0.001);
         Assert.True(raw.IsRaw);
-        var mathRaw = ScopeFrameBuilder.MathTrace(record, raw, WaveformOperation.AMinusB);
+        var mathRaw = ScopeFrameBuilder.MathTrace(record, raw, 1, WaveformOperation.AMinusB, 0, 1);
         Assert.NotNull(mathRaw);
         Assert.Null(mathRaw!.Columns);
         Assert.Equal(raw.Samples!.Length, mathRaw.Samples!.Length);
@@ -91,7 +91,7 @@ public class ScopeMathTraceTests
     {
         var record = DifferentialPair(96_000);
         var slice = ScopeFrameBuilder.Overview(record, channel: 0);
-        var math = ScopeFrameBuilder.MathTrace(record, slice, WaveformOperation.AMinusB);
+        var math = ScopeFrameBuilder.MathTrace(record, slice, 1, WaveformOperation.AMinusB, 0, 1);
 
         Assert.NotNull(math);
         Assert.Equal(0.001, math!.Measurements.MaxV, 6);
@@ -140,7 +140,7 @@ public class ScopeMathTraceTests
         var record = DifferentialPair(8_192);
         var slice = ScopeFrameBuilder.Overview(record, channel: 0);
 
-        var math = ScopeFrameBuilder.MathTrace(record, slice, operation);
+        var math = ScopeFrameBuilder.MathTrace(record, slice, 1, operation, 0, 1);
 
         Assert.NotNull(math);
         Assert.Equal(unit, math!.Unit);
@@ -167,7 +167,7 @@ public class ScopeMathTraceTests
             FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
 
         // Half-open: [0.1, 0.2) at 48 kS/s is frames 4800..9599.
-        var gated = ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0.1, 0.2);
+        var gated = ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0, 1, 0.1, 0.2);
 
         Assert.NotNull(gated);
         Assert.Equal(4_800.0, gated!.MinV, 6);
@@ -184,9 +184,9 @@ public class ScopeMathTraceTests
     {
         var record = DifferentialPair(8_192);
 
-        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0.5, 0.6));
-        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0.1, 0.05));
-        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, double.NaN, 0.01));
+        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0, 1, 0.5, 0.6));
+        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0, 1, 0.1, 0.05));
+        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0, 1, double.NaN, 0.01));
     }
 
     // -----------------------------------------------------------------------
@@ -207,14 +207,14 @@ public class ScopeMathTraceTests
             FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
         var slice = ScopeFrameBuilder.Overview(mono, channel: 0);
 
-        Assert.Null(ScopeFrameBuilder.MathTrace(mono, slice, WaveformOperation.AMinusB));
-        Assert.Null(ScopeFrameBuilder.MathTrace(mono, slice, WaveformOperation.ATimesB));
-        Assert.Null(ScopeFrameBuilder.MathGate(mono, WaveformOperation.AMinusB, 0.0, 0.01));
+        Assert.Null(ScopeFrameBuilder.MathTrace(mono, slice, 1, WaveformOperation.AMinusB, 0, 1));
+        Assert.Null(ScopeFrameBuilder.MathTrace(mono, slice, 1, WaveformOperation.ATimesB, 0, 1));
+        Assert.Null(ScopeFrameBuilder.MathGate(mono, WaveformOperation.AMinusB, 0, 1, 0.0, 0.01));
 
         // The one-channel operations are unaffected, which is what makes them worth having as
         // entries of their own rather than as A - 0.
-        Assert.NotNull(ScopeFrameBuilder.MathTrace(mono, slice, WaveformOperation.NegateA));
-        Assert.NotNull(ScopeFrameBuilder.MathTrace(mono, slice, WaveformOperation.DerivativeA));
+        Assert.NotNull(ScopeFrameBuilder.MathTrace(mono, slice, 1, WaveformOperation.NegateA, 0, 1));
+        Assert.NotNull(ScopeFrameBuilder.MathTrace(mono, slice, 1, WaveformOperation.DerivativeA, 0, 1));
     }
 
     // -----------------------------------------------------------------------
@@ -247,13 +247,16 @@ public class ScopeMathTraceTests
         var record = new ScopeRecord(
             [left, right], SampleRateHz, FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
         var slice = ScopeFrameBuilder.Overview(record, channel: 0);
-        var math = ScopeFrameBuilder.MathTrace(record, slice, WaveformOperation.ADivB);
+        var math = ScopeFrameBuilder.MathTrace(record, slice, 1, WaveformOperation.ADivB, 0, 1);
 
         Assert.NotNull(math);
         Assert.True(math!.ClampedSamples > 0, "a sine denominator has to have railed somewhere");
 
         var wire = new ScopeMathSlice(
+            math.Slot,
             math.Operation.ToString(),
+            math.SourceA,
+            math.SourceB,
             math.Unit.ToString(),
             math.Samples,
             math.Columns?.Select(c => (float)c.Min).ToArray(),
@@ -282,7 +285,7 @@ public class ScopeMathTraceTests
             [flat, flat], SampleRateHz, FirstIndex: 0, TriggerPosition: 0, Epoch: 0, Spliced: false, Forced: false);
         var slice = ScopeFrameBuilder.Overview(record, channel: 0);
 
-        var math = ScopeFrameBuilder.MathTrace(record, slice, WaveformOperation.DerivativeA);
+        var math = ScopeFrameBuilder.MathTrace(record, slice, 1, WaveformOperation.DerivativeA, 0, 1);
 
         Assert.NotNull(math);
         Assert.Null(math!.Measurements.PeriodS);

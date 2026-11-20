@@ -19,8 +19,73 @@
  * three can never disagree about what a figure means.</p>
  */
 
-/** A scope's horizontal graticule. The s/div readout is the span over this, as every bench instrument quotes it. */
+/**
+ * A scope's horizontal graticule, and since 2026-11-20 the thing the record is built from.
+ *
+ * <p>It used to be a label divisor and nothing else: the record length was typed in milliseconds
+ * and the s/div readout was whatever the window happened to be over ten. That was deliberate — the
+ * chart draws a window <em>into</em> the record here, so a long record costs memory rather than
+ * detail — and what it cost is that the one control every scope user reaches for first did not
+ * exist. Now the timebase sets the record (<code>10 × time/div</code>) and the zoom stays as a
+ * second look, which is how a DSO's own zoom window behaves.</p>
+ */
 export const HORIZONTAL_DIVISIONS = 10
+
+/**
+ * The timebase's detents, in seconds per division.
+ *
+ * <p>A 1-2-5 ladder like the V/div one beside it, because a graticule is read by counting squares
+ * and that only works if a square is a round number — which is the whole argument for a knob with
+ * detents rather than the free time the record box used to take.</p>
+ *
+ * <p><b>Its ends are the server's own, divided by ten</b>: <code>OscilloscopeRequest</code>'s
+ * <code>MinRecordSeconds</code> (20 µs) and <code>MaxRecordSeconds</code> (1 s, the figure the
+ * <code>.tbench</code> size budget sets). So the bounds need no second opinion and cannot drift
+ * from the refusal the server would answer with.</p>
+ */
+export const SCOPE_TIME_PER_DIVISION_LADDER: readonly number[] = Object.freeze([
+  2e-6, 5e-6,
+  1e-5, 2e-5, 5e-5,
+  1e-4, 2e-4, 5e-4,
+  1e-3, 2e-3, 5e-3,
+  1e-2, 2e-2, 5e-2,
+  1e-1,
+])
+
+/** The whole record a timebase asks for: ten divisions of it. */
+export function recordSecondsFor(timePerDivisionS: number): number {
+  return HORIZONTAL_DIVISIONS * timePerDivisionS
+}
+
+/** And back — what a record length reads as on the timebase. */
+export function timePerDivisionFor(recordSeconds: number): number {
+  return recordSeconds / HORIZONTAL_DIVISIONS
+}
+
+/**
+ * The nearest rung to a figure, or the figure itself where it is already one.
+ *
+ * <p><b>Nearest in the logarithm</b>, not in seconds: the ladder spans five decades, so a linear
+ * distance would snap almost everything to the top rung. The reader's sense of "nearest" on a
+ * 1-2-5 ladder is a ratio, which is what this measures.</p>
+ *
+ * <p>Used only to read an off-ladder stored record back onto the control. A measurement captured at
+ * some odd length is never re-captured at a rung behind the user's back — the panel folds its own
+ * figure into the list instead.</p>
+ */
+export function snapTimePerDivision(timePerDivisionS: number): number {
+  if (!Number.isFinite(timePerDivisionS) || timePerDivisionS <= 0) return SCOPE_TIME_PER_DIVISION_LADDER[8]
+  let best = SCOPE_TIME_PER_DIVISION_LADDER[0]
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const rung of SCOPE_TIME_PER_DIVISION_LADDER) {
+    const distance = Math.abs(Math.log(timePerDivisionS / rung))
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = rung
+    }
+  }
+  return best
+}
 
 /** The display units a time window can be read in, coarsest first. */
 export type ScopeTimeUnit = 's' | 'ms' | 'us'
@@ -157,4 +222,47 @@ export function isWholeRecord(window: ScopeTimeWindow, bounds: ScopeTimeWindow):
   // A thousandth of the record: tighter than any drag and looser than floating-point noise.
   const slack = span * 1e-3
   return Math.abs(window.fromS - bounds.fromS) <= slack && Math.abs(window.toS - bounds.toS) <= slack
+}
+
+/**
+ * The window after the record's own geometry has moved under it.
+ *
+ * <p>Needed because the Acquisition panel is live: the record length and the pre-trigger fraction
+ * can both change while the scope is running, and a window left where it was can then hold no
+ * samples at all — the chart draws nothing with a live capture on hand and no error anywhere, which
+ * is the Roll-crossing fault in another costume.</p>
+ *
+ * <p><b>A window that was the record follows it; a deliberate zoom is only clamped.</b> That is the
+ * whole rule, and the distinction matters: rewriting a zoom would throw away a stretch the reader
+ * chose to look at, while leaving an unzoomed window behind would make shortening the record read
+ * as the trace disappearing.</p>
+ */
+export function followRecordWindow(
+  window: ScopeTimeWindow,
+  oldBounds: ScopeTimeWindow,
+  newBounds: ScopeTimeWindow,
+): ScopeTimeWindow {
+  if (isWholeRecord(window, oldBounds)) return { fromS: newBounds.fromS, toS: newBounds.toS }
+  return clampWindow(window, newBounds)
+}
+
+/**
+ * Where the trigger sits inside the record, from a pointer dragged along the time axis.
+ *
+ * <p>The axis is <b>trigger-relative</b>, so t = 0 never moves on it — what the gesture sets is how
+ * much of the record is captured before the trigger, which is the fraction the Acquisition panel
+ * types as a percentage. A pointer at the record's own start is 0 and at its end is 1.</p>
+ *
+ * <p>Clamped rather than refused past either end: a drag that runs off the plot means "all of it
+ * one side", which is a setting the panel allows, and stopping the grip dead at 93 % because the
+ * pointer left the canvas would read as the drag having broken.</p>
+ */
+export function preTriggerFromPointer(pointerS: number, recordSeconds: number, oldFraction: number): number {
+  const fallback = Number.isFinite(oldFraction) ? Math.min(Math.max(oldFraction, 0), 1) : 0.25
+  if (!Number.isFinite(pointerS) || !Number.isFinite(recordSeconds) || recordSeconds <= 0) return fallback
+  // The record runs from -fraction*T to (1-fraction)*T, so the pointer's distance from the record's
+  // own start, over the record's length, is the fraction it is asking for -- and the old fraction is
+  // what says where that start is.
+  const start = -recordSeconds * fallback
+  return Math.min(Math.max((pointerS - start) / recordSeconds, 0), 1)
 }

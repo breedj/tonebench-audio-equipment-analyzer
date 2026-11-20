@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   HORIZONTAL_DIVISIONS,
   clampWindow,
+  followRecordWindow,
   formatPerDivision,
   formatScopeTime,
   fromChartMs,
   isWholeRecord,
+  preTriggerFromPointer,
   recordWindow,
+  recordSecondsFor,
+  SCOPE_TIME_PER_DIVISION_LADDER,
+  snapTimePerDivision,
+  timePerDivisionFor,
   scopeTimeScale,
   toChartMs,
 } from './timeAxis'
@@ -155,5 +161,125 @@ describe('isWholeRecord', () => {
   it('is false once either end has really moved', () => {
     expect(isWholeRecord({ fromS: 0, toS: 0.015 }, bounds)).toBe(false)
     expect(isWholeRecord({ fromS: -0.005, toS: 0.001 }, bounds)).toBe(false)
+  })
+})
+
+describe('followRecordWindow', () => {
+  const was = recordWindow(0.02, 0.25)
+
+  it('follows the record when the window was the record', () => {
+    const now = recordWindow(0.004, 0.25)
+    expect(followRecordWindow(was, was, now)).toEqual(now)
+  })
+
+  it('leaves a deliberate zoom alone where it still fits', () => {
+    const zoom = { fromS: 0.001, toS: 0.002 }
+    const now = recordWindow(0.004, 0.25)
+    expect(followRecordWindow(zoom, was, now)).toEqual(zoom)
+  })
+
+  it('clamps a zoom the shortened record no longer holds', () => {
+    const zoom = { fromS: 0.012, toS: 0.014 }
+    const now = recordWindow(0.004, 0.25)
+    const result = followRecordWindow(zoom, was, now)
+    expect(result.fromS).toBeGreaterThanOrEqual(now.fromS)
+    expect(result.toS).toBeLessThanOrEqual(now.toS)
+    expect(result.toS).toBeGreaterThan(result.fromS)
+  })
+
+  it('follows a pre-trigger change, which moves the record without resizing it', () => {
+    const now = recordWindow(0.02, 0.75)
+    expect(followRecordWindow(was, was, now)).toEqual(now)
+    expect(now.fromS).not.toBeCloseTo(was.fromS, 9)
+  })
+})
+
+describe('preTriggerFromPointer', () => {
+  it('reads the record’s own start as none of it and its end as all of it', () => {
+    // A 20 ms record a quarter pre-trigger runs -5 ms to +15 ms.
+    expect(preTriggerFromPointer(-0.005, 0.02, 0.25)).toBeCloseTo(0, 12)
+    expect(preTriggerFromPointer(0.015, 0.02, 0.25)).toBeCloseTo(1, 12)
+    expect(preTriggerFromPointer(0.005, 0.02, 0.25)).toBeCloseTo(0.5, 12)
+  })
+
+  it('reads the trigger’s own position back as the fraction it already was', () => {
+    for (const fraction of [0, 0.1, 0.25, 0.5, 0.9, 1]) {
+      expect(preTriggerFromPointer(0, 0.02, fraction)).toBeCloseTo(fraction, 12)
+    }
+  })
+
+  it('clamps a pointer dragged off either end rather than refusing it', () => {
+    expect(preTriggerFromPointer(-5, 0.02, 0.25)).toBe(0)
+    expect(preTriggerFromPointer(5, 0.02, 0.25)).toBe(1)
+  })
+
+  it('keeps the fraction it had when there is no record to measure against', () => {
+    expect(preTriggerFromPointer(0.001, 0, 0.4)).toBe(0.4)
+    expect(preTriggerFromPointer(Number.NaN, 0.02, 0.4)).toBe(0.4)
+    expect(preTriggerFromPointer(0.001, 0.02, Number.NaN)).toBeCloseTo(0.3, 12)
+  })
+})
+
+describe('the timebase ladder', () => {
+  it('runs 1-2-5 across its whole span', () => {
+    for (const rung of SCOPE_TIME_PER_DIVISION_LADDER) {
+      const mantissa = rung / 10 ** Math.floor(Math.log10(rung) + 1e-9)
+      expect([1, 2, 5].some((m) => Math.abs(mantissa - m) < 1e-6), `${rung}`).toBe(true)
+    }
+  })
+
+  it('climbs, and never repeats a rung', () => {
+    for (let i = 1; i < SCOPE_TIME_PER_DIVISION_LADDER.length; i += 1) {
+      expect(SCOPE_TIME_PER_DIVISION_LADDER[i]).toBeGreaterThan(SCOPE_TIME_PER_DIVISION_LADDER[i - 1])
+    }
+  })
+
+  it('ends exactly where the server would start refusing', () => {
+    // MinRecordSeconds = 20 us and MaxRecordSeconds = 1 s, over ten divisions. Asserted as the
+    // record rather than as the rung, because that is the figure the refusal is about.
+    const first = recordSecondsFor(SCOPE_TIME_PER_DIVISION_LADDER[0])
+    const last = recordSecondsFor(SCOPE_TIME_PER_DIVISION_LADDER[SCOPE_TIME_PER_DIVISION_LADDER.length - 1])
+    expect(first).toBeCloseTo(20e-6, 12)
+    expect(last).toBeCloseTo(1, 12)
+  })
+})
+
+describe('recordSecondsFor and timePerDivisionFor', () => {
+  it('are ten divisions apart, and are exact inverses', () => {
+    for (const rung of SCOPE_TIME_PER_DIVISION_LADDER) {
+      expect(recordSecondsFor(rung)).toBeCloseTo(rung * HORIZONTAL_DIVISIONS, 15)
+      expect(timePerDivisionFor(recordSecondsFor(rung))).toBeCloseTo(rung, 15)
+    }
+  })
+
+  it('reads the default 20 ms record as 2 ms a division', () => {
+    expect(timePerDivisionFor(0.02)).toBeCloseTo(2e-3, 15)
+  })
+})
+
+describe('snapTimePerDivision', () => {
+  it('leaves a rung alone', () => {
+    for (const rung of SCOPE_TIME_PER_DIVISION_LADDER) {
+      expect(snapTimePerDivision(rung)).toBe(rung)
+    }
+  })
+
+  it('is nearest in the ratio, not in seconds', () => {
+    // 3 us sits between 2 and 5. Linearly 2 is nearer; by ratio it is 1.5x against 1.67x, so 2 wins
+    // either way -- but 3.2 us is 1.6x and 1.5625x, where the two answers differ and the ratio's is
+    // the one a reader of a 1-2-5 ladder means.
+    expect(snapTimePerDivision(3.2e-6)).toBeCloseTo(5e-6, 15)
+    expect(snapTimePerDivision(3e-6)).toBeCloseTo(2e-6, 15)
+  })
+
+  it('pins anything past either end to that end', () => {
+    expect(snapTimePerDivision(1e-9)).toBeCloseTo(2e-6, 15)
+    expect(snapTimePerDivision(10)).toBeCloseTo(0.1, 15)
+  })
+
+  it('answers a rung for a figure that is no time at all', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SCOPE_TIME_PER_DIVISION_LADDER).toContain(snapTimePerDivision(bad))
+    }
   })
 })

@@ -160,6 +160,15 @@ const { showPage } = useManual()
     </p>
 
     <h2>Acquisition</h2>
+    <p>
+      <strong>Every control here is live.</strong> A scope is set up while it is running, so
+      changing the record length, the pre-trigger or the channel pair hands the new setting to the
+      capture in flight — nothing stops and nothing is lost but the records already accumulated.
+      The <strong>sample rate</strong> is the one exception: it re-clocks the analyzer, which cannot
+      be done to a capture already under way, so changing it stops and starts the run for you.
+      Either way the persistence picture, the averaging or envelope, and the measurement statistics
+      start again, because records taken under two configurations are not one population.
+    </p>
     <table>
       <thead>
         <tr>
@@ -172,22 +181,37 @@ const { showPage } = useManual()
           <td>Sample rate</td>
           <td>
             The capture rate, and with it the finest detail there is: one sample every 5.2 µs at
-            192 kS/s, 20.8 µs at 48 kS/s. It cannot be changed on a capture already running — it
-            re-clocks the analyzer — so changing it restarts the run for you.
+            192 kS/s, 20.8 µs at 48 kS/s. The one control here that cannot be handed to a capture
+            already running, because it re-clocks the analyzer — so changing it stops and starts
+            the run for you, in the background.
           </td>
         </tr>
         <tr>
-          <td>Record (ms)</td>
+          <td>Time/div</td>
           <td>
-            The whole record, pre- and post-trigger together, up to one second. Unlike a bench
-            scope's timebase this is not what you see: the chart draws a window <em>into</em> the
-            record, so a long record costs memory rather than detail. Longer than a second is the
-            stream recorder's job (Configuration ▸ Diagnostics).
+            The timebase, 2&nbsp;µs/div to 100&nbsp;ms/div in 1-2-5 steps. The plot is ten
+            divisions wide, so the record is ten times this — which the badge underneath quotes,
+            together with the sample count, because what the timebase costs is memory. Up to one
+            second; longer is the stream recorder's job (Configuration ▸ Diagnostics).
+            <strong>The zoom is a second look rather than the timebase</strong>: drag a box on the
+            plot and the per-division readout above it follows what is <em>drawn</em> rather than
+            what was captured, with <strong>Back</strong> and <strong>Reset zoom</strong> beside
+            it. Stepping the timebase <em>ends</em> such a zoom and draws the new record whole,
+            which is what the knob means — a window from the capture before it would be a
+            different stretch of a different capture. A window you typed into
+            <strong>Time window (ms)</strong> is the other thing and does survive, clamped into the
+            new record where it has to be: that is a window rather than a look.
           </td>
         </tr>
         <tr>
           <td>Pre-trigger (%)</td>
-          <td>How much of the record sits before the trigger, 0 to 100. The badges underneath quote the record in samples, the sample interval and what one capture costs end to end.</td>
+          <td>
+            How much of the record sits before the trigger, 0 to 100 — or
+            <strong>drag the amber T along the top of the plot</strong>, which is the same setting
+            by eye. The axis is measured from the trigger, so t&nbsp;=&nbsp;0 never moves: what the
+            drag moves is the record under it. The badges underneath quote the record in samples,
+            the sample interval and what one capture costs end to end.
+          </td>
         </tr>
         <tr>
           <td>Channels</td>
@@ -201,6 +225,15 @@ const { showPage } = useManual()
     </table>
 
     <h2>Trigger</h2>
+    <p>
+      <strong>Mode</strong>, <strong>Records</strong>, <strong>Source</strong>,
+      <strong>Kind</strong>, <strong>Slope</strong> and <strong>Condition</strong> are lists that
+      draw each option as a small figure of what it does, and the button shows the chosen one's
+      figure. <em>Edge</em>, <em>Pulse width</em>, <em>Window</em>, <em>Dropout</em> and
+      <em>Runt</em> are five words to parse where five pictures are scanned — and every row says
+      what it finds while the list is open, which is when you are choosing. Open one with a click
+      or with ↑/↓, move with the arrows, choose with Enter, and leave with Escape.
+    </p>
     <table>
       <thead>
         <tr>
@@ -565,11 +598,11 @@ const { showPage } = useManual()
 
     <p>
       It is two outlines, so only the questions that are about a band have answers:
-      <strong>Vmax</strong>, <strong>Vmin</strong> and <strong>Vpp</strong>. Everything else in the
-      Measurements panel is <em>absent</em> rather than computed — a mean or an RMS of an outline is
+      <strong>Vmax</strong>, <strong>Vmin</strong> and <strong>Vpp</strong>. Every other reading
+      is <em>absent</em> rather than computed — a mean or an RMS of an outline is
       arithmetic on something that was never a signal, a period or a duty cycle would be a reading
       of the accumulation rather than of the DUT, and a rise time between two outlines is the jitter
-      and the edge added together. For the same reason the <strong>math channel</strong>, the
+      and the edge added together. For the same reason the <strong>math channels</strong>, the
       <strong>X–Y figure</strong>, the <strong>eye</strong> and the <strong>residual</strong> are all
       absent on an envelope.
     </p>
@@ -648,6 +681,20 @@ const { showPage } = useManual()
       chirp, and the exact square and triangle described on the
       <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
       page.
+    </p>
+    <p>
+      <strong>Stimulus</strong> is a button carrying the chosen kind's figure and name, and it opens
+      a dialog of all of them — a figure, a name and a line saying what each is for. Ten names in a
+      dropdown are read; ten figures are scanned. Picking one changes the panel underneath it, since
+      a tone asks for a frequency where a burst asks for cycles on and off.
+      <strong>Enabled channels</strong> is the same two-segment L/R control the Display and
+      Acquisition rails use.
+    </p>
+    <p>
+      There is <strong>no Load</strong> here, unlike the FFT screen's generator. A load in ohms is
+      what turns volts into watts, and nothing on this screen reads a power — the oscilloscope
+      measures and stores volts. Set it on <strong>FFT analysis</strong> or on whichever sweep is
+      going to quote the watts.
     </p>
 
     <h2>The chart</h2>
@@ -742,10 +789,14 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Math</td>
+          <td>Math 1, Math 2</td>
           <td>
-            A waveform derived from the two captured ones — see <strong>The math channel</strong>
-            below. Drawn in violet against its own axis on the right.
+            Two derived waveforms, each computed from inputs you choose — see
+            <strong>The math channels</strong> below. Each button shows its own expression
+            (<em>L − R</em>, <em>dR/dt</em>) or <em>Off</em>, and opens a dialog of the seven
+            operations with a <strong>Source A</strong> and <strong>Source B</strong> beside them.
+            Math 1 is drawn in violet and Math 2 in dashed pink, each against its own axis on the
+            right.
           </td>
         </tr>
         <tr>
@@ -913,8 +964,8 @@ const { showPage } = useManual()
       <p>
         <strong>Every reading is of the trace on screen, and what is stored is not.</strong> AC
         coupling moves every level figure by the record’s own mean. That is not wrong — the figures
-        are of what is on screen, which is the only honest arrangement — and the Measurements panel
-        says which trace that is. The samples that go into a saved result are always the capture as
+        are of what is on screen, which is the only honest arrangement — and the badge on the
+        chart's header says which trace that is. The samples that go into a saved result are always the capture as
         it arrived, so a result can be reopened and read a different way, or raw.
       </p>
     </div>
@@ -1096,8 +1147,8 @@ const { showPage } = useManual()
 
     <p>
       The view says which of three things it is rather than coming up blank. <strong>No frequency
-      was measured</strong> in this window, so there is no period to fold on — widen it until the
-      Measurements panel reads one. <strong>Fewer than two whole periods</strong> are in the window,
+      was measured</strong> in this window, so there is no period to fold on — widen it until a
+      <strong>Freq</strong> reading appears under the chart. <strong>Fewer than two whole periods</strong> are in the window,
       so there is nothing to overlay. Or nothing has been captured yet. A picture folded on a
       guessed period would be a band of noise that looks exactly like a jittery signal, so it is
       never drawn.
@@ -1132,13 +1183,18 @@ const { showPage } = useManual()
 
     <h2>Measurements</h2>
     <p>
-      The <strong>Measurements</strong> panel in the display rail lists every reading the window
-      has, per drawn channel, and <strong>every one of them is measured on the
-      analyzer rather than read off the picture</strong>. Maximum, minimum and peak to peak would
-      survive the drawing — both extremes of every column are kept — and nothing else would: an
-      average of column maxima is an average of the envelope, and a rise time read off a column
-      pair is a reading of the column width. So the whole set is taken on the samples themselves,
-      at full resolution, over the window on screen.
+      Readings are chosen from the <strong>+</strong> in the <strong>Selected measurements</strong>
+      table under the chart and read there, in the table rather than in the rail. The rail's own
+      <strong>Record</strong> panel holds the four facts no measurement can report, because they
+      describe the record rather than the signal in it: how long it is, the rate it was sampled at,
+      how much of it sits before the trigger, and what the chart is showing it at.
+    </p>
+    <p>
+      <strong>Every reading is measured on the analyzer rather than read off the picture.</strong>
+      Maximum, minimum and peak to peak would survive the drawing — both extremes of every column
+      are kept — and nothing else would: an average of column maxima is an average of the envelope,
+      and a rise time read off a column pair is a reading of the column width. So the whole set is
+      taken on the samples themselves, at full resolution, over the window on screen.
     </p>
     <table>
       <thead>
@@ -1230,17 +1286,20 @@ const { showPage } = useManual()
 
     <h2>The readout under the chart</h2>
     <p>
-      The panel above lists everything; the <strong>Selected measurements</strong> table under the
-      chart shows the few you are watching, large enough to read at a glance. Press the
-      <strong>+</strong> in that table's own header, or <strong>Choose measurements…</strong> in
-      the Measurements panel, to pick them from a figure of
-      each — the four tabs are <strong>Vertical</strong> (how tall),
+      The <strong>Selected measurements</strong> table under the chart shows the readings you are
+      watching, large enough to read at a glance. Its header carries three buttons:
+      <strong>+</strong> opens the picker, the bar-chart button turns the
+      <strong>statistics</strong> columns on and off, and the circular arrow
+      <strong>clears</strong> what they have accumulated and starts counting again — it does not
+      take any rows off the table, which is what the cross beside a row is for. Pick readings from
+      a figure of each: the four tabs are <strong>Vertical</strong> (how tall),
       <strong>Horizontal</strong> (how long), <strong>Miscellaneous</strong> and
       <strong>Channel delay</strong>.
     </p>
     <p>
       <strong>Source</strong>, at the top of that dialog, is which trace the tiles below it are
-      being ticked for — the left input, the right, or the math channel. Tick a reading, switch the
+      being ticked for — the left input, the right, or either math channel. Tick a reading, switch
+      the
       source, tick it again, and it appears once for each. The cross beside a row in the table takes
       off <em>that</em> row, so the same measurement on the other input stays.
     </p>
@@ -1251,7 +1310,7 @@ const { showPage } = useManual()
     <div class="manual-note">
       <p>
         <strong>A selection outlives a capture.</strong> You can ask for a reading on a trace this
-        measurement is not reading — the right input when only the left is ticked, or the math
+        measurement is not reading — the right input when only the left is ticked, or a math
         channel with no operation chosen — and it simply has no row until it is. The dialog says so
         rather than refusing, because the alternative is being unable to set up a measurement before
         making it.
@@ -1297,7 +1356,7 @@ const { showPage } = useManual()
 
     <h3>Statistics</h3>
     <p>
-      Tick <strong>Statistics</strong> in the Measurements panel and each row gains its mean, its
+      Turn <strong>Statistics</strong> on in the table's header and each row gains its mean, its
       extremes, how far it has wandered (<strong>Pk-Pk</strong>), its standard deviation and a
       count. What a single reading says is what this capture was; what a column of them says is
       whether the DUT is steady — a peak-to-peak that reads 306 mV every record and one that reads
@@ -1313,7 +1372,8 @@ const { showPage } = useManual()
       </p>
       <p>
         The count starts again on its own whenever a reading stops meaning the same thing: a
-        capture setting, the stretch of the record being measured, the cursors, the math channel. A
+        capture setting, the stretch of the record being measured, the cursors, either math
+        channel's operation. A
         mean over two configurations is a mean of two different measurements, and the figure would
         not say so.
       </p>
@@ -1390,14 +1450,25 @@ const { showPage } = useManual()
       whenever a capture setting makes the records stop being comparable.
     </p>
 
-    <h2>The math channel</h2>
+    <h2>The math channels</h2>
     <p>
-      <strong>Math</strong> draws one more trace, computed from the two captured waveforms. A is the
-      left input and B the right. The derived trace is violet and has <strong>its own axis on the
-      right</strong>, which is not a nicety: a differential reading is routinely a thousandth of
-      what it came from — the millivolts of difference between two ten-volt signals — and on the
-      waveforms’ own axis that is a flat line on zero. Several of the operations are not in volts at
-      all, and the axis says which unit it is in.
+      <strong>Math 1</strong> and <strong>Math 2</strong> each draw one more trace, computed from
+      the captured waveforms. Press either button in the display rail and a dialog offers the seven
+      operations as figures, with <strong>Source A</strong> and <strong>Source B</strong> under
+      them — so <em>which</em> inputs the expression reads is yours, and the button and the axis
+      then write the sockets rather than A and B: <em>L − R</em>, <em>R − L</em>,
+      <em>dR/dt</em>. Nothing is applied until <strong>Apply</strong>, and
+      <strong>Turn off</strong> is how a channel goes away.
+    </p>
+    <p>
+      Each derived trace has <strong>its own axis on the right</strong>, which is not a nicety: a
+      differential reading is routinely a thousandth of what it came from — the millivolts of
+      difference between two ten-volt signals — and on the waveforms’ own axis that is a flat
+      line on zero. Several of the operations are not in volts at all, and the axis says which unit
+      it is in. Math 1 is violet and Math 2 is <strong>dashed</strong> pink: neither is a shade of
+      an input’s, because a derived trace belongs to neither, and the dash is what tells the two
+      apart in a black-and-white report. Both channels on costs 144&nbsp;px of plot width to the
+      two axes, which is the price of asking for two.
     </p>
     <table>
       <thead>
@@ -1409,13 +1480,13 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>A − B, B − A</td>
+          <td>A − B</td>
           <td>V</td>
           <td>
             A <strong>software differential probe</strong>, and the one most of this exists for:
             what is across a transformer winding, a bridged output, a current shunt or a ground
-            loop, with neither end of it at ground. Both polarities are offered because a
-            differential reading has a sign and there is no second operation to chain.
+            loop, with neither end of it at ground. There is no second entry for B − A, because
+            a differential reading has a sign and exchanging the two sources is how you set it.
           </td>
         </tr>
         <tr>
@@ -1443,12 +1514,12 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>−A, −B</td>
+          <td>−A</td>
           <td>V</td>
           <td>One input inverted, for comparing an inverting stage against its own input.</td>
         </tr>
         <tr>
-          <td>dA/dt, dB/dt</td>
+          <td>dA/dt</td>
           <td>V/s</td>
           <td>
             The slope — a <strong>slew-rate trace</strong>, written in V/µs at anything a real
@@ -1456,7 +1527,7 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>∫A dt, ∫B dt</td>
+          <td>∫A dt</td>
           <td>V·s</td>
           <td>
             The running integral, which is a flux or a charge. The window’s mean is removed first,
@@ -1466,9 +1537,12 @@ const { showPage } = useManual()
       </tbody>
     </table>
     <p>
-      The <strong>Measurements</strong> panel gives the derived trace the same reading set every
-      waveform gets — peak to peak, RMS, period, rise time and the rest — written in its own unit.
-      Peak to peak of A − B is exactly what a differential probe is for.
+      The three one-operand entries read <strong>Source A</strong> alone, so Source B is dimmed
+      while one of them is chosen, with a line saying it does nothing here — dimmed rather than
+      disabled, so it is still set where you want it when you go back to a two-input entry. The
+      <strong>Measurements</strong> panel gives each derived trace the same reading set every
+      waveform gets — peak to peak, RMS, period, rise time and the rest — written in its own
+      unit. Peak to peak of L − R is exactly what a differential probe is for.
     </p>
     <div class="manual-note">
       <p>
@@ -1496,9 +1570,17 @@ const { showPage } = useManual()
       </p>
     </div>
     <p>
-      An operation that needs an input the measurement is not capturing draws nothing and says so,
-      rather than computing against silence and labelling the result A − B. Tick the input under
+      An operation that needs an input the measurement is not capturing draws nothing and says
+      which one — by the socket you chose, not by the operand — rather than computing against
+      silence and labelling the result L − R. Tick the input under
       <strong>Acquisition ▸ Channels</strong>.
+    </p>
+    <p>
+      A measurement saved before there were two channels reopens with its stored operation on
+      Math&nbsp;1, Source&nbsp;A on the left input and Source&nbsp;B on the right — which is what
+      A and B meant then. One saved as <em>B − A</em>, <em>−B</em>, <em>dB/dt</em> or
+      <em>∫B dt</em> comes back as the same trace under its own entry with the two sources
+      exchanged.
     </p>
 
     <h2>Reference traces</h2>
@@ -1572,8 +1654,8 @@ const { showPage } = useManual()
     <h3>What a reference does not do</h3>
 
     <p>
-      <strong>Nothing is measured off it.</strong> The Measurements panel, the cursors' gated
-      figures, the math channel and the residual are all of the <em>live</em> record — a reference is
+      <strong>Nothing is measured off it.</strong> The readings under the chart, the cursors'
+      gated figures, the math channels and the residual are all of the <em>live</em> record — a reference is
       a picture. To read a stored capture's own figures, open it: selecting it in History loads it as
       the record, and then every reading on the panel is its.
     </p>
@@ -1608,14 +1690,18 @@ const { showPage } = useManual()
       <p>
         Autoset reads the record on screen, so capture something first — the button is disabled
         until there is one. Every figure it uses is measured: the extremes, the frequency and the
-        midpoint are the same ones the Measurements panel and the 50 % button read.
+        midpoint are the same ones the readings under the chart and the 50 % button read.
       </p>
     </div>
     <p>
-      A record too short for three cycles simply shows what it has; the window is clamped into the
-      capture rather than reaching past it, and <strong>Record (ms)</strong> is the control that
-      fixes that. With no frequency measured — noise, DC, silence — the window is left at the whole
-      record and the other two are still set.
+      <strong>It sets the timebase</strong>, which is what makes it a horizontal control at all:
+      three cycles over the ten divisions, on the nearest rung, so the record itself grows or
+      shrinks to hold what was asked for — three cycles of 20&nbsp;Hz is 150&nbsp;ms, which no
+      amount of windowing could have shown on a 20&nbsp;ms capture. The window it sets is still
+      clamped into the record already on screen, so the trace does not stop in the middle of the
+      plot while the next capture arrives at the new length. With no frequency measured — noise,
+      DC, silence — the timebase is left alone and the vertical and the trigger level are still
+      set; the line under the button says which of the two happened.
     </p>
 
     <h2>The pass/fail mask</h2>
@@ -1702,9 +1788,11 @@ const { showPage } = useManual()
         <tr>
           <td>Keep</td>
           <td>
-            How many records are kept — 8, 32, 128, or all of them. A <em>record count</em> rather
-            than a time, because records arrive at a rate set by the record length, the trigger and
-            the DUT: two seconds is anywhere between one record and two hundred.
+            How many records are kept — <strong>8</strong>, <strong>32</strong>,
+            <strong>128</strong>, or <strong>∞</strong>, all of them. A <em>record count</em>
+            rather than a time, because records arrive at a rate set by the record length, the
+            trigger and the DUT: two seconds is anywhere between one record and two hundred. The
+            buttons are labelled with the count; hover one for the whole phrase.
           </td>
         </tr>
         <tr>
@@ -1788,12 +1876,33 @@ const { showPage } = useManual()
 
     <h2>Cursors</h2>
     <p>
-      Two pairs of measuring lines, switched on in the display rail and <strong>dragged by the
-      lettered grips on the chart</strong> — time along the bottom edge, level down the left. The
-      number boxes beside each checkbox are the precise fallback. Switching a pair on places it a
-      quarter and three quarters across the window, so it is never stacked somewhere you cannot
-      find it.
+      Two pairs of measuring lines, switched on with the two buttons in the display rail and
+      <strong>dragged by the lettered grips on the chart</strong> — time along the bottom edge,
+      level down the left. The number boxes beside each are the precise fallback. Switching a pair
+      on places it a quarter and three quarters across the window, so it is never stacked somewhere
+      you cannot find it.
     </p>
+    <p>
+      <strong>Style</strong> decides where the figures are written, and the two answers are the
+      ones a bench scope offers:
+    </p>
+    <ul>
+      <li>
+        <strong>Fixed</strong> — every reading in one box on the plot, which you can
+        <strong>drag anywhere</strong>. One place to look, and it only covers the trace if you put
+        it there. Where you leave it is forgotten when you close the app; the choice of style is
+        not.
+      </li>
+      <li>
+        <strong>Following</strong> — each line carries its own value, with a double-headed arrow
+        between the pair carrying the difference. The figures are where the lines are, at the cost
+        of text that moves as you drag. <strong>The arrows and their figures are red</strong>, in
+        neither cursor's own colour: an arrow is a reading of the <em>span</em> rather than of
+        either line, and drawn in the lines' colour the two readings read as one. An arrow is drawn
+        only when both of its cursors are on screen: one pinned to the edge would read as a
+        measurement to the edge.
+      </li>
+    </ul>
     <ul>
       <li>
         <strong>Time cursors</strong> read where each sits, the time between them, and
@@ -1806,10 +1915,17 @@ const { showPage } = useManual()
         <strong>Level cursors</strong> read each level and <strong>ΔV</strong>. They do not gate
         anything — a pair of levels names no stretch of the record.
       </li>
+      <li>
+        With <strong>both</strong> pairs on there is one more reading: <strong>ΔV/Δt</strong>, the
+        level difference over the time between them. Put them either side of the straight part of
+        an edge and it is a slew rate; put them anywhere else and it is the average slope of
+        whatever is between them, which is a different claim. It is written with the denominator
+        scaled — 20.3 V/ms rather than 20 300 V/s — the way a datasheet quotes one.
+      </li>
     </ul>
     <p>
-      <strong>While the time pair is on, the Measurements panel reads the stretch between them</strong>
-      instead of the whole window, and says so above the figures. The window travels to the analyzer
+      <strong>While the time pair is on, the readings under the chart are of the stretch between
+      them</strong> instead of the whole window, and the table says so above them. The window travels to the analyzer
       and it measures those samples afresh: gating on the drawn picture would be a reading of the
       min/max columns rather than a measurement. A pair with no span, or one dragged entirely off
       the record, gates nothing and the panel goes back to the window's own figures rather than

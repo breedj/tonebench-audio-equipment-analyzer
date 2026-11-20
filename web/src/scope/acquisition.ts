@@ -13,10 +13,15 @@
 
 export type ScopeAccumulation = 'Normal' | 'Average' | 'Envelope'
 
-export const SCOPE_ACCUMULATIONS: readonly { value: ScopeAccumulation; label: string }[] = Object.freeze([
-  { value: 'Normal', label: 'Normal' },
-  { value: 'Average', label: 'Average' },
-  { value: 'Envelope', label: 'Envelope' },
+export const SCOPE_ACCUMULATIONS: readonly {
+  value: ScopeAccumulation
+  label: string
+  /** The figure the control is drawn as — see scope/displayIcons.ts. */
+  icon: string
+}[] = Object.freeze([
+  { value: 'Normal', label: 'Normal', icon: 'accNormal' },
+  { value: 'Average', label: 'Average', icon: 'accAverage' },
+  { value: 'Envelope', label: 'Envelope', icon: 'accEnvelope' },
 ])
 
 /** The tooltip each one gets. The difference between Average and Envelope is the one worth stating. */

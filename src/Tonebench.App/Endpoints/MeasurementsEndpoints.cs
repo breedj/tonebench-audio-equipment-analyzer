@@ -237,7 +237,7 @@ public static class MeasurementsEndpoints
                 record.Spliced,
                 record.Forced,
                 channels,
-                Math: null,
+                Maths: null,
                 Xy: null,
                 Filtered: path.Changes));
         });

@@ -82,6 +82,7 @@ import {
   type ScopeAxisWindow,
 } from './scope/display'
 import { cursorGate, DEFAULT_SCOPE_CURSORS, type ScopeCursors } from './scope/cursors'
+import { DEFAULT_CURSOR_BOX_POSITION } from './scope/cursorOverlay'
 import {
   addMaskVerdict,
   newMaskTally,
@@ -90,7 +91,7 @@ import {
 } from './scope/mask'
 import { autosetNote, scopeAutoset } from './scope/autoset'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
-import { mathQueryValue } from './scope/math'
+import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
@@ -103,7 +104,14 @@ import {
 import { useScopeMeasurements } from './composables/useScopeMeasurements'
 import { DEFAULT_SCOPE_PATH, pathQuery, pathSummary, type ScopeSignalPathSettings } from './scope/signalPath'
 import { DEFAULT_SCOPE_TRIGGER } from './scope/triggerSpec'
-import { clampWindow, recordWindow, type ScopeTimeWindow } from './scope/timeAxis'
+import {
+  clampWindow,
+  followRecordWindow,
+  isWholeRecord,
+  recordSecondsFor,
+  recordWindow,
+  type ScopeTimeWindow,
+} from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
 import { recordExtremes } from './scope/measurements'
 import SaveAsDialog from './components/SaveAsDialog.vue'
@@ -2107,6 +2115,8 @@ const scopeShowTriggerLevel = ref(DEFAULT_SCOPE_DISPLAY.showTriggerLevel)
 const scopeShowLeft = ref(DEFAULT_SCOPE_DISPLAY.showLeft)
 const scopeShowRight = ref(DEFAULT_SCOPE_DISPLAY.showRight)
 const scopeShowResidual = ref(DEFAULT_SCOPE_DISPLAY.showResidual)
+/** Which style the cursors are read in. A preference, so it is stored; their positions are not. */
+const scopeCursorStyle = ref(DEFAULT_SCOPE_DISPLAY.cursorStyle)
 const scopePersistence = ref(DEFAULT_SCOPE_DISPLAY.persistence)
 const scopeIntensityMode = ref(DEFAULT_SCOPE_DISPLAY.intensityMode)
 const scopeIntensityPalette = ref(DEFAULT_SCOPE_DISPLAY.intensityPalette)
@@ -2131,7 +2141,11 @@ const scopePersistenceKey = computed(
   () =>
     `${currentTypeId.value ?? 0}:${scopePersistenceCleared.value}:${scopeCaptureSignature(scopeCaptureFacts.value)}:${scopePath.value.coupling}`,
 )
-const scopeMathOperation = ref(DEFAULT_SCOPE_DISPLAY.mathOperation)
+/** The two math channels — what each computes and on which inputs. See scope/math.ts. */
+const scopeMaths = ref<[ScopeMathSpec, ScopeMathSpec]>([
+  { ...DEFAULT_SCOPE_DISPLAY.maths[0] },
+  { ...DEFAULT_SCOPE_DISPLAY.maths[1] },
+])
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
 /** The display path — the coupling and the in-path filter. One ref, because it is one thing. */
@@ -2231,6 +2245,16 @@ const scopePlaneShowing = computed(() => scopeXyShowing.value || scopeEyeShowing
 const scopeCursors = ref<ScopeCursors>({ ...DEFAULT_SCOPE_CURSORS })
 
 /**
+ * Where the Fixed cursor box sits, as a fraction of the plot's free travel.
+ *
+ * <p>Session state beside the cursors themselves and for the same reason: where somebody put the
+ * readout while reading a measurement is a fact about that session, so it is not in
+ * <code>params_json</code> and not in a report. The <em>style</em> is a preference and is stored —
+ * see <code>scope/cursorOverlay.ts</code>.</p>
+ */
+const scopeCursorBox = ref({ ...DEFAULT_CURSOR_BOX_POSITION })
+
+/**
  * The five settings the chart needs as well as the panel.
  *
  * <p>Here rather than inside `ScopeConfigPanel` because the chart <b>writes</b> the trigger level —
@@ -2305,6 +2329,38 @@ watch(
     scopeTimeFromS.value = window.fromS
     scopeTimeToS.value = window.toS
     scopeViewWindow.value = null
+  },
+)
+
+/**
+ * The record's geometry moved under the window, so the window follows it.
+ *
+ * <p>Reachable now that the Acquisition panel is live: the record length and the pre-trigger
+ * fraction can both change while the scope is running, and a window left where it was can then
+ * hold no samples at all — the chart draws nothing with a live capture on hand and no error
+ * anywhere, which is the Roll-crossing fault above in another costume.</p>
+ *
+ * <p><b>A window that was the record follows it; a deliberate zoom is only clamped</b> — see
+ * <code>followRecordWindow</code>. Rewriting a zoom would throw away a stretch the reader chose to
+ * look at, and leaving an unzoomed window behind would make shortening the record read as the
+ * trace disappearing. The zoom is cleared only in the first case, for the same reason.</p>
+ *
+ * <p>Not folded into the Roll watcher above: that one fires on a <em>crossing</em> and rewrites
+ * unconditionally, because there the axis's own zero has moved.</p>
+ */
+watch(
+  () => [scopeRecordSeconds.value, scopePreTriggerFraction.value] as const,
+  ([record, pre], [wasRecord, wasPre]) => {
+    if (!isOscilloscope.value || wasRecord === undefined || scopeMode.value === 'Roll') return
+    if (record === wasRecord && pre === wasPre) return
+
+    const oldBounds = recordWindow(wasRecord, wasPre)
+    const newBounds = recordWindow(record, pre)
+    const current = { fromS: scopeTimeFromS.value, toS: scopeTimeToS.value }
+    const next = followRecordWindow(current, oldBounds, newBounds)
+    scopeTimeFromS.value = next.fromS
+    scopeTimeToS.value = next.toS
+    if (isWholeRecord(current, oldBounds)) scopeViewWindow.value = null
   },
 )
 
@@ -2396,7 +2452,7 @@ const {
   setWindow: setOscilloscopeWindow,
   setGate: setOscilloscopeGate,
   setResidual: setOscilloscopeResidual,
-  setMath: setOscilloscopeMath,
+  setMaths: setOscilloscopeMaths,
   setXy: setOscilloscopeXy,
   setEye: setOscilloscopeEye,
   setPath: setOscilloscopePath,
@@ -2549,10 +2605,11 @@ function currentScopeDisplay() {
     showDataPoints: scopeShowDataPoints.value,
     showTriggerLevel: scopeShowTriggerLevel.value,
     showResidual: scopeShowResidual.value,
+    cursorStyle: scopeCursorStyle.value,
     persistence: scopePersistence.value,
     intensityMode: scopeIntensityMode.value,
     intensityPalette: scopeIntensityPalette.value,
-    mathOperation: scopeMathOperation.value,
+    maths: [{ ...scopeMaths.value[0] }, { ...scopeMaths.value[1] }] as [ScopeMathSpec, ScopeMathSpec],
     chartView: scopeChartView.value,
     path: { ...scopePath.value },
     drawing: scopeDrawing.value,
@@ -2587,10 +2644,11 @@ function applyStoredScopeDisplay(paramsJson: string) {
   // wrong place until its chart reported for itself.
   scopeViewWindow.value = null
   scopeShowResidual.value = display.showResidual
+  scopeCursorStyle.value = display.cursorStyle
   scopePersistence.value = display.persistence
   scopeIntensityMode.value = display.intensityMode
   scopeIntensityPalette.value = display.intensityPalette
-  scopeMathOperation.value = display.mathOperation
+  scopeMaths.value = [{ ...display.maths[0] }, { ...display.maths[1] }]
   scopeChartView.value = display.chartView
   scopePath.value = { ...display.path }
   scopeDrawing.value = display.drawing
@@ -2632,10 +2690,11 @@ watch(
     scopeShowLeft,
     scopeShowRight,
     scopeShowResidual,
+    scopeCursorStyle,
     scopePersistence,
     scopeIntensityMode,
     scopeIntensityPalette,
-    scopeMathOperation,
+    scopeMaths,
     scopeChartView,
     scopePath,
     scopeDrawing,
@@ -2676,18 +2735,24 @@ watch(
 )
 
 /**
- * And so is the math channel — the derived trace is computed server-side on the window being
- * drawn and arrives on the same slice, so picking an operation is a fetch as well as a preference.
+ * And so are the two math channels — each derived trace is computed server-side on the window
+ * being drawn and arrives on the same slice, so picking an operation is a fetch as well as a
+ * preference.
  *
- * <p><code>mathQueryValue</code> rather than the raw ref, so Off asks for nothing at all and the
- * request is byte-identical to the one before any of this existed.</p>
+ * <p><b>Both in one call</b>, because they ride on one request: two calls would be two fetches of
+ * the same record, and on a running scope the second would be of a <em>later</em> one — two math
+ * traces drawn against one waveform but not against each other.</p>
+ *
+ * <p><code>mathSpecQuery</code> rather than the raw specs, so off asks for nothing at all and a
+ * scope with no math on sends the request it sent before any of this existed.</p>
  */
 watch(
-  scopeMathOperation,
-  (operation) => {
-    if (isOscilloscope.value) void setOscilloscopeMath(mathQueryValue(operation)).catch(() => undefined)
+  scopeMaths,
+  (specs) => {
+    if (!isOscilloscope.value) return
+    void setOscilloscopeMaths(specs.map(mathSpecQuery)).catch(() => undefined)
   },
-  { immediate: true },
+  { immediate: true, deep: true },
 )
 
 /**
@@ -2800,12 +2865,26 @@ async function runOscilloscope(request: import('./api/client').OscilloscopeStart
  * happens, by stopping and starting the run itself — which is what the user meant by turning the
  * control, and costs them nothing to find out.</p>
  */
+/** True while a sample-rate change is being answered by a background stop and start. */
+let scopeRestarting = false
+
 async function onScopeRetune(request: import('./api/client').OscilloscopeStartRequest) {
   if (!scopeRunning.value) return
 
   if (Math.abs(request.sampleRateHz - scopeSampleRateHz.value) > 0.5) {
-    await cancelOscilloscopeRun()
-    await runOscilloscope(request)
+    // One restart at a time. The rate is a dropdown, so two picks in quick succession are ordinary,
+    // and a second cancel/start pair overlapping the first would race `/start`'s own run guard --
+    // which answers "another measurement is still running", the one answer a turned knob must never
+    // get. Dropping the second costs nothing: the panel's debounced watcher sends the final state
+    // again on the next tick.
+    if (scopeRestarting) return
+    scopeRestarting = true
+    try {
+      await cancelOscilloscopeRun()
+      await runOscilloscope(request)
+    } finally {
+      scopeRestarting = false
+    }
     return
   }
 
@@ -2892,6 +2971,10 @@ function autosetOscilloscope() {
 
   scopeVoltsPerDivision.value = result.voltsPerDivision
   scopeVoltOffsetV.value = result.offsetV
+  // The timebase first: the record then holds three periods, and the window written below is what
+  // the *record on hand* can show until the next capture arrives at the new length. Autoset is a
+  // horizontal control now rather than only a chooser of windows inside whatever was set.
+  if (result.timePerDivisionS !== null) scopeRecordSeconds.value = recordSecondsFor(result.timePerDivisionS)
   scopeTimeFromS.value = result.fromS
   scopeTimeToS.value = result.toS
   // The zoom goes with it, or a window dragged on the chart would go on overriding the one Autoset
@@ -2918,6 +3001,21 @@ function autosetOscilloscope() {
  */
 function onScopeCursorsCommitted() {
   void setOscilloscopeGate(cursorGate(scopeCursors.value)).catch(() => undefined)
+}
+
+/**
+ * The trigger-position marker was dragged: the fraction is written live, the capture re-armed once
+ * on the release.
+ *
+ * <p>The same pair the trigger level uses, and now meaningful <em>mid-run</em>: the pre-trigger is
+ * a setting the analyzer takes in place, so the drag re-arms rather than needing a Stop.</p>
+ */
+function onScopePreTriggerChanged(fraction: number) {
+  scopePreTriggerFraction.value = fraction
+}
+
+function onScopePreTriggerCommitted() {
+  scopeConfigPanel.value?.flushRetune()
 }
 
 /** "Set axis" from the chart: the window on screen written back into the display panel's boxes. */
@@ -5348,7 +5446,32 @@ onBeforeUnmount(() => stopLoadPolling?.())
 </script>
 
 <template>
-  <div class="flex h-screen flex-col bg-[var(--surface-ground)] text-neutral-900 dark:text-neutral-100">
+  <!--
+    The shell: a viewport-tall column that never scrolls itself.
+
+    `overflow-hidden` is load-bearing. Without it the three content-sized children below - the
+    update banner, this header and the status bar - could push the column past the viewport, and
+    what spilled went to the *document*: a scrollbar of its own that took the status bar up with it
+    when it was used (reported 2026-11-20). The one thing that may give way is the middle, which
+    carries `flex-1 overflow-hidden` and so has a floor of zero.
+
+    `h-dvh` rather than `h-screen` for the same reason one layer out: `vh` ignores a horizontal
+    scrollbar, so on any window that grew one, `100vh` was already taller than what was left.
+
+    `relative` is the other half of the clip and is not decoration. `overflow-hidden` on a *static*
+    box clips only the descendants it is the containing block for, and an absolutely positioned one
+    with no positioned ancestor is laid out against the initial containing block instead - so it
+    escapes to the document however many clipping ancestors it has. Measured here: the `sr-only`
+    panel-hint spans are `position: absolute` at their static position inside the scrolled `<main>`,
+    which on the oscilloscope screen is some 700 px below the fold, and the furthest of them was
+    setting `document.scrollingElement.scrollHeight` to 1709 against a 1000 px viewport - the
+    reported scrollbar exactly, with `overflow-hidden` already in place and doing nothing about it.
+    Making the shell a containing block costs nothing geometrically, since it is at the origin and
+    exactly the viewport's size, and `fixed` descendants (the expanded chart) are unaffected.
+  -->
+  <div
+    class="relative flex h-dvh flex-col overflow-hidden bg-[var(--surface-ground)] text-neutral-900 dark:text-neutral-100"
+  >
     <!-- First in the tree and `fixed`, so it is painted over everything without taking part in the
          layout underneath -- see SplashScreen.vue. It unmounts itself through @done once its own
          fade has finished, rather than on the hold's timer, or it would disappear instead of
@@ -5356,7 +5479,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
     <SplashScreen v-if="splashShowing" @done="splashShowing = false" />
 
     <UpdateBanner />
-    <header class="flex items-center gap-3 border-b border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 dark:border-neutral-800">
+    <header
+      class="flex shrink-0 items-center gap-3 border-b border-neutral-200 bg-[var(--surface-panel)] px-4 py-2 dark:border-neutral-800"
+    >
       <!-- The mark and the name are one unit, so they sit in their own flex box: the header's own
            gap-3 is the spacing between the *controls* on the bar, and applied between these two it
            reads as an icon that belongs to nothing in particular.
@@ -6501,6 +6626,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :device-kind="status?.deviceKind"
                   :restore="scopeGeneratorRestore"
                   :stimulus="scopeStimulus"
+                  :show-load="false"
                   :staged-sample-rate-hz="scopeStagedSampleRateHz"
                   @change="applyScopeGeneratorLive"
                 />
@@ -6528,13 +6654,8 @@ onBeforeUnmount(() => stopLoadPolling?.())
                 />
 
                 <ScopeMeasurementsPanel
-                  :volts-per-division="scopeVoltsPerDivision"
                   :time-from-s="scopeTimeFromS"
                   :time-to-s="scopeTimeToS"
-                  :show-left="scopeShowLeft"
-                  :show-right="scopeShowRight"
-                  :path-note="scopePathNote"
-                  @pick-measurements="scopeMeasurementPickerOpen = true"
                 />
               </template>
 
@@ -6596,6 +6717,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-else
                   ref="scopeChart"
                   v-model:annotations="shownAnnotations"
+                  :cursor-style="scopeCursorStyle"
+                  :cursor-box="scopeCursorBox"
+                  @cursor-box-moved="scopeCursorBox = $event"
+                  @pre-trigger-changed="onScopePreTriggerChanged"
+                  @pre-trigger-committed="onScopePreTriggerCommitted"
                   v-model:annotation-armed="annotationArmed"
                   v-model:trigger-level-v="scopeTriggerLevelV"
                   v-model:cursors="scopeCursors"
@@ -6619,7 +6745,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :persistence="scopePersistence"
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
-                  :math-operation="scopeMathOperation"
+                  :maths="scopeMaths"
                   :path-note="scopePathNote"
                   :drawing="scopeDrawing"
                   :references="visibleScopeOverlays"
@@ -6667,10 +6793,11 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:show-left="scopeShowLeft"
                   v-model:show-right="scopeShowRight"
                   v-model:show-residual="scopeShowResidual"
+                  v-model:cursor-style="scopeCursorStyle"
                   v-model:persistence="scopePersistence"
                   v-model:intensity-mode="scopeIntensityMode"
                   v-model:intensity-palette="scopeIntensityPalette"
-                  v-model:math-operation="scopeMathOperation"
+                  v-model:maths="scopeMaths"
                   v-model:chart-view="scopeChartView"
                   v-model:path="scopePath"
                   v-model:drawing="scopeDrawing"

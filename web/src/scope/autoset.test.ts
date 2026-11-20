@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AUTOSET_PERIODS, autosetNote, scopeAutoset } from './autoset'
+import { SCOPE_TIME_PER_DIVISION_LADDER, snapTimePerDivision } from './timeAxis'
 
 /** A 1 kHz sine of ±0.7 V in a 20 ms record with a quarter of it before the trigger. */
 const TONE = {
@@ -109,5 +110,33 @@ describe('autosetNote', () => {
 
   it('is nothing at all with nothing to report', () => {
     expect(autosetNote(null)).toBeNull()
+  })
+})
+
+describe('the timebase Autoset sets', () => {
+  const steady = { maxV: 1, minV: -1, recordFromS: -0.005, recordToS: 0.015 }
+
+  it('is three periods over the ten divisions, on a rung', () => {
+    // 1 kHz: three periods is 3 ms, which is 0.3 ms a division -- the ladder's nearest rung is 0.2.
+    const result = scopeAutoset({ ...steady, frequencyHz: 1000 })
+    expect(result?.timePerDivisionS).toBeCloseTo(snapTimePerDivision(3e-3 / 10), 15)
+    expect(SCOPE_TIME_PER_DIVISION_LADDER).toContain(result?.timePerDivisionS)
+  })
+
+  it('asks for a record far longer than the one on hand where the signal is slow', () => {
+    // The whole point of it being a horizontal control: three periods of 20 Hz is 150 ms, which the
+    // 20 ms record in `steady` cannot hold at all. Before the timebase this could only clamp.
+    const result = scopeAutoset({ ...steady, frequencyHz: 20 })
+    expect(result?.timePerDivisionS).not.toBeNull()
+    const record = result!.timePerDivisionS! * 10
+    expect(record).toBeGreaterThan(steady.recordToS - steady.recordFromS)
+  })
+
+  it('leaves the record alone with no frequency to size one from', () => {
+    expect(scopeAutoset({ ...steady, frequencyHz: null })?.timePerDivisionS).toBeNull()
+  })
+
+  it('says what it set, so the press is not silent about the record changing', () => {
+    expect(autosetNote(scopeAutoset({ ...steady, frequencyHz: 1000 }))).toMatch(/Timebase .+\/div\./)
   })
 })

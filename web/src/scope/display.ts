@@ -5,7 +5,14 @@ import {
   type ScopeIntensityMode,
   type ScopePersistence,
 } from './persistence'
-import { SCOPE_MATH_OPERATIONS, type ScopeMathOperation } from './math'
+import { DEFAULT_SCOPE_CURSOR_STYLE, isScopeCursorStyle, type ScopeCursorStyle } from './cursorOverlay'
+import {
+  DEFAULT_SCOPE_MATH_SPEC,
+  SCOPE_MATH_OPERATIONS,
+  mathSpecFromStored,
+  type ScopeMathOperation,
+  type ScopeMathSpec,
+} from './math'
 import { SCOPE_VIEWS, type ScopeView } from './xy'
 import { SCOPE_DRAWINGS, type ScopeDrawing } from './interpolation'
 import {
@@ -65,6 +72,15 @@ export interface ScopeDisplay {
    */
   showResidual: boolean
   /**
+   * Which style the cursors are read in — one box of figures, or a value on each line.
+   *
+   * <p><b>A preference, where the cursors' own positions are not.</b> Where somebody happened to
+   * leave a cursor while reading a measurement is a fact about that session; how they like their
+   * readouts written is a setting like the trace weight, and resetting it on every measurement
+   * switch would be the one of the two that is merely annoying.</p>
+   */
+  cursorStyle: ScopeCursorStyle
+  /**
    * How long the chart keeps each record's trace — the digital-phosphor picture, where how often
    * the trace passes through a pixel decides how it is painted. See scope/persistence.ts.
    *
@@ -84,7 +100,14 @@ export interface ScopeDisplay {
    * the derived trace is recomputed whenever the record is drawn: that is what lets the operation
    * be changed on a reopened capture, where a stored derived waveform could not be.</p>
    */
-  mathOperation: ScopeMathOperation
+  /**
+   * The two math channels — what each computes and on which inputs. See scope/math.ts.
+   *
+   * <p>A display preference rather than part of the measurement, so each derived trace is
+   * recomputed whenever the record is drawn: that is what lets an operation be changed on a
+   * reopened capture, where a stored derived waveform could not be.</p>
+   */
+  maths: [ScopeMathSpec, ScopeMathSpec]
   /**
    * Which picture the chart draws — the waveforms against time, or one channel against the other.
    *
@@ -193,6 +216,8 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   showLeft: true,
   showRight: true,
   showResidual: false,
+  /** Fixed, which is the Siglent's own default and never lands on the trace unless it is put there. */
+  cursorStyle: DEFAULT_SCOPE_CURSOR_STYLE,
   /**
    * Off by default. Persistence is what a reader turns on while hunting something intermittent; on
    * a steady signal it draws the same trace over itself and buys nothing but a slower redraw.
@@ -204,7 +229,9 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
    * Off by default, and asked for rather than always sent: a math trace is a pass over the window
    * on every fetch, and most of what a scope is pointed at wants the two waveforms themselves.
    */
-  mathOperation: 'Off',
+  /** Both off: a math channel is a pass over the window on every fetch, and most of what a scope
+   *  is pointed at wants the two waveforms themselves. */
+  maths: [{ ...DEFAULT_SCOPE_MATH_SPEC }, { ...DEFAULT_SCOPE_MATH_SPEC }] as [ScopeMathSpec, ScopeMathSpec],
   /** The waveform, which is what a scope is for; X–Y is a view a reader switches to on purpose. */
   chartView: 'Waveform',
   /** DC: a scope shows what arrived until somebody asks it not to. */
@@ -262,7 +289,13 @@ export function scopeDisplayFromParams(
   paramsJson: string | null | undefined,
   base: Readonly<ScopeDisplay> = DEFAULT_SCOPE_DISPLAY,
 ): ScopeDisplay {
-  const display: ScopeDisplay = { ...base, annotations: [...base.annotations], path: { ...base.path } }
+  const display: ScopeDisplay = {
+    ...base,
+    annotations: [...base.annotations],
+    path: { ...base.path },
+    // Copied, not shared: the base is frozen and the restore below writes into this pair.
+    maths: [{ ...base.maths[0] }, { ...base.maths[1] }],
+  }
   if (!paramsJson) return display
 
   let stored: Partial<OscilloscopeParameters>
@@ -303,6 +336,7 @@ export function scopeDisplayFromParams(
   if (typeof stored.chartShowLeft === 'boolean') display.showLeft = stored.chartShowLeft
   if (typeof stored.chartShowRight === 'boolean') display.showRight = stored.chartShowRight
   if (typeof stored.chartShowResidual === 'boolean') display.showResidual = stored.chartShowResidual
+  if (isScopeCursorStyle(stored.chartCursorStyle)) display.cursorStyle = stored.chartCursorStyle
 
   // Validated against the tables rather than cast: a stored string from a newer build, or a
   // hand-edited one, would otherwise reach the painter as a palette that does not exist.
@@ -318,11 +352,29 @@ export function scopeDisplayFromParams(
     (PALETTE_NAMES as string[]).includes(stored.chartIntensityPalette)
   )
     display.intensityPalette = stored.chartIntensityPalette as import('../api/client').DecayPalette
+  // The two math channels. Each is three stored fields, and a measurement saved before the sources
+  // could be chosen carries only the operation -- which read A as the left input and B as the
+  // right, so that is what an absent pair means. An operation whose operands were the other way
+  // round (BMinusA, NegateB, dB/dt, integral B) comes back as its own tile with the sources
+  // exchanged, so the trace is unchanged and nothing saved loses its meaning.
   if (
     typeof stored.chartMathOperation === 'string' &&
     SCOPE_MATH_OPERATIONS.some((o) => o.value === stored.chartMathOperation)
   )
-    display.mathOperation = stored.chartMathOperation as ScopeMathOperation
+    display.maths[0] = mathSpecFromStored(
+      stored.chartMathOperation as ScopeMathOperation,
+      stored.chartMathSourceA,
+      stored.chartMathSourceB,
+    )
+  if (
+    typeof stored.chartMath2Operation === 'string' &&
+    SCOPE_MATH_OPERATIONS.some((o) => o.value === stored.chartMath2Operation)
+  )
+    display.maths[1] = mathSpecFromStored(
+      stored.chartMath2Operation as ScopeMathOperation,
+      stored.chartMath2SourceA,
+      stored.chartMath2SourceB,
+    )
   if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
     display.chartView = stored.chartView as ScopeView
 
@@ -380,10 +432,16 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartShowLeft: display.showLeft,
     chartShowRight: display.showRight,
     chartShowResidual: display.showResidual,
+    chartCursorStyle: display.cursorStyle,
     chartPersistence: display.persistence,
     chartIntensityMode: display.intensityMode,
     chartIntensityPalette: display.intensityPalette,
-    chartMathOperation: display.mathOperation,
+    chartMathOperation: display.maths[0].operation,
+    chartMathSourceA: display.maths[0].sourceA,
+    chartMathSourceB: display.maths[0].sourceB,
+    chartMath2Operation: display.maths[1].operation,
+    chartMath2SourceA: display.maths[1].sourceA,
+    chartMath2SourceB: display.maths[1].sourceB,
     chartView: display.chartView,
     chartCoupling: display.path.coupling,
     chartDrawing: display.drawing,

@@ -174,11 +174,25 @@ describe('parseScopeMeasurementIds, with sources', () => {
 
   it('orders by the catalogue first and the source second', () => {
     // rms comes after pkpk in the catalogue, whichever order they were pressed in.
-    expect(parseScopeMeasurementIds(['rms:ch0', 'pkpk:math', 'pkpk:ch0'])).toEqual([
+    expect(parseScopeMeasurementIds(['rms:ch0', 'pkpk:math1', 'pkpk:ch0'])).toEqual([
       'pkpk:ch0',
-      'pkpk:math',
+      'pkpk:math1',
       'rms:ch0',
     ])
+  })
+
+  /**
+   * There was one math channel until 2026-11-20, spelled `math`; there are two. An unknown source
+   * is dropped by the loop below, so without the rename every stored selection would silently lose
+   * its math rows — a setting disappearing rather than changing.
+   */
+  it('reads the one math channel’s old source name as the first of the two', () => {
+    expect(parseScopeMeasurementIds(['pkpk:math'])).toEqual(['pkpk:math1'])
+    expect(parseScopeMeasurementIds(['rms:math', 'rms:math2'])).toEqual(['rms:math1', 'rms:math2'])
+  })
+
+  it('still drops a source it has never had', () => {
+    expect(parseScopeMeasurementIds(['pkpk:ch9', 'pkpk:stim'])).toEqual([])
   })
 
   it('reads a bare id, which is everything stored before this existed', () => {
@@ -210,7 +224,11 @@ describe('removeScopeSelectionRow', () => {
    * what the cross did before a source could be chosen, and is not what it means now.
    */
   it('expands a bare entry rather than dropping the whole measurement', () => {
-    expect(removeScopeSelectionRow(['pkpk'], 'pkpk:ch0')).toEqual(['pkpk:ch1', 'pkpk:math'])
+    expect(removeScopeSelectionRow(['pkpk'], 'pkpk:ch0')).toEqual([
+      'pkpk:ch1',
+      'pkpk:math1',
+      'pkpk:math2',
+    ])
   })
 
   it('leaves other measurements alone', () => {

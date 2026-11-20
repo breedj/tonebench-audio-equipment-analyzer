@@ -131,8 +131,8 @@ public class ScopeEnvelopeSliceTests
         var record = Envelope([-1.0, -1.0], [1.0, 1.0], [-2.0, -2.0], [2.0, 2.0]);
         var slice = ScopeFrameBuilder.Overview(record, channel: 0);
 
-        Assert.Null(ScopeFrameBuilder.MathTrace(record, slice, WaveformOperation.AMinusB));
-        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0.0, 1.0));
+        Assert.Null(ScopeFrameBuilder.MathTrace(record, slice, 1, WaveformOperation.AMinusB, 0, 1));
+        Assert.Null(ScopeFrameBuilder.MathGate(record, WaveformOperation.AMinusB, 0, 1, 0.0, 1.0));
     }
 
     [Fact]

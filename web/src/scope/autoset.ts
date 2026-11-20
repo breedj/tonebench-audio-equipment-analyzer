@@ -18,6 +18,7 @@
 
 import { fitVoltWindow, roundVoltsForWindow } from './voltAxis'
 import { fiftyPercentLevel } from './triggerSpec'
+import { formatScopeTime, snapTimePerDivision, timePerDivisionFor } from './timeAxis'
 
 /** How many periods of the measured signal Autoset puts on screen. */
 export const AUTOSET_PERIODS = 3
@@ -54,6 +55,19 @@ export interface ScopeAutoset {
   triggerLevelV: number
   /** Null where no frequency was measured: the window is then the record, and this says so. */
   periodS: number | null
+  /**
+   * The timebase to capture at — three periods over the ten divisions, snapped to a rung.
+   *
+   * <p><b>Null where there is no frequency to work from</b>, in which case the record is left as it
+   * is and only the vertical and the trigger are set.</p>
+   *
+   * <p>This is what makes Autoset a horizontal control at all. Until the timebase existed it could
+   * only choose a <em>window</em> inside whatever record happened to be set, so three periods of
+   * 20 Hz — 150 ms — simply could not be shown on a 20 ms capture, and the honest answer was to
+   * clamp and let the reader fix the record by hand. Setting the record is the better answer, and
+   * the clamp below is now a fallback rather than the rule.</p>
+   */
+  timePerDivisionS: number | null
 }
 
 /** What Autoset reads: the measured extremes and frequency of the trace it is setting up for. */
@@ -70,12 +84,14 @@ export interface ScopeAutosetInput {
 /**
  * Works out the three settings.
  *
- * <p><b>The window is clamped into the record rather than allowed past it</b>, and that is the one
- * rule here that is quietly wrong by default: three periods of 20 Hz is 150 ms, which a 20 ms
- * record does not contain, and a window reaching past the capture draws a trace that stops in the
- * middle of the plot with empty graticule either side. Clamped, a record too short for three
- * periods simply shows what it has — which is the honest answer, and the capture length is the
- * control that fixes it.</p>
+ * <p><b>It sets the timebase, and the window follows.</b> Three periods over the ten divisions,
+ * snapped to a rung — so the record itself grows or shrinks to hold what was asked for, which is
+ * what a bench scope's own Auto Setup does.</p>
+ *
+ * <p><b>The window it returns is still clamped into the record on hand</b>, which is now a
+ * fallback rather than the rule: the caller applies the timebase and the record follows on the
+ * next capture, so for the record already drawn the clamp is what keeps the trace from stopping in
+ * the middle of the plot with empty graticule either side.</p>
  *
  * <p>Returns null only where the extremes are not numbers, which is a record that measured
  * nothing.</p>
@@ -113,11 +129,19 @@ export function scopeAutoset(input: ScopeAutosetInput): ScopeAutoset | null {
     }
   }
 
+  // Three periods across the whole graticule, on the nearest detent. Null with no frequency, where
+  // there is nothing to size a timebase from and the record is left alone.
+  const timePerDivisionS =
+    periodS !== null
+      ? snapTimePerDivision(timePerDivisionFor(periodS * AUTOSET_PERIODS))
+      : null
+
   return {
     voltsPerDivision: fit.voltsPerDivision,
     offsetV: fit.offsetV,
     fromS,
     toS,
+    timePerDivisionS,
     triggerLevelV: roundVoltsForWindow(
       fiftyPercentLevel(input.maxV, input.minV) as number,
       Math.abs(input.maxV - input.minV),
@@ -133,5 +157,9 @@ export function autosetNote(result: ScopeAutoset | null): string | null {
     return 'No frequency measured, so the window is the whole record — the vertical and the trigger level are set.'
 
   const cycles = (result.toS - result.fromS) / result.periodS
-  return `${cycles.toFixed(1)} cycles on screen, with the trigger level at the middle of the signal.`
+  const timebase =
+    result.timePerDivisionS !== null
+      ? ` Timebase ${formatScopeTime(result.timePerDivisionS * 1000, result.timePerDivisionS * 1000)}/div.`
+      : ''
+  return `${cycles.toFixed(1)} cycles on screen, with the trigger level at the middle of the signal.${timebase}`
 }

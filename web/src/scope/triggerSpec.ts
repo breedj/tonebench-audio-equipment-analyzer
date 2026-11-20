@@ -41,10 +41,24 @@ export const DEFAULT_SCOPE_TRIGGER: Readonly<ScopeTrigger> = Object.freeze({
   holdoffS: 0,
 })
 
-/** One option of a dropdown: the value the server takes, and what the control reads. */
+/**
+ * One option of a trigger control: the value the server takes, what the control reads, and the
+ * figure it is drawn as.
+ *
+ * <p><b>The figure is the point of these being a listbox rather than a
+ * <code>&lt;select&gt;</code>.</b> <em>Edge</em>, <em>Pulse width</em>, <em>Window</em>,
+ * <em>Dropout</em> and <em>Runt</em> are five words a reader parses where five pictures of what
+ * each one fires on are scanned — the argument <code>measurementIcons.ts</code> already makes about
+ * thirty measurement names. <code>glyph</code> is the way out for the two that a picture would say
+ * less about than a letter: an input channel is <b>L</b> or <b>R</b> on every scope ever made.</p>
+ */
 export interface ScopeOption<T extends string> {
   value: T
   label: string
+  /** A figure from <code>scope/displayIcons.ts</code>. */
+  icon?: string
+  /** Or a letter, where that says more. */
+  glyph?: string
 }
 
 /**
@@ -56,10 +70,10 @@ export interface ScopeOption<T extends string> {
  * therefore last.</p>
  */
 export const SCOPE_RUN_MODES: readonly ScopeOption<ScopeRunMode>[] = Object.freeze([
-  { value: 'Auto', label: 'Auto' },
-  { value: 'Normal', label: 'Normal' },
-  { value: 'Single', label: 'Single' },
-  { value: 'Roll', label: 'Roll' },
+  { value: 'Auto', label: 'Auto', icon: 'modeAuto' },
+  { value: 'Normal', label: 'Normal', icon: 'modeNormal' },
+  { value: 'Single', label: 'Single', icon: 'modeSingle' },
+  { value: 'Roll', label: 'Roll', icon: 'modeRoll' },
 ])
 
 /** What each mode does, for the control's tooltip — the difference between Auto and Normal is the one worth stating. */
@@ -71,9 +85,9 @@ export const SCOPE_RUN_MODE_HINTS: Readonly<Record<ScopeRunMode, string>> = Obje
 })
 
 export const SCOPE_TRIGGER_SLOPES: readonly ScopeOption<ScopeTriggerSlope>[] = Object.freeze([
-  { value: 'Rising', label: 'Rising' },
-  { value: 'Falling', label: 'Falling' },
-  { value: 'Either', label: 'Either' },
+  { value: 'Rising', label: 'Rising', icon: 'slopeRising' },
+  { value: 'Falling', label: 'Falling', icon: 'slopeFalling' },
+  { value: 'Either', label: 'Either', icon: 'slopeEither' },
 ])
 
 /**
@@ -81,11 +95,11 @@ export const SCOPE_TRIGGER_SLOPES: readonly ScopeOption<ScopeTriggerSlope>[] = O
  * four that each select a fault an edge trigger cannot pick out of the signal around it.
  */
 export const SCOPE_TRIGGER_KINDS: readonly ScopeOption<ScopeTriggerKind>[] = Object.freeze([
-  { value: 'Edge', label: 'Edge' },
-  { value: 'PulseWidth', label: 'Pulse width' },
-  { value: 'Window', label: 'Window' },
-  { value: 'Dropout', label: 'Dropout' },
-  { value: 'Runt', label: 'Runt' },
+  { value: 'Edge', label: 'Edge', icon: 'kindEdge' },
+  { value: 'PulseWidth', label: 'Pulse width', icon: 'kindPulse' },
+  { value: 'Window', label: 'Window', icon: 'kindWindow' },
+  { value: 'Dropout', label: 'Dropout', icon: 'kindDropout' },
+  { value: 'Runt', label: 'Runt', icon: 'kindRunt' },
 ])
 
 /**
@@ -129,9 +143,9 @@ export const SCOPE_TRIGGER_SLOPE_HINTS: Readonly<Record<ScopeTriggerKind, string
 export type ScopePulseCondition = 'ShorterThan' | 'LongerThan' | 'Between'
 
 export const SCOPE_PULSE_CONDITIONS: readonly ScopeOption<ScopePulseCondition>[] = Object.freeze([
-  { value: 'ShorterThan', label: 'Shorter than' },
-  { value: 'LongerThan', label: 'Longer than' },
-  { value: 'Between', label: 'Between' },
+  { value: 'ShorterThan', label: 'Shorter than', icon: 'widthLess' },
+  { value: 'LongerThan', label: 'Longer than', icon: 'widthGreater' },
+  { value: 'Between', label: 'Between', icon: 'widthBetween' },
 ])
 
 /** The two bounds a condition comes to, in seconds. Null for the upper one means unbounded above. */
@@ -185,9 +199,9 @@ export function pulseWidthFor(condition: ScopePulseCondition, loS: number, hiS: 
  * any feature an edge trigger could lock to.</p>
  */
 export const SCOPE_TRIGGER_SOURCES: readonly ScopeOption<ScopeTriggerSource>[] = Object.freeze([
-  { value: 'ChannelA', label: 'Left' },
-  { value: 'ChannelB', label: 'Right' },
-  { value: 'Stimulus', label: 'Stimulus' },
+  { value: 'ChannelA', label: 'Left', glyph: 'L' },
+  { value: 'ChannelB', label: 'Right', glyph: 'R' },
+  { value: 'Stimulus', label: 'Stimulus', icon: 'sourceStimulus' },
 ])
 
 /** What each source watches, for the control's tooltip. */

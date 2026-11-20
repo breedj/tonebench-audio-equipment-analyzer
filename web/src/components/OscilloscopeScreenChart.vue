@@ -40,6 +40,7 @@ import {
   scopeTimeScale,
   toChartMs,
   fromChartMs,
+  preTriggerFromPointer,
 } from '../scope/timeAxis'
 import { formatVolts, formatVoltsPerDivision, roundVoltsForWindow, voltWindow } from '../scope/voltAxis'
 import {
@@ -71,12 +72,25 @@ import {
 } from '../scope/interpolation'
 import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
 import {
+  clampCursorBox,
+  cursorArrowFits,
+  cursorBoxFraction,
+  cursorBoxRows,
+  cursorLevelSpanLabels,
+  cursorTimeSpanLabels,
+  cursorValueLabel,
+  layoutCursorBox,
+  type CursorId,
+  type ScopeCursorStyle,
+} from '../scope/cursorOverlay'
+import {
   formatMathValue,
-  mathAxisLabel,
-  mathDraws,
-  mathLabel,
+  mathSpecAxisLabel,
+  mathSpecDraws,
+  mathSpecLabel,
   mathUnitOf,
-  type ScopeMathOperation,
+  scopeMathSlice,
+  type ScopeMathSpec,
 } from '../scope/math'
 
 /**
@@ -149,6 +163,18 @@ const props = withDefaults(defineProps<{
   /** The record the settings ask for, so an empty chart can draw the axis the next capture lands on. */
   recordSeconds: number
   preTriggerFraction: number
+  /**
+   * Which style the cursors are read in — one box of figures, or a value on each line.
+   *
+   * <p>A prop rather than a model: it is a <em>display</em> preference the rail owns and stores,
+   * where the cursor positions beside it are session state this chart writes.</p>
+   */
+  cursorStyle: ScopeCursorStyle
+  /**
+   * Where the Fixed box sits, as a fraction of the plot's free travel. See scope/cursorOverlay.ts
+   * for why a fraction rather than pixels.
+   */
+  cursorBox: { x: number; y: number }
   /** True while the run is armed or capturing — what makes the trace read as live rather than held. */
   running?: boolean
   /** Whether each captured input is drawn. The display rail's pair; see scope/display.ts. */
@@ -165,7 +191,13 @@ const props = withDefaults(defineProps<{
    * the record, built server-side on the same geometry as the waveforms so every series on the
    * chart shares one x array.</p>
    */
-  mathOperation?: ScopeMathOperation
+  /**
+   * The two math channels — what each computes and on which inputs.
+   *
+   * <p>A pair rather than one operation, and specs rather than bare operation names: with A and B
+   * chosen, the name alone no longer says which trace it is of.</p>
+   */
+  maths: readonly [ScopeMathSpec, ScopeMathSpec]
   /**
    * What the display path is doing to the trace, in the words the rail uses — or null for a bare
    * record. Shown as a badge, because the path changes what every reading beside it means.
@@ -219,7 +251,6 @@ const props = withDefaults(defineProps<{
   persistence: 'Off',
   intensityMode: 'Single',
   intensityPalette: 'Jet',
-  mathOperation: 'Off',
   pathNote: null,
   captureRates: null,
   drawing: 'Linear',
@@ -244,6 +275,17 @@ const emit = defineEmits<{
    * would ask the server for a window per pointer move.</p>
    */
   cursorsCommitted: []
+  /** The Fixed box was dragged. Session state, so it goes to the screen and no further. */
+  cursorBoxMoved: [position: { x: number; y: number }]
+  /**
+   * The trigger-position marker was dragged, live and then on release.
+   *
+   * <p>Two events for the trigger level's own reason: the fraction is written live so the marker
+   * and the panel's box cannot disagree mid-drag, and the <em>capture</em> is re-armed once on the
+   * release rather than once per pointer move.</p>
+   */
+  preTriggerChanged: [fraction: number]
+  preTriggerCommitted: []
   /**
    * The window this chart is drawing, after anything that moved it.
    *
@@ -289,9 +331,35 @@ const CHANNEL_COLORS = ['#3b82f6', '#f97316'] as const
 
 // The cursor teal is neither channel's colour and not the trigger's amber, which is the whole
 // requirement: a line on this chart has to say what kind of line it is before it says where it is.
+// The Following style's arrows are `arrow` and not `cursor`, which is a reading aid rather than a
+// preference: the arrow measures *between* two cursors, so drawn in their own colour it reads as a
+// third cursor. Red separates the measure from the things measured, which is what every bench scope
+// does with it -- the Siglent's own Following style included.
+//
+// `plotGround` is `--surface-plot`, repeated here as a literal rather than read back through
+// `getComputedStyle` for the decay surface's own reason: an export forces the light theme whatever
+// the app is showing, so a live read would put the dark well under a light picture.
 const THEME = {
-  dark: { axis: '#a3a3a3', grid: '#404040', gridWidth: 1, trigger: '#a3a3a3', marker: '#f59e0b', cursor: '#2dd4bf' },
-  light: { axis: '#525252', grid: '#e5e5e5', gridWidth: 1, trigger: '#525252', marker: '#b45309', cursor: '#0f766e' },
+  dark: {
+    axis: '#a3a3a3',
+    grid: '#404040',
+    gridWidth: 1,
+    trigger: '#a3a3a3',
+    marker: '#f59e0b',
+    cursor: '#2dd4bf',
+    arrow: '#f87171',
+    plotGround: '#15181d',
+  },
+  light: {
+    axis: '#525252',
+    grid: '#e5e5e5',
+    gridWidth: 1,
+    trigger: '#525252',
+    marker: '#b45309',
+    cursor: '#0f766e',
+    arrow: '#dc2626',
+    plotGround: '#ffffff',
+  },
 } as const
 
 type Theme = (typeof THEME)[keyof typeof THEME]
@@ -353,14 +421,18 @@ interface ChannelSeries {
 const RESIDUAL_COLORS = ['#93c5fd', '#fdba74'] as const
 
 /**
- * The math trace's colour.
+ * The two math traces' colours.
  *
- * <p>A third hue rather than a shade of either channel's, because it belongs to neither — A − B
- * is as much the right input's as the left's, and painting it blue would read as a second left
- * trace. Violet is the app's own third accent, and the one the phase curves already use for a
- * quantity drawn against its own axis.</p>
+ * <p>Neither is a shade of a channel's, because a math trace belongs to neither — A − B is as much
+ * the right input's as the left's, and painting it blue would read as a second left trace. Violet
+ * is the app's own third accent and what the phase curves already use for a quantity drawn against
+ * its own axis; pink is the fourth, and as clearly neither input.</p>
+ *
+ * <p><b>Math 2 is also dashed</b>, which is the half that is not decoration: two derived traces
+ * that differ only in hue are one trace in a black-and-white report.</p>
  */
-const MATH_COLOR = '#a855f7'
+const MATH_COLORS = ['#a855f7', '#ec4899'] as const
+const MATH_DASH = [7, 4]
 
 /**
  * How far a reference's colour is pulled toward its run's own hue, and how much of the trace's
@@ -384,7 +456,10 @@ const MASK_COLOR = '#dc2626'
 const MASK_DASH = [5, 4]
 
 /** The scale the math trace is drawn against, which is its own. See ChannelSeries.scale. */
-const MATH_SCALE = 'm'
+const MATH_SCALES = ['m1', 'm2'] as const
+
+/** Which slot a scale, a colour and an axis belong to. 1 and 2 as a scope numbers them. */
+const MATH_SLOTS = [1, 2] as const
 
 /** The x array every series shares, in the milliseconds this chart plots. */
 function sliceXMs(slice: ScopeChannelSlice, count: number): number[] {
@@ -549,10 +624,13 @@ const series = computed(() => {
     }
   }
 
-  // The math trace last, so it draws over the waveforms it was derived from -- and on its own
-  // scale, which is what keeps a millivolt difference between two ten-volt signals visible.
-  const math = record?.math
-  if (math && mathDraws(props.mathOperation)) {
+  // The math traces last, so they draw over the waveforms they were derived from -- and each on
+  // its own scale, which is what keeps a millivolt difference between two ten-volt signals visible.
+  for (const slot of MATH_SLOTS) {
+    const math = scopeMathSlice(record, slot)
+    const spec = props.maths[slot - 1]
+    if (!math || !spec || !mathSpecDraws(spec)) continue
+
     const length = math.samples?.length ?? Math.min(math.max?.length ?? 0, math.min?.length ?? 0)
     const pad = (values: readonly number[] | null | undefined): (number | null)[] => {
       const out = new Array<number | null>(count).fill(null)
@@ -561,13 +639,14 @@ const series = computed(() => {
     }
     const raw = math.samples !== null
     channels.push({
-      index: -1,
-      label: mathLabel(props.mathOperation),
-      color: MATH_COLOR,
+      index: -slot,
+      label: mathSpecLabel(spec),
+      color: MATH_COLORS[slot - 1],
       line: raw ? pad(math.samples) : pad(math.max),
       band: raw ? null : pad(math.min),
       raw,
-      scale: MATH_SCALE,
+      scale: MATH_SCALES[slot - 1],
+      dash: slot === 2 ? MATH_DASH : undefined,
       math: true,
     })
   }
@@ -692,7 +771,10 @@ function sampleMarkers(u: uPlot, _seriesIdx: number, show: boolean): number[] | 
  * capture. So the axis appears with the trace rather than with the setting, and an axis labelled
  * for a quantity nothing is drawing never takes 72 px off the plot.</p>
  */
-const mathDrawn = computed(() => mathDraws(props.mathOperation) && !!props.record?.math)
+/** Which math channels have a trace on screen — what the axes and the rebuild key are gated on. */
+const mathDrawn = computed(() =>
+  MATH_SLOTS.map((slot) => mathSpecDraws(props.maths[slot - 1]) && !!scopeMathSlice(props.record, slot)),
+)
 
 /** The window the chart shows, in the milliseconds it plots. */
 const xWindowMs = computed(() => ({ min: toChartMs(props.timeFromS), max: toChartMs(props.timeToS) }))
@@ -956,6 +1038,163 @@ function triggerLevelPlugin(color: string): uPlot.Plugin {
  * <p>Each line carries its letter at the end the handle is on, so the readout's "Time A" and the
  * line on screen cannot be confused for one another.</p>
  */
+/**
+ * One line of text on a ground of its own.
+ *
+ * <p>The ground is what makes Following readable at all: these labels land wherever the cursors
+ * are, which on a dense trace is on top of the waveform — and teal text over an orange trace is a
+ * worse reading than no text. The plot's own background at nine tenths, so what is under it still
+ * shows faintly and the reader can see they are covering something.</p>
+ */
+function labelAt(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  align: CanvasTextAlign,
+  baseline: CanvasTextBaseline,
+  px: number,
+  t: Theme,
+  /** The ink. Defaults to the cursors' own; the span labels pass the arrow's red, being its. */
+  ink: string = t.cursor,
+) {
+  const width = ctx.measureText(text).width
+  const height = 12 * px
+  const padX = 3 * px
+  const boxX = align === 'center' ? x - width / 2 : align === 'right' ? x - width : x
+  const boxY = baseline === 'middle' ? y - height / 2 : baseline === 'bottom' ? y - height : y
+
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.globalAlpha = 0.9
+  ctx.fillStyle = t.plotGround
+  ctx.fillRect(boxX - padX, boxY, width + padX * 2, height)
+  ctx.restore()
+
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.fillStyle = ink
+  ctx.textAlign = align
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, x, boxY + height / 2)
+  ctx.restore()
+}
+
+/** Several of those, stacked away from the point they are anchored at. */
+function labelBlock(
+  ctx: CanvasRenderingContext2D,
+  lines: readonly string[],
+  x: number,
+  y: number,
+  align: CanvasTextAlign,
+  baseline: CanvasTextBaseline,
+  px: number,
+  t: Theme,
+  ink: string = t.cursor,
+) {
+  const height = 12 * px
+  // Stacked upwards from the anchor for a block that sits above its arrow, and centred on it
+  // otherwise, so the arrow stays the thing the eye follows.
+  const first = baseline === 'bottom' ? y - height * (lines.length - 1) : y - (height * (lines.length - 1)) / 2
+  lines.forEach((line, i) => labelAt(ctx, line, x, first + i * height, align, 'middle', px, t, ink))
+}
+
+/** A double-headed measure between two positions along one axis. */
+function arrowBetween(
+  ctx: CanvasRenderingContext2D,
+  a: number,
+  b: number,
+  across: number,
+  axis: 'h' | 'v',
+  px: number,
+  t: Theme,
+) {
+  const head = 4 * px
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.strokeStyle = t.arrow
+  ctx.lineWidth = px
+  ctx.beginPath()
+  if (axis === 'h') {
+    ctx.moveTo(a, across)
+    ctx.lineTo(b, across)
+    for (const [end, dir] of [
+      [a, Math.sign(b - a)],
+      [b, Math.sign(a - b)],
+    ] as const) {
+      ctx.moveTo(end + dir * head, across - head)
+      ctx.lineTo(end, across)
+      ctx.lineTo(end + dir * head, across + head)
+    }
+  } else {
+    ctx.moveTo(across, a)
+    ctx.lineTo(across, b)
+    for (const [end, dir] of [
+      [a, Math.sign(b - a)],
+      [b, Math.sign(a - b)],
+    ] as const) {
+      ctx.moveTo(across - head, end + dir * head)
+      ctx.lineTo(across, end)
+      ctx.lineTo(across + head, end + dir * head)
+    }
+  }
+  ctx.stroke()
+  ctx.restore()
+}
+
+/**
+ * The Fixed style's box, and the rect the drag handle follows.
+ *
+ * <p>Drawn on the canvas rather than as DOM, so a Screenshot and a report carry it — the whole set
+ * of figures is part of the picture. The <em>grab</em> is a transparent element over it, because
+ * hit-testing a canvas rectangle by hand is the one part of this a DOM node does better.</p>
+ */
+function drawCursorBox(u: uPlot, c: ScopeCursors, px: number, t: Theme) {
+  const rows = cursorBoxRows(c, props.voltsPerDivision, spanMs.value)
+  if (rows.length === 0) {
+    cursorBoxRect.value = null
+    return
+  }
+
+  // Measured against the canvas and divided back to CSS pixels, because the layout's own sizes
+  // are in those -- the box is then scaled up by `px` with everything else on this chart.
+  const metrics = layoutCursorBox(rows, (text) => u.ctx.measureText(text).width / px)
+  const box = { width: metrics.width * px, height: metrics.height * px }
+  const plot = { left: u.bbox.left, top: u.bbox.top, width: u.bbox.width, height: u.bbox.height }
+  const { left, top } = clampCursorBox(props.cursorBox, box, plot)
+
+  const ctx = u.ctx
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.globalAlpha = 0.92
+  ctx.fillStyle = t.plotGround
+  ctx.fillRect(left, top, box.width, box.height)
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = t.cursor
+  ctx.lineWidth = px
+  ctx.strokeRect(left, top, box.width, box.height)
+
+  ctx.fillStyle = t.cursor
+  ctx.textBaseline = 'middle'
+  rows.forEach((row, i) => {
+    const y = top + (metrics.padding + metrics.lineHeight * (i + 0.5)) * px
+    ctx.textAlign = 'left'
+    ctx.fillText(row.label, left + metrics.padding * px, y)
+    ctx.textAlign = 'right'
+    ctx.fillText(row.value, left + box.width - metrics.padding * px, y)
+  })
+  ctx.restore()
+
+  // In CSS pixels, which is what the overlay element is positioned in.
+  const scale = u.bbox.width / Math.max(u.over.clientWidth, 1)
+  cursorBoxRect.value = {
+    left: left / scale,
+    top: top / scale,
+    width: box.width / scale,
+    height: box.height / scale,
+  }
+}
+
 function cursorsPlugin(t: Theme): uPlot.Plugin {
   return {
     hooks: {
@@ -978,8 +1217,15 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
           ctx.setLineDash([3 * px, 3 * px])
           ctx.font = `${Math.round(10 * px)}px system-ui, sans-serif`
 
+          const following = props.cursorStyle === 'Following'
+          /** Where each line was drawn, or null where it was not — what the arrows are hung off. */
+          const at: Record<CursorId, number | null> = { timeA: null, timeB: null, voltA: null, voltB: null }
+
           if (c.timeOn) {
-            for (const [label, seconds] of [['A', c.timeAS], ['B', c.timeBS]] as const) {
+            for (const [id, label, seconds] of [
+              ['timeA', 'A', c.timeAS],
+              ['timeB', 'B', c.timeBS],
+            ] as const) {
               if (!Number.isFinite(seconds)) continue
               const x = u.valToPos(toChartMs(seconds), 'x', true)
               // Off the window: drawn nowhere rather than clamped to the edge. A time cursor is read
@@ -987,6 +1233,7 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
               // where the trigger level, which is a setting rather than a reading, is better clamped
               // and marked than hidden.
               if (x < left || x > right) continue
+              at[id] = x
               ctx.beginPath()
               ctx.moveTo(x, top)
               ctx.lineTo(x, bottom)
@@ -995,15 +1242,25 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
               ctx.textAlign = 'center'
               ctx.textBaseline = 'bottom'
               ctx.fillText(label, x, bottom - 2 * px)
+              if (following) {
+                // The value above the letter, which keeps it clear of the trace's own busiest
+                // region and of the time-cursor grips along the bottom edge.
+                const value = cursorValueLabel(c, id, props.voltsPerDivision, spanMs.value)
+                if (value) labelAt(ctx, value, x, top + 4 * px, 'center', 'top', px, t)
+              }
               ctx.setLineDash([3 * px, 3 * px])
             }
           }
 
           if (c.voltOn) {
-            for (const [label, volts] of [['A', c.voltAV], ['B', c.voltBV]] as const) {
+            for (const [id, label, volts] of [
+              ['voltA', 'A', c.voltAV],
+              ['voltB', 'B', c.voltBV],
+            ] as const) {
               if (!Number.isFinite(volts)) continue
               const y = u.valToPos(volts, 'y', true)
               if (y < top || y > bottom) continue
+              at[id] = y
               ctx.beginPath()
               ctx.moveTo(left, y)
               ctx.lineTo(right, y)
@@ -1012,8 +1269,48 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
               ctx.textAlign = 'left'
               ctx.textBaseline = 'middle'
               ctx.fillText(label, left + 3 * px, y)
+              if (following) {
+                const value = cursorValueLabel(c, id, props.voltsPerDivision, spanMs.value)
+                if (value) labelAt(ctx, value, right - 4 * px, y, 'right', 'middle', px, t)
+              }
               ctx.setLineDash([3 * px, 3 * px])
             }
+          }
+
+          if (following) {
+            ctx.setLineDash([])
+            // A quarter down for the horizontal arrow and a quarter across for the vertical one, so
+            // the two never land on each other with both pairs on.
+            if (cursorArrowFits(at.timeA, at.timeB, left, right)) {
+              arrowBetween(ctx, at.timeA!, at.timeB!, top + u.bbox.height * 0.22, 'h', px, t)
+              labelBlock(
+                ctx,
+                cursorTimeSpanLabels(c),
+                (at.timeA! + at.timeB!) / 2,
+                top + u.bbox.height * 0.22 - 6 * px,
+                'center',
+                'bottom',
+                px,
+                t,
+                t.arrow,
+              )
+            }
+            if (cursorArrowFits(at.voltA, at.voltB, top, bottom)) {
+              arrowBetween(ctx, at.voltA!, at.voltB!, left + u.bbox.width * 0.22, 'v', px, t)
+              labelBlock(
+                ctx,
+                cursorLevelSpanLabels(c, props.voltsPerDivision),
+                left + u.bbox.width * 0.22 + 6 * px,
+                (at.voltA! + at.voltB!) / 2,
+                'left',
+                'middle',
+                px,
+                t,
+                t.arrow,
+              )
+            }
+          } else {
+            drawCursorBox(u, c, px, t)
           }
 
           ctx.restore()
@@ -1301,7 +1598,11 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       // magnitude nobody knows in advance -- and unlike the volts axis there is no V/div ladder it
       // could be a rung of. uPlot ranges an auto scale over what is visible in x, so it follows a
       // zoom the way a scope's own math channel does.
-      [MATH_SCALE]: { auto: true },
+      // One auto-ranging scale per math channel: two derived quantities are routinely in different
+      // units, so they cannot share one -- and a derived trace is routinely orders smaller than
+      // what it came from, which is why neither is on the volts axis.
+      [MATH_SCALES[0]]: { auto: true },
+      [MATH_SCALES[1]]: { auto: true },
     },
     axes: [
       {
@@ -1321,25 +1622,22 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         ticks: { stroke: t.grid, width: t.gridWidth },
         values: (_u, splits) => splits.map((v) => formatVolts(v, props.voltsPerDivision)),
       },
-      // The math axis, on the right and only while there is a trace on it -- an axis labelled for
-      // a quantity nothing is drawing takes 64 px off the plot and says nothing.
-      ...(mathDrawn.value
-        ? [
-            {
-              scale: MATH_SCALE,
-              side: 1 as const,
-              label: mathAxisLabel(props.mathOperation),
-              size: 72,
-              stroke: MATH_COLOR,
-              // No grid of its own: a second set of horizontals over the first would make both
-              // unreadable, and the graticule belongs to the volts axis the waveforms are on.
-              grid: { show: false },
-              ticks: { stroke: t.grid, width: t.gridWidth },
-              values: (_u: uPlot, splits: number[]) =>
-                splits.map((v) => formatMathValue(v, mathUnitOf(props.mathOperation))),
-            },
-          ]
-        : []),
+      // A math axis per drawn channel, on the right and only while there is a trace on it -- one
+      // labelled for a quantity nothing is drawing takes 72 px off the plot and says nothing.
+      // Both on costs 144 px, which is the price of asking for two.
+      ...MATH_SLOTS.filter((slot) => mathDrawn.value[slot - 1]).map((slot) => ({
+        scale: MATH_SCALES[slot - 1],
+        side: 1 as const,
+        label: mathSpecAxisLabel(props.maths[slot - 1]),
+        size: 72,
+        stroke: MATH_COLORS[slot - 1],
+        // No grid of its own: a second set of horizontals over the first would make both
+        // unreadable, and the graticule belongs to the volts axis the waveforms are on.
+        grid: { show: false },
+        ticks: { stroke: t.grid, width: t.gridWidth },
+        values: (_u: uPlot, splits: number[]) =>
+          splits.map((v) => formatMathValue(v, mathUnitOf(props.maths[slot - 1].operation))),
+      })),
     ],
     series: [
       { label: 'Time' },
@@ -1431,10 +1729,45 @@ const handleRect = shallowRef<{ top: number; right: number; height: number; widt
 const HANDLE_WIDTH_PX = 48
 const HANDLE_HEIGHT_PX = 18
 
+/**
+ * The Fixed box's grab area, in CSS pixels, or null when no box is drawn.
+ *
+ * <p>Written by the <em>draw</em> rather than computed here, because where the box goes depends on
+ * how big it is and how big it is depends on measuring its own text against the canvas — so the
+ * one place that knows is the pass that drew it.</p>
+ */
+const cursorBoxRect = shallowRef<{ left: number; top: number; width: number; height: number } | null>(null)
+
+/** Where the trigger-position marker is grabbed, along the top edge — its own documented lane. */
+const triggerPositionRect = shallowRef<{ left: number; top: number } | null>(null)
+const TRIGGER_POSITION_GRIP_PX = 18
+
+function syncTriggerPosition() {
+  const u = plot.value
+  // Nothing in Roll, where the marker itself is not drawn: t = 0 is the record's right-hand edge
+  // and there is no pre-trigger to set.
+  if (!u || props.record?.rolled === true) {
+    triggerPositionRect.value = null
+    return
+  }
+  const css = u.over.clientWidth
+  const scale = css > 0 ? u.bbox.width / css : 1
+  const x = u.valToPos(0, 'x', false)
+  if (!Number.isFinite(x) || x < 0 || x > css) {
+    triggerPositionRect.value = null
+    return
+  }
+  triggerPositionRect.value = {
+    left: u.bbox.left / scale + x - TRIGGER_POSITION_GRIP_PX / 2,
+    top: u.bbox.top / scale,
+  }
+}
+
 function syncHandle() {
   // The cursors' grips are positioned against the same window, so they move with it -- in one
   // function rather than beside every call, so a new call site cannot update one and not the other.
   syncCursorHandles()
+  syncTriggerPosition()
 
   const u = plot.value
   if (!u || !props.showTriggerLevel || props.record?.rolled === true) {
@@ -1494,6 +1827,108 @@ function onHandlePointerUp(event: PointerEvent) {
   emit('triggerLevelCommitted')
 }
 
+// ---------------------------------------------------------------------------
+// The trigger-position marker — the one setting on this chart that is a *time*
+// ---------------------------------------------------------------------------
+
+const draggingPreTrigger = ref(false)
+
+function onPreTriggerPointerDown(event: PointerEvent) {
+  if (!plot.value) return
+  event.stopPropagation()
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  draggingPreTrigger.value = true
+}
+
+/**
+ * Where the trigger sits inside the record, from the pointer.
+ *
+ * <p>The axis is trigger-relative, so <b>t = 0 never moves on it</b> — what the drag sets is how
+ * much of the record is captured before the trigger. Showing the whole record, which is the
+ * ordinary case, the marker then lands under the pointer because the window follows the record's
+ * new extent upstream; zoomed in, the window stays and the fraction still follows the pointer
+ * against the record.</p>
+ */
+function onPreTriggerPointerMove(event: PointerEvent) {
+  if (!draggingPreTrigger.value) return
+  const u = plot.value
+  if (!u) return
+
+  const rect = u.over.getBoundingClientRect()
+  const seconds = fromChartMs(u.posToVal(event.clientX - rect.left, 'x'))
+  if (!Number.isFinite(seconds)) return
+
+  emit(
+    'preTriggerChanged',
+    preTriggerFromPointer(seconds, props.recordSeconds, props.preTriggerFraction),
+  )
+}
+
+function onPreTriggerPointerUp(event: PointerEvent) {
+  if (!draggingPreTrigger.value) return
+  draggingPreTrigger.value = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  emit('preTriggerCommitted')
+}
+
+// ---------------------------------------------------------------------------
+// The Fixed cursor box — drawn on the canvas, grabbed through an element over it
+// ---------------------------------------------------------------------------
+
+const draggingBox = ref(false)
+/** Where inside the box the pointer took hold, so it does not jump to its corner on the first move. */
+let boxGrabOffset = { x: 0, y: 0 }
+
+function onBoxPointerDown(event: PointerEvent) {
+  const rect = cursorBoxRect.value
+  if (!plot.value || !rect) return
+  event.stopPropagation()
+  event.preventDefault()
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  const over = plot.value.over.getBoundingClientRect()
+  boxGrabOffset = {
+    x: event.clientX - over.left - (rect.left - plot.value.bbox.left / boxScale()),
+    y: event.clientY - over.top - (rect.top - plot.value.bbox.top / boxScale()),
+  }
+  draggingBox.value = true
+}
+
+/** The canvas-to-CSS pixel ratio this chart is drawn at, which both the box rect and the drag use. */
+function boxScale(): number {
+  const u = plot.value
+  if (!u) return 1
+  const css = u.over.clientWidth
+  return css > 0 ? u.bbox.width / css : 1
+}
+
+function onBoxPointerMove(event: PointerEvent) {
+  if (!draggingBox.value) return
+  const u = plot.value
+  const rect = cursorBoxRect.value
+  if (!u || !rect) return
+
+  const over = u.over.getBoundingClientRect()
+  const scale = boxScale()
+  const plotCss = {
+    left: u.bbox.left / scale,
+    top: u.bbox.top / scale,
+    width: u.bbox.width / scale,
+    height: u.bbox.height / scale,
+  }
+  const position = {
+    left: event.clientX - over.left - boxGrabOffset.x + plotCss.left,
+    top: event.clientY - over.top - boxGrabOffset.y + plotCss.top,
+  }
+  emit('cursorBoxMoved', cursorBoxFraction(position, rect, plotCss))
+}
+
+function onBoxPointerUp(event: PointerEvent) {
+  if (!draggingBox.value) return
+  draggingBox.value = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+}
+
 /** The reading beside the handle while it is dragged — the level in the same unit the axis is in. */
 const triggerReadout = computed(() => formatVolts(triggerLevelV.value, props.voltsPerDivision))
 
@@ -1502,11 +1937,10 @@ const triggerReadout = computed(() => formatVolts(triggerLevelV.value, props.vol
 // ---------------------------------------------------------------------------
 
 /**
- * Which cursor a handle belongs to. The four are one list rather than four refs so the template
- * draws them in one loop and the drag reads which one it has from the handle itself.
+ * The four handles. One list rather than four refs, so the template draws them in one loop and the
+ * drag reads which one it has from the handle itself. <code>CursorId</code> itself is imported from
+ * <code>scope/cursorOverlay.ts</code>, which labels the same four.
  */
-type CursorId = 'timeA' | 'timeB' | 'voltA' | 'voltB'
-
 interface CursorHandle {
   id: CursorId
   label: string
@@ -1917,7 +2351,13 @@ watch(
     // The math operation, because its axis label and tick formatter are baked in at construction
     // the way the time axis's unit is -- two operations both drawn would otherwise keep the first
     // one's label.
-    () => `${mathDrawn.value}:${props.mathOperation}`,
+    // Both operations, and both sources: the axis label and the tick formatter are baked in at
+    // construction, so a channel changed without a rebuild keeps the other one's label.
+    () =>
+      MATH_SLOTS.map(
+        (slot) =>
+          `${mathDrawn.value[slot - 1]}:${props.maths[slot - 1].operation}:${props.maths[slot - 1].sourceA}:${props.maths[slot - 1].sourceB}`,
+      ).join(','),
     // The drawing mode, because Dots replaces the series' own path builder, which uPlot reads at
     // construction -- a mode changed without a rebuild ticks and does nothing.
     () => props.drawing,
@@ -2247,6 +2687,47 @@ const windowNote = computed(
       >
         {{ handle.label }}
       </div>
+
+      <!-- The trigger-position grip, on the top edge — this marker's own lane, so it collides with
+           none of the other claimants. What it sets is the pre-trigger fraction: the axis is
+           trigger-relative, so t = 0 never moves and what the drag moves is the record under it. -->
+      <div
+        v-if="triggerPositionRect"
+        class="absolute grid cursor-ew-resize select-none touch-none place-items-center rounded-sm text-[9px] font-bold leading-none text-white"
+        :style="{
+          left: `${triggerPositionRect.left}px`,
+          top: `${triggerPositionRect.top}px`,
+          width: `${TRIGGER_POSITION_GRIP_PX}px`,
+          height: `${TRIGGER_POSITION_GRIP_PX}px`,
+          backgroundColor: theme().marker,
+        }"
+        :title="`Trigger position — ${(preTriggerFraction * 100).toFixed(0)} % of the record is before the trigger. Drag to move it.`"
+        @pointerdown="onPreTriggerPointerDown"
+        @pointermove="onPreTriggerPointerMove"
+        @pointerup="onPreTriggerPointerUp"
+        @pointercancel="onPreTriggerPointerUp"
+      >
+        T
+      </div>
+
+      <!-- The Fixed cursor box is painted on the canvas, so a Screenshot and a report carry it;
+           this is only the grab, which is the one part a DOM node does better than hit-testing a
+           rectangle by hand. -->
+      <div
+        v-if="cursorBoxRect && cursorStyle === 'Fixed'"
+        class="absolute cursor-move select-none touch-none"
+        :style="{
+          left: `${cursorBoxRect.left}px`,
+          top: `${cursorBoxRect.top}px`,
+          width: `${cursorBoxRect.width}px`,
+          height: `${cursorBoxRect.height}px`,
+        }"
+        title="The cursor readings — drag to move them out of the way of the trace."
+        @pointerdown="onBoxPointerDown"
+        @pointermove="onBoxPointerMove"
+        @pointerup="onBoxPointerUp"
+        @pointercancel="onBoxPointerUp"
+      ></div>
     </div>
   </section>
 </template>

@@ -29,7 +29,15 @@ defineProps<{
   gated?: boolean
 }>()
 
-const { selected, statistics, stat, remove } = useScopeMeasurements()
+/**
+ * The controls live in this card's own header now rather than in the Measurements panel.
+ *
+ * <p>The rail's argument was that a bench instrument puts the readings on the screen and the
+ * controls that decide them in a menu. It is the wrong way round here: the reader notices a
+ * reading is missing, or that a figure is wandering, while looking at <em>this table</em> — so the
+ * add, the statistics and the reset belong where that is noticed.</p>
+ */
+const { selected, statistics, setStatistics, stat, statCount, resetStats, remove } = useScopeMeasurements()
 
 /** A statistic as the cell prints it — in the row's own units, at its own magnitude. */
 function statText(row: ScopeMeasurementRow, key: (typeof SCOPE_STAT_COLUMNS)[number]['key']): string {
@@ -49,10 +57,9 @@ function iconOf(row: ScopeMeasurementRow): string {
 /**
  * Opens the picker from the table it fills.
  *
- * <p>A second entry point beside the rail's own <b>Choose measurements…</b>, not a replacement:
- * the rail's button is where the setting lives, and this is where a reader is looking when they
- * notice a reading is missing. It goes in the header's own slot, which stays clickable without
- * toggling the section.</p>
+ * <p>The only way in, since the rail's own button went with the readings it sat beside: this is
+ * where a reader is looking when they notice a reading is missing. It goes in the header's own
+ * slot, which stays clickable without toggling the section.</p>
  */
 const emit = defineEmits<{ pickMeasurements: [] }>()
 </script>
@@ -60,15 +67,46 @@ const emit = defineEmits<{ pickMeasurements: [] }>()
 <template>
   <CollapsibleSection title="Selected measurements">
     <template #header-right>
-      <button
-        type="button"
-        class="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-        title="Add or remove measurements…"
-        aria-label="Add or remove measurements"
-        @click="emit('pickMeasurements')"
-      >
-        <ToolbarIcon name="plus" />
-      </button>
+      <div class="flex items-center gap-1.5">
+        <!-- The count beside the controls that change it, where the rail used to carry it. -->
+        <span v-if="statistics && statCount > 0" class="text-[11px] tabular-nums text-neutral-500 dark:text-neutral-400">
+          {{ statCount.toLocaleString() }}
+        </span>
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-lg border transition btn-toggle-off"
+          title="Add or remove measurements…"
+          aria-label="Add or remove measurements"
+          @click="emit('pickMeasurements')"
+        >
+          <ToolbarIcon name="plus" />
+        </button>
+        <!-- A lit toggle rather than a tick box, the display rail's own idiom: unlit is the track's
+             recess and lit is the accent, so the state survives a monochrome screenshot. -->
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-lg border transition"
+          :class="statistics ? 'btn-action' : 'btn-toggle-off'"
+          :aria-pressed="statistics"
+          aria-label="Statistics"
+          title="Statistics — each row gains its mean, its extremes, how far it has wandered, and how many records have been counted."
+          @click="setStatistics(!statistics)"
+        >
+          <ToolbarIcon name="statistics" />
+        </button>
+        <!-- Clear is the *statistics*, not the selection: the rows come off one at a time by their
+             own cross, and this is the one of the two that cannot be undone. -->
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-lg border transition btn-toggle-off disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="statCount === 0"
+          aria-label="Clear statistics"
+          title="Clear the accumulated statistics and start counting again from the next record. The readings themselves are unaffected."
+          @click="resetStats()"
+        >
+          <ToolbarIcon name="reset" />
+        </button>
+      </div>
     </template>
 
     <p
@@ -148,8 +186,7 @@ const emit = defineEmits<{ pickMeasurements: [] }>()
     </div>
 
     <p v-else-if="selected.length === 0" class="text-xs text-neutral-400 dark:text-neutral-600">
-      Nothing chosen. Press <strong>+</strong> above, or <strong>Choose measurements…</strong>
-      under Measurements in the display rail, to put a reading here.
+      Nothing chosen. Press <strong>+</strong> above to put a reading here.
     </p>
     <p v-else class="text-xs text-neutral-400 dark:text-neutral-600">Nothing captured yet.</p>
 

@@ -103,6 +103,8 @@ describe('scopeSettingsRows', () => {
   it('labels the run the way the two config sections label it', () => {
     expect(rowsToObject(scopeSettingsRows(params))).toEqual({
       'Sample rate': '192 kS/s',
+      // The control that was turned, and what it cost. Ten divisions apart by construction.
+      'Time/div': '2.000 ms',
       // The figure is grouped the way the screen groups it, which is the reader's own locale --
       // so the expectation asks for the same thing rather than for one locale's spelling of it.
       Record: `20.00 ms (${(3840).toLocaleString()} samples)`,

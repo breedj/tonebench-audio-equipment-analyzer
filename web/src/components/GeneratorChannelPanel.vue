@@ -2,6 +2,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { ArbitraryChannel, ArbitrarySettings, GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
 import FileBrowserDialog from './FileBrowserDialog.vue'
+import ScopeToggleIcon from './ScopeToggleIcon.vue'
+import StimulusPickerDialog from './StimulusPickerDialog.vue'
+import { stimulusKind, stimulusKindLabel } from '../generator/stimulusKinds'
 import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import {
@@ -54,24 +57,13 @@ const props = withDefaults(
 // App.vue's applyGeneratorLive.
 const emit = defineEmits<{ change: [] }>()
 
-// 'Off' is deliberately not offered here — GeneratorPanel's own L/R "Enabled" checkboxes are the
-// on/off control, and a second way to say "silent" would just be two controls disagreeing.
-//
-// 'EchoChirp' is deliberately left out of this list — not deleted, just hidden from this picker.
-// The kind, its form below, and the underlying request/state types all still exist; it's slated
-// for a different UI elsewhere later.
-const KINDS: { value: GeneratorKind; label: string }[] = [
-  { value: 'Tones', label: 'Sine tones' },
-  { value: 'Multitone', label: 'Multitone' },
-  { value: 'WhiteNoise', label: 'White noise' },
-  { value: 'Square', label: 'Square' },
-  { value: 'Triangle', label: 'Triangle' },
-  { value: 'Sawtooth', label: 'Sawtooth' },
-  { value: 'Pulse', label: 'Pulse' },
-  { value: 'ToneBurst', label: 'Tone burst' },
-  { value: 'DcLevel', label: 'DC level' },
-  { value: 'Arbitrary', label: 'Arbitrary (.wav)' },
-]
+// The kinds this picker offers, their figures and what each is for, are generator/stimulusKinds.ts
+// -- in a module because the dialog and the button that opens it both read them, and because the
+// audit that keeps every offered kind buildable can then import the list rather than parse it out
+// of this file by its braces. The two deliberate absences are documented there.
+
+/** Whether the picker is open. */
+const stimulusPickerOpen = ref(false)
 
 const ARBITRARY_CHANNELS: { value: ArbitraryChannel; label: string }[] = [
   { value: 'Left', label: 'Left' },
@@ -253,6 +245,26 @@ function applyPreset(levelDbv: number) {
   actualFreqHz.splice(0, actualFreqHz.length, null, null)
 }
 
+/** What the button shows: the chosen kind's own figure, name and sentence. */
+const stimulusEntry = computed(() => stimulusKind(kind.value))
+const stimulusIcon = computed(() => stimulusEntry.value?.icon ?? '')
+const stimulusLabel = computed(() => stimulusKindLabel(kind.value))
+const stimulusTitle = computed(
+  () => stimulusEntry.value?.title ?? 'The stimulus this measurement plays. Choose one.',
+)
+
+/**
+ * A kind chosen in the dialog.
+ *
+ * <p>Goes through the same handler the dropdown's `@change` did, so the one side effect it carries
+ * — Multitone adding its own two metrics the first time it is picked — is not lost with the
+ * control.</p>
+ */
+function onKindPicked(picked: GeneratorKind) {
+  kind.value = picked
+  onKindChange()
+}
+
 function onKindChange() {
   // Picking the multitone stimulus is asking for its reading, the way an IMD preset is: surface
   // the TD+N tiles once. A later removal is respected.
@@ -385,16 +397,40 @@ defineExpose({ currentConfig, syncFromStatus })
 
 <template>
   <div>
-    <label class="mb-3 flex flex-col gap-1 text-sm">
-      Stimulus
-      <select
-        v-model="kind"
-        class="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700"
-        @change="onKindChange"
+    <!-- A button carrying the chosen stimulus's own figure, opening a picker. Ten names in a
+         dropdown are a list to parse; ten pictures with a line each are scanned, and the line is
+         the part that decides the choice. -->
+    <div class="tb-field mb-3">
+      <span class="tb-group">Stimulus</span>
+      <button
+        type="button"
+        class="tb-input flex items-center gap-2 text-left"
+        :title="stimulusTitle"
+        @click="stimulusPickerOpen = true"
       >
-        <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
-      </select>
-    </label>
+        <ScopeToggleIcon v-if="stimulusIcon" :name="stimulusIcon" />
+        <span class="min-w-0 flex-1 truncate">{{ stimulusLabel }}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          class="shrink-0 opacity-60"
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+    </div>
+
+    <StimulusPickerDialog
+      :open="stimulusPickerOpen"
+      :kind="kind"
+      @close="stimulusPickerOpen = false"
+      @pick="onKindPicked"
+    />
 
     <div v-if="kind === 'Tones'">
       <label class="mb-3 flex flex-col gap-1 text-sm" title="A standard two-tone intermodulation test: sets both tones up from one sine-equivalent level (the pair's peak equals that sine's peak) and turns the IMD reading on.">

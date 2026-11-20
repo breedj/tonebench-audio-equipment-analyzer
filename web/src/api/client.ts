@@ -1639,8 +1639,13 @@ export interface ScopeResidualSlice {
  * <code>...V</code> — right for A − B and wrong for A × B, A / B, a derivative or an integral.</p>
  */
 export interface ScopeMathSlice {
+  /** Which of the two math channels this is, 1 or 2 — what a slice is paired to its channel by. */
+  slot: number
   /** The operation, as its server-side name: AMinusB, ATimesB, DerivativeA and the rest. */
   operation: string
+  /** The record channel operand A read, and `sourceB` B's — 0 for left, 1 for right. */
+  sourceA: number
+  sourceB: number
   /** Volt, VoltSquared, Ratio, VoltPerSecond or VoltSecond. */
   unit: string
   samples: number[] | null
@@ -1784,7 +1789,7 @@ export interface ScopeRecordResponse {
    * measurement does not capture — which the display rail says in words rather than leaving a
    * trace quietly absent.</p>
    */
-  math?: ScopeMathSlice | null
+  maths?: ScopeMathSlice[] | null
   /**
    * The X–Y figure, when the fetch asked for one.
    *
@@ -2013,12 +2018,21 @@ export interface OscilloscopeParameters {
   chartShowRight?: boolean | null
   /** Whether the THD residual is drawn as a second trace. Costs a sine fit per fetch, so it is asked for. */
   chartShowResidual?: boolean | null
+  /** Which style the cursors are read in — `Fixed` or `Following`. The positions are never stored. */
+  chartCursorStyle?: string | null
   /** How long the chart keeps each record's trace. See scope/persistence.ts. */
   chartPersistence?: string | null
   chartIntensityMode?: string | null
   chartIntensityPalette?: string | null
   /** Which math channel the chart drew — a WaveformOperation name, or Off. See scope/math.ts. */
   chartMathOperation?: string | null
+  /** Which inputs Math 1's operands read — `ch0` or `ch1`. Absent means the left and the right. */
+  chartMathSourceA?: string | null
+  chartMathSourceB?: string | null
+  /** And the second math channel, which no measurement saved before 2026-11-20 has. */
+  chartMath2Operation?: string | null
+  chartMath2SourceA?: string | null
+  chartMath2SourceB?: string | null
   /** Which picture the chart drew — `Waveform` or `XY`. See scope/xy.ts. */
   chartView?: string | null
   /**
@@ -5195,7 +5209,8 @@ export const api = {
     maxColumns?: number,
     gate?: { fromS: number; toS: number },
     residual?: boolean,
-    math?: string | null,
+    /** The two math channels, each `operation:sourceA:sourceB`, or null for off. */
+    maths?: readonly (string | null)[],
     xy?: boolean,
     eye?: boolean,
     path?: Record<string, string>,
@@ -5214,9 +5229,12 @@ export const api = {
     }
     // Asked for rather than always sent: it costs a least-squares sine fit per channel per fetch.
     if (residual) query.set('residual', 'true')
-    // The same, and Off is absent rather than the string "Off", so the commonest state puts
-    // nothing on the query at all.
-    if (math) query.set('math', math)
+    // The same, and off is absent rather than the string "Off", so a scope with no math on puts
+    // nothing on the query at all -- which is the commonest state and was the whole query before
+    // there were two channels.
+    ;(maths ?? []).forEach((spec, index) => {
+      if (spec) query.set(`math${index + 1}`, spec)
+    })
     // And the same again: the X-Y figure is the one slice that cannot be summarised, so it is the
     // one that costs real bytes. Only the view that draws it asks for it.
     if (xy) query.set('xy', 'true')

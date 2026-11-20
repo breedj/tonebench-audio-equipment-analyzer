@@ -139,7 +139,8 @@ public static class OscilloscopeEndpoints
             double? gateFromS,
             double? gateToS,
             bool? residual,
-            string? math,
+            string? math1,
+            string? math2,
             bool? xy,
             bool? eye,
             string? coupling,
@@ -161,13 +162,14 @@ public static class OscilloscopeEndpoints
             // a pass over the window per fetch, and Off is both the default and the commonest
             // state. An unknown name is a bad request rather than a silent Off -- a trace quietly
             // absent is exactly how a display setting comes to look broken.
-            WaveformOperation? operation = null;
-            if (!string.IsNullOrWhiteSpace(math) && !math.Equals("Off", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!EnumParsing.TryParse(math, WaveformOperation.AMinusB, out var parsed, out var mathError))
-                    return Results.BadRequest(mathError);
-                operation = parsed;
-            }
+            //
+            // Two channels, each one parameter: `operation:sourceA:sourceB`. One token rather than
+            // three parameters apiece so that off is still *absent* -- a scope with no math on puts
+            // nothing at all on the query, as it did when there was one channel and no sources.
+            if (!TryParseMath(math1, 1, out var spec1, out var mathError1))
+                return Results.BadRequest(mathError1);
+            if (!TryParseMath(math2, 2, out var spec2, out var mathError2))
+                return Results.BadRequest(mathError2);
 
             int columns = Math.Clamp(maxColumns ?? ScopeFrameBuilder.DefaultMaxColumns, 1, 4096);
 
@@ -229,31 +231,42 @@ public static class OscilloscopeEndpoints
                     slice.TrailSamples));
             }
 
-            // One math trace per record rather than one per channel, because it is not a channel:
-            // it combines them. Built off the first drawn slice's geometry, which is every slice's
-            // -- the server cuts them all from one window -- so the derived trace shares the x
-            // array the waveforms are drawn against.
-            ScopeMathSlice? mathSlice = null;
-            if (operation is { } op && geometry is { } reference)
+            // A math trace is not a channel -- it combines them -- so there is one list of them
+            // rather than one per channel. Each is built off the first drawn slice's geometry,
+            // which is every slice's (the server cuts them all from one window), so every derived
+            // trace shares the x array the waveforms are drawn against.
+            var mathSlices = new List<ScopeMathSlice>(2);
+            foreach (var spec in new[] { spec1, spec2 })
             {
-                bool haveA = !WaveformMath.NeedsA(op) || WasCaptured(runner.LastRequest, 0);
-                bool haveB = !WaveformMath.NeedsB(op) || WasCaptured(runner.LastRequest, 1);
-                var built = haveA && haveB ? ScopeFrameBuilder.MathTrace(record, reference, op, columns) : null;
+                if (spec is not { } m || geometry is not { } reference)
+                    continue;
 
-                if (built is not null)
-                {
-                    mathSlice = new ScopeMathSlice(
-                        built.Operation.ToString(),
-                        built.Unit.ToString(),
-                        built.Samples,
-                        built.Columns?.Select(c => (float)c.Min).ToArray(),
-                        built.Columns?.Select(c => (float)c.Max).ToArray(),
-                        built.Measurements,
-                        gateFromS is { } mathGateFrom && gateToS is { } mathGateTo
-                            ? ScopeFrameBuilder.MathGate(record, op, mathGateFrom, mathGateTo)
-                            : null,
-                        built.ClampedSamples);
-                }
+                // Per operand and per source: an operation that does not read B is not refused for
+                // a B pointing at an input this run is not capturing.
+                bool haveA = !WaveformMath.NeedsA(m.Operation) || WasCaptured(runner.LastRequest, m.SourceA);
+                bool haveB = !WaveformMath.NeedsB(m.Operation) || WasCaptured(runner.LastRequest, m.SourceB);
+                if (!haveA || !haveB)
+                    continue;
+
+                var built = ScopeFrameBuilder.MathTrace(
+                    record, reference, m.Slot, m.Operation, m.SourceA, m.SourceB, columns);
+                if (built is null)
+                    continue;
+
+                mathSlices.Add(new ScopeMathSlice(
+                    built.Slot,
+                    built.Operation.ToString(),
+                    built.SourceA,
+                    built.SourceB,
+                    built.Unit.ToString(),
+                    built.Samples,
+                    built.Columns?.Select(c => (float)c.Min).ToArray(),
+                    built.Columns?.Select(c => (float)c.Max).ToArray(),
+                    built.Measurements,
+                    gateFromS is { } mathGateFrom && gateToS is { } mathGateTo
+                        ? ScopeFrameBuilder.MathGate(record, m.Operation, m.SourceA, m.SourceB, mathGateFrom, mathGateTo)
+                        : null,
+                    built.ClampedSamples));
             }
 
             // The X-Y figure, when the chart is in that view. Asked for by name like the two
@@ -316,7 +329,7 @@ public static class OscilloscopeEndpoints
                 record.Spliced,
                 record.Forced,
                 channels,
-                mathSlice,
+                mathSlices,
                 xySlice,
                 eyeSlice,
                 path.Changes,
@@ -324,6 +337,59 @@ public static class OscilloscopeEndpoints
                 record.IsEnvelope,
                 record.AveragesTaken));
         });
+    }
+
+    /// <summary>One math channel, as the query names it.</summary>
+    private readonly record struct MathSpec(int Slot, WaveformOperation Operation, int SourceA, int SourceB);
+
+    /// <summary>
+    /// Reads one math channel's query token — <c>operation:sourceA:sourceB</c>.
+    ///
+    /// <para><b>Absent is off and so is the literal "Off"</b>, which keeps the commonest state off
+    /// the query entirely; anything else that will not parse is a 400 rather than a silent Off,
+    /// because a trace quietly absent is how a display setting comes to look broken. The sources
+    /// are optional and default to the left and right inputs, which is what the operation names
+    /// meant before they could be chosen.</para>
+    /// </summary>
+    private static bool TryParseMath(string? value, int slot, out MathSpec? spec, out string? error)
+    {
+        spec = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value) || value.Equals("Off", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var parts = value.Split(':');
+        if (!EnumParsing.TryParse(parts[0], WaveformOperation.AMinusB, out var operation, out error))
+            return false;
+
+        int sourceA = 0;
+        int sourceB = 1;
+        if (parts.Length > 1 && !TryParseMathSource(parts[1], out sourceA, out error))
+            return false;
+        if (parts.Length > 2 && !TryParseMathSource(parts[2], out sourceB, out error))
+            return false;
+
+        spec = new MathSpec(slot, operation, sourceA, sourceB);
+        return true;
+    }
+
+    /// <summary>A source name — <c>ch0</c> or <c>ch1</c> — as a record channel index.</summary>
+    private static bool TryParseMathSource(string value, out int channel, out string? error)
+    {
+        error = null;
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "ch0":
+                channel = 0;
+                return true;
+            case "ch1":
+                channel = 1;
+                return true;
+            default:
+                channel = 0;
+                error = $"'{value}' is not a math source. Use ch0 or ch1.";
+                return false;
+        }
     }
 
     /// <summary>
@@ -512,7 +578,7 @@ public sealed record ScopeRecordResponse(
     bool Spliced,
     bool Forced,
     IReadOnlyList<ScopeChannelSlice> Channels,
-    ScopeMathSlice? Math = null,
+    IReadOnlyList<ScopeMathSlice>? Maths = null,
     ScopeXySlice? Xy = null,
     ScopeEyeSlice? Eye = null,
     bool Filtered = false,
@@ -530,7 +596,9 @@ public sealed record ScopeRecordResponse(
 /// for A × B, A / B, a derivative or an integral it is not, and a figure labelled volts on a scale
 /// that is not volts is the plausible wrong answer this app's rules exist to prevent.</para>
 /// </summary>
+/// <param name="Slot">Which of the two math channels, 1 or 2 — what the client pairs it up by.</param>
 /// <param name="Operation">Which operation, as its enum name.</param>
+/// <param name="SourceA">The record channel operand A read, and <paramref name="SourceB"/> B's.</param>
 /// <param name="Unit">What the numbers are in, as <see cref="WaveformMathUnit"/> spells it.</param>
 /// <param name="Samples">The derived waveform, or null when the window is decimated.</param>
 /// <param name="Min">Both extremes of every column, as the waveforms own are sent.</param>
@@ -539,7 +607,10 @@ public sealed record ScopeRecordResponse(
 /// <param name="Gated">The same over the cursor gate, or null when none was asked for or it named nothing.</param>
 /// <param name="ClampedSamples">How many samples A / B railed on; zero for every other operation.</param>
 public sealed record ScopeMathSlice(
+    int Slot,
     string Operation,
+    int SourceA,
+    int SourceB,
     string Unit,
     float[]? Samples,
     float[]? Min,

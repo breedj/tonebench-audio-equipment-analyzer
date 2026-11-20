@@ -474,3 +474,25 @@ describe('scopeCaptureSignature', () => {
     expect(scopeCaptureSignature(withGenerator)).toBe(scopeCaptureSignature(base))
   })
 })
+
+describe('the persistence control\u2019s two labels', () => {
+  it('gives every option a short label, because the control is a row of buttons on a narrow rail', () => {
+    for (const option of SCOPE_PERSISTENCE_OPTIONS) {
+      expect(option.shortLabel.length, option.value).toBeGreaterThan(0)
+      // Short enough for a fifth of the rail. "128" is the longest figure the ladder reaches.
+      expect(option.shortLabel.length, option.value).toBeLessThanOrEqual(3)
+    }
+  })
+
+  it('keeps the long label, which is what the button says when you ask it', () => {
+    const long = SCOPE_PERSISTENCE_OPTIONS.find((o) => o.value === 'Short')
+    expect(long?.label).toBe('8 records')
+    expect(long?.shortLabel).toBe('8')
+  })
+
+  it('still names every setting the ladder holds', () => {
+    expect(SCOPE_PERSISTENCE_OPTIONS.map((o) => o.value)).toEqual(
+      Object.keys(SCOPE_PERSISTENCE_RECORDS),
+    )
+  })
+})

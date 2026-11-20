@@ -282,7 +282,23 @@ export function scopeMeasurementsIn(group: ScopeMeasurementGroup): ScopeMeasurem
  * Which of these actually produce a row is decided per record, by what it carries — see
  * <code>scopeMeasurementSources</code>.</p>
  */
-export const SCOPE_SELECTION_SOURCES: readonly string[] = Object.freeze(['ch0', 'ch1', 'math'])
+export const SCOPE_SELECTION_SOURCES: readonly string[] = Object.freeze([
+  'ch0',
+  'ch1',
+  'math1',
+  'math2',
+])
+
+/**
+ * What a retired source name reads as now.
+ *
+ * <p>There was one math channel until 2026-11-20 and its source was spelled <code>math</code>;
+ * there are two, spelled <code>math1</code> and <code>math2</code>. Without this,
+ * <code>parseScopeMeasurementIds</code> would do what it does with any unknown source — drop it —
+ * and every stored selection would silently lose its math rows, which is a setting disappearing
+ * rather than changing.</p>
+ */
+const RETIRED_SOURCES: Readonly<Record<string, string>> = Object.freeze({ math: 'math1' })
 
 /** The catalogue id of a stored selection entry, which may carry a source after a colon. */
 export function scopeSelectionId(entry: string): string {
@@ -332,7 +348,18 @@ export function scopeSelectionSources(entry: string): readonly string[] {
 export function parseScopeMeasurementIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
 
-  const wanted = new Set(value.filter((v): v is string => typeof v === 'string'))
+  const wanted = new Set(
+    value
+      .filter((v): v is string => typeof v === 'string')
+      // A source this build has renamed is read as its new name rather than dropped; see
+      // RETIRED_SOURCES. The id and the source are split and rejoined so a measurement id that
+      // happened to contain a colon could not be mangled by a bare string replace.
+      .map((entry) => {
+        const source = scopeSelectionSource(entry)
+        const renamed = source === null ? null : RETIRED_SOURCES[source]
+        return renamed ? scopeSelectionEntry(scopeSelectionId(entry), renamed) : entry
+      }),
+  )
   const out: string[] = []
   for (const def of SCOPE_MEASUREMENTS) {
     // The bare id first: it is the broader claim, and a selection holding both is a reader who

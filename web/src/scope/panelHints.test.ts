@@ -47,8 +47,9 @@ describe('the display rail’s panels', () => {
       // What is in the signal path at the moment.
       'In the path: {{ pathNote }}',
       'Nothing in the path:',
-      // The math trace that cannot be built, and the one that is railing.
-      'Nothing to draw: this needs the',
+      // A math channel that cannot be built, and one that is railing. Per channel now, so each
+      // says which of the two it is about.
+      'has nothing to draw: it needs the',
       'samples railed at ±1000',
       // The mask: which reference, and how the run is going.
       'Tick a history item to compare against',
@@ -68,5 +69,57 @@ describe('the display rail’s panels', () => {
     // On a wrapper, because PanelIcon is aria-hidden and takes no title of its own -- one written
     // at its call site would land on a hidden element.
     expect(section).toMatch(/<span v-if="hint" :title="hint"[\s\S]{0,80}<PanelIcon/)
+  })
+})
+
+/**
+ * The rail's own readout panel, which is facts about the capture and no readings at all.
+ *
+ * <p>Every figure measured <em>from</em> the record moved to the Selected measurements table under
+ * the chart, where a reader picks them from a figure of each. The four that stayed are the ones no
+ * measurement can report, because they describe the record rather than the signal in it — so the
+ * panel is called <b>Record</b>, which is what it now holds.</p>
+ */
+describe('the Record panel', () => {
+  const panel = read('ScopeMeasurementsPanel.vue')
+
+  it('is named for what it holds', () => {
+    expect(panel).toContain('title="Record"')
+    expect(panel).not.toContain('title="Measurements"')
+  })
+
+  it('keeps the four facts about the capture', () => {
+    for (const row of ['>Record<', '>Sampled at<', '>Pre-trigger<', '>Timebase<']) {
+      expect(panel, `the panel no longer says "${row}"`).toContain(row)
+    }
+  })
+
+  it('carries no readings and no controls', () => {
+    // The readings are in the catalogue and tickable into the table; the controls are in that
+    // table's own header. A second list of either here is one too many.
+    for (const gone of [
+      'scopeChannelReadings',
+      'residualReadings',
+      'mathReadings',
+      'xyReadings',
+      'eyeReadings',
+      'useScopeMeasurements',
+      'pickMeasurements',
+    ]) {
+      expect(panel, `the panel still reaches for ${gone}`).not.toContain(gone)
+    }
+  })
+
+  it('leaves the capture\u2019s own flags to the chart, which already badges them', () => {
+    // Spliced, untriggered and the display path are all on the chart's header row. A paragraph
+    // that comes and goes above a chart takes its height off the canvas every time it appears.
+    // The template half only: the component's own doc block is free to say what moved and why.
+    const template = panel.slice(panel.indexOf('<template>'))
+    expect(template).not.toContain('spliced')
+    expect(template).not.toContain('pathNote')
+  })
+
+  it('still carries a hint, like every other panel on this screen', () => {
+    expect(panel).toMatch(/hint="[^"]{40,}"/)
   })
 })

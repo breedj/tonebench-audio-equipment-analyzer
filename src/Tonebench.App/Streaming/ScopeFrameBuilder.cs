@@ -106,8 +106,17 @@ public sealed record ScopeResidual(
 /// operation, and reported rather than hidden: a ratio trace that spends most of its time at the
 /// limit is one whose reader has to be told.
 /// </param>
+/// <param name="Slot">
+/// Which of the two math channels this is, 1 or 2. Numbered rather than named, as a scope numbers
+/// them, and carried on the trace itself so the client pairs a slice with the channel that asked
+/// for it rather than with its position in the list.
+/// </param>
+/// <param name="SourceA">The record channel operand A reads, and <paramref name="SourceB"/> B's.</param>
 public sealed record ScopeMath(
+    int Slot,
     WaveformOperation Operation,
+    int SourceA,
+    int SourceB,
     WaveformMathUnit Unit,
     MinMax[]? Columns,
     float[]? Samples,
@@ -322,9 +331,15 @@ public static class ScopeFrameBuilder
     /// A − B.</para>
     /// </summary>
     public static ScopeMath? MathTrace(
-        ScopeRecord record, ScopeFrameSlice slice, WaveformOperation operation, int maxColumns = DefaultMaxColumns)
+        ScopeRecord record,
+        ScopeFrameSlice slice,
+        int slot,
+        WaveformOperation operation,
+        int sourceA,
+        int sourceB,
+        int maxColumns = DefaultMaxColumns)
     {
-        var (values, clamped) = Combine(record, operation, slice.FirstFrame, slice.FrameCount);
+        var (values, clamped) = Combine(record, operation, sourceA, sourceB, slice.FirstFrame, slice.FrameCount);
         if (values is null)
             return null;
 
@@ -338,12 +353,12 @@ public static class ScopeFrameBuilder
             var samples = new float[values.Length];
             for (int i = 0; i < values.Length; i++)
                 samples[i] = (float)values[i];
-            return new ScopeMath(operation, unit, Columns: null, samples, measurements, clamped);
+            return new ScopeMath(slot, operation, sourceA, sourceB, unit, Columns: null, samples, measurements, clamped);
         }
 
         var columns = new MinMax[slice.Columns!.Length];
         SpectrumDecimator.DecimateLinear(values, columns);
-        return new ScopeMath(operation, unit, columns, Samples: null, measurements, clamped);
+        return new ScopeMath(slot, operation, sourceA, sourceB, unit, columns, Samples: null, measurements, clamped);
     }
 
     /// <summary>
@@ -351,12 +366,12 @@ public static class ScopeFrameBuilder
     /// counterpart, and absent on a window that names nothing for the same reason.
     /// </summary>
     public static ScopeSliceMeasurements? MathGate(
-        ScopeRecord record, WaveformOperation operation, double fromS, double toS)
+        ScopeRecord record, WaveformOperation operation, int sourceA, int sourceB, double fromS, double toS)
     {
         if (FrameRange(record, fromS, toS) is not { } range)
             return null;
 
-        var (values, _) = Combine(record, operation, range.First, range.Count);
+        var (values, _) = Combine(record, operation, sourceA, sourceB, range.First, range.Count);
         if (values is null)
             return null;
 
@@ -368,8 +383,16 @@ public static class ScopeFrameBuilder
     /// cannot disagree about what a math trace is — a gated figure computed a second way is the
     /// plausible disagreement nothing on screen would flag.
     /// </summary>
+    /// <remarks>
+    /// <para><b>A and B are chosen, where until 2026-11-20 they were channels 0 and 1 in these very
+    /// lines.</b> <see cref="WaveformMath"/> itself never knew where its two spans came from - it
+    /// takes a pair and applies an operation - so the whole of the binding was here, and moving it
+    /// out to the caller is what lets one operation serve both polarities and both one-operand
+    /// forms. The operand a given operation does not read is not resolved at all, so a source it
+    /// names that the record has not is refused only where it would really have been used.</para>
+    /// </remarks>
     private static (double[]? Values, int Clamped) Combine(
-        ScopeRecord record, WaveformOperation operation, int firstFrame, int frameCount)
+        ScopeRecord record, WaveformOperation operation, int sourceA, int sourceB, int firstFrame, int frameCount)
     {
         if (frameCount <= 0)
             return (null, 0);
@@ -377,22 +400,26 @@ public static class ScopeFrameBuilder
         // were never signals, and A - B of them would read as a differential measurement.
         if (record.IsEnvelope)
             return (null, 0);
-        if (WaveformMath.NeedsA(operation) && record.ChannelCount < 1)
+        if (WaveformMath.NeedsA(operation) && !HasChannel(record, sourceA))
             return (null, 0);
-        if (WaveformMath.NeedsB(operation) && record.ChannelCount < 2)
+        if (WaveformMath.NeedsB(operation) && !HasChannel(record, sourceB))
             return (null, 0);
 
         var a = WaveformMath.NeedsA(operation)
-            ? record.Channels[0].AsSpan(firstFrame, frameCount)
+            ? record.Channels[sourceA].AsSpan(firstFrame, frameCount)
             : ReadOnlySpan<double>.Empty;
         var b = WaveformMath.NeedsB(operation)
-            ? record.Channels[1].AsSpan(firstFrame, frameCount)
+            ? record.Channels[sourceB].AsSpan(firstFrame, frameCount)
             : ReadOnlySpan<double>.Empty;
 
         var values = new double[frameCount];
         int clamped = WaveformMath.Apply(operation, a, b, record.SampleRateHz, values);
         return (values, clamped);
     }
+
+    /// <summary>Whether the record holds the channel a source names.</summary>
+    private static bool HasChannel(ScopeRecord record, int channel) =>
+        channel >= 0 && channel < record.ChannelCount;
 
     /// <summary>
     /// How many pairs of samples an X–Y figure is drawn from, at most.

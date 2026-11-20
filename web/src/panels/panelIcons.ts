@@ -155,6 +155,9 @@ const BY_TITLE: Record<string, PanelIconSpec> = {
   display: { icon: 'eye', tone: 'pink' },
 
   measurements: { icon: 'ruler', tone: 'indigo' },
+  // The oscilloscope's rail panel, which holds facts about the capture rather than readings taken
+  // from it -- so it is the waveform's own glyph, not the ruler every measuring panel carries.
+  record: { icon: 'waveform', tone: 'blue' },
   // The oscilloscope's readout under the chart -- the few a reader chose, against the rail's
   // own panel, which lists every reading the window has.
   'selected measurements': { icon: 'ruler', tone: 'indigo' },

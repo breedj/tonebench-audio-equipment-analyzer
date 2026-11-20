@@ -435,3 +435,54 @@ describe('the stimulus source', () => {
     expect(triggerSourceProblem('Stimulus', false, false)).toBeNull()
   })
 })
+
+describe('the Acquisition controls are live while the scope is running', () => {
+  // A scope is set up *while* it is running, and the server already allows it: the runner's Retune
+  // validates the record length, the pre-trigger and the channel pair, rebuilds the capture spec
+  // and restarts the accumulator when the geometry moves, and /oscilloscope/retune is deliberately
+  // not behind MeasurementRunGuard. The sample rate is the one field it refuses by name -- it
+  // re-clocks the analyzer -- and App.vue answers that refusal with a background stop and start.
+  //
+  // So these controls were disabled out of caution rather than necessity, and this reads the
+  // component as text to keep them that way: the fault would be invisible otherwise, since a
+  // disabled control looks deliberate.
+  const source = readFileSync(new URL('../components/ScopeConfigPanel.vue', import.meta.url), 'utf8')
+
+  it('disables nothing on the staged settings because a run is in flight', () => {
+    expect(source).not.toMatch(/:disabled="running"/)
+  })
+
+  it('still gates the controls that have their own reason to be gated', () => {
+    // Roll has no trigger at all, and accumulation is refused under Single and Roll by name. Those
+    // are refusals about the setting rather than about the run, and they stay.
+    expect(source).toMatch(/:disabled="rolling"/)
+    expect(source).toMatch(/:disabled="!canAccumulate"/)
+  })
+})
+
+describe('the Trigger panel\u2019s lists', () => {
+  const source = readFileSync(new URL('../components/ScopeConfigPanel.vue', import.meta.url), 'utf8')
+  const lists = source.match(/<IconSelect[\s\S]*?\/>/g) ?? []
+
+  it('replaced every one of the panel\u2019s dropdowns', () => {
+    // Mode, Records, Source, Kind, Slope, Condition. The sample rate stays a <select>: its options
+    // are a list of numbers, which no figure says anything about.
+    expect(lists).toHaveLength(6)
+    // The only <select>s left are the two whose options are lists of *numbers*, which no figure
+    // would say anything about: the sample rate and the timebase.
+    // `<select` followed by whitespace *and an attribute* -- so the one in this panel's own prose,
+    // which explains why the trigger controls are no longer one, is not counted as a control.
+    const selects = source.match(/<select\s+[a-z:@][\s\S]*?>/g) ?? []
+    expect(selects).toHaveLength(2)
+    expect(selects.join()).toMatch(/form\.sampleRateHz/)
+    expect(selects.join()).toMatch(/timePerDivisionS/)
+  })
+
+  it('names each one, since the button carries a figure rather than a label element', () => {
+    for (const list of lists) {
+      expect(list, list).toMatch(/group-label="[^"]+"/)
+      expect(list, list).toMatch(/v-model="/)
+      expect(list, list).toMatch(/:options="/)
+    }
+  })
+})

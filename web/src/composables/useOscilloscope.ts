@@ -98,14 +98,14 @@ const gate = shallowRef<CursorGate | null>(null)
 const wantResidual = ref(false)
 
 /**
- * Which math channel the fetch asks for, or null for none.
+ * What the fetch asks the two math channels for — one token each, or null for off.
  *
- * <p>The fourth thing a fetch is keyed on, and here for the gate's and the residual's reason: the
+ * <p>The fourth thing a fetch is keyed on, and here for the gate's and the residual's reason: a
  * derived trace rides on the <em>same</em> request as the waveforms it was derived from, so the
- * math trace on screen is always of the record under it. Off is null rather than the string, so
- * the commonest state asks for nothing.</p>
+ * math traces on screen are always of the record under them. Off is null rather than the string,
+ * so the commonest state asks for nothing at all.</p>
  */
-const wantMath = shallowRef<string | null>(null)
+const wantMaths = shallowRef<readonly (string | null)[]>([null, null])
 
 /**
  * Whether the fetch asks for the X–Y figure.
@@ -215,7 +215,7 @@ async function fetchRecord(force = false): Promise<void> {
       maxColumns.value,
       gate.value ?? undefined,
       wantResidual.value,
-      wantMath.value,
+      wantMaths.value,
       wantXy.value,
       wantEye.value,
       wantPath.value,
@@ -371,16 +371,20 @@ export function useOscilloscope() {
   }
 
   /**
-   * Picks the math channel, or null for none, and re-fetches so the derived trace arrives with the
-   * record it was derived from.
+   * Picks what the two math channels compute, and re-fetches so the derived traces arrive with the
+   * record they were derived from.
    *
-   * <p>Re-fetches at once for the gate's reason: a stopped scope has no next poll, and changing
-   * the operation on a held record is the commonest way this is used.</p>
+   * <p>Both at once rather than one call per channel: they ride on one request, so two calls would
+   * be two fetches of the same record, and the second would be of a <em>later</em> record on a
+   * running scope — two math traces drawn against one waveform but not against each other.</p>
+   *
+   * <p>Re-fetches at once for the gate's reason: a stopped scope has no next poll, and changing an
+   * operation on a held record is the commonest way this is used.</p>
    */
-  async function setMath(operation: string | null): Promise<void> {
-    const next = operation || null
-    if (wantMath.value === next) return
-    wantMath.value = next
+  async function setMaths(specs: readonly (string | null)[]): Promise<void> {
+    const next = [specs[0] || null, specs[1] || null]
+    if (next[0] === wantMaths.value[0] && next[1] === wantMaths.value[1]) return
+    wantMaths.value = next
     await fetchRecord(true)
   }
 
@@ -512,7 +516,7 @@ export function useOscilloscope() {
     fetchRecord,
     setWindow,
     setGate,
-    setMath,
+    setMaths,
     setXy,
     setEye,
     setPath,

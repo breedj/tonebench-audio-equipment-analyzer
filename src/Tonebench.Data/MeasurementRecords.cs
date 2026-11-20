@@ -1303,6 +1303,17 @@ public sealed record OscilloscopeParameters(
     /// </summary>
     bool? ChartShowResidual = null,
     /// <summary>
+    /// Which style the cursors were read in — <c>Fixed</c>, one box of figures on the plot, or
+    /// <c>Following</c>, a value pinned to each line with an arrow between the pair.
+    /// </summary>
+    /// <remarks>
+    /// A display preference, so it is stored; the cursors' own <i>positions</i> are not, and must
+    /// never be. Where somebody happened to leave a cursor while reading a measurement is a fact
+    /// about that session, not about what was measured — which is why a report carries neither.
+    /// Null on anything saved before the control existed, which reads as the default.
+    /// </remarks>
+    string? ChartCursorStyle = null,
+    /// <summary>
     /// How long the chart keeps each record's trace — the digital-phosphor picture. A display
     /// preference like the pair above, so it is stored; what is <i>accumulated</i> is never stored
     /// and never parked, being a history of a display rather than of a capture.
@@ -1324,6 +1335,21 @@ public sealed record OscilloscopeParameters(
     /// definition of which is which.</para>
     /// </summary>
     string? ChartMathOperation = null,
+    /// <summary>
+    /// Which inputs Math 1's two operands read — <c>ch0</c> or <c>ch1</c>.
+    /// </summary>
+    /// <remarks>
+    /// Null on anything saved before the sources could be chosen, which reads as A = the left
+    /// input and B = the right: that is what the operation names meant then, so nothing stored
+    /// changes meaning. An operation whose operands were the other way round reopens as its own
+    /// tile with the pair exchanged — see <c>scope/math.ts</c>'s <c>mathSpecFromStored</c>.
+    /// </remarks>
+    string? ChartMathSourceA = null,
+    string? ChartMathSourceB = null,
+    /// <summary>The second math channel, which nothing saved before 2026-11-20 carries.</summary>
+    string? ChartMath2Operation = null,
+    string? ChartMath2SourceA = null,
+    string? ChartMath2SourceB = null,
     /// <summary>
     /// Which picture the chart drew — <c>Waveform</c> (the trace against time) or <c>XY</c> (the
     /// goniometer, one input against the other). A display preference like the rest, so the view a

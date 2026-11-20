@@ -12,6 +12,7 @@ import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composable
 import { canSnapToBin as canSnapToBinKind, snapToBinOnLoad } from '../measurements/snapToBin'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import { generatorRateCeilingNotice } from '../generatorRateCeiling'
+import ChannelPair from './ChannelPair.vue'
 import GeneratorChannelPanel from './GeneratorChannelPanel.vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 
@@ -45,8 +46,22 @@ const props = withDefaults(
      * own; the FFT screen's shared one is the fallback.
      */
     stagedSampleRateHz?: number | null
+    /**
+     * Whether the amplifier Load belongs on this screen.
+     *
+     * <p><b>It is not a property of the generator</b>, which is why it can be taken away: it is the
+     * figure the FFT screen's power tiles divide by, and that screen is the only one rendering this
+     * panel that reads it, stores it
+     * (<code>FftSpectrumParameters.LoadOhms</code>) or has a watt to report. The oscilloscope
+     * measures volts and time; a Load row there is a control for a reading that does not exist on
+     * that screen, and height on a rail whose standing problem is height.</p>
+     *
+     * <p>The eight sweep and response panels each carry their own Load field, so the shared figure
+     * stays editable from every screen that uses it.</p>
+     */
+    showLoad?: boolean
   }>(),
-  { stimulus: () => useGeneratorStimulus() },
+  { stimulus: () => useGeneratorStimulus(), showLoad: true },
 )
 
 // Shared with both channels' Metrics panels — one amplifier load, edited here instead of twice.
@@ -92,6 +107,16 @@ const generatorUsable = computed(() => rateCeilingNotice.value === null)
 const leftEnabled = ref(true)
 const rightEnabled = ref(false)
 const snapToBin = ref(true)
+
+/**
+ * The channel pair is a component now, so an edit is noticed by watching rather than by an
+ * `@change` on each box — the pair writes the models itself and has no event of its own to carry.
+ *
+ * <p>Declared here rather than beside the emit, because a watcher that names a ref has to come
+ * after it: a `const` is in its temporal dead zone until its own line runs, and this project has
+ * paid for that twice.</p>
+ */
+watch([leftEnabled, rightEnabled], () => emit('change'))
 const { kind: stimulusKind } = props.stimulus
 
 // Which kinds snap is `snapToBin.ts`'s to say, for both this and the watcher below — the rule
@@ -178,19 +203,15 @@ defineExpose({ buildRequest, resyncTones })
     </p>
 
     <div v-show="generatorUsable" class="contents">
-      <fieldset class="mb-3 flex items-center gap-4 text-sm" title="Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.">
-        <legend class="sr-only">Enabled channels</legend>
-        <label class="tb-check-row">
-          <input type="checkbox" v-model="leftEnabled" @change="emit('change')" />
-          Left
-        </label>
-        <label class="tb-check-row">
-          <input type="checkbox" v-model="rightEnabled" @change="emit('change')" />
-          Right
-        </label>
-      </fieldset>
+      <!-- Which channel(s) play this stimulus once Run is pressed — the ADC always samples both.
+           The same control as the Acquisition panel's "which are captured" and the display rail's
+           "which are drawn", because all three ask one question about the same two channels. -->
+      <div class="tb-field mb-3">
+        <span class="tb-group">Play on</span>
+        <ChannelPair v-model:left="leftEnabled" v-model:right="rightEnabled" group-label="Play on" />
+      </div>
 
-      <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <div v-if="showLoad" class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         <!-- `change` like every other field here: the load reaches no device, but the emit is
              also what marks the open measurement dirty (App.vue's applyGeneratorLive), and
              without it an edited load left the Save button hidden with autosave off and was

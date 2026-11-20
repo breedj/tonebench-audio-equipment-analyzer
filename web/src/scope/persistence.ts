@@ -44,15 +44,25 @@ export const SCOPE_PERSISTENCE_RECORDS: Readonly<Record<ScopePersistence, number
     Infinite: null,
   })
 
-/** The dropdown, in the order a reader turns it up. */
-export const SCOPE_PERSISTENCE_OPTIONS: readonly { value: ScopePersistence; label: string }[] =
-  Object.freeze([
-    { value: 'Off', label: 'Off' },
-    { value: 'Short', label: '8 records' },
-    { value: 'Medium', label: '32 records' },
-    { value: 'Long', label: '128 records' },
-    { value: 'Infinite', label: 'Infinite' },
-  ])
+/**
+ * The control, in the order a reader turns it up.
+ *
+ * <p><b>Two labels, because the control is a row of buttons on a narrow rail.</b>
+ * <code>shortLabel</code> is what fits in a fifth of that rail and <code>label</code> is what says
+ * what it means, carried as each button's tooltip. Kept in one table rather than spelled in the
+ * template, so the two cannot come to disagree about which setting keeps how many records.</p>
+ */
+export const SCOPE_PERSISTENCE_OPTIONS: readonly {
+  value: ScopePersistence
+  label: string
+  shortLabel: string
+}[] = Object.freeze([
+  { value: 'Off', label: 'Off', shortLabel: 'Off' },
+  { value: 'Short', label: '8 records', shortLabel: '8' },
+  { value: 'Medium', label: '32 records', shortLabel: '32' },
+  { value: 'Long', label: '128 records', shortLabel: '128' },
+  { value: 'Infinite', label: 'Infinite', shortLabel: '∞' },
+])
 
 /** How the accumulated picture is coloured. */
 export type ScopeIntensityMode = 'Single' | 'Multi'

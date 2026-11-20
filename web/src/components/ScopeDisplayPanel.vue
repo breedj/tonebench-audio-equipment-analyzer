@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
@@ -31,15 +31,21 @@ import {
   pathSummary,
   type ScopeSignalPathSettings,
 } from '../scope/signalPath'
+import ChannelPair from './ChannelPair.vue'
+import ScopeMathDialog from './ScopeMathDialog.vue'
 import ScopeToggleIcon from './ScopeToggleIcon.vue'
+import { SCOPE_CURSOR_STYLES, type ScopeCursorStyle } from '../scope/cursorOverlay'
 import { SCOPE_DRAWINGS, drawingNeedsRawSlice, type ScopeDrawing } from '../scope/interpolation'
 import {
-  SCOPE_MATH_OPERATIONS,
-  mathDraws,
-  mathMissingChannels,
+  DEFAULT_SCOPE_MATH_SPEC,
+  SCOPE_MATH_SLOTS,
   mathOption,
-  type ScopeMathOperation,
-  type ScopeMathOption,
+  mathSpecDraws,
+  mathSpecLabel,
+  mathSpecMissing,
+  scopeMathSlice,
+  type ScopeMathSlot,
+  type ScopeMathSpec,
 } from '../scope/math'
 import type { DecayPalette } from '../api/client'
 
@@ -65,9 +71,12 @@ const showResidual = defineModel<boolean>('showResidual', { required: true })
 const persistence = defineModel<ScopePersistence>('persistence', { required: true })
 const intensityMode = defineModel<ScopeIntensityMode>('intensityMode', { required: true })
 const intensityPalette = defineModel<DecayPalette>('intensityPalette', { required: true })
-const mathOperation = defineModel<ScopeMathOperation>('mathOperation', { required: true })
+/** The two math channels — see scope/math.ts. A pair, because the chart draws two. */
+const maths = defineModel<[ScopeMathSpec, ScopeMathSpec]>('maths', { required: true })
 const chartView = defineModel<ScopeView>('chartView', { required: true })
 const drawing = defineModel<ScopeDrawing>('drawing', { required: true })
+/** Which style the cursors are read in. A preference, where their positions are session state. */
+const cursorStyle = defineModel<ScopeCursorStyle>('cursorStyle', { required: true })
 
 /**
  * Whether the chosen drawing is actually reaching the picture.
@@ -245,41 +254,58 @@ const captured = computed(() => capturedScopeChannels(record.value?.channels))
 /** An X–Y figure needs both inputs; one of them draws a horizontal line that looks like a measurement. */
 const bothCaptured = computed(() => captured.value.left && captured.value.right)
 
-/** The entry for the chosen operation, which carries its own label, unit and explanation. */
-const math = computed(() => mathOption(mathOperation.value))
-
-/** The groups, in the table's own order, so twelve entries read as four short lists. */
-const mathGroups = computed(() => {
-  const groups: { name: string; options: ScopeMathOption[] }[] = []
-  for (const option of SCOPE_MATH_OPERATIONS) {
-    if (!option.group) continue
-    const last = groups.at(-1)
-    if (last && last.name === option.group) last.options.push(option)
-    else groups.push({ name: option.group, options: [option] })
-  }
-  return groups
-})
-
 /**
- * Which inputs the chosen operation needs and is not getting.
+ * The two math channels, as the rail draws them: what each computes, and what is wrong with it.
  *
- * <p>The server answers with no trace at all in that case, which is the honest result — an
- * operation computed against an array of zeros would draw A itself and label it A − B — but an
- * absent trace with nothing beside it reads as a broken setting, so the rail says which box to
- * tick.</p>
+ * <p>One row per slot rather than two blocks of markup, so a third could not be added with one of
+ * its notes missing.</p>
  */
-const mathMissing = computed(() =>
-  mathMissingChannels(mathOperation.value, captured.value.left, captured.value.right),
+const mathRows = computed(() =>
+  SCOPE_MATH_SLOTS.map((slot) => {
+    const spec = maths.value[slot - 1]
+    return {
+      slot,
+      spec,
+      on: mathSpecDraws(spec),
+      /** The expression with its sources filled in — "L − R" rather than "A − B". */
+      label: mathSpecLabel(spec),
+      title: mathOption(spec.operation).title,
+      /**
+       * Which chosen inputs this measurement is not capturing.
+       *
+       * <p>The server answers with no trace at all in that case, which is the honest result — an
+       * operation computed against an array of zeros would draw A itself and label it A − B — but
+       * an absent trace with nothing beside it reads as a broken setting, so the rail says which
+       * box to tick.</p>
+       */
+      missing: mathSpecMissing(spec, captured.value.left, captured.value.right),
+      /**
+       * How many samples A ÷ B railed on, when it did.
+       *
+       * <p>Reported rather than hidden, which is the whole reason the count comes back from the
+       * server: a ratio trace spends every zero crossing of its denominator at the limit, so one
+       * that is mostly at ±1000 is a picture of the clamp and its reader has to be told.</p>
+       */
+      clamped: scopeMathSlice(record.value, slot)?.clampedSamples ?? 0,
+    }
+  }),
 )
 
-/**
- * How many samples A ÷ B railed on, when it did.
- *
- * <p>Reported rather than hidden, which is the whole reason the count comes back from the server:
- * a ratio trace spends every zero crossing of its denominator at the limit, so one that is mostly
- * at ±1000 is a picture of the clamp and its reader has to be told.</p>
- */
-const mathClamped = computed(() => record.value?.math?.clampedSamples ?? 0)
+/** Which channel's dialog is open, or null. */
+const mathDialogSlot = ref<ScopeMathSlot | null>(null)
+
+const mathDialogSpec = computed(() =>
+  mathDialogSlot.value ? maths.value[mathDialogSlot.value - 1] : DEFAULT_SCOPE_MATH_SPEC,
+)
+
+/** One channel set from the dialog. The pair is replaced rather than mutated, as every model here is. */
+function onMathApply(spec: ScopeMathSpec) {
+  const slot = mathDialogSlot.value
+  if (!slot) return
+  const next: [ScopeMathSpec, ScopeMathSpec] = [maths.value[0], maths.value[1]]
+  next[slot - 1] = spec
+  maths.value = next
+}
 
 /**
  * The extremes of what is <b>drawn</b> — exact even on a decimated slice. See scope/measurements.ts.
@@ -326,15 +352,6 @@ function autofitAll() {
  * params_json and is simply not read here -- the ChartDecayLightAzimuthDeg precedent.
  */
 
-/**
- * The trace colours, for the lit Channels buttons.
- *
- * <p>Repeated from OscilloscopeScreenChart rather than imported from it, which is this project's
- * usual answer for a constant a component and a chart both need: the chart is where they are the
- * stroke of a series, and a rail importing a chart to colour a button would be the wrong way
- * round. Two entries, and a channel beyond them is simply not coloured.</p>
- */
-const CHANNEL_INK = ['#3b82f6', '#f59e0b']
 
 /** Which figure stands for each drawing mode — see scope/displayIcons.ts. */
 const DRAWING_ICONS: Record<ScopeDrawing, string> = {
@@ -392,6 +409,68 @@ const showToggles = computed(() => [
     },
   },
 ])
+
+/**
+ * The two cursor pairs, as buttons rather than tick boxes.
+ *
+ * <p>Separate from <code>showToggles</code> although they are drawn the same way, because they
+ * belong in the Cursors section with the boxes and the readings they are about — and because each
+ * one <em>places</em> its pair on the way on rather than merely setting a flag.</p>
+ */
+const cursorToggles = computed(() => [
+  {
+    icon: 'cursorTime',
+    label: 'Time cursors',
+    title:
+      'Time cursors — two vertical lines reading the time between them and its reciprocal. While they are on, the readings under the chart are of the stretch of the record between them rather than of the whole window.',
+    on: cursors.value.timeOn,
+    toggle: () => toggleTimeCursors(!cursors.value.timeOn),
+  },
+  {
+    icon: 'cursorLevel',
+    label: 'Level cursors',
+    title:
+      'Level cursors — two horizontal lines reading the level difference between them. They gate nothing: a pair of levels names no stretch of the record. With both pairs on, the readout also carries ΔV/Δt.',
+    on: cursors.value.voltOn,
+    toggle: () => toggleVoltCursors(!cursors.value.voltOn),
+  },
+])
+
+/**
+ * The persistence ladder as a row of buttons.
+ *
+ * <p>The <b>short</b> label, because five of them share the rail's width; the long one is the
+ * tooltip, so "32" still says "32 records" to anyone who asks.</p>
+ */
+const persistenceOptions = computed(() =>
+  SCOPE_PERSISTENCE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.shortLabel,
+    title: option.label,
+  })),
+)
+
+const intensityOptions = computed(() =>
+  SCOPE_INTENSITY_MODES.map((option) => ({ value: option.value, label: option.label })),
+)
+
+/**
+ * The coupling as a pair of buttons.
+ *
+ * <p>Written through a computed rather than bound directly, because the model is the whole path
+ * object: the setter replaces it, which is what the <code>@change</code> handler did before and
+ * what keeps a future second field in the path from being dropped by a write to this one.</p>
+ */
+const coupling = computed<ScopeSignalPathSettings['coupling']>({
+  get: () => path.value.coupling,
+  set: (value) => {
+    path.value = { ...path.value, coupling: value }
+  },
+})
+
+const couplingOptions = computed(() =>
+  SCOPE_COUPLINGS.map((option) => ({ value: option.value, label: option.label, title: option.title })),
+)
 
 const verticalLabel = computed(() => formatVoltsPerDivision(voltsPerDivision.value))
 
@@ -629,45 +708,17 @@ function onVoltsPerDivisionChange(event: Event) {
   >
     <div class="tb-field">
       <span class="tb-group">Channels</span>
-      <!-- A letter rather than a figure: L and R are what a scope has always called its inputs,
-           and a drawing of a channel would be a drawing of nothing. Lit, each takes its own
-           trace colour, which is the other thing a reader matches them by. -->
-      <div class="tb-segment-track grid grid-cols-2">
-        <button
-          type="button"
-          class="tb-segment font-semibold"
-          :class="showLeft && captured.left ? 'tb-segment-on' : ''"
-          :style="showLeft && captured.left ? { color: CHANNEL_INK[0] } : undefined"
-          :disabled="!captured.left"
-          :aria-pressed="showLeft && captured.left"
-          :aria-label="'Draw the left input'"
-          :title="
-            captured.left
-              ? 'Draw the left input.'
-              : 'Not being captured — tick Left under Acquisition ▸ Channels.'
-          "
-          @click="showLeft = !showLeft"
-        >
-          L
-        </button>
-        <button
-          type="button"
-          class="tb-segment font-semibold"
-          :class="showRight && captured.right ? 'tb-segment-on' : ''"
-          :style="showRight && captured.right ? { color: CHANNEL_INK[1] } : undefined"
-          :disabled="!captured.right"
-          :aria-pressed="showRight && captured.right"
-          :aria-label="'Draw the right input'"
-          :title="
-            captured.right
-              ? 'Draw the right input.'
-              : 'Not being captured — tick Right under Acquisition ▸ Channels.'
-          "
-          @click="showRight = !showRight"
-        >
-          R
-        </button>
-      </div>
+      <!-- Which captured inputs are *drawn*. The same control as Acquisition's "which are captured"
+           and the Generator's "which play", because they are one question asked three times. -->
+      <ChannelPair
+        v-model:left="showLeft"
+        v-model:right="showRight"
+        group-label="Draw"
+        :left-disabled="!captured.left"
+        :right-disabled="!captured.right"
+        left-disabled-title="Not being captured — tick L under Acquisition ▸ Channels."
+        right-disabled-title="Not being captured — tick R under Acquisition ▸ Channels."
+      />
     </div>
 
     <div class="tb-field">
@@ -730,19 +781,10 @@ function onVoltsPerDivisionChange(event: Event) {
          doing it on the client would change the picture and leave every reading describing
          something else. See scope/signalPath.ts, which also records what the in-path filter that
          stood here until 2026-11-18 got wrong, and what rebuilding it properly needs. -->
-    <label class="tb-field">
-      Coupling
-      <select
-        class="tb-input"
-        :value="path.coupling"
-        @change="path = { ...path, coupling: ($event.target as HTMLSelectElement).value as ScopeSignalPathSettings['coupling'] }"
-      >
-        <!-- v-once, as Math's list. -->
-        <option v-for="option in SCOPE_COUPLINGS" v-once :key="option.value" :value="option.value" :title="option.title">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
+    <div class="tb-field">
+      <span class="tb-group">Coupling</span>
+      <SegmentedToggle v-model="coupling" :options="couplingOptions" group-label="Coupling" />
+    </div>
 
     <!-- State stays, explanation moved to the hint: what is in the path right now is the panel
          talking about the present, and what that costs every reading is read once. -->
@@ -757,46 +799,50 @@ function onVoltsPerDivisionChange(event: Event) {
   <CollapsibleSection
     title="Math"
     size="xs"
-    hint="A is the left input and B the right. The derived trace is drawn in violet against its own axis on the right, because a derived quantity is frequently not in volts and, even when it is, routinely far smaller than what it came from."
+    hint="Two channels, each combining two inputs you choose. Each is drawn against its own axis on the right — violet for Math 1, pink and dashed for Math 2 — because a derived quantity is frequently not in volts and, even when it is, routinely far smaller than what it came from."
   >
-    <!-- The derived waveform is computed server-side on the samples, never on the drawn columns:
-         the difference of two envelopes is not the envelope of a difference, and on a differential
+    <!-- One button per channel, each showing what it computes and opening its own dialog. The
+         derived waveform is computed server-side on the samples, never on the drawn columns: the
+         difference of two envelopes is not the envelope of a difference, and on a differential
          pair that error is the entire reading. See scope/math.ts. -->
-    <label class="tb-field">
-      Channel
-      <select v-model="mathOperation" class="tb-input" :title="math.title">
-        <option value="Off">Off</option>
-        <!-- v-once, and it is a fix rather than an optimisation. Vue patches a `value` binding
-             unconditionally (patchProps carves it out of the "only when it changed" rule) and then
-             syncs the attribute with a bare setAttribute that has no equality guard of its own — so
-             every re-render of this section writes `value` on all eleven options whether or not one
-             of them moved. Chrome repaints an open <select> popup when its options' attributes
-             mutate, and what a repaint redraws most visibly is the highlighted row: with a math
-             channel on, this list re-rendered on every arriving record and the selected item
-             flickered a few times a second. (Only with one on: `mathClamped` is the one thing in
-             this section that reads the record, so with Math off nothing here tracked it and
-             nothing flickered — which is why this dropdown was the one reported.) The table is a
-             frozen module constant and `mathGroups` has no reactive input, so rendering it once is
-             the whole answer. Its five siblings below carry it for the same reason. -->
-        <optgroup v-for="group in mathGroups" v-once :key="group.name" :label="group.name">
-          <option v-for="option in group.options" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </optgroup>
-      </select>
-    </label>
+    <template v-for="row in mathRows" :key="row.slot">
+      <button
+        type="button"
+        class="flex h-[34px] w-full items-center gap-2 rounded-lg border px-2 text-left text-[12px] transition"
+        :class="row.on ? 'btn-action' : 'btn-toggle-off'"
+        :aria-pressed="row.on"
+        :aria-label="`Math ${row.slot}`"
+        :title="row.on ? row.title : 'No trace. Press to choose an operation and its two inputs.'"
+        @click="mathDialogSlot = row.slot"
+      >
+        <span class="shrink-0 font-semibold">Math {{ row.slot }}</span>
+        <span class="min-w-0 flex-1 truncate text-right">{{ row.label }}</span>
+      </button>
 
-    <template v-if="mathDraws(mathOperation)">
-      <p v-if="mathMissing.length" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-        Nothing to draw: this needs the {{ mathMissing.join(' and the ') }} input, which this
-        measurement is not capturing. Tick it under Acquisition ▸ Channels.
-      </p>
-      <p v-else-if="mathClamped > 0" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-        {{ mathClamped.toLocaleString() }} samples railed at ±1000 — the denominator passes through
-        zero there. A ratio is only meaningful where B is a settled level; for a transfer function
-        use the frequency-response measurement.
-      </p>
+      <template v-if="row.on">
+        <p v-if="row.missing.length" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+          Math {{ row.slot }} has nothing to draw: it needs the
+          {{ row.missing.join(' and the ') }} input, which this measurement is not capturing. Tick
+          it under Acquisition ▸ Channels.
+        </p>
+        <p v-else-if="row.clamped > 0" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+          Math {{ row.slot }}: {{ row.clamped.toLocaleString() }} samples railed at ±1000 — the
+          denominator passes through zero there. A ratio is only meaningful where B is a settled
+          level; for a transfer function use the frequency-response measurement.
+        </p>
+      </template>
     </template>
+
+    <ScopeMathDialog
+      v-if="mathDialogSlot"
+      :open="mathDialogSlot !== null"
+      :slot="mathDialogSlot"
+      :spec="mathDialogSpec"
+      :captured-left="captured.left"
+      :captured-right="captured.right"
+      @close="mathDialogSlot = null"
+      @apply="onMathApply"
+    />
   </CollapsibleSection>
 
   <CollapsibleSection
@@ -807,26 +853,19 @@ function onVoltsPerDivisionChange(event: Event) {
     <!-- A history of a *display*, not of a capture: the setting is stored with the measurement, and
          what it accumulates is thrown away whenever a pixel would stop meaning the same time and
          the same level. -->
-    <label class="tb-field">
-      Keep
-      <select v-model="persistence" class="tb-input">
-        <!-- v-once, as Math's list. -->
-        <option v-for="option in SCOPE_PERSISTENCE_OPTIONS" v-once :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
+    <!-- Buttons rather than a dropdown: five rungs of one ladder that a reader turns up and down
+         while watching the picture, which is exactly what a segmented control is for — and the
+         short labels are why the table carries two (see scope/persistence.ts). -->
+    <div class="tb-field">
+      <span class="tb-group">Keep</span>
+      <SegmentedToggle v-model="persistence" :options="persistenceOptions" group-label="Persistence" />
+    </div>
 
     <template v-if="persistenceOn">
-      <label class="tb-field">
-        Colour
-        <select v-model="intensityMode" class="tb-input">
-          <!-- v-once, as Math's list. -->
-          <option v-for="option in SCOPE_INTENSITY_MODES" v-once :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+      <div class="tb-field">
+        <span class="tb-group">Colour</span>
+        <SegmentedToggle v-model="intensityMode" :options="intensityOptions" group-label="Persistence colour" />
+      </div>
       <label v-if="intensityMode === 'Multi'" class="tb-field">
         Map
         <select v-model="intensityPalette" class="tb-input">
@@ -857,16 +896,35 @@ function onVoltsPerDivisionChange(event: Event) {
   >
     <!-- A cursor is a transient reading that belongs to the session, not a note that belongs to the
          measurement - so none of this is in params_json, and none of it is in a report. -->
-    <label class="tb-check-row">
-      <input
-        :checked="cursors.timeOn"
-        type="checkbox"
-        class="tb-check"
-        title="Two vertical cursors reading the time between them and its reciprocal. While they are on, the Measurements panel reads the stretch of the record between them instead of the whole window."
-        @change="toggleTimeCursors(($event.target as HTMLInputElement).checked)"
-      />
-      Time cursors
-    </label>
+    <!-- Which of the two the figures are written in. A preference, unlike the positions beside it:
+         see scope/cursorOverlay.ts. -->
+    <div class="tb-field">
+      <span class="tb-group">Style</span>
+      <SegmentedToggle v-model="cursorStyle" :options="SCOPE_CURSOR_STYLES" group-label="Cursor style" />
+    </div>
+
+    <!-- The two pairs, as the Show group's buttons: the name a label carried is the button's own
+         tooltip and its aria-label, so nothing is lost to a reader who hovers or to a screen
+         reader - only to one who is scanning, which is what the figure is for. -->
+    <div class="tb-field">
+      <span class="tb-group">Cursors</span>
+      <div class="flex flex-wrap gap-1.5">
+        <button
+          v-for="toggle in cursorToggles"
+          :key="toggle.icon"
+          type="button"
+          class="flex h-[34px] w-[34px] items-center justify-center rounded-lg border transition"
+          :class="toggle.on ? 'btn-action' : 'btn-toggle-off'"
+          :aria-pressed="toggle.on"
+          :aria-label="toggle.label"
+          :title="toggle.title"
+          @click="toggle.toggle()"
+        >
+          <ScopeToggleIcon :name="toggle.icon" />
+        </button>
+      </div>
+    </div>
+
     <div v-if="cursors.timeOn" class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         A ({{ boxScale.label }})
@@ -894,16 +952,6 @@ function onVoltsPerDivisionChange(event: Event) {
       </label>
     </div>
 
-    <label class="tb-check-row">
-      <input
-        :checked="cursors.voltOn"
-        type="checkbox"
-        class="tb-check"
-        title="Two horizontal cursors reading the level difference between them. They read levels only and do not gate the measurements - a pair of levels names no stretch of the record."
-        @change="toggleVoltCursors(($event.target as HTMLInputElement).checked)"
-      />
-      Level cursors
-    </label>
     <div v-if="cursors.voltOn" class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         A (V)

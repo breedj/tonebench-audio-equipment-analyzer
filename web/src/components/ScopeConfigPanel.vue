@@ -13,6 +13,9 @@ import { useProjects } from '../composables/useProjects'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import CollapsibleSection from './CollapsibleSection.vue'
 import EstimateBadge from './EstimateBadge.vue'
+import ChannelPair from './ChannelPair.vue'
+import IconSelect from './IconSelect.vue'
+import ScopeToggleIcon from './ScopeToggleIcon.vue'
 import { clampNumberField } from '../numberField'
 import {
   DEFAULT_SCOPE_AVERAGE_COUNT,
@@ -48,7 +51,12 @@ import {
   windowLevelsProblem,
   type ScopePulseCondition,
 } from '../scope/triggerSpec'
-import { formatScopeTime } from '../scope/timeAxis'
+import {
+  formatScopeTime,
+  recordSecondsFor,
+  SCOPE_TIME_PER_DIVISION_LADDER,
+  timePerDivisionFor,
+} from '../scope/timeAxis'
 import { roundVoltsForWindow } from '../scope/voltAxis'
 
 /**
@@ -145,14 +153,46 @@ const MAX_RECORD_MS = 1000
 const MIN_RECORD_MS = 0.02
 
 /**
- * The record lengths the dropdown offers, in milliseconds.
+ * The timebase, in seconds per division — the record is ten of them.
  *
- * <p>A 1-2-5 ladder, which is how a scope's timebase knob is stepped, from the shortest record a
- * chart can draw anything on up to the one-second ceiling. The box beside it takes any figure in
- * between — the record length is a free time here rather than a knob position, because unlike a
- * real scope the timebase is a view <em>into</em> the record and so costs nothing to set oddly.</p>
+ * <p><b>A knob with detents, where this was a free figure in milliseconds until 2026-11-20.</b>
+ * The old box's own note argued for the freedom: the chart draws a window <em>into</em> the record
+ * here, so an odd length costs nothing. What it cost instead was the control every scope user
+ * reaches for first. The zoom is unchanged and is still a window into the record — it is only
+ * which control sets the record that has moved.</p>
+ *
+ * <p>The ladder's own ends are the server's refusal bounds over ten; see timeAxis.ts.</p>
  */
-const RECORD_MS_LADDER = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+const timePerDivisionS = computed(() => timePerDivisionFor(form.recordMs / 1000))
+
+/**
+ * The rungs, plus whatever this measurement was actually captured at.
+ *
+ * <p>Folded in rather than snapped, which is the `withCurrentValue` rule one screen along: a
+ * measurement stored at an odd record length must reopen reading what it captured, not quietly
+ * re-captured at the nearest detent. Its own figure leaves the list again as soon as a rung is
+ * picked.</p>
+ */
+const timePerDivisionOptions = computed(() => {
+  const current = timePerDivisionS.value
+  const rungs = [...SCOPE_TIME_PER_DIVISION_LADDER]
+  if (Number.isFinite(current) && current > 0 && !rungs.some((r) => Math.abs(r - current) < r * 1e-6)) {
+    rungs.push(current)
+    rungs.sort((a, b) => a - b)
+  }
+  return rungs
+})
+
+/** One rung as the control writes it — the division's own unit, like the status line's readout. */
+function timePerDivisionLabel(seconds: number): string {
+  return `${formatScopeTime(seconds * 1000, seconds * 1000)}/div`
+}
+
+function onTimePerDivisionChange(event: Event) {
+  const seconds = Number((event.target as HTMLSelectElement).value)
+  if (!Number.isFinite(seconds) || seconds <= 0) return
+  form.recordMs = clampNumberField(recordSecondsFor(seconds) * 1000, MIN_RECORD_MS, MAX_RECORD_MS)
+}
 
 const form = reactive({
   sampleRateHz: 192000,
@@ -314,6 +354,35 @@ watch(
     preTriggerFraction.value = Math.min(1, Math.max(0, percent / 100))
   },
 )
+/**
+ * And back again, which is the half this pair needed once the marker became draggable.
+ *
+ * <p>Every other Acquisition setting is written only by its own box, so one direction is enough.
+ * The pre-trigger is not: the chart's T grip on the top edge writes the <em>model</em>, and
+ * <code>buildRequest</code> reads <code>form.preTriggerPercent</code> — so without this the drag
+ * moved the marker and changed nothing at all, which reads as a grip that does not work.</p>
+ *
+ * <p>Guarded against the pair ping-ponging: the percent is written only when it really differs,
+ * since the watcher above turns every percent into exactly this fraction.</p>
+ */
+/**
+ * The record written from outside, back onto the form.
+ *
+ * <p>The pre-trigger's own rule, for the same reason one control along: <code>buildRequest</code>
+ * reads <code>form.recordMs</code>, so Autoset — which now sets the <em>timebase</em> — would
+ * otherwise move the model and change nothing at all.</p>
+ */
+watch(recordSeconds, (seconds) => {
+  const ms = clampNumberField(seconds * 1000, MIN_RECORD_MS, MAX_RECORD_MS)
+  if (Math.abs(ms - form.recordMs) < MIN_RECORD_MS / 2) return
+  form.recordMs = ms
+})
+
+watch(preTriggerFraction, (fraction) => {
+  const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 1000) / 10
+  if (Math.abs(percent - form.preTriggerPercent) < 0.05) return
+  form.preTriggerPercent = percent
+})
 
 watch(
   () =>
@@ -418,6 +487,32 @@ const kindIsDropout = computed(() => triggerKind.value === 'Dropout')
  */
 const sourceIsStimulus = computed(() => triggerIsStimulus(triggerSource.value))
 const kindIsRunt = computed(() => triggerKind.value === 'Runt')
+
+/**
+ * The six lists, each option carrying the sentence that used to be the control's own title.
+ *
+ * <p><b>Per option rather than per control</b>, which is what the listbox buys over the dropdown it
+ * replaces: a <code>&lt;select&gt;</code> can only say what the <em>chosen</em> one means, so the
+ * reason to reach past Edge was readable only after picking it. Here every row says what it finds
+ * while the list is open, which is when the reader is choosing.</p>
+ */
+const modeOptions = computed(() =>
+  SCOPE_RUN_MODES.map((option) => ({ ...option, title: SCOPE_RUN_MODE_HINTS[option.value] })),
+)
+const accumulationOptions = computed(() =>
+  SCOPE_ACCUMULATIONS.map((option) => ({ ...option, title: SCOPE_ACCUMULATION_HINTS[option.value] })),
+)
+const sourceOptions = computed(() =>
+  SCOPE_TRIGGER_SOURCES.map((option) => ({ ...option, title: SCOPE_TRIGGER_SOURCE_HINTS[option.value] })),
+)
+const kindOptions = computed(() =>
+  SCOPE_TRIGGER_KINDS.map((option) => ({ ...option, title: SCOPE_TRIGGER_KIND_HINTS[option.value] })),
+)
+/** The slope's meaning is the <em>kind's</em>, not the option's — the word is the same and the thing it selects is not. */
+const slopeOptions = computed(() =>
+  SCOPE_TRIGGER_SLOPES.map((option) => ({ ...option, title: SCOPE_TRIGGER_SLOPE_HINTS[triggerKind.value] })),
+)
+const conditionOptions = computed(() => SCOPE_PULSE_CONDITIONS.map((option) => ({ ...option })))
 
 /**
  * The window's band and the runt's pair of thresholds are the same two numbers read two ways, so
@@ -699,12 +794,6 @@ function onHysteresisChange(event: Event) {
   ;(event.target as HTMLInputElement).value = String(triggerHysteresisV.value)
 }
 
-function onRecordChange(event: Event) {
-  const typed = Number((event.target as HTMLInputElement).value)
-  form.recordMs = clampNumberField(typed, MIN_RECORD_MS, MAX_RECORD_MS)
-  ;(event.target as HTMLInputElement).value = String(form.recordMs)
-}
-
 function onPreTriggerChange(event: Event) {
   const typed = Number((event.target as HTMLInputElement).value)
   form.preTriggerPercent = clampNumberField(typed, 0, 100)
@@ -729,26 +818,22 @@ function onAutoTimeoutChange(event: Event) {
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         Sample rate
-        <select v-model.number="form.sampleRateHz" class="tb-input" :disabled="running">
+        <select v-model.number="form.sampleRateHz" class="tb-input">
           <option v-for="hz in sampleRates" :key="hz" :value="hz">{{ (hz / 1000).toFixed(0) }} kS/s</option>
         </select>
       </label>
       <label class="tb-field">
-        Record (ms)
-        <input
-          :value="form.recordMs"
-          type="number"
-          step="1"
-          :max="MAX_RECORD_MS"
-          :list="'scope-record-ladder'"
+        Time/div
+        <select
           class="tb-input"
-          :disabled="running"
-          title="The whole record, pre- and post-trigger together. Up to one second; longer captures are the stream recorder's job."
-          @change="onRecordChange"
-        />
-        <datalist id="scope-record-ladder">
-          <option v-for="ms in RECORD_MS_LADDER" :key="ms" :value="ms"></option>
-        </datalist>
+          :value="timePerDivisionS"
+          title="The timebase. The record is ten divisions of it, pre- and post-trigger together — up to one second, beyond which the stream recorder is the tool. Live: changing it while the scope is running re-arms the capture rather than needing a Stop."
+          @change="onTimePerDivisionChange"
+        >
+          <option v-for="seconds in timePerDivisionOptions" :key="seconds" :value="seconds">
+            {{ timePerDivisionLabel(seconds) }}
+          </option>
+        </select>
       </label>
     </div>
 
@@ -760,23 +845,26 @@ function onAutoTimeoutChange(event: Event) {
         step="5"
         max="100"
         class="tb-input"
-        :disabled="running"
-        title="How much of the record sits before the trigger. 100 % is a whole record of history — free here, because the analyzer streams continuously and the trigger is a window chosen out of it."
+        title="How much of the record sits before the trigger. 100 % is a whole record of history — free here, because the analyzer streams continuously and the trigger is a window chosen out of it. Drag the marker along the top of the plot to set it by eye."
         @change="onPreTriggerChange"
       />
     </label>
 
     <div class="tb-field">
       <span class="tb-group">Channels</span>
-      <label class="tb-check-row">
-        <input v-model="form.processLeft" type="checkbox" class="tb-check" :disabled="running" /> Left
-      </label>
-      <label class="tb-check-row">
-        <input v-model="form.processRight" type="checkbox" class="tb-check" :disabled="running" /> Right
-      </label>
+      <!-- Which inputs are *captured* — a scope's CH1 and CH2. The same control as the display
+           rail's "which are drawn" and the Generator's "which play": one question, three places. -->
+      <ChannelPair
+        v-model:left="form.processLeft"
+        v-model:right="form.processRight"
+        group-label="Capture"
+      />
     </div>
 
     <div class="flex flex-wrap gap-1.5">
+      <EstimateBadge kind="time" title="The whole record — ten divisions of the timebase, pre- and post-trigger together. What the timebase costs in memory, which the control itself no longer says.">
+        {{ formatScopeTime(form.recordMs, form.recordMs) }} record
+      </EstimateBadge>
       <EstimateBadge kind="points" title="How many samples the record holds at the staged rate.">
         {{ recordFrames.toLocaleString() }} samples
       </EstimateBadge>
@@ -794,29 +882,28 @@ function onAutoTimeoutChange(event: Event) {
   </CollapsibleSection>
 
   <CollapsibleSection title="Trigger">
-    <label class="tb-field">
-      Mode
-      <select v-model="mode" class="tb-input" :title="SCOPE_RUN_MODE_HINTS[mode]">
-        <option v-for="option in SCOPE_RUN_MODES" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-    </label>
+    <!--
+      A listbox showing the chosen option's own figure, rather than a <select>. Every choice in
+      this panel is one of a handful of distinct behaviours, and a picture of what each one fires
+      on is scanned where five words have to be parsed - see panels/iconSelect.ts.
+    -->
+    <div class="tb-field">
+      <span class="tb-group">Mode</span>
+      <IconSelect v-model="mode" :options="modeOptions" group-label="Run mode" />
+    </div>
 
     <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Records
-        <select
+      <div class="tb-field">
+        <span class="tb-group">Records</span>
+        <IconSelect
           v-model="accumulation"
-          class="tb-input"
+          :options="accumulationOptions"
+          group-label="What is done with the records"
           :disabled="!canAccumulate"
-          :title="SCOPE_ACCUMULATION_HINTS[accumulation]"
-        >
-          <option v-for="option in SCOPE_ACCUMULATIONS" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+        />
+      </div>
       <label v-if="accumulation === 'Average'" class="tb-field">
-        Average over
+        <span class="flex items-center gap-1.5"><ScopeToggleIcon name="accAverage" :size="14" />Average over</span>
         <input
           :value="averageCount"
           type="number"
@@ -849,33 +936,25 @@ function onAutoTimeoutChange(event: Event) {
     </p>
 
     <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Source
-        <select
+      <div class="tb-field">
+        <span class="tb-group">Source</span>
+        <IconSelect
           v-model="triggerSource"
-          class="tb-input"
+          :options="sourceOptions"
+          group-label="Trigger source"
           :disabled="rolling"
-          :title="SCOPE_TRIGGER_SOURCE_HINTS[triggerSource]"
-        >
-          <option v-for="option in SCOPE_TRIGGER_SOURCES" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+        />
+      </div>
       <!--
         Hidden rather than disabled under the stimulus source, which is the opposite of what Roll
         does with these controls and is right for the opposite reason: Roll is a mode you come back
         from, so what was typed under it has to survive, while the source is a choice about what the
         trigger IS and a kind beside it would be a second answer to the same question.
       -->
-      <label v-if="!sourceIsStimulus" class="tb-field">
-        Kind
-        <select v-model="triggerKind" class="tb-input" :disabled="rolling" :title="SCOPE_TRIGGER_KIND_HINTS[triggerKind]">
-          <option v-for="option in SCOPE_TRIGGER_KINDS" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+      <div v-if="!sourceIsStimulus" class="tb-field">
+        <span class="tb-group">Kind</span>
+        <IconSelect v-model="triggerKind" :options="kindOptions" group-label="Trigger kind" :disabled="rolling" />
+      </div>
     </div>
 
     <p
@@ -885,23 +964,19 @@ function onAutoTimeoutChange(event: Event) {
       {{ sourceIsStimulus ? SCOPE_TRIGGER_SOURCE_HINTS.Stimulus : SCOPE_TRIGGER_KIND_HINTS[triggerKind] }}
     </p>
 
-    <label v-if="!sourceIsStimulus" class="tb-field">
-      Slope
+    <div v-if="!sourceIsStimulus" class="tb-field">
+      <span class="tb-group">Slope</span>
       <!--
         The word is the same for every kind and the thing it selects is not: on a pulse-width
         trigger it decides which stretch IS the pulse, and on a window trigger whether entering or
         leaving fires. Hence the title rather than three dropdowns.
       -->
-      <select v-model="form.slope" class="tb-input" :disabled="rolling" :title="SCOPE_TRIGGER_SLOPE_HINTS[triggerKind]">
-        <option v-for="option in SCOPE_TRIGGER_SLOPES" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </option>
-      </select>
-    </label>
+      <IconSelect v-model="form.slope" :options="slopeOptions" group-label="Trigger slope" :disabled="rolling" />
+    </div>
 
     <!-- The level's box is the precise fallback; the line on the chart is how it is normally set. -->
     <label v-if="!sourceIsStimulus" class="tb-field">
-      Level (V)
+      <span class="flex items-center gap-1.5"><ScopeToggleIcon name="triggerLevel" :size="14" />Level (V)</span>
       <div class="flex items-center gap-1.5">
         <input
           :value="triggerLevelV"
@@ -939,7 +1014,7 @@ function onAutoTimeoutChange(event: Event) {
       are typed.
     -->
     <label v-if="needsSecondLevel && !sourceIsStimulus" class="tb-field">
-      {{ secondLevelLabel }}
+      <span class="flex items-center gap-1.5"><ScopeToggleIcon name="valueHysteresis" :size="14" />{{ secondLevelLabel }}</span>
       <input
         :value="triggerLevelLowV"
         type="number"
@@ -952,7 +1027,7 @@ function onAutoTimeoutChange(event: Event) {
     </label>
 
     <label v-if="kindIsDropout && !sourceIsStimulus" class="tb-field">
-      No edge within (ms)
+      <span class="flex items-center gap-1.5"><ScopeToggleIcon name="kindDropout" :size="14" />No edge within (ms)</span>
       <input
         :value="form.dropoutMs"
         type="number"
@@ -966,16 +1041,17 @@ function onAutoTimeoutChange(event: Event) {
 
     <template v-if="kindIsPulse && !sourceIsStimulus">
       <div class="grid grid-cols-2 gap-2.5">
+        <div class="tb-field">
+          <span class="tb-group">Condition</span>
+          <IconSelect
+            v-model="form.pulseCondition"
+            :options="conditionOptions"
+            group-label="Width condition"
+            :disabled="rolling"
+          />
+        </div>
         <label class="tb-field">
-          Condition
-          <select v-model="form.pulseCondition" class="tb-input" :disabled="rolling">
-            <option v-for="option in SCOPE_PULSE_CONDITIONS" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label class="tb-field">
-          {{ form.pulseCondition === 'Between' ? 'From (µs)' : 'Width (µs)' }}
+          <span class="flex items-center gap-1.5"><ScopeToggleIcon name="widthBetween" :size="14" />{{ form.pulseCondition === 'Between' ? 'From (µs)' : 'Width (µs)' }}</span>
           <input
             :value="form.pulseWidthUs"
             type="number"
@@ -988,7 +1064,7 @@ function onAutoTimeoutChange(event: Event) {
         </label>
       </div>
       <label v-if="form.pulseCondition === 'Between'" class="tb-field">
-        To (µs)
+        <span class="flex items-center gap-1.5"><ScopeToggleIcon name="widthBetween" :size="14" />To (µs)</span>
         <input
           :value="form.pulseWidthHiUs"
           type="number"
@@ -1010,7 +1086,7 @@ function onAutoTimeoutChange(event: Event) {
 
     <div class="grid grid-cols-2 gap-2.5">
       <label v-if="!sourceIsStimulus" class="tb-field">
-        Hysteresis (V)
+        <span class="flex items-center gap-1.5"><ScopeToggleIcon name="valueHysteresis" :size="14" />Hysteresis (V)</span>
         <input
           :value="triggerHysteresisV"
           type="number"
@@ -1022,7 +1098,7 @@ function onAutoTimeoutChange(event: Event) {
         />
       </label>
       <label class="tb-field">
-        Holdoff (ms)
+        <span class="flex items-center gap-1.5"><ScopeToggleIcon name="valueHoldoff" :size="14" />Holdoff (ms)</span>
         <input
           :value="form.holdoffMs"
           type="number"
@@ -1036,7 +1112,7 @@ function onAutoTimeoutChange(event: Event) {
     </div>
 
     <label v-if="mode === 'Auto'" class="tb-field">
-      Auto timeout (ms)
+      <span class="flex items-center gap-1.5"><ScopeToggleIcon name="valueTimeout" :size="14" />Auto timeout (ms)</span>
       <input
         :value="form.autoTimeoutMs"
         type="number"

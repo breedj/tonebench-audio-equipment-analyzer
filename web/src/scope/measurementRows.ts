@@ -14,8 +14,10 @@ import type { ScopeRecordResponse, ScopeXySlice } from '../api/client'
 import {
   formatMathValue,
   formatSiValue,
-  mathAxisLabel,
-  type ScopeMathOperation,
+  mathSliceAxisLabel,
+  SCOPE_MATH_SLOTS,
+  scopeMathSlice,
+  type ScopeMathSlot,
   type ScopeMathUnit,
 } from './math'
 import {
@@ -34,6 +36,8 @@ export interface ScopeMeasurementSource {
   kind: ScopeMeasurementSourceKind
   /** 0 or 1 for a captured input; absent otherwise. */
   channel?: number
+  /** 1 or 2 for a math channel; absent otherwise. */
+  slot?: ScopeMathSlot
   /** What the row calls it — "Left", "A − B", "L ↔ R". */
   label: string
   /** The unit its levels are in. Volts for a captured input, the operation's own for the math trace. */
@@ -154,13 +158,18 @@ export function scopeMeasurementSources(
     })
   }
 
-  const math = record?.math
-  if (math) {
+  // One per math channel that drew something. Keyed by slot rather than by a single `math`, so a
+  // reading chosen on Math 2 cannot quietly end up on Math 1's trace.
+  for (const slot of SCOPE_MATH_SLOTS) {
+    const math = scopeMathSlice(record, slot)
+    if (!math) continue
     sources.push({
       kind: 'math',
-      label: mathAxisLabel(math.operation as ScopeMathOperation),
+      slot,
+      // The sockets, not A and B: the picker and the display rail are looking at one trace.
+      label: mathSliceAxisLabel(math),
       unit: math.unit as ScopeMathUnit,
-      key: 'math',
+      key: `math${slot}`,
     })
   }
 
@@ -229,9 +238,11 @@ function channelRow(
 ): ScopeMeasurementRow {
   const measurements =
     source.kind === 'math'
-      ? reading === 'gate'
-        ? (record.math?.gated ?? null)
-        : (record.math?.measurements ?? null)
+      ? (() => {
+          const math = (record.maths ?? []).find((m) => m.slot === source.slot)
+          if (!math) return null
+          return reading === 'gate' ? (math.gated ?? null) : math.measurements
+        })()
       : (() => {
           const slice = record.channels.find((c) => c.channel === source.channel)
           if (!slice) return null
@@ -309,7 +320,7 @@ export function scopeStatsSignature(
     captureSignature,
     record.sampleRateHz,
     window ? `${window.fromS}:${window.toS}` : 'all',
-    record.math?.operation ?? 'Off',
+    SCOPE_MATH_SLOTS.map((slot) => scopeMathSlice(record, slot)?.operation ?? 'Off').join('+'),
     reading,
   ].join('|')
 }

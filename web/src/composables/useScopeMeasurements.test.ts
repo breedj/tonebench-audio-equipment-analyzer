@@ -130,3 +130,50 @@ describe('the screen wires the statistics up', () => {
     expect(app).toContain('scopeFetchedWindow.value,')
   })
 })
+
+/**
+ * The three controls live in the table's own header now, not in the rail.
+ *
+ * <p>The rail's argument was that a bench instrument puts the readings on the screen and the
+ * controls that decide them in a menu. It is the wrong way round here: a reader notices a reading
+ * is missing, or that a figure is wandering, while looking at the table — so the add, the
+ * statistics and the reset belong where that is noticed. Read as text, since the component is a
+ * `.vue` against a real DOM and this suite runs on `environment: node`.</p>
+ */
+describe('the Selected measurements header', () => {
+  const source = readFileSync(
+    resolve(import.meta.dirname, '..', 'components/ScopeMeasurementTable.vue'),
+    'utf8',
+  )
+  const header = source.slice(source.indexOf('#header-right'), source.indexOf('</template>'))
+  const buttons = header.match(/<button[\s\S]*?>/g) ?? []
+
+  it('carries three bordered buttons', () => {
+    expect(buttons).toHaveLength(3)
+    // A border is what makes them read as buttons rather than as glyphs; the `+` had none.
+    for (const button of buttons) expect(button, button).toMatch(/border/)
+  })
+
+  it('names every one of them, since none carries any text', () => {
+    for (const button of buttons) {
+      expect(button, button).toMatch(/aria-label="[^"]+"/)
+      expect(button, button).toMatch(/title="[^"]+"/)
+    }
+  })
+
+  it('draws the statistics control as a lit toggle rather than a tick box', () => {
+    expect(header).toMatch(/:aria-pressed="statistics"/)
+    expect(header).toMatch(/statistics \? 'btn-action' : 'btn-toggle-off'/)
+  })
+
+  it('clears the statistics rather than the selection, and only when there are some', () => {
+    expect(header).toMatch(/resetStats\(\)/)
+    expect(header).toMatch(/:disabled="statCount === 0"/)
+    // The rows come off one at a time by their own cross; nothing here empties the table.
+    expect(header).not.toMatch(/setSelected\(\[\]\)/)
+  })
+
+  it('no longer sends a reader to a control the rail has stopped carrying', () => {
+    expect(source).not.toContain('Choose measurements')
+  })
+})

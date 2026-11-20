@@ -2,7 +2,7 @@
 import PanelIcon from './PanelIcon.vue'
 import type { PanelIconName } from '../panels/panelIcons'
 import type { MeasurementKindTone } from '../measurements/kinds'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 // This codebase's first modal primitive — native <dialog> rather than a hand-rolled overlay div,
 // since showModal() already gives Escape-to-close, a backdrop, and focus containment for free in
@@ -58,16 +58,27 @@ const titled = computed(() => props.icon !== undefined || props.size === 'xl')
 
 const WIDTHS = { md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-[800px]', full: 'max-w-[1040px]' } as const
 
-watch(
-  () => props.open,
-  (open) => {
-    const dialog = dialogRef.value
-    if (!dialog) return
-    if (open && !dialog.open) dialog.showModal()
-    else if (!open && dialog.open) dialog.close()
-  },
-  { immediate: true },
-)
+/**
+ * The element's own open state follows the prop, and it is synced <b>on mount as well as on
+ * change</b>.
+ *
+ * <p><code>{ immediate: true }</code> alone is not enough and reads as though it were: the
+ * immediate run happens during setup, where <code>dialogRef</code> is still null, so it returns
+ * having done nothing. A dialog whose <code>open</code> is already true when it mounts — one
+ * brought into existence by a <code>v-if</code> at the moment it is wanted, rather than mounted
+ * for the life of the screen and toggled, which is what the other twenty here do — then never
+ * calls <code>showModal()</code> at all. Measured: the oscilloscope's Math dialog was in the DOM
+ * with the right title and simply would not open, and nothing anywhere said why.</p>
+ */
+function syncOpen(open: boolean) {
+  const dialog = dialogRef.value
+  if (!dialog) return
+  if (open && !dialog.open) dialog.showModal()
+  else if (!open && dialog.open) dialog.close()
+}
+
+onMounted(() => syncOpen(props.open))
+watch(() => props.open, syncOpen)
 
 function onCancel(e: Event) {
   // Fires on Escape (native <dialog> behaviour), before the element actually closes — prevented

@@ -1,9 +1,9 @@
 import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordResponse } from '../../api/client'
 import { mathReadings, scopeChannelReadings } from '../../scope/readings'
-import { mathAxisLabel, type ScopeMathOperation } from '../../scope/math'
+import { mathSliceAxisLabel } from '../../scope/math'
 import { xyReadings, xyTruncationNote } from '../../scope/xy'
 import { pathSummary } from '../../scope/signalPath'
-import { formatScopeTime, toChartMs } from '../../scope/timeAxis'
+import { formatScopeTime, timePerDivisionFor, toChartMs } from '../../scope/timeAxis'
 import { scopeMeasurementRows } from '../../scope/measurementRows'
 import { SCOPE_MEASUREMENT_ABSENT } from '../../scope/measurementCatalogue'
 import { SCOPE_STAT_COLUMNS, type ScopeMeasurementStat } from '../../scope/measurementStats'
@@ -52,6 +52,9 @@ export function scopeSettingsRows(paramsJson: string): ReportRow[] {
   const rows: ReportRow[] = []
   if (typeof params.sampleRateHz === 'number') rows.push({ label: 'Sample rate', value: `${formatNumber(params.sampleRateHz / 1000)} kS/s` })
   if (typeof params.recordSeconds === 'number') {
+    // The timebase is the control that was set; the record is ten divisions of it. Both, because
+    // the first is what a reader turned and the second is what it cost.
+    rows.push({ label: 'Time/div', value: time(timePerDivisionFor(params.recordSeconds)) })
     const samples = typeof params.sampleRateHz === 'number' ? Math.round(params.recordSeconds * params.sampleRateHz) : null
     rows.push({
       label: 'Record',
@@ -140,17 +143,16 @@ export function scopeMeasurementSections(
     })
   }
 
-  // The math channel is a table of its own rather than a column beside the channels', because its
+  // A math channel is a table of its own rather than a column beside the channels', because its
   // numbers are frequently not in the same unit: A × B is V² and a derivative V/s, so a shared
   // "Reading" column would put three units in one row. Its heading carries the expression and the
   // unit, which is where a reader of the paper finds that out.
-  const math = record.math
-  if (math) {
+  for (const math of record.maths ?? []) {
     const readings = mathReadings(math)
     if (readings.length > 0) {
       sections.push({
         kind: 'table',
-        title: `Math — ${mathAxisLabel(math.operation as ScopeMathOperation)}`,
+        title: `Math ${math.slot} — ${mathSliceAxisLabel(math)}`,
         headers: ['Reading', 'Value'],
         cells: readings.map((reading) => [reading.label, reading.value]),
       })

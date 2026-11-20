@@ -8,6 +8,16 @@ import {
   scopeToggleIcon,
   type ScopeToggleShape,
 } from './displayIcons'
+import { SCOPE_ACCUMULATIONS } from './acquisition'
+import { STIMULUS_KINDS } from '../generator/stimulusKinds'
+import { SCOPE_MATH_TILES } from './math'
+import {
+  SCOPE_PULSE_CONDITIONS,
+  SCOPE_RUN_MODES,
+  SCOPE_TRIGGER_KINDS,
+  SCOPE_TRIGGER_SLOPES,
+  SCOPE_TRIGGER_SOURCES,
+} from './triggerSpec'
 
 /** Every x and y a shape puts ink at, a marker's own radius included. */
 function extent(shape: ScopeToggleShape): { xs: number[]; ys: number[] } {
@@ -75,6 +85,42 @@ function extent(shape: ScopeToggleShape): { xs: number[]; ys: number[] } {
   return { xs, ys }
 }
 
+/** The rail's own toggles, read as text, plus every option table that names a figure. */
+function everyIconAskedFor(): Set<string> {
+  const asked = new Set<string>()
+
+  for (const file of ['components/ScopeDisplayPanel.vue', 'components/ScopeConfigPanel.vue']) {
+    const source = readFileSync(resolve(import.meta.dirname, '..', file), 'utf8')
+    // The three Drawing modes, from the map the buttons read.
+    for (const m of source.matchAll(/^\s*(?:Linear|Sinc|Dots):\s*'([a-zA-Z]+)',/gm)) asked.add(m[1])
+    // The plain on/off toggles, and any figure named beside a number box.
+    for (const m of source.matchAll(/^\s*icon:\s*'([a-zA-Z]+)',/gm)) asked.add(m[1])
+    for (const m of source.matchAll(/\bname="([a-zA-Z]+)"/g)) {
+      if (scopeToggleIcon(m[1]).length > 0) asked.add(m[1])
+    }
+  }
+
+  // The generator's stimuli and the math channel's operations name theirs in their own tables, as
+  // the trigger controls do.
+  for (const option of STIMULUS_KINDS) asked.add(option.icon)
+  for (const tile of SCOPE_MATH_TILES) asked.add(tile.icon)
+
+  for (const table of [
+    SCOPE_RUN_MODES,
+    SCOPE_TRIGGER_KINDS,
+    SCOPE_TRIGGER_SLOPES,
+    SCOPE_TRIGGER_SOURCES,
+    SCOPE_PULSE_CONDITIONS,
+    SCOPE_ACCUMULATIONS,
+  ]) {
+    for (const option of table as readonly { icon?: string }[]) {
+      if (option.icon) asked.add(option.icon)
+    }
+  }
+
+  return asked
+}
+
 describe('the display toggles’ figures', () => {
   it('draws every one inside its own box', () => {
     for (const [name, shapes] of Object.entries(SCOPE_TOGGLE_ICONS)) {
@@ -100,23 +146,20 @@ describe('the display toggles’ figures', () => {
   /**
    * The audit that matters: a button whose figure is missing draws an empty box, which looks
    * deliberate. The rail is a `.vue` against a real DOM and the suite runs on `environment: node`,
-   * so this reads it as text — the technique the persistence and v-model audits already use.
+   * so its own toggles are read as text — the technique the persistence and v-model audits already
+   * use. The Trigger panel's are read from the tables instead, which is stronger: its options are
+   * declared in modules, so importing them cannot miss one the way a regex over a template can.
    */
-  it('has a figure for every name the rail asks for', () => {
-    const rail = readFileSync(
-      resolve(import.meta.dirname, '..', 'components/ScopeDisplayPanel.vue'),
-      'utf8',
-    )
+  it('has a figure for every name anything asks for, and no figure nothing asks for', () => {
+    const asked = everyIconAskedFor()
 
-    const asked = new Set<string>()
-    // The three Drawing modes, from the map the buttons read.
-    for (const m of rail.matchAll(/^\s*(?:Linear|Sinc|Dots):\s*'([a-zA-Z]+)',/gm)) asked.add(m[1])
-    // And the plain on/off toggles, from the list they are declared in.
-    for (const m of rail.matchAll(/^\s*icon:\s*'([a-zA-Z]+)',/gm)) asked.add(m[1])
-
-    expect(asked.size).toBe(Object.keys(SCOPE_TOGGLE_ICONS).length)
     for (const name of asked) {
-      expect(scopeToggleIcon(name), `the rail asks for ${name}`).not.toEqual([])
+      expect(scopeToggleIcon(name), `something asks for ${name}`).not.toEqual([])
+    }
+    // The other direction, which is what stops a figure being added and never wired up: every
+    // entry in the table is reached by some control.
+    for (const name of Object.keys(SCOPE_TOGGLE_ICONS)) {
+      expect(asked.has(name), `nothing asks for ${name}`).toBe(true)
     }
   })
 

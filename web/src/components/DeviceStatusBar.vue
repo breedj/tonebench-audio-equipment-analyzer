@@ -700,7 +700,7 @@ function applyGain(gain: { leftDb: number; rightDb: number; unit: GainUnit }) {
     clipped bar would put the external gain and both ranges out of reach.
   -->
   <footer
-    class="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-neutral-200 bg-[var(--surface-panel)] px-3 py-1.5 text-xs dark:border-neutral-800"
+    class="flex min-h-11 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-neutral-200 bg-[var(--surface-panel)] px-3 py-1.5 text-xs dark:border-neutral-800"
   >
     <!-- The analyzer, as one pill: a dot, what it calls itself, and the one word that says whether
          it is answering. "Removed" is its own word rather than a badge beside it — unplugged

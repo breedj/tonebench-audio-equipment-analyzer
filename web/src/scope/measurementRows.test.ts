@@ -50,8 +50,11 @@ describe('scopeMeasurementSources', () => {
 
   it('adds the math trace when one is drawn, in its own unit', () => {
     const withMath = record({
-      math: {
+      maths: [{
+        slot: 1,
         operation: 'ATimesB',
+        sourceA: 0,
+        sourceB: 1,
         unit: 'VoltSquared',
         samples: null,
         min: null,
@@ -59,11 +62,14 @@ describe('scopeMeasurementSources', () => {
         measurements: measurements(),
         gated: null,
         clampedSamples: 0,
-      },
+      }],
     })
     const sources = scopeMeasurementSources(withMath, true, true)
     expect(sources).toHaveLength(3)
     expect(sources[2].unit).toBe('VoltSquared')
+    // Named by the sockets it reads, which is how the display rail names the same trace \u2014 the
+    // picker offering "A \u00d7 B" beside a button reading "L \u00d7 R" is one trace described two ways.
+    expect(sources[2].label).toBe('L \u00d7 R (V\u00b2)')
   })
 
   it('is nothing at all before anything has been captured', () => {
@@ -145,8 +151,11 @@ describe('scopeMeasurementRows', () => {
 
   it('keeps an area off the math trace, whose integral has no name anyone quotes', () => {
     const withMath = record({
-      math: {
+      maths: [{
+        slot: 1,
         operation: 'ATimesB',
+        sourceA: 0,
+        sourceB: 1,
         unit: 'VoltSquared',
         samples: null,
         min: null,
@@ -154,7 +163,7 @@ describe('scopeMeasurementRows', () => {
         measurements: measurements({ areaVs: 1 }),
         gated: null,
         clampedSamples: 0,
-      },
+      }],
     })
     const rows = scopeMeasurementRows(withMath, ['area'], both)
     expect(rows.map((r) => r.sourceLabel)).toEqual(['Left', 'Right'])
@@ -247,8 +256,11 @@ describe('scopeStatsSignature', () => {
   it('changes when the math channel does, which the capture signature cannot see', () => {
     const withMath = (operation: string) =>
       record({
-        math: {
+        maths: [{
+          slot: 1,
           operation,
+          sourceA: 0,
+          sourceB: 1,
           unit: 'Volt',
           samples: null,
           min: null,
@@ -256,7 +268,7 @@ describe('scopeStatsSignature', () => {
           measurements: measurements(),
           gated: null,
           clampedSamples: 0,
-        },
+        }],
       })
     expect(sig(base, withMath('AMinusB'))).not.toBe(sig(base, withMath('BMinusA')))
   })

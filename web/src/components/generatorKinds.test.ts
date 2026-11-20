@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { STIMULUS_KINDS, stimulusKind, stimulusKindLabel } from '../generator/stimulusKinds'
+import { scopeToggleIcon } from '../scope/displayIcons'
 
 /**
  * <b>Every stimulus the picker offers must put its own settings block on the request.</b>
@@ -22,17 +24,16 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(resolve(import.meta.dirname, 'GeneratorChannelPanel.vue'), 'utf8')
 
 /**
- * The picker's own list, read out of the component so it cannot drift from what is on screen.
+ * The picker's own list.
  *
- * Bounded by the array's own closing bracket rather than by whatever declaration comes next: the
- * panel has more than one `{ value, label }` list in it now, and reading to the next `const` once
- * swept a channel picker's Left/Right/Mix in with the stimulus kinds.
+ * <p><b>Imported rather than parsed</b>, since the list moved out of the component and into
+ * <code>generator/stimulusKinds.ts</code> on 2026-11-20. It used to be located by the literal
+ * `const KINDS` and `= [` inside the `.vue`, bounded by the array's own closing bracket because
+ * reading to the next declaration once swept a channel picker's Left/Right/Mix in with the kinds.
+ * A module needs none of that and cannot be mis-bounded.</p>
  */
 function offeredKinds(): string[] {
-  // From the `= [` rather than from the declaration: the type annotation carries a `]` of its own.
-  const start = source.indexOf('= [', source.indexOf('const KINDS'))
-  const list = source.slice(start, source.indexOf(']', start))
-  return [...list.matchAll(/value: '(\w+)'/g)].map((m) => m[1])
+  return STIMULUS_KINDS.map((option) => option.value)
 }
 
 /** The kinds `currentConfig` names in a `case`. */
@@ -54,12 +55,27 @@ describe('the generator panel request', () => {
     }
   })
 
-  it('reads the stimulus list and not the other pickers beside it', () => {
-    // The panel has more than one `{ value, label }` list in it, and reading past the array's own
-    // closing bracket once swept the arbitrary channel picker's Left/Right/Mix in with the kinds.
-    for (const notAKind of ['Mix', 'OneOver24', 'Smpte']) {
+  it('offers no kind the generator has no such thing as', () => {
+    // The old parse could read past the array's own closing bracket and sweep the arbitrary
+    // channel picker's Left/Right/Mix in with the kinds. It cannot now, and this says so.
+    for (const notAKind of ['Mix', 'OneOver24', 'Smpte', 'Off', 'EchoChirp']) {
       expect(offeredKinds()).not.toContain(notAKind)
     }
+  })
+
+  it('gives every kind it offers a figure and a sentence', () => {
+    for (const option of STIMULUS_KINDS) {
+      expect(scopeToggleIcon(option.icon), `${option.value} has no figure`).not.toEqual([])
+      expect(option.title.length, `${option.value} has no sentence`).toBeGreaterThan(30)
+    }
+  })
+
+  it('names a kind it does not offer rather than showing a blank', () => {
+    // A stored measurement can carry EchoChirp, which the picker hides. The button still has to
+    // read as something.
+    expect(stimulusKind('EchoChirp')).toBeNull()
+    expect(stimulusKindLabel('EchoChirp')).toBe('EchoChirp')
+    expect(stimulusKindLabel('Tones')).toBe('Sine tones')
   })
 
   it('offers the four stimuli a bench scope needs', () => {

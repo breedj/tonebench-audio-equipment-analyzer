@@ -18,6 +18,14 @@ export interface RunToneLook {
   label: string
   /** The progress bar's fill. */
   fill: string
+  /**
+   * The ground behind a word carrying this tone — the oscilloscope's trigger-state badge.
+   *
+   * <p>A tint rather than the saturated fill the bar uses: the word is set in the tone's own
+   * colour, and a saturated ground under it would need white text and then the badge would be
+   * the loudest thing on a bar whose dot is already saying the same thing.</p>
+   */
+  badge: string
 }
 
 /**
@@ -30,21 +38,25 @@ const LOOKS: Record<RunTone, RunToneLook> = {
     dot: 'bg-neutral-400 dark:bg-neutral-500',
     label: 'text-neutral-500 dark:text-neutral-400',
     fill: 'bg-neutral-300 dark:bg-neutral-600',
+    badge: 'bg-neutral-100 dark:bg-neutral-800',
   },
   busy: {
     dot: 'bg-blue-500 dark:bg-blue-400',
     label: 'text-blue-700 dark:text-blue-300',
     fill: 'bg-blue-500 dark:bg-blue-400',
+    badge: 'bg-blue-50 dark:bg-blue-500/15',
   },
   waiting: {
     dot: 'bg-amber-500 dark:bg-amber-400',
     label: 'text-amber-700 dark:text-amber-300',
     fill: 'bg-amber-500 dark:bg-amber-400',
+    badge: 'bg-amber-50 dark:bg-amber-500/15',
   },
   ok: {
     dot: 'bg-green-600 dark:bg-green-400',
     label: 'text-green-700 dark:text-green-300',
     fill: 'bg-green-600 dark:bg-green-400',
+    badge: 'bg-green-50 dark:bg-green-500/15',
   },
   cancelled: {
     dot: 'bg-red-600 dark:bg-red-400',
@@ -52,11 +64,13 @@ const LOOKS: Record<RunTone, RunToneLook> = {
     // Grey, not red: the points already measured are good, and a red bar claims they are not.
     // The mockup's own choice (#94a3b8 against a #dc2626 dot).
     fill: 'bg-neutral-400 dark:bg-neutral-500',
+    badge: 'bg-red-50 dark:bg-red-500/15',
   },
   error: {
     dot: 'bg-red-600 dark:bg-red-400',
     label: 'text-red-700 dark:text-red-300',
     fill: 'bg-red-500 dark:bg-red-400',
+    badge: 'bg-red-50 dark:bg-red-500/15',
   },
 }
 

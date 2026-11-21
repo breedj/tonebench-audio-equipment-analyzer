@@ -783,6 +783,7 @@ function stepOffset(direction: 1 | -1) {
 
   <CollapsibleSection
     :title="`Time window (${boxScale.label})`"
+    panel-id="time-window"
     size="xs"
     :hint="`${windowSpan} over ten divisions. Tighten it far enough and the chart draws every sample instead of a min/max column pair.`"
   >

@@ -1720,6 +1720,47 @@ const { showPage } = useManual()
       draws its own results.
     </p>
 
+    <h2>The trigger state</h2>
+    <p>
+      The bar above the chart carries a word for what the analyzer is doing, where every other
+      screen has a progress track. A scope’s run does not progress — Auto and Normal go round the
+      same loop for as long as you leave them — so the six states a bench oscilloscope prints in
+      the corner of its screen are worth more:
+    </p>
+    <table>
+      <thead>
+        <tr><th>State</th><th>What it means</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Armed</td>
+          <td>
+            Collecting the samples that go <em>before</em> the trigger. Nothing can trigger it
+            yet: a crossing now would have no pre-trigger history behind it.
+          </td>
+        </tr>
+        <tr><td>Ready</td><td>The pre-trigger is filled, and it is waiting for a trigger.</td></tr>
+        <tr><td>Trig’d</td><td>A trigger fired; the samples after it are still arriving.</td></tr>
+        <tr>
+          <td>Auto</td>
+          <td>
+            Auto mode is drawing <em>without</em> a trigger, because none arrived inside the
+            timeout. Amber, because the trace on screen is not of a triggered event — check the
+            level, the slope and the source.
+          </td>
+        </tr>
+        <tr><td>Scan</td><td>Roll: there is no trigger at all, and the newest window slides across.</td></tr>
+        <tr><td>Stop</td><td>Not acquiring. Whatever was last captured is on screen.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      The coloured dot beside it still belongs to the <em>run</em> — whether it is working, has
+      finished, was stopped or failed — and the badge to the trigger. A steady alternation of
+      <strong>Ready</strong> and <strong>Trig’d</strong> is a scope doing its job; a badge stuck
+      on <strong>Armed</strong> means the record is longer than the analyzer has managed to
+      collect, and one stuck on <strong>Auto</strong> means nothing is crossing your level.
+    </p>
+
     <h2>Autoset</h2>
     <p>
       <strong>Autoset</strong>, under the run buttons, is one press that makes an unknown signal

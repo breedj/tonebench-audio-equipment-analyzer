@@ -18,9 +18,10 @@
  * pickers, a count badge, a numeric input) — see MeasurementHistoryPanel / OtherPeaksTable /
  * MeasurementChecklist.
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import PanelIcon from './PanelIcon.vue'
 import { panelIconFor, type PanelIconName } from '../panels/panelIcons'
+import { panelSlug } from '../panels/panelOrder'
 import type { MeasurementKindTone } from '../measurements/kinds'
 
 const props = withDefaults(
@@ -58,6 +59,17 @@ const props = withDefaults(
      * explanation is still in the accessibility tree rather than only in a tooltip.</p>
      */
     hint?: string
+    /**
+     * What this panel is called in the stored rail order, for the panels whose heading is
+     * <em>computed</em>.
+     *
+     * <p>The default is a slug of the title, which is stable for the thirty-odd panels whose
+     * heading is a constant. It is not stable for the handful that spell a setting into their
+     * name — "dB range" against "Distortion range", "Time window (ms)" against "(µs)" — and
+     * those must declare one here, or their place in the rail is lost the moment that setting
+     * is touched. See panels/panelOrder.ts.</p>
+     */
+    panelId?: string
   }>(),
   { size: 'sm', padding: 'p-3', defaultOpen: true },
 )
@@ -69,10 +81,77 @@ const icon = computed(() => props.icon ?? derived.value.icon)
 const tone = computed(() => props.tone ?? derived.value.tone)
 
 const bodyPadding = computed(() => (props.padding === 'p-4' ? 'px-4 pb-4' : 'px-3.5 pb-3.5'))
+
+const id = computed(() => props.panelId ?? panelSlug(props.title))
+
+const root = ref<HTMLElement | null>(null)
+
+/**
+ * Whether this panel can be dragged into a different place, which only the panels of a
+ * measurement screen's two rails can.
+ *
+ * <p>Decided from the DOM at mount rather than from a prop or an injection. A prop would have to
+ * be threaded through every one of the thirty-odd call sites; an injection would not arrive at
+ * all, because slot content belongs to the component that <em>wrote</em> it — App.vue — rather
+ * than to the rail it is rendered into, so <code>provide</code> from the rail never reaches it.
+ * The rail marks itself, and a panel asks whether it is in one. The second test is what keeps a
+ * section nested inside another panel's body out of it.</p>
+ */
+const inRail = ref(false)
+
+/**
+ * True only while the grip is held, which is what makes the <em>grip</em> the handle rather
+ * than the whole panel — the measurement sidebar's own rule, and for its reason: a draggable
+ * card cannot have its text selected, and a press anywhere in a settings panel would start a
+ * drag instead of working the control under it.
+ */
+const armed = ref(false)
+
+function disarm() {
+  armed.value = false
+}
+
+onMounted(() => {
+  const el = root.value
+  inRail.value =
+    el?.closest('[data-panel-rail]') != null && el?.parentElement?.closest('[data-panel-id]') == null
+  // On the window, because a press released outside the panel would otherwise leave it armed
+  // for the next unrelated drag.
+  window.addEventListener('mouseup', disarm)
+})
+
+onBeforeUnmount(() => window.removeEventListener('mouseup', disarm))
 </script>
 
 <template>
-  <section class="panel-surface overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
+  <section
+    ref="root"
+    class="panel-surface group/panel relative overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800"
+    :data-panel-id="id"
+    :draggable="armed ? 'true' : undefined"
+  >
+    <!-- The grip, and only in a rail. Two decisions. It appears on hovering the panel rather
+         than standing there always, because thirty-odd panels each carrying a visible handle is
+         a column of furniture — the measurement sidebar's own grip already works this way. And
+         it is laid *over* the header's left padding rather than put in the row: a 20 px handle
+         in the flow pushes the icon and the title of every rail panel across, which is a change
+         to the look of every screen bought for a control that is not even visible most of the
+         time. Absolutely positioned, nothing moves. -->
+    <button
+      v-if="inRail"
+      type="button"
+      class="absolute left-0 top-0 z-10 flex w-3 cursor-grab items-center justify-center text-neutral-300 opacity-0 transition-opacity hover:text-neutral-500 focus-visible:opacity-100 group-hover/panel:opacity-100 dark:text-neutral-600 dark:hover:text-neutral-300"
+      :class="size === 'xs' ? 'h-10' : 'h-11'"
+      title="Drag to move this panel up or down the rail. The order is kept for every measurement of this kind."
+      aria-label="Reorder this panel"
+      @mousedown="armed = true"
+    >
+      <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" aria-hidden="true">
+        <circle cx="1.6" cy="2" r="1.1" /><circle cx="6.4" cy="2" r="1.1" />
+        <circle cx="1.6" cy="7" r="1.1" /><circle cx="6.4" cy="7" r="1.1" />
+        <circle cx="1.6" cy="12" r="1.1" /><circle cx="6.4" cy="12" r="1.1" />
+      </svg>
+    </button>
     <div class="flex items-center gap-2.5 pl-3 pr-1.5" :class="size === 'xs' ? 'h-10' : 'h-11'">
       <!-- The title and its icon are one button: the whole left of the header toggles the body,
            which is a far easier target than the chevron and is what the mockup implies by putting

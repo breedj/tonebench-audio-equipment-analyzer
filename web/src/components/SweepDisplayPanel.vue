@@ -417,6 +417,7 @@ function swatch(key: SweepTraceColorKey): string {
 
   <CollapsibleSection
     :title="unit === 'db' ? 'dB range' : 'Distortion range'"
+    panel-id="distortion-range"
     :suffix="unit === 'db' ? undefined : '(%)'"
   >
     <template v-if="unit === 'db'">
@@ -471,6 +472,7 @@ function swatch(key: SweepTraceColorKey): string {
        to the vertical one and so looked like a level window (Joost, 2026-10-18). -->
   <CollapsibleSection
     :title="`${sweepXLabel(xAxis)} range`"
+    panel-id="x-range"
     :suffix="`(${sweepXUnit(xAxis)})`"
     icon="rangeX"
     tone="cyan"

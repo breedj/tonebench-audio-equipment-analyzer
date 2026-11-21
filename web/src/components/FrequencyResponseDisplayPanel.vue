@@ -547,7 +547,12 @@ watch(running, (isRunning, wasRunning) => {
   <!-- The axis windows, first in the rail and laid out the way the FFT screen's Level range /
        Frequency range are (ChartDisplayPanel.vue): label over a full-width field. Multi-root, so
        they flow into MeasurementLayout's aside grid one by one like SweepDisplayPanel's. -->
-  <CollapsibleSection v-if="bodeShowing" :title="view === 'Dbv' ? 'dBV range' : 'Gain range'" size="xs">
+  <CollapsibleSection
+    v-if="bodeShowing"
+    :title="view === 'Dbv' ? 'dBV range' : 'Gain range'"
+    panel-id="level-range"
+    size="xs"
+  >
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         Top
@@ -703,7 +708,12 @@ watch(running, (isRunning, wasRunning) => {
        and nothing for Autofit to fit. -->
 
   <!-- The delay axis still has a window of its own, and this is its pair of boxes. -->
-  <CollapsibleSection v-if="bodeShowing && delayView !== 'None' && phaseAvailable" :title="`Delay range (${delayUnit})`" size="xs">
+  <CollapsibleSection
+    v-if="bodeShowing && delayView !== 'None' && phaseAvailable"
+    :title="`Delay range (${delayUnit})`"
+    panel-id="delay-range"
+    size="xs"
+  >
     <div class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         Top

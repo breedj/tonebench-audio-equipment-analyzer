@@ -504,6 +504,10 @@ export function useOscilloscope() {
     spliced: computed(() => status.value?.spliced ?? false),
     /** Auto's timeout took it; nothing crossed the level, so the trace is aligned to nothing. */
     forced: computed(() => status.value?.forced ?? false),
+    /** What the trigger engine is doing, for the trigger-state badge. See scope/triggerState.ts. */
+    engineState: computed(() => status.value?.engineState ?? null),
+    /** And whether its pre-trigger is filled, which is Armed against Ready. */
+    preTriggerReady: computed(() => status.value?.preTriggerReady ?? false),
     /**
      * Committed, collected and drawn per second, or null while a run is stopped or the window is
      * too short to divide by. See `scope/captureRates.ts`.

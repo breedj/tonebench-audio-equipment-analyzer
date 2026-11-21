@@ -90,6 +90,7 @@ import {
   type ScopeMaskVerdict,
 } from './scope/mask'
 import { scopeAutoset } from './scope/autoset'
+import { scopeTriggerBadge } from './scope/triggerState'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
@@ -2439,6 +2440,9 @@ const {
   runError: scopeRunError,
   progressLabel: scopeProgressLabel,
   recordsTaken: scopeRecordsTaken,
+  engineState: scopeEngineState,
+  preTriggerReady: scopePreTriggerReady,
+  forced: scopeForced,
   captureRates: scopeCaptureRates,
   recordBounds: scopeRecordBounds,
   window: scopeFetchedWindow,
@@ -2927,6 +2931,26 @@ function onScopeStripWindow(next: ScopeTimeWindow) {
 function onScopeTriggerLevelCommitted() {
   scopeConfigPanel.value?.flushRetune()
 }
+
+/**
+ * What a bench oscilloscope prints in the corner of its screen: Armed, Ready, Trig’d, Stop, Auto
+ * or Scan.
+ *
+ * <p>It is what the status bar shows in place of a progress track on this screen (asked for
+ * 2026-11-21), because a scope’s run does not progress — Normal and Auto go round the same loop
+ * for as long as they are left, so a bar that fills says nothing where a word that changes says
+ * whether the analyzer is waiting for a trigger it is never going to get. See
+ * scope/triggerState.ts for which of the six each state comes to.</p>
+ */
+const scopeTriggerState = computed(() =>
+  scopeTriggerBadge({
+    engineState: scopeEngineState.value,
+    preTriggerReady: scopePreTriggerReady.value,
+    mode: scopeMode.value,
+    forced: scopeForced.value,
+    running: scopeRunning.value,
+  }),
+)
 
 /**
  * One press that makes an unknown signal readable and standing still.
@@ -6658,6 +6682,9 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :label="scopeProgressLabel"
                   :done="scopeRecordsTaken"
                   :total="0"
+                  :badge="scopeTriggerState.state"
+                  :badge-detail="scopeTriggerState.detail"
+                  :badge-tone="scopeTriggerState.tone"
                 >
                   <span v-if="scopeRecord">
                     <span class="font-mono text-neutral-700 dark:text-neutral-200">{{ scopeRecord.frameCount.toLocaleString() }}</span>

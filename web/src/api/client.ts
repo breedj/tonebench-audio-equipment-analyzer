@@ -791,6 +791,25 @@ export interface UiLayoutConfig {
 }
 
 /**
+ * The order one rail's panels are stacked in, top first — the ids are the client's own (a slug of
+ * the panel's heading, or one it declares). A rail that was never dragged has no entry.
+ */
+export interface PanelRailOrder {
+  settings?: string[] | null
+  display?: string[] | null
+}
+
+/**
+ * Panel order per measurement kind (`ui.panelOrder` in the configuration database), so opening
+ * another measurement of the same kind shows its rails stacked the same way. A preference about
+ * this screen rather than about any measurement, which is why it is here and not in the project
+ * file — see panels/panelOrder.ts for what the ids are and how they are applied.
+ */
+export interface PanelOrderConfig {
+  kinds: Record<string, PanelRailOrder>
+}
+
+/**
  * Which elements a PDF report includes, remembered per measurement kind (`report.settings` in the
  * configuration database). The ids are the client's own — see report/elements.ts; the server keeps
  * the strings and validates nothing beyond that. A kind with no entry gets every element it offers.
@@ -1520,6 +1539,16 @@ export interface OscilloscopeStatus {
   spliced: boolean
   /** Auto's timeout took it; nothing crossed the level, so the trace is aligned to nothing. */
   forced: boolean
+  /**
+   * What the trigger engine is doing — `Idle`, `Waiting`, `Filling`, `Held` or `Rolling`.
+   *
+   * A fact rather than a word for the screen: which of a bench scope's six trigger states that
+   * comes to is decided in scope/triggerState.ts, because it needs the run mode and `forced`
+   * as well.
+   */
+  engineState: string
+  /** Whether a trigger found now would have its pre-trigger history — Armed against Ready. */
+  preTriggerReady: boolean
   triggerOffsetS: number | null
   recordFromS: number | null
   recordToS: number | null
@@ -4999,6 +5028,7 @@ export const api = {
     request<ImpedanceFixtureConfig>('/config/impedance-fixture', { method: 'DELETE' }),
 
   getUiLayout: () => request<UiLayoutConfig>('/config/ui-layout'),
+  getPanelOrder: () => request<PanelOrderConfig>('/config/panel-order'),
 
   getReportSettings: () => request<ReportSettingsConfig>('/config/report-settings'),
 
@@ -5026,6 +5056,8 @@ export const api = {
 
   setUiLayout: (layout: UiLayoutConfig) =>
     request<UiLayoutConfig>('/config/ui-layout', { method: 'PUT', body: JSON.stringify(layout) }),
+  setPanelOrder: (order: PanelOrderConfig) =>
+    request<PanelOrderConfig>('/config/panel-order', { method: 'PUT', body: JSON.stringify(order) }),
 
   getCaptureDelay: () => request<CaptureDelayConfig>('/config/capture-delay'),
 

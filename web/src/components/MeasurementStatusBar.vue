@@ -10,7 +10,13 @@
  * other start at the same height — which is what the frequency-response mockup shows and what the
  * old bare text line could not do, being one line of 12 px text against a 56 px button.
  *
- * Two shapes, chosen by whether `caption` is given. With it, the track carries a caption row above
+ * A third shape since 2026-11-21: `badge`, which puts a word where the track would be. The
+ * oscilloscope asks for it, because a scope's run does not *progress* — Normal and Auto go round
+ * the same loop for as long as they are left, so a track that fills says nothing, where
+ * Armed / Ready / Trig’d / Auto says whether the analyzer is waiting for a trigger it is never
+ * going to get. The dot stays beside it: it is the run, and the badge is the trigger.
+ *
+ * Two shapes otherwise, chosen by whether `caption` is given. With it, the track carries a caption row above
  * it (the frequency-response mockup: "Record 1 of 1" on the left, "2 Hz → 96 kHz · 2.1 s" on the
  * right). Without it, the track is a plain bar on the one line with the figures after it (the THD
  * mockup: "4 / 50", "gen −20.00 dBV"). Both are this component because they are the same bar — a
@@ -31,11 +37,23 @@ const props = withDefaults(
     caption?: string | null
     /** Right caption above the track, set in the mono face. */
     captionRight?: string | null
+    /**
+     * A word in place of the progress track — the oscilloscope's trigger state.
+     *
+     * <p>It takes the track's place rather than standing beside it: a bar that cannot fill is
+     * furniture, and the two would be read as one thing contradicting the other.</p>
+     */
+    badge?: string | null
+    /** What that word means, on the badge's own tooltip. */
+    badgeDetail?: string | null
+    /** How it is tinted — the same three tones the dot uses, so one state is one colour. */
+    badgeTone?: RunTone
   }>(),
-  { done: 0, total: 0, caption: null, captionRight: null },
+  { done: 0, total: 0, caption: null, captionRight: null, badge: null, badgeDetail: null, badgeTone: 'idle' },
 )
 
 const look = computed(() => runToneLook(props.tone))
+const badgeLook = computed(() => runToneLook(props.badgeTone))
 const fraction = computed(() => progressFraction(props.tone, props.done, props.total))
 const stacked = computed(() => props.caption !== null || props.captionRight !== null)
 </script>
@@ -69,7 +87,19 @@ const stacked = computed(() => props.caption !== null || props.captionRight !== 
     </div>
 
     <template v-else>
+      <!-- The trigger state, where the track would be. `role=status` so a screen reader is told
+           when it changes, which is the whole of what this readout is for. -->
+      <span
+        v-if="badge !== null"
+        class="inline-flex min-w-0 shrink-0 items-center rounded-md px-2 py-0.5 font-mono text-[12px] font-semibold tabular-nums"
+        :class="[badgeLook.label, badgeLook.badge]"
+        role="status"
+        :title="badgeDetail ?? undefined"
+        >{{ badge }}</span
+      >
+      <div v-if="badge !== null" class="min-w-0 flex-1"></div>
       <div
+        v-else
         class="tb-progress min-w-0 flex-1"
         role="progressbar"
         :aria-label="label"

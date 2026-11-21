@@ -1186,6 +1186,42 @@ public static class ConfigEndpoints
 
             return Results.Ok(settings);
         });
+
+        // The order the panels of each measurement screen's rails are stacked in, per kind.
+        // Same contract as the report settings and the layout: the ids are the client's own
+        // vocabulary, and a document this build cannot read is replaced by the defaults — which
+        // for an order means "the order the screen gives them" and costs nothing.
+        group.MapGet("/panel-order", async (
+            ConfigRepository repo, CancellationToken ct) =>
+        {
+            string? stored = await repo.GetAsync(ConfigRepository.PanelOrderKey, ct);
+            if (string.IsNullOrWhiteSpace(stored))
+                return Results.Ok(PanelOrderConfig.Default);
+
+            try
+            {
+                var order = JsonSerializer.Deserialize(stored, AppJsonContext.Default.PanelOrderConfig);
+                return Results.Ok(order is { IsValid: true } ? order : PanelOrderConfig.Default);
+            }
+            catch (JsonException)
+            {
+                return Results.Ok(PanelOrderConfig.Default);
+            }
+        });
+
+        group.MapPut("/panel-order", async (
+            PanelOrderConfig order, ConfigRepository repo, CancellationToken ct) =>
+        {
+            if (!order.IsValid)
+                return Results.BadRequest("Every panel id must be a non-empty string under a non-empty kind.");
+
+            await repo.SetAsync(
+                ConfigRepository.PanelOrderKey,
+                JsonSerializer.Serialize(order, AppJsonContext.Default.PanelOrderConfig),
+                ct);
+
+            return Results.Ok(order);
+        });
     }
 }
 

@@ -36,7 +36,9 @@ import {
   useMediaQuery,
 } from '../composables/useMediaQuery'
 import { railAtNewWidth, railCollapsed, railToggled, type RailState } from '../layout/railCollapse'
+import PanelRail from './PanelRail.vue'
 import SimulatorHint from './SimulatorHint.vue'
+import { useProjects } from '../composables/useProjects'
 
 /**
  * `roomyRail` gives the settings column 266 px instead of 16rem, and only the FFT screen asks for
@@ -51,6 +53,16 @@ import SimulatorHint from './SimulatorHint.vue'
  * response screen's next door was the more visible of the two problems; those sentences wrap.
  */
 const props = withDefaults(defineProps<{ roomyRail?: boolean }>(), { roomyRail: false })
+
+/**
+ * The kind the panel order is remembered against — read here rather than passed in by each of
+ * the eleven screens, because this component is only ever rendered for the measurement that is
+ * open and the store already knows which one that is.
+ */
+const { types, currentTypeId } = useProjects()
+const currentKind = computed(
+  () => types.value.find((type) => type.id === currentTypeId.value)?.kind ?? null,
+)
 
 const {
   settingsRailCollapsed,
@@ -113,7 +125,9 @@ const STRIP =
          to prevent, pushing it under the chart instead. DOM order never changes either way.
          `self-stretch` overrides the grid's items-start so the strip runs the row's full height. -->
     <div class="flex min-w-0 items-stretch lg:self-stretch">
-      <div
+      <PanelRail
+        rail="settings"
+        :kind="currentKind"
         class="flex min-w-0 flex-1 flex-col gap-3 lg:flex-none"
         :class="[
           props.roomyRail ? 'lg:w-[266px]' : 'lg:w-64',
@@ -121,7 +135,7 @@ const STRIP =
         ]"
       >
         <slot name="rail" />
-      </div>
+      </PanelRail>
       <button
         type="button"
         class="hidden lg:flex"
@@ -167,12 +181,14 @@ const STRIP =
           <path :d="displayFolded ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'" />
         </svg>
       </button>
-      <div
+      <PanelRail
+        rail="display"
+        :kind="currentKind"
         class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:w-64 lg:flex-none lg:flex-col lg:items-stretch"
         :class="displayFolded ? 'lg:hidden' : ''"
       >
         <slot name="aside" />
-      </div>
+      </PanelRail>
     </div>
   </div>
 </template>

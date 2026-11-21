@@ -180,7 +180,9 @@ public sealed class OscilloscopeRunner(
                         // Named rather than defaulted: Roll never reaches FillIfReady, so it
                         // commits nothing -- and the counter beside this one is roll steps rather
                         // than records, so the pair would not be two readings of one quantity.
-                        RecordsCommitted: 0);
+                        RecordsCommitted: 0,
+                        EngineState: engine.State.ToString(),
+                        PreTriggerReady: false);
                 }
 
                 return new OscilloscopeStatus(
@@ -206,7 +208,15 @@ public sealed class OscilloscopeRunner(
                     // that has never run -- a fabricated gap, on the one readout whose whole
                     // subject is being honest about gaps. Mirroring makes it park, clear and reset
                     // with everything it has to agree with.
-                    RecordsCommitted: (int)Math.Min(int.MaxValue, _recordsCommitted));
+                    RecordsCommitted: (int)Math.Min(int.MaxValue, _recordsCommitted),
+                    // What the engine is doing, as a bench instrument's trigger-status corner
+                    // reads it. Facts rather than a word: which state the machine is in and
+                    // whether the pre-trigger is filled. Which of the six names that comes to is
+                    // the client's to decide -- see scope/triggerState.ts -- because it also
+                    // needs the run mode and whether the last record was forced, and both of
+                    // those are already on this record.
+                    EngineState: engine.State.ToString(),
+                    PreTriggerReady: engine.PreTriggerReady);
             }
         }
     }

@@ -451,7 +451,9 @@ public sealed record OscilloscopeStatus(
     string Accumulation = nameof(RecordAccumulation.Normal),
     int AveragesTaken = 0,
     int AverageCount = 1,
-    int RecordsCommitted = 0);
+    int RecordsCommitted = 0,
+    string EngineState = nameof(ScopeEngineState.Idle),
+    bool PreTriggerReady = false);
 
 /// <summary>The acknowledgement a start returns, so the client knows what it actually got.</summary>
 /// <param name="SampleRateHz">The rate the run is streaming at.</param>

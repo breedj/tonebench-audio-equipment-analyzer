@@ -843,6 +843,41 @@ public sealed record ReportSettingsConfig(Dictionary<string, ReportKindSettings>
 }
 
 /// <summary>
+/// The order the panels of one measurement screen's two rails are stacked in, as the user dragged
+/// them.
+///
+/// <para>Ids rather than titles, and the client's own vocabulary again: a panel's id is a slug of
+/// its heading or a string it declares, and the server stores the strings and checks nothing but
+/// that they are strings. An id this build does not render is simply never matched, and a panel
+/// nobody has ordered keeps the place the screen gives it.</para>
+/// </summary>
+/// <param name="Settings">The settings rail, top first. Null on a rail that was never dragged.</param>
+/// <param name="Display">The display rail, top first.</param>
+public sealed record PanelRailOrder(string[]? Settings = null, string[]? Display = null);
+
+/// <summary>
+/// Panel order per measurement <i>kind</i>, which is what was asked for: open another FFT
+/// measurement and its rails are stacked the way the last one was left.
+///
+/// <para>Here rather than in the project database for <see cref="UiLayoutConfig"/>'s reason — it
+/// describes how this bench likes its screen, not what a measurement was, and a project file copied
+/// to another machine must not carry one window's layout with it.</para>
+/// </summary>
+/// <param name="Kinds">The per-kind orders, keyed by the client's measurement-kind name.</param>
+public sealed record PanelOrderConfig(Dictionary<string, PanelRailOrder> Kinds)
+{
+    public static PanelOrderConfig Default { get; } = new(new Dictionary<string, PanelRailOrder>());
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid =>
+        Kinds is not null
+        && Kinds.All(kind => !string.IsNullOrWhiteSpace(kind.Key)
+                             && kind.Value is not null
+                             && (kind.Value.Settings is null || kind.Value.Settings.All(id => !string.IsNullOrWhiteSpace(id)))
+                             && (kind.Value.Display is null || kind.Value.Display.All(id => !string.IsNullOrWhiteSpace(id))));
+}
+
+/// <summary>
 /// Reads and writes the configuration database's key/value documents.
 ///
 /// <para>Deliberately takes <see cref="ConfigConnectionFactory"/> and not
@@ -908,6 +943,9 @@ public sealed class ConfigRepository(ConfigConnectionFactory factory)
 
     /// <summary>The report settings' key. One document, see <see cref="ReportSettingsConfig"/>.</summary>
     public const string ReportSettingsKey = "report.settings";
+
+    /// <summary>The panel order's key. One document, see <see cref="PanelOrderConfig"/>.</summary>
+    public const string PanelOrderKey = "ui.panelOrder";
 
     /// <summary>The recent-projects list's key. One document, see <see cref="RecentProjectsConfig"/>.</summary>
     public const string RecentProjectsKey = "projects.recent";

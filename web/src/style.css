@@ -48,6 +48,27 @@
   background-color: var(--surface-panel);
 }
 
+/* A PANEL BEING DRAGGED UP OR DOWN ITS RAIL, and the line showing where it would land.
+
+   An inset shadow rather than a border or an inserted element: a border would change the panel's
+   height and push everything under it along as the pointer moved, and an element inserted between
+   two flex items would have to be ordered along with them. An inset shadow is drawn inside the box
+   that is already there, so the only thing that moves during a drag is the pointer.
+
+   The dragged panel keeps its place and fades, which is what says the gesture is under way; the
+   browser draws the card itself under the cursor. */
+:where(.panel-dragging) {
+  opacity: 0.45;
+}
+
+:where(.panel-drop-before) {
+  box-shadow: inset 0 3px 0 0 var(--kind-violet-chip-fg);
+}
+
+:where(.panel-drop-after) {
+  box-shadow: inset 0 -3px 0 0 var(--kind-violet-chip-fg);
+}
+
 /* Text boxes, number fields, dropdowns and text areas, in both themes — Tailwind preflight gives
    them `background-color: transparent`, which would hand them whatever panel they sit on. `button`
    is deliberately left out: a great many buttons here are borderless and are *meant* to pick up

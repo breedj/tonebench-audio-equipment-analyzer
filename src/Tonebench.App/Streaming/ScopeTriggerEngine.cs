@@ -99,6 +99,29 @@ public sealed class ScopeTriggerEngine(ScopeCaptureBuffer buffer)
         }
     }
 
+    /// <summary>
+    /// Whether a trigger found now would have its pre-trigger history behind it — which is the
+    /// whole difference between a scope that is <i>armed</i> and one that is <i>ready</i>.
+    ///
+    /// <para>The same test <see cref="AcceptTrigger"/> makes, asked at the write head rather than
+    /// at a hit: an armed scope with an empty buffer refuses every crossing until it has
+    /// collected <see cref="ScopeCaptureSpec.PreTriggerFrames"/> contiguous frames, and until
+    /// then a bench instrument says Armed rather than Ready. False in every other state, where
+    /// nothing is scanning and the question does not arise.</para>
+    /// </summary>
+    public bool PreTriggerReady
+    {
+        get
+        {
+            lock (_handoff)
+            {
+                if (_state != ScopeEngineState.Waiting) return false;
+                long usable = _buffer.Newest - Math.Max(_buffer.ContiguousFrom, _buffer.Oldest);
+                return usable >= _spec.PreTriggerFrames;
+            }
+        }
+    }
+
     /// <summary>The spec the engine is currently running, as last armed.</summary>
     public ScopeCaptureSpec Spec => _spec;
 

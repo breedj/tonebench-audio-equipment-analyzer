@@ -107,6 +107,16 @@ const { showPage } = useManual()
       press on a wide window are remembered.
     </p>
     <p>
+      <strong>The panels in either rail can be put in whatever order you like.</strong> Hover a
+      panel and a grip appears at the left of its heading; drag it up or down and a line shows
+      where it will land. The order is kept for every measurement of that <em>kind</em>, so
+      opening another FFT analysis shows the same rail — and it is kept on this machine rather
+      than in the project file, because it is how you like the screen rather than anything about
+      what was measured. The run buttons and <strong>Autofit</strong> are not panels and stay
+      where they are; a panel this build has added that you have never dragged stays beside the
+      one above it.
+    </p>
+    <p>
       A red dot next to a measurement's name means its settings have been changed but not saved.
       <strong>Save</strong> stores the settings into that measurement, <strong>Save as…</strong>
       makes a new measurement from them, and <strong>Project ▸ Save</strong> saves every changed

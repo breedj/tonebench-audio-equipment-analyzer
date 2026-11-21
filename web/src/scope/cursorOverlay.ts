@@ -19,7 +19,12 @@
  */
 
 import type { SegmentedOption } from '../panels/segmented'
-import { cursorReadings, formatCursorFrequency, type ScopeCursors } from './cursors'
+import {
+  cursorLevelsRead,
+  cursorReadings,
+  formatCursorFrequency,
+  type ScopeCursors,
+} from './cursors'
 import { formatMathValue } from './math'
 import { formatSeconds, type ScopeReading } from './readings'
 import { formatScopeTime } from './timeAxis'
@@ -73,7 +78,7 @@ export type CursorId = 'timeA' | 'timeB' | 'voltA' | 'voltB'
  * second opinion about how a rate is written.</p>
  */
 export function cursorSlopeReading(cursors: ScopeCursors): ScopeReading | null {
-  if (!cursors.timeOn || !cursors.voltOn) return null
+  if (!cursors.timeOn || !cursorLevelsRead(cursors)) return null
   const dt = cursors.timeBS - cursors.timeAS
   const dv = cursors.voltBV - cursors.voltAV
   if (!Number.isFinite(dt) || !Number.isFinite(dv) || dt === 0) return null
@@ -124,7 +129,7 @@ export function cursorValueLabel(
     }
     case 'voltA':
     case 'voltB': {
-      if (!cursors.voltOn) return null
+      if (!cursorLevelsRead(cursors)) return null
       const volts = id === 'voltA' ? cursors.voltAV : cursors.voltBV
       if (!Number.isFinite(volts)) return null
       return formatVolts(volts, voltsPerDivision)

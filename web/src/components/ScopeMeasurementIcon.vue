@@ -8,6 +8,15 @@ import { ICON_HEIGHT, ICON_WIDTH, scopeMeasurementIcon } from '../scope/measurem
  * <p>The shapes are data (<code>scope/measurementIcons.ts</code>); this only draws them. The
  * backdrop trace is faint and the mark is in the current colour, so a figure reads the same way
  * against a panel, inside a chosen card and in either theme without a palette of its own.</p>
+ *
+ * <p><b><code>mark</code> is the two-colour reading of the same shapes</b>, which everything that
+ * stands for a <em>chosen</em> measurement asks for — the picker's tiles and, since 2026-11-20, the
+ * readings table's own rows, so a row is drawn exactly as the tile it was picked off. Given one,
+ * the trace stops being faint and takes
+ * the current colour outright — its well is already tinted, so it has contrast of its own — and
+ * everything drawn <em>on</em> it takes the mark colour instead. Nothing about the data changes:
+ * <code>faint</code> already means "this is the trace, the rest is the reading", which is exactly
+ * the split the two colours want. Without it the component draws precisely what it always did.</p>
  */
 
 const props = withDefaults(
@@ -26,11 +35,44 @@ const props = withDefaults(
      * viewBox, and all 31 shape tables plus their test are written in that 24x16 space.</p>
      */
     size?: 'sm' | 'lg'
+    /**
+     * A CSS colour for the marks on the trace — a level line, a dimension line, a dot, a band.
+     *
+     * <p>Absent means the one-colour figure the readings table has always drawn.</p>
+     */
+    mark?: string
   }>(),
-  { size: 'sm' },
+  { size: 'sm', mark: undefined },
 )
 
 const shapes = computed(() => scopeMeasurementIcon(props.name))
+
+/** Whether this is being drawn in two colours, which is what decides every stroke below. */
+const twoTone = computed(() => props.mark !== undefined)
+
+/** What a shape is stroked in: the trace keeps the current colour, the marks take theirs. */
+function ink(faint?: boolean): string | undefined {
+  if (!twoTone.value) return undefined
+  return faint ? undefined : props.mark
+}
+
+/** How solid a shape is. A two-colour figure has no need to whisper its trace. */
+function opacity(faint?: boolean): number {
+  return faint && !twoTone.value ? 0.4 : 1
+}
+
+/**
+ * How heavy a stroke is.
+ *
+ * <p>In two colours the trace is drawn a little heavier than what is marked on it, which is the
+ * hierarchy the faintness used to carry: the waveform is the thing, and the level lines and
+ * dimension arrows are an annotation of it. Undefined everywhere else, so the one-colour figure
+ * keeps the single width the <code>svg</code> sets.</p>
+ */
+function weight(faint?: boolean): number | undefined {
+  if (!twoTone.value) return undefined
+  return faint ? 1 : 0.8
+}
 
 /** Half the arm of a dimension line's end tick, in the icon's own units. */
 const TICK = 2
@@ -52,7 +94,9 @@ const TICK = 2
       <path
         v-if="shape.t === 'path'"
         :d="shape.d"
-        :stroke-opacity="shape.faint ? 0.4 : 1"
+        :stroke="ink(shape.faint)"
+        :stroke-width="weight(shape.faint)"
+        :stroke-opacity="opacity(shape.faint)"
         :stroke-dasharray="shape.dash ? '2 1.5' : undefined"
       />
       <line
@@ -61,7 +105,9 @@ const TICK = 2
         :y1="shape.y1"
         :x2="shape.x2"
         :y2="shape.y2"
-        :stroke-opacity="shape.faint ? 0.4 : 1"
+        :stroke="ink(shape.faint)"
+        :stroke-width="weight(shape.faint)"
+        :stroke-opacity="opacity(shape.faint)"
         :stroke-dasharray="shape.dash ? '2 1.5' : undefined"
       />
       <rect
@@ -70,21 +116,21 @@ const TICK = 2
         :y="shape.y"
         :width="shape.w"
         :height="shape.h"
-        fill="currentColor"
-        fill-opacity="0.22"
+        :fill="props.mark ?? 'currentColor'"
+        :fill-opacity="twoTone ? 0.28 : 0.22"
         stroke="none"
       />
       <!-- A dimension line: the span itself and a tick at each end, which is what makes it read as a
            measurement rather than as one more trace. -->
       <template v-else-if="shape.t === 'spanH'">
-        <line :x1="shape.x1" :y1="shape.y" :x2="shape.x2" :y2="shape.y" />
-        <line :x1="shape.x1" :y1="shape.y - TICK" :x2="shape.x1" :y2="shape.y + TICK" />
-        <line :x1="shape.x2" :y1="shape.y - TICK" :x2="shape.x2" :y2="shape.y + TICK" />
+        <line :x1="shape.x1" :y1="shape.y" :x2="shape.x2" :y2="shape.y" :stroke="ink(false)" :stroke-width="weight(false)" />
+        <line :x1="shape.x1" :y1="shape.y - TICK" :x2="shape.x1" :y2="shape.y + TICK" :stroke="ink(false)" :stroke-width="weight(false)" />
+        <line :x1="shape.x2" :y1="shape.y - TICK" :x2="shape.x2" :y2="shape.y + TICK" :stroke="ink(false)" :stroke-width="weight(false)" />
       </template>
       <template v-else-if="shape.t === 'spanV'">
-        <line :x1="shape.x" :y1="shape.y1" :x2="shape.x" :y2="shape.y2" />
-        <line :x1="shape.x - TICK" :y1="shape.y1" :x2="shape.x + TICK" :y2="shape.y1" />
-        <line :x1="shape.x - TICK" :y1="shape.y2" :x2="shape.x + TICK" :y2="shape.y2" />
+        <line :x1="shape.x" :y1="shape.y1" :x2="shape.x" :y2="shape.y2" :stroke="ink(false)" :stroke-width="weight(false)" />
+        <line :x1="shape.x - TICK" :y1="shape.y1" :x2="shape.x + TICK" :y2="shape.y1" :stroke="ink(false)" :stroke-width="weight(false)" />
+        <line :x1="shape.x - TICK" :y1="shape.y2" :x2="shape.x + TICK" :y2="shape.y2" :stroke="ink(false)" :stroke-width="weight(false)" />
       </template>
     </template>
   </svg>

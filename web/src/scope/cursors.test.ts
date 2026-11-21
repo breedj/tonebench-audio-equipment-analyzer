@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   cursorGate,
+  cursorLevelsRead,
   cursorPairNeedsPlacing,
   cursorReadings,
+  cursorTimeBBox,
+  cursorTimeBFromBox,
+  cursorsTrack,
   DEFAULT_SCOPE_CURSORS,
   formatCursorFrequency,
+  isScopeCursorMode,
   placeCursorPair,
+  trackLevelAt,
   type ScopeCursors,
 } from './cursors'
 
@@ -115,5 +121,102 @@ describe('formatCursorFrequency', () => {
     expect(formatCursorFrequency(96_000)).toBe('96.000 kHz')
     expect(formatCursorFrequency(150_000)).toBe('150.00 kHz')
     expect(formatCursorFrequency(Number.POSITIVE_INFINITY)).toBe('—')
+  })
+})
+
+
+describe('Track mode', () => {
+  it('is off by default, with the level pair placed by hand', () => {
+    expect(DEFAULT_SCOPE_CURSORS.mode).toBe('Manual')
+    expect(cursorsTrack(cursors())).toBe(false)
+  })
+
+  it('needs the time pair, which is the thing it follows', () => {
+    // Track with nothing to follow is not tracking: the level cursors would have no time to read
+    // the trace at, so the honest answer is that the mode is simply not doing anything yet.
+    expect(cursorsTrack(cursors({ mode: 'Track' }))).toBe(false)
+    expect(cursorsTrack(cursors({ mode: 'Track', timeOn: true }))).toBe(true)
+  })
+
+  it('reads the levels whether or not their own lines are drawn', () => {
+    // voltOn draws the two horizontals -- the Siglent's Show CursorY. Under Track the squares on
+    // the trace are already saying where the levels are, so the figures are worth printing either
+    // way; in Manual there is nothing to print until the pair is switched on.
+    expect(cursorLevelsRead(cursors({ mode: 'Track', timeOn: true }))).toBe(true)
+    expect(cursorLevelsRead(cursors())).toBe(false)
+    expect(cursorLevelsRead(cursors({ voltOn: true }))).toBe(true)
+  })
+
+  it('prints the level rows under Track with the time pair alone', () => {
+    const rows = cursorReadings(
+      cursors({ mode: 'Track', timeOn: true, timeAS: 0, timeBS: 0.001, voltAV: 0.5, voltBV: -0.25 }),
+      0.5,
+      10,
+    )
+    const labels = rows.map((r) => r.label)
+    expect(labels).toContain('Level A')
+    expect(labels).toContain('ΔV')
+    // And says they were read off the trace rather than placed, which is the whole difference.
+    expect(rows.find((r) => r.label === 'Level A')?.title).toContain('the trace')
+  })
+
+  it('answers for a mode it does not know, rather than taking it', () => {
+    expect(isScopeCursorMode('Track')).toBe(true)
+    expect(isScopeCursorMode('Follow')).toBe(false)
+  })
+})
+
+describe('trackLevelAt', () => {
+  const xs = [0, 1, 2, 3]
+  const ys = [0, 10, 20, 30]
+
+  it('interpolates between the two samples either side', () => {
+    expect(trackLevelAt(xs, ys, 1.5)).toBeCloseTo(15, 12)
+    expect(trackLevelAt(xs, ys, 2.25)).toBeCloseTo(22.5, 12)
+  })
+
+  it('is the sample itself where it lands on one, and at either end', () => {
+    expect(trackLevelAt(xs, ys, 2)).toBe(20)
+    expect(trackLevelAt(xs, ys, 0)).toBe(0)
+    expect(trackLevelAt(xs, ys, 3)).toBe(30)
+  })
+
+  it('answers nothing outside the trace, rather than clamping to its ends', () => {
+    // A level cursor clamped to the last sample would claim the trace is still there, which on a
+    // window wider than the record is exactly what it is not.
+    expect(trackLevelAt(xs, ys, -0.5)).toBeNull()
+    expect(trackLevelAt(xs, ys, 3.5)).toBeNull()
+    expect(trackLevelAt([], [], 0)).toBeNull()
+    expect(trackLevelAt(xs, ys, Number.NaN)).toBeNull()
+  })
+
+  it('does not interpolate across a gap, which is a stretch nothing measured', () => {
+    const gappy = [0, null, 20, 30]
+    expect(trackLevelAt(xs, gappy, 1.5)).toBeNull()
+    // The sample before a gap still reads itself: what is absent is the stretch, not the sample.
+    expect(trackLevelAt(xs, gappy, 0.5)).toBe(0)
+  })
+
+  it('finds the right interval on a long trace, which is what the search is for', () => {
+    const longXs = Array.from({ length: 5000 }, (_, i) => i * 0.25)
+    const longYs = longXs.map((x) => x * 2)
+    expect(trackLevelAt(longXs, longYs, 613.375)).toBeCloseTo(1226.75, 9)
+  })
+})
+
+describe('the B box as a span', () => {
+  it('shows a position or the span from A, and reads back as a position either way', () => {
+    const absolute = cursors({ timeAS: -0.000065, timeBS: 0.000335 })
+    expect(cursorTimeBBox(absolute)).toBeCloseTo(0.000335, 12)
+    const span = { ...absolute, timeBIsSpan: true }
+    expect(cursorTimeBBox(span)).toBeCloseTo(0.0004, 12)
+    // The Siglent's own figures: X1 335 µs, X2 −65 µs, ΔX 400 µs.
+    expect(cursorTimeBFromBox(span, 0.0004)).toBeCloseTo(0.000335, 12)
+    expect(cursorTimeBFromBox(absolute, 0.0004)).toBeCloseTo(0.0004, 12)
+  })
+
+  it('leaves timeBS absolute, so nothing downstream has to know how it was typed', () => {
+    const span = cursors({ timeOn: true, timeAS: 0.001, timeBS: 0.003, timeBIsSpan: true })
+    expect(cursorGate(span)).toEqual({ fromS: 0.001, toS: 0.003 })
   })
 })

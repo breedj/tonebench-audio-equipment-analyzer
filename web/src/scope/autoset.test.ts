@@ -1,30 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { AUTOSET_PERIODS, autosetNote, scopeAutoset } from './autoset'
-import { SCOPE_TIME_PER_DIVISION_LADDER, snapTimePerDivision } from './timeAxis'
+import { AUTOSET_PERIODS, scopeAutoset } from './autoset'
+import { SCOPE_TIME_PER_DIVISION_LADDER, recordSecondsFor, snapTimePerDivision } from './timeAxis'
 
-/** A 1 kHz sine of ±0.7 V in a 20 ms record with a quarter of it before the trigger. */
+/** A 1 kHz sine of ±0.7 V. */
 const TONE = {
   maxV: 0.7,
   minV: -0.7,
   frequencyHz: 1000,
-  recordFromS: -0.005,
-  recordToS: 0.015,
 }
 
 describe('scopeAutoset', () => {
-  it('puts three cycles on screen', () => {
-    const set = scopeAutoset(TONE)!
-
-    expect((set.toS - set.fromS) * TONE.frequencyHz).toBeCloseTo(AUTOSET_PERIODS, 9)
-  })
-
-  it('hangs the window off the trigger, a quarter of it before', () => {
-    const set = scopeAutoset(TONE)!
-
-    expect(set.fromS).toBeCloseTo(-0.00075, 9)
-    expect(set.toS).toBeCloseTo(0.00225, 9)
-  })
-
   it('takes the trigger level to the middle of the signal', () => {
     expect(scopeAutoset({ ...TONE, maxV: 1.2, minV: 0.2 })!.triggerLevelV).toBeCloseTo(0.7, 6)
   })
@@ -49,37 +34,6 @@ describe('scopeAutoset', () => {
     expect(set.offsetV).toBeCloseTo(0, 9)
   })
 
-  /**
-   * The rule that is quietly wrong by default: three periods of 20 Hz is 150 ms, which a 20 ms
-   * record does not contain, and a window past the capture draws a trace that stops in the middle
-   * of the plot.
-   */
-  it('clamps the window into a record too short for three cycles', () => {
-    const set = scopeAutoset({ ...TONE, frequencyHz: 20 })!
-
-    expect(set.fromS).toBeCloseTo(TONE.recordFromS, 9)
-    expect(set.toS).toBeCloseTo(TONE.recordToS, 9)
-  })
-
-  /** Slid rather than squeezed: the number of cycles is the figure the whole thing is chosen for. */
-  it('slides a window that runs past the end rather than shortening it', () => {
-    const set = scopeAutoset({ ...TONE, recordFromS: 0, recordToS: 0.002 })!
-
-    expect(set.toS).toBeCloseTo(0.002, 9)
-    expect(set.fromS).toBeCloseTo(0, 9)
-  })
-
-  it('shows the whole record where no frequency was measured', () => {
-    const set = scopeAutoset({ ...TONE, frequencyHz: null })!
-
-    expect(set.fromS).toBe(TONE.recordFromS)
-    expect(set.toS).toBe(TONE.recordToS)
-    expect(set.periodS).toBeNull()
-    // And still sets the other two, which do not need a frequency.
-    expect(set.triggerLevelV).toBeCloseTo(0, 6)
-    expect(set.voltsPerDivision).toBeGreaterThan(0)
-  })
-
   it('treats a nonsense frequency as none at all', () => {
     for (const hz of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(scopeAutoset({ ...TONE, frequencyHz: hz })!.periodS).toBeNull()
@@ -97,24 +51,21 @@ describe('scopeAutoset', () => {
   it('takes a flat record own level as the trigger level', () => {
     expect(scopeAutoset({ ...TONE, maxV: 0.1, minV: 0.1 })!.triggerLevelV).toBeCloseTo(0.1, 9)
   })
-})
 
-describe('autosetNote', () => {
-  it('says how many cycles it put on screen', () => {
-    expect(autosetNote(scopeAutoset(TONE))).toMatch(/3\.0 cycles/)
-  })
+  /**
+   * It chooses a record and not a window (asked for 2026-11-21): the caller shows all of whatever
+   * record the timebase gives, so a window computed here would be a second answer to one question.
+   */
+  it('answers with no window at all', () => {
+    const set = scopeAutoset(TONE)! as unknown as Record<string, unknown>
 
-  it('says so when there was no frequency to work from', () => {
-    expect(autosetNote(scopeAutoset({ ...TONE, frequencyHz: null }))).toMatch(/whole record/)
-  })
-
-  it('is nothing at all with nothing to report', () => {
-    expect(autosetNote(null)).toBeNull()
+    expect(set.fromS).toBeUndefined()
+    expect(set.toS).toBeUndefined()
   })
 })
 
 describe('the timebase Autoset sets', () => {
-  const steady = { maxV: 1, minV: -1, recordFromS: -0.005, recordToS: 0.015 }
+  const steady = { maxV: 1, minV: -1 }
 
   it('is three periods over the ten divisions, on a rung', () => {
     // 1 kHz: three periods is 3 ms, which is 0.3 ms a division -- the ladder's nearest rung is 0.2.
@@ -123,20 +74,30 @@ describe('the timebase Autoset sets', () => {
     expect(SCOPE_TIME_PER_DIVISION_LADDER).toContain(result?.timePerDivisionS)
   })
 
-  it('asks for a record far longer than the one on hand where the signal is slow', () => {
-    // The whole point of it being a horizontal control: three periods of 20 Hz is 150 ms, which the
-    // 20 ms record in `steady` cannot hold at all. Before the timebase this could only clamp.
+  /**
+   * The whole point of it being a horizontal control: three periods of 20 Hz is 150 ms, which no
+   * ordinary record holds, and before the timebase this could only clamp a window into one that
+   * did not.
+   */
+  it('asks for a record long enough for a signal slower than any sensible capture', () => {
     const result = scopeAutoset({ ...steady, frequencyHz: 20 })
+
     expect(result?.timePerDivisionS).not.toBeNull()
-    const record = result!.timePerDivisionS! * 10
-    expect(record).toBeGreaterThan(steady.recordToS - steady.recordFromS)
+    expect(recordSecondsFor(result!.timePerDivisionS!)).toBeGreaterThan(0.02)
+  })
+
+  /** Within a rung of what was asked for, which is what makes the note's cycle count honest. */
+  it('lands within one detent of the periods it asks for', () => {
+    for (const hz of [20, 100, 1000, 12_345]) {
+      const result = scopeAutoset({ ...steady, frequencyHz: hz })!
+      const cycles = recordSecondsFor(result.timePerDivisionS!) * hz
+
+      expect(cycles, `${hz} Hz`).toBeGreaterThan(AUTOSET_PERIODS / 3)
+      expect(cycles, `${hz} Hz`).toBeLessThan(AUTOSET_PERIODS * 3)
+    }
   })
 
   it('leaves the record alone with no frequency to size one from', () => {
     expect(scopeAutoset({ ...steady, frequencyHz: null })?.timePerDivisionS).toBeNull()
-  })
-
-  it('says what it set, so the press is not silent about the record changing', () => {
-    expect(autosetNote(scopeAutoset({ ...steady, frequencyHz: 1000 }))).toMatch(/Timebase .+\/div\./)
   })
 })

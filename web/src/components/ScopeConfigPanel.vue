@@ -12,10 +12,11 @@ import type {
 import { useProjects } from '../composables/useProjects'
 import { useCaptureDelay } from '../composables/useCaptureDelay'
 import CollapsibleSection from './CollapsibleSection.vue'
-import EstimateBadge from './EstimateBadge.vue'
 import ChannelPair from './ChannelPair.vue'
 import IconSelect from './IconSelect.vue'
 import ScopeToggleIcon from './ScopeToggleIcon.vue'
+import StepperTile from './StepperTile.vue'
+import { stepLadder } from '../panels/stepperGrid'
 import { clampNumberField } from '../numberField'
 import {
   DEFAULT_SCOPE_AVERAGE_COUNT,
@@ -183,15 +184,27 @@ const timePerDivisionOptions = computed(() => {
   return rungs
 })
 
-/** One rung as the control writes it — the division's own unit, like the status line's readout. */
-function timePerDivisionLabel(seconds: number): string {
-  return `${formatScopeTime(seconds * 1000, seconds * 1000)}/div`
+/**
+ * One rung in the division's own unit, like the status line's readout.
+ *
+ * <p>Without the `/div`, which the tile draws for itself as a suffix and the grid's cells must not
+ * carry at all — `2 ms/div` in a cell three characters wide is the unit said twice.</p>
+ */
+function timePerDivisionGridLabel(seconds: number): string {
+  return formatScopeTime(seconds * 1000, seconds * 1000)
 }
 
-function onTimePerDivisionChange(event: Event) {
-  const seconds = Number((event.target as HTMLSelectElement).value)
+/** What the tile reads now. */
+const timePerDivisionValue = computed(() => timePerDivisionGridLabel(timePerDivisionS.value))
+
+function setTimePerDivision(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return
   form.recordMs = clampNumberField(recordSecondsFor(seconds) * 1000, MIN_RECORD_MS, MAX_RECORD_MS)
+}
+
+/** One rung of the ladder, from the tile's own two buttons. */
+function stepTimePerDivision(direction: 1 | -1) {
+  setTimePerDivision(stepLadder(timePerDivisionOptions.value, timePerDivisionS.value, direction))
 }
 
 const form = reactive({
@@ -231,7 +244,6 @@ const form = reactive({
 const sampleRates = computed(() => props.ranges?.sampleRatesHz ?? [48000, 96000, 192000])
 
 /** How many frames the record comes to at the staged rate — what the badge quotes. */
-const recordFrames = computed(() => Math.max(2, Math.round((form.recordMs / 1000) * form.sampleRateHz)))
 
 /** The sample interval, which is the floor on anything this measurement can resolve in time. */
 const sampleIntervalUs = computed(() => (form.sampleRateHz > 0 ? 1e6 / form.sampleRateHz : 0))
@@ -815,28 +827,34 @@ function onAutoTimeoutChange(event: Event) {
 
 <template>
   <CollapsibleSection title="Acquisition">
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        Sample rate
-        <select v-model.number="form.sampleRateHz" class="tb-input">
-          <option v-for="hz in sampleRates" :key="hz" :value="hz">{{ (hz / 1000).toFixed(0) }} kS/s</option>
-        </select>
-      </label>
-      <label class="tb-field">
-        Time/div
-        <select
-          class="tb-input"
-          :value="timePerDivisionS"
-          title="The timebase. The record is ten divisions of it, pre- and post-trigger together — up to one second, beyond which the stream recorder is the tool. Live: changing it while the scope is running re-arms the capture rather than needing a Stop."
-          @change="onTimePerDivisionChange"
-        >
-          <option v-for="seconds in timePerDivisionOptions" :key="seconds" :value="seconds">
-            {{ timePerDivisionLabel(seconds) }}
-          </option>
-        </select>
-      </label>
+    <label class="tb-field">
+      Sample rate
+      <select v-model.number="form.sampleRateHz" class="tb-input">
+        <option v-for="hz in sampleRates" :key="hz" :value="hz">{{ (hz / 1000).toFixed(0) }} kS/s</option>
+      </select>
+    </label>
+
+    <div class="mt-2.5">
+      <!-- A stepper rather than a dropdown (Joost's design of 2026-11-20): the timebase is driven
+           a step at a time with the trace in view, which a popup covers for two presses in three.
+           The grid behind the body is the whole ladder laid out as decades by 1-2-5. -->
+      <StepperTile
+        label="Time/div"
+        tone="orange"
+        :display="timePerDivisionValue"
+        suffix="/div"
+        :ladder="timePerDivisionOptions"
+        :value="timePerDivisionS"
+        :format="timePerDivisionGridLabel"
+        title="The timebase. The record is ten divisions of it, pre- and post-trigger together — up to one second, beyond which the stream recorder is the tool. Live: changing it while the scope is running re-arms the capture rather than needing a Stop."
+        @step="stepTimePerDivision"
+        @pick="setTimePerDivision"
+      />
     </div>
 
+    <!-- A narrow box (Joost, 2026-11-20): it holds a percentage, so three digits is the whole of
+         what it can ever be asked for, and at the rail's full width it read as a field expecting
+         something longer. -->
     <label class="tb-field">
       Pre-trigger (%)
       <input
@@ -844,8 +862,8 @@ function onAutoTimeoutChange(event: Event) {
         type="number"
         step="5"
         max="100"
-        class="tb-input"
-        title="How much of the record sits before the trigger. 100 % is a whole record of history — free here, because the analyzer streams continuously and the trigger is a window chosen out of it. Drag the marker along the top of the plot to set it by eye."
+        class="tb-input w-16"
+        title="How much of the record sits before the trigger. 100 % is a whole record of history — free here, because the analyzer streams continuously and the trigger is a window chosen out of it. Drag the amber T along the top of the plot to set it by eye — that lands on whole percentages."
         @change="onPreTriggerChange"
       />
     </label>
@@ -861,24 +879,10 @@ function onAutoTimeoutChange(event: Event) {
       />
     </div>
 
-    <div class="flex flex-wrap gap-1.5">
-      <EstimateBadge kind="time" title="The whole record — ten divisions of the timebase, pre- and post-trigger together. What the timebase costs in memory, which the control itself no longer says.">
-        {{ formatScopeTime(form.recordMs, form.recordMs) }} record
-      </EstimateBadge>
-      <EstimateBadge kind="points" title="How many samples the record holds at the staged rate.">
-        {{ recordFrames.toLocaleString() }} samples
-      </EstimateBadge>
-      <EstimateBadge kind="time" title="One sample interval - the floor on anything this measurement can resolve in time.">
-        {{ formatScopeTime(sampleIntervalUs / 1000, 0.05) }} / sample
-      </EstimateBadge>
-      <EstimateBadge kind="time" title="One capture end to end: the settle the stimulus change books, plus the record itself.">
-        {{ formatScopeTime(captureMs, captureMs) }} / capture
-      </EstimateBadge>
-    </div>
-    <p class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Nothing faster than about 4 µs can be read off an edge this analyzer produced — that is its own
-      reconstruction filter, not the DUT. See the manual's Oscilloscope page.
-    </p>
+    <!-- The four estimate badges and the 4 µs caveat that used to close this panel are in the
+         Record panel at the foot of the rail (Joost, 2026-11-20): they are the same kind of thing
+         it already carries — what a capture is rather than what it reads — and said there once,
+         beside the record they describe, instead of twice three sections apart. -->
   </CollapsibleSection>
 
   <CollapsibleSection title="Trigger">

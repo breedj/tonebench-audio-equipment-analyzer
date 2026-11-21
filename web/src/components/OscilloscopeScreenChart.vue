@@ -70,7 +70,12 @@ import {
   sincResampleX,
   type ScopeDrawing,
 } from '../scope/interpolation'
-import { DEFAULT_SCOPE_CURSORS, type ScopeCursors } from '../scope/cursors'
+import {
+  DEFAULT_SCOPE_CURSORS,
+  cursorsTrack,
+  trackLevelAt,
+  type ScopeCursors,
+} from '../scope/cursors'
 import {
   clampCursorBox,
   cursorArrowFits,
@@ -394,8 +399,18 @@ interface ChannelSeries {
   scale?: string
   /** True for the math trace, which is excluded from the haze and from the band's volts reading. */
   math?: boolean
-  /** True for a stored capture drawn behind the live one — dashed, tinted and thin. */
+  /** True for a stored capture drawn behind the live one — dashed and tinted. */
   reference?: boolean
+  /**
+   * True for the pass/fail mask's two edges, which are a <em>limit</em> rather than a trace.
+   *
+   * <p>Which is why they alone keep a one-pixel stroke under Thick lines: the band is there so
+   * that an excursion out of it can be seen, and a two-pixel edge eats into the very margin
+   * being judged. A reference <em>is</em> a trace and follows the setting like any other
+   * (asked for 2026-11-21) — what tells it from the live one is its dash, which is also the
+   * half a black-and-white report keeps.</p>
+   */
+  limit?: boolean
   /** The dash that tells one reference from another, and from the live trace, in a report with no colour. */
   dash?: number[]
   /**
@@ -701,6 +716,7 @@ const series = computed(() => {
           band: null,
           raw: live.raw,
           reference: true,
+          limit: true,
           dash: MASK_DASH,
         })
       }
@@ -844,6 +860,65 @@ const windowBand = computed(() =>
 /** The cursors' own colour, for their grips — the chart paints the lines in it through `theme()`. */
 const cursorColor = computed(() => theme().cursor)
 
+/**
+ * The trace the level cursors follow under Track, as the series the chart is actually drawing.
+ *
+ * <p>A <b>drawn</b> series and never a reference or a residual: the squares land on the line the
+ * reader is measuring, and a stored capture behind it is not that line. Null where the chosen
+ * source is not on screen, which the rail says in words rather than quietly tracking something
+ * else.</p>
+ */
+const trackedSeries = computed<ChannelSeries | null>(() => {
+  if (!cursorsTrack(cursors.value)) return null
+  const wanted = cursors.value.trackSource
+  const index = wanted === 'ch0' ? 0 : wanted === 'ch1' ? 1 : wanted === 'math1' ? -1 : wanted === 'math2' ? -2 : null
+  if (index === null) return null
+  return (
+    series.value.channels.find((c) => c.index === index && !c.reference && !c.residual) ?? null
+  )
+})
+
+/** Where that trace is at each time cursor, or null where it has nothing to say there. */
+const trackedLevels = computed<{ a: number | null; b: number | null }>(() => {
+  const line = trackedSeries.value?.line
+  if (!line) return { a: null, b: null }
+  const { xMs } = series.value
+  return {
+    a: trackLevelAt(xMs, line, toChartMs(cursors.value.timeAS)),
+    b: trackLevelAt(xMs, line, toChartMs(cursors.value.timeBS)),
+  }
+})
+
+/**
+ * The tracked levels written back onto the model, so everything downstream reads them unchanged —
+ * the readout, the Fixed box, ΔV, ΔV/Δt and the two horizontal lines.
+ *
+ * <p>Written from a watcher rather than from the draw hook, which would write during a render and
+ * ask for another one. Guarded against a loop twice over: it writes only under Track, and only
+ * when the figure really moved — the comparison is against a thousandth of a division, so a
+ * recomputation that lands on the same level to the last bit does not start a round trip through
+ * the parent.</p>
+ */
+watch(
+  () => [trackedLevels.value.a, trackedLevels.value.b, cursorsTrack(cursors.value)] as const,
+  ([a, b, tracking]) => {
+    if (!tracking) return
+    const epsilon = Math.abs(props.voltsPerDivision) / 1000 || 1e-9
+    const next = { ...cursors.value }
+    let moved = false
+    if (a !== null && Math.abs(a - next.voltAV) > epsilon) {
+      next.voltAV = a
+      moved = true
+    }
+    if (b !== null && Math.abs(b - next.voltBV) > epsilon) {
+      next.voltBV = b
+      moved = true
+    }
+    if (moved) cursors.value = next
+  },
+  { immediate: true },
+)
+
 /** Which trace the trigger watches — the line is drawn in that channel's own colour. */
 const triggerColor = computed(() => CHANNEL_COLORS[triggerChannel(props.triggerSource)] ?? CHANNEL_COLORS[0])
 
@@ -852,12 +927,44 @@ const timebaseLabel = computed(() => formatPerDivision(spanMs.value))
 const verticalLabel = computed(() => formatVoltsPerDivision(props.voltsPerDivision))
 
 /**
- * Both extremes of every column, the min as a band under the line.
+ * Both extremes of every column: the region between them filled, and the lower envelope joined at
+ * full weight the way uPlot joins the upper one.
  *
  * <p>Skipped for a raw slice, where the line <em>is</em> the waveform — drawing a band there would
  * be a band of zero width over every sample, which costs a full pass for nothing.</p>
+ *
+ * <p><b>Why the lower envelope is stroked as a line of its own</b> (2026-11-20, from a report of
+ * "lighter lines at the bottom" with persistence off). The <em>max</em> of every column is drawn
+ * twice — once as the top of the band and once as the series uPlot joins through it — while the
+ * min was drawn only as the lower ends of a stroke per column. Wherever the per-column extremes
+ * scatter, which they do whenever a column is not a whole number of cycles of what is in it, the
+ * joined line fills the scatter in at the top and nothing fills it in at the bottom: the top edge
+ * comes out crisp and the bottom frays into a pale fringe. Measured on a 700 Hz tone over a
+ * one-second record at 240 samples a column, the drawn block went solid within <b>one</b> row of
+ * its top edge and thinned over <b>eight</b> at its foot — from a signal whose own scatter is
+ * symmetric to a tenth of a millivolt (35.4 mV at the top against 35.6 at the bottom). The data was
+ * never asymmetric; the drawing was.</p>
+ *
+ * <p><b>Why the middle is a filled region rather than a stroke per column</b> (2026-11-21, from
+ * "the higher frequency signal shows two dashed lines instead of a single line; zoom in a bit more
+ * and a single line is drawn"). A stroke per column fills the band only while a column is at least
+ * a device pixel wide: the strokes were one <em>device</em> pixel where every other width here is a
+ * CSS pixel, so on a scaled display, or wherever the analyzer sent more columns than the plot has
+ * pixels, they land as a comb with gaps between them and the 0.35 alpha washes out to nearly
+ * nothing. What is left on screen is then the two full-weight envelopes with white between — one
+ * trace drawn as two, which is exactly how it was reported, and which zooming cures only because a
+ * raw slice has no band at all. A filled region cannot comb: it is the same quantity, drawn as the
+ * area it is, at any column density and any pixel ratio. A run of one column — all a null leaves —
+ * is given a pixel of width so it is not a zero-area path that draws nothing.</p>
  */
 function minMaxBandPlugin(): uPlot.Plugin {
+  // Scratch for the region's return leg, reused across channels and redraws rather than built
+  // afresh: a cursor drag redraws on every pointer move, and three arrays truncated in place cost
+  // nothing where a few thousand point objects a frame would be a stream of garbage.
+  const runX: number[] = []
+  const runTop: number[] = []
+  const runBottom: number[] = []
+
   return {
     hooks: {
       draw: [
@@ -873,22 +980,69 @@ function minMaxBandPlugin(): uPlot.Plugin {
             ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height)
             ctx.clip()
 
-            const path = new Path2D()
+            const px = u.bbox.width / Math.max(u.over.clientWidth, 1)
+            const area = new Path2D()
+            const floor = new Path2D()
+            let drawn = false
+            // One closed region per unbroken run of columns: out along the upper envelope and back
+            // along the lower one. Collected as it goes, because the return leg is the same run
+            // reversed and a second pass over the array would have to find the run again.
+            runX.length = 0
+            runTop.length = 0
+            runBottom.length = 0
+            const closeRun = () => {
+              const n = runX.length
+              if (n === 0) return
+              // A lone column has no width to fill, so it is given one: half a CSS pixel either
+              // side, which is what a stroke of that width would have covered.
+              const pad = n === 1 ? px / 2 : 0
+              area.moveTo(runX[0] - pad, runTop[0])
+              for (let k = 1; k < n; k++) area.lineTo(runX[k], runTop[k])
+              if (pad > 0) area.lineTo(runX[0] + pad, runTop[0])
+              for (let k = n - 1; k >= 0; k--) {
+                area.lineTo(runX[k] + (k === n - 1 ? pad : 0), runBottom[k])
+              }
+              if (pad > 0) area.lineTo(runX[0] - pad, runBottom[0])
+              area.closePath()
+              runX.length = 0
+              runTop.length = 0
+              runBottom.length = 0
+            }
             for (let i = 0; i < xMs.length; i++) {
               const lo = channel.band[i]
               const hi = channel.line[i]
-              if (lo === null || hi === null) continue
+              if (lo === null || hi === null) {
+                closeRun()
+                continue
+              }
               const x = u.valToPos(xMs[i], 'x', true)
               // The channel's own scale: the math trace is not on the volts axis, and reading its
               // band against that one would draw it somewhere the trace is not.
-              path.moveTo(x, u.valToPos(lo, channel.scale ?? 'y', true))
-              path.lineTo(x, u.valToPos(hi, channel.scale ?? 'y', true))
+              const bottom = u.valToPos(lo, channel.scale ?? 'y', true)
+              runX.push(x)
+              runTop.push(u.valToPos(hi, channel.scale ?? 'y', true))
+              runBottom.push(bottom)
+              // The lower envelope, joined across the gaps a null leaves rather than through them.
+              if (drawn) floor.lineTo(x, bottom)
+              else floor.moveTo(x, bottom)
+              drawn = true
             }
+            closeRun()
 
+            ctx.fillStyle = channel.color
             ctx.strokeStyle = channel.color
             ctx.globalAlpha = 0.35
-            ctx.lineWidth = 1
-            ctx.stroke(path)
+            ctx.fill(area)
+
+            // And the lower envelope at the weight and dash uPlot gives the upper one, so the two
+            // edges of the block are drawn alike. Scaled by `px`, so the width is a CSS pixel on a
+            // canvas measured in device ones -- which is what the fill above is now about.
+            ctx.globalAlpha = 1
+            ctx.lineWidth = (channel.residual || channel.limit ? 1 : props.thickLines ? 2 : 1) * px
+            ctx.lineJoin = 'round'
+            if (channel.residual) ctx.setLineDash([4 * px, 3 * px])
+            else if (channel.dash) ctx.setLineDash(channel.dash.map((d) => d * px))
+            ctx.stroke(floor)
             ctx.restore()
           }
         },
@@ -1185,13 +1339,14 @@ function drawCursorBox(u: uPlot, c: ScopeCursors, px: number, t: Theme) {
   })
   ctx.restore()
 
-  // In CSS pixels, which is what the overlay element is positioned in.
-  const scale = u.bbox.width / Math.max(u.over.clientWidth, 1)
+  // In CSS pixels, which is what the overlay element is positioned in -- through the very ratio
+  // this box was drawn at rather than a fresh read of it, so the picture and the grab over it
+  // cannot be measured against two different widths.
   cursorBoxRect.value = {
-    left: left / scale,
-    top: top / scale,
-    width: box.width / scale,
-    height: box.height / scale,
+    left: left / px,
+    top: top / px,
+    width: box.width / px,
+    height: box.height / px,
   }
 }
 
@@ -1275,6 +1430,27 @@ function cursorsPlugin(t: Theme): uPlot.Plugin {
               }
               ctx.setLineDash([3 * px, 3 * px])
             }
+          }
+
+          // Track: a square where each time cursor meets the trace it is following. Drawn after the
+          // lines so it sits on top of them, and outlined rather than filled -- a filled block hides
+          // the very sample it is marking, which on a steep edge is the whole reading.
+          if (cursorsTrack(c)) {
+            ctx.setLineDash([])
+            ctx.lineWidth = 1.5 * px
+            const half = 4 * px
+            for (const [seconds, volts] of [
+              [c.timeAS, trackedLevels.value.a],
+              [c.timeBS, trackedLevels.value.b],
+            ] as const) {
+              if (volts === null || !Number.isFinite(seconds)) continue
+              const x = u.valToPos(toChartMs(seconds), 'x', true)
+              const y = u.valToPos(volts, 'y', true)
+              if (x < left || x > right || y < top || y > bottom) continue
+              ctx.strokeRect(x - half, y - half, 2 * half, 2 * half)
+            }
+            ctx.lineWidth = px
+            ctx.setLineDash([3 * px, 3 * px])
           }
 
           if (following) {
@@ -1385,11 +1561,37 @@ function currentIntensitySignature(u: uPlot): string {
   )
 }
 
+/**
+ * The plot area in CSS pixels, read from the overlay element itself.
+ *
+ * <p><b>Never <code>bbox / over.clientWidth</code>, which is the device pixel ratio inferred from
+ * two layout facts that can disagree.</b> <code>bbox</code> is in canvas pixels and is updated
+ * inside <code>setSize</code>; the overlay's own width follows a style write, so a sync running
+ * between the two sees the new <code>bbox</code> against the old <code>clientWidth</code> and the
+ * "ratio" comes out as the ratio of two widths rather than as the pixel ratio. Measured 2026-11-20
+ * on a chart widened by collapsing the sidebar: bbox 940 against clientWidth 676 gave 1.39 at a
+ * device ratio of 1, so every grip positioned through it landed <b>26 px</b> left of the thing it
+ * grips — and <code>syncTriggerPosition</code>'s <code>x &gt; css</code> guard, fed the same stale
+ * width, had already refused to render the trigger-position grip at all.</p>
+ *
+ * <p>The overlay's <code>offsetLeft</code>/<code>offsetTop</code> are CSS pixels relative to
+ * <code>.u-wrap</code>, which is where these grips are positioned from, so there is no ratio to get
+ * wrong: one element, one layout read, four numbers that agree with each other whatever uPlot is
+ * part way through.</p>
+ */
+function plotCssBox(u: uPlot): { left: number; top: number; width: number; height: number } {
+  return {
+    left: u.over.offsetLeft,
+    top: u.over.offsetTop,
+    width: u.over.clientWidth,
+    height: u.over.clientHeight,
+  }
+}
+
 /** The plot area in CSS pixels, which is what the buffer is sized and addressed in. */
 function intensityGeometry(u: uPlot): { width: number; height: number } {
-  const css = u.over.clientWidth
-  const scale = css > 0 ? u.bbox.width / css : 1
-  return { width: Math.round(u.bbox.width / scale), height: Math.round(u.bbox.height / scale) }
+  const box = plotCssBox(u)
+  return { width: Math.round(box.width), height: Math.round(box.height) }
 }
 
 /** Throws the picture away. A changed signature, a Clear, and switching persistence off all land here. */
@@ -1654,8 +1856,9 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
         stroke: channel.color,
         // Thinner and dashed for the residual: it is derived from the trace beside it rather than
         // measured, and at a quiet DUT it sits on the zero line where a solid line of the same
-        // weight would read as a second waveform.
-        width: channel.residual || channel.reference ? 1 : props.thickLines ? 2 : 1,
+        // weight would read as a second waveform. The mask's edges stay thin for their own
+        // reason -- see `limit`. A reference is a trace and follows Thick lines like any other.
+        width: channel.residual || channel.limit ? 1 : props.thickLines ? 2 : 1,
         dash: channel.residual ? [4, 3] : channel.dash,
         // Dots: the samples and nothing joining them, which is the one mode that can never draw
         // something the analyzer did not measure. uPlot takes a null path builder for that.
@@ -1750,16 +1953,17 @@ function syncTriggerPosition() {
     triggerPositionRect.value = null
     return
   }
-  const css = u.over.clientWidth
-  const scale = css > 0 ? u.bbox.width / css : 1
+  const box = plotCssBox(u)
   const x = u.valToPos(0, 'x', false)
-  if (!Number.isFinite(x) || x < 0 || x > css) {
+  // Off the window is no grip, matching the marker, which its own plugin does not draw there
+  // either: a grab for a line that is not on screen would move a thing the reader cannot see.
+  if (!Number.isFinite(x) || x < 0 || x > box.width) {
     triggerPositionRect.value = null
     return
   }
   triggerPositionRect.value = {
-    left: u.bbox.left / scale + x - TRIGGER_POSITION_GRIP_PX / 2,
-    top: u.bbox.top / scale,
+    left: box.left + x - TRIGGER_POSITION_GRIP_PX / 2,
+    top: box.top,
   }
 }
 
@@ -1774,15 +1978,14 @@ function syncHandle() {
     handleRect.value = null
     return
   }
-  const css = u.over.clientWidth
-  const scale = css > 0 ? u.bbox.width / css : 1
+  const box = plotCssBox(u)
   const y = u.valToPos(indicator.value.levelV, 'y', false)
   if (!Number.isFinite(y)) {
     handleRect.value = null
     return
   }
   handleRect.value = {
-    top: u.bbox.top / scale + y - HANDLE_HEIGHT_PX / 2,
+    top: box.top + y - HANDLE_HEIGHT_PX / 2,
     right: 0,
     height: HANDLE_HEIGHT_PX,
     width: HANDLE_WIDTH_PX,
@@ -1888,18 +2091,10 @@ function onBoxPointerDown(event: PointerEvent) {
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
   const over = plot.value.over.getBoundingClientRect()
   boxGrabOffset = {
-    x: event.clientX - over.left - (rect.left - plot.value.bbox.left / boxScale()),
-    y: event.clientY - over.top - (rect.top - plot.value.bbox.top / boxScale()),
+    x: event.clientX - over.left - (rect.left - plotCssBox(plot.value).left),
+    y: event.clientY - over.top - (rect.top - plotCssBox(plot.value).top),
   }
   draggingBox.value = true
-}
-
-/** The canvas-to-CSS pixel ratio this chart is drawn at, which both the box rect and the drag use. */
-function boxScale(): number {
-  const u = plot.value
-  if (!u) return 1
-  const css = u.over.clientWidth
-  return css > 0 ? u.bbox.width / css : 1
 }
 
 function onBoxPointerMove(event: PointerEvent) {
@@ -1909,13 +2104,7 @@ function onBoxPointerMove(event: PointerEvent) {
   if (!u || !rect) return
 
   const over = u.over.getBoundingClientRect()
-  const scale = boxScale()
-  const plotCss = {
-    left: u.bbox.left / scale,
-    top: u.bbox.top / scale,
-    width: u.bbox.width / scale,
-    height: u.bbox.height / scale,
-  }
+  const plotCss = plotCssBox(u)
   const position = {
     left: event.clientX - over.left - boxGrabOffset.x + plotCss.left,
     top: event.clientY - over.top - boxGrabOffset.y + plotCss.top,
@@ -1973,12 +2162,7 @@ function syncCursorHandles() {
     return
   }
 
-  const css = u.over.clientWidth
-  const scale = css > 0 ? u.bbox.width / css : 1
-  const plotLeft = u.bbox.left / scale
-  const plotTop = u.bbox.top / scale
-  const plotWidth = u.bbox.width / scale
-  const plotHeight = u.bbox.height / scale
+  const { left: plotLeft, top: plotTop, width: plotWidth, height: plotHeight } = plotCssBox(u)
   const half = CURSOR_HANDLE_PX / 2
 
   const out: CursorHandle[] = []
@@ -1996,7 +2180,11 @@ function syncCursorHandles() {
     }
   }
 
-  if (c.voltOn) {
+  // No grips under Track: the level cursors are derived from the trace there, so a handle would
+  // offer a drag that is overwritten on the next record -- a control that appears to work and does
+  // not. The lines are still drawn where they are; what is gone is the claim that they can be
+  // moved.
+  if (c.voltOn && !cursorsTrack(c)) {
     for (const [id, label, volts] of [
       ['voltA', 'A', c.voltAV],
       ['voltB', 'B', c.voltBV],
@@ -2383,6 +2571,28 @@ watch(() => props.record, () => {
     plot.value?.redraw()
   })
 })
+
+/**
+ * The mask's band is built in `series` from these three, so changing one changes the band — and
+ * until 2026-11-21 nothing redrew it.
+ *
+ * <p>A new tolerance leaves the series <em>count</em> and the rebuild key exactly as they were,
+ * so neither <code>rebuild</code> nor the record watcher fired and the chart went on drawing the
+ * band it already had: the boxes moved, the tally reset, and the picture did not. Reported as
+ * "changing the mask settings does not change the mask in the graph".</p>
+ *
+ * <p>The verdict goes with it, because the record on screen has just been judged against a
+ * different band. That cannot double-count: the tally starts again on exactly these three, and
+ * its own guard counts one record once.</p>
+ */
+watch(
+  () => [props.maskReferenceId, props.maskToleranceV, props.maskToleranceS] as const,
+  () => {
+    refresh()
+    if (props.maskReferenceId !== null) emit('maskVerdict', series.value.mask)
+    void nextTick(() => plot.value?.redraw())
+  },
+)
 
 // Switching persistence off throws the picture away rather than freezing it: what is on screen has
 // to be what the setting says, and a frozen haze over a live trace is neither.

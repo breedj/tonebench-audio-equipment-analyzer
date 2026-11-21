@@ -256,6 +256,12 @@ export function followRecordWindow(
  * <p>Clamped rather than refused past either end: a drag that runs off the plot means "all of it
  * one side", which is a setting the panel allows, and stopping the grip dead at 93 % because the
  * pointer left the canvas would read as the drag having broken.</p>
+ *
+ * <p><b>Rounded to a whole percent</b> (Joost, 2026-11-20), which is the unit the setting is
+ * <em>in</em>: the box types a percentage and the marker's own tooltip quotes one, so a drag that
+ * left 23.37 % behind would make the two disagree about the same setting — and nothing on this
+ * screen can use a hundredth of a percent of a record. It also means a drag back to where it
+ * started really does land there, rather than a hair off it.</p>
  */
 export function preTriggerFromPointer(pointerS: number, recordSeconds: number, oldFraction: number): number {
   const fallback = Number.isFinite(oldFraction) ? Math.min(Math.max(oldFraction, 0), 1) : 0.25
@@ -264,5 +270,6 @@ export function preTriggerFromPointer(pointerS: number, recordSeconds: number, o
   // own start, over the record's length, is the fraction it is asking for -- and the old fraction is
   // what says where that start is.
   const start = -recordSeconds * fallback
-  return Math.min(Math.max((pointerS - start) / recordSeconds, 0), 1)
+  const asked = Math.min(Math.max((pointerS - start) / recordSeconds, 0), 1)
+  return Math.round(asked * 100) / 100
 }

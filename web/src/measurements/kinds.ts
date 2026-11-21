@@ -29,14 +29,23 @@ export type MeasurementKindTone =
   | 'teal'
   | 'amber'
   | 'green'
+  /** Not an accent: for a section that is deliberately not one of the named things beside it. */
+  | 'slate'
 
 /**
- * The four hues a *group badge* is drawn in — deliberately a subset of the card tones, because a
+ * The six hues a *group badge* is drawn in — deliberately a subset of the card tones, because a
  * badge needs three values rather than two (it carries a border in the dark theme) and only these
- * four are defined. A new group reaching for a tone outside this set fails to compile instead of
+ * six are defined. A new group reaching for a tone outside this set fails to compile instead of
  * rendering a transparent badge.
+ *
+ * <p>Four until 2026-11-20, when the oscilloscope's three pickers took the same heading: its
+ * sections run to five in one tab, so red and green were defined by the same formula as the rest
+ * (a tint of the accent in the dark theme, the Tailwind 100/700 pair in the light one).</p>
  */
-export type MeasurementGroupTone = Extract<MeasurementKindTone, 'orange' | 'blue' | 'teal' | 'violet'>
+export type MeasurementGroupTone = Extract<
+  MeasurementKindTone,
+  'orange' | 'blue' | 'teal' | 'violet' | 'red' | 'green' | 'slate'
+>
 
 export type MeasurementKindGroupId = 'distortion' | 'response' | 'impedance' | 'channels'
 

@@ -39,14 +39,14 @@ describe('the display rail’s panels', () => {
    * right now cannot move into a tooltip, because a reader who is not hovering would never see it.
    */
   it('leaves every state line and warning on screen', () => {
+    // Two left this list on 2026-11-21, both at Joost's ask and both because the *control* had
+    // come to say the same thing: the drawing that has fallen back is now the dimmed button with
+    // the reason on its title, and the coupling in force is the lit half of its own toggle, in its
+    // own hue and with its own figure. What a caption may not do is leave with nothing in its
+    // place, so each is checked for below.
     for (const line of [
       // The view that cannot be drawn with one input.
       'Nothing to draw: an X–Y figure needs both inputs',
-      // The drawing mode that has fallen back because the slice is decimated.
-      'Lines for now: this window is wide enough',
-      // What is in the signal path at the moment.
-      'In the path: {{ pathNote }}',
-      'Nothing in the path:',
       // A math channel that cannot be built, and one that is railing. Per channel now, so each
       // says which of the two it is about.
       'has nothing to draw: it needs the',
@@ -57,6 +57,26 @@ describe('the display rail’s panels', () => {
     ]) {
       expect(rail, `the rail no longer says "${line}"`).toContain(line)
     }
+  })
+
+  /**
+   * The two captions removed on 2026-11-21 said something about the present, so the rule above
+   * applies to them: what replaced each is on the control itself, which is where a reader who is
+   * not hovering still sees it.
+   */
+  it('says a fallen-back drawing on the button, now that it no longer says it underneath', () => {
+    expect(rail).not.toContain('Lines for now: this window is wide enough')
+    // Lit, chosen, and not what is being drawn: dimmed, with the reason on its own title.
+    expect(rail).toMatch(/drawing === option\.value && !drawingInForce \? 'opacity-50'/)
+    expect(rail).toMatch(/lines for now: this window is wide enough/)
+  })
+
+  it('says the coupling on its toggle, now that it no longer says it underneath', () => {
+    expect(rail).not.toContain('In the path:')
+    expect(rail).not.toContain('Nothing in the path:')
+    // The toggle is the state: each option carries its own figure and its own hue, so the lit half
+    // says which coupling is in force without a line under it.
+    expect(rail).toMatch(/:options="couplingOptions"/)
   })
 
   /**
@@ -121,5 +141,42 @@ describe('the Record panel', () => {
 
   it('still carries a hint, like every other panel on this screen', () => {
     expect(panel).toMatch(/hint="[^"]{40,}"/)
+  })
+
+  /**
+   * The estimate moved here from the Acquisition panel on 2026-11-20, which is the same kind of
+   * thing this panel already held — what a capture is, rather than what it reads.
+   */
+  it('carries the estimate of the next capture as well as the record on screen', () => {
+    // As name-and-value rows like the table below it, not badges (Joost, 2026-11-21): two
+    // halves that say the same kind of thing read alike, and four pills spent the rail's width
+    // on their own chrome rather than on the figures.
+    expect(panel).not.toContain('EstimateBadge')
+    for (const figure of [
+      'staged.recordMs',
+      'staged.frames',
+      'staged.intervalUs',
+      'staged.captureMs',
+      'staged.rate',
+    ]) {
+      expect(panel, `the panel no longer estimates "${figure}"`).toContain(figure)
+    }
+    // A row of its own, whose label sits on its own line under a long title attribute.
+    expect(panel).toMatch(/>\s*Capture\s*</)
+    // And it is gone from where it was, or the rail says the same thing twice.
+    expect(read('ScopeConfigPanel.vue')).not.toContain('EstimateBadge')
+  })
+
+  it('says which half is which, because they are routinely different', () => {
+    // Change the rate or the timebase without running again and the estimate moves while the
+    // record stays: one heading over each is what stops that reading as a contradiction.
+    expect(panel).toContain('>Next capture<')
+    expect(panel).toContain('>On screen<')
+  })
+
+  it('keeps the analyzer’s own edge caveat, in the hint rather than as a paragraph', () => {
+    // Explanation, not state -- the rail's own rule -- so it moves to the hint with the rest.
+    expect(panel).toMatch(/hint="[^"]*4 µs[^"]*"/)
+    expect(read('ScopeConfigPanel.vue')).not.toContain('reconstruction filter, not the DUT')
   })
 })

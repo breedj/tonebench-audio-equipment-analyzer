@@ -18,9 +18,18 @@ import type { GeneratorLevelUnit } from '../generatorLevel'
  * FFT screen's instance is still a singleton underneath (`useGeneratorStimulus`), so everything
  * that reads it — the Gen tile, stimulusSummary, noiseFigureCaveat — is untouched.</p>
  */
+/**
+ * The one tone a fresh stimulus plays, and what **Clear** beside the IMD preset puts back.
+ *
+ * <p>Exported rather than written twice, because the second copy is the one that drifts: a Clear
+ * that answered 1 kHz at a level the panel does not otherwise start on would be a different
+ * default wearing the same name.</p>
+ */
+export const DEFAULT_TONE: Readonly<GeneratorTone> = Object.freeze({ freqHz: 1000, ampDbv: -6 })
+
 export function createGeneratorStimulus() {
   const kind = ref<GeneratorKind>('Tones')
-  const tones = reactive<GeneratorTone[]>([{ freqHz: 1000, ampDbv: -6 }])
+  const tones = reactive<GeneratorTone[]>([{ ...DEFAULT_TONE }])
   const multitone = reactive<MultitoneSettings>({ tonesPerOctave: 5, totalRmsDbv: -50, rolloffDbPerOctave: 0 })
   const noise = reactive<WhiteNoiseSettings>({ levelDbv: -20 })
   // All four hard-switched shapes share one staged block, as they share one settings record

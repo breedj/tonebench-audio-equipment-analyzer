@@ -127,14 +127,25 @@ const { showPage } = useManual()
         <tr>
           <td>IMD preset</td>
           <td>
-            Sine tones only. A standard two-tone intermodulation test — <strong>SMPTE 60 Hz + 7 kHz
-            (4:1)</strong>, <strong>DIN 250 Hz + 8 kHz (4:1)</strong>, <strong>CCIF/ITU-R 19 kHz +
-            20 kHz (1:1)</strong> or <strong>CCIF 18.5 + 19.5 kHz (1:1)</strong> — sets both tones up
+            Sine tones only. A button carrying the chosen test's own <strong>FFT footprint</strong>,
+            opening a picker of all of them: what separates these is not what they look like — every
+            one is two sine tones — but <em>where in the band</em> they put their energy and their
+            products, which is exactly what a picture of the spectrum shows and a name cannot. They
+            are in two groups by method: <strong>Modulation</strong> (<strong>SMPTE 60 Hz +
+            7 kHz</strong> and <strong>DIN 250 Hz + 8 kHz</strong>, both 4:1, a low tone modulating a
+            high one so the sidebands around the high tone are read) and <strong>Twin tone</strong>
+            (<strong>CCIF/ITU-R 19 + 20 kHz</strong> and <strong>CCIF 18.5 + 19.5 kHz</strong>, both
+            1:1, two close equal tones whose difference product lands far down the band). A preset
+            sets both tones up
             from one <strong>Level</strong>: the <em>sine-equivalent</em> level, i.e. the level
             of a single sine whose peak equals the pair's peak (a 4:1 pair sits 1.94 and 13.98 dB
             below it, a 1:1 pair 6.02 dB below). Picking a preset also turns the IMD reading on and
             adds the <strong>IMD %</strong> and <strong>IMD dB</strong> tiles. <strong>Custom</strong>
-            frees the tone rows again; any two tones still get a reading.
+            frees the tone rows again; any two tones still get a reading. <strong>Clear</strong>,
+            beside the caption, is the way back out: one 1 kHz tone at −6 dBV, which is where the
+            panel starts. It leaves the IMD method and the tiles alone — with one tone there is no
+            reading to take, so there is nothing to tidy away — and it is greyed when there is
+            nothing to clear.
           </td>
         </tr>
         <tr>
@@ -170,7 +181,9 @@ const { showPage } = useManual()
         <tr>
           <td>Snap to bin</td>
           <td>
-            Moves each tone to the nearest exact FFT bin so it lands on one bin with no leakage into
+            A lit icon button under the tones — two bin edges with the tone between them and arrows
+            pushing it to the centre. Moves each tone to the nearest exact FFT bin so it lands on one
+            bin with no leakage into
             its neighbours. <strong>On by default</strong> for a new measurement, and leave it on for
             distortion work. The frequency you typed stays in the field; the grey figure beneath it
             is what is really playing, which depends on the FFT size. Sine tones and the multitone

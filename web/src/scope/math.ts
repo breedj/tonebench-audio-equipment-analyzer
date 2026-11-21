@@ -16,6 +16,11 @@
  * <p>What is here is the table of operations, what each one's numbers are in, and how to write
  * them — the half nothing in a <code>.vue</code> could be tested on.</p>
  */
+import {
+  groupIntoSections,
+  type PickerSection,
+  type PickerSectionOf,
+} from '../panels/pickerSections'
 
 export type ScopeMathOperation =
   | 'Off'
@@ -370,11 +375,47 @@ export interface ScopeMathTile {
   /** The operation it writes, with A and B in the order the sources are given. */
   operation: ScopeMathOperation
   label: string
-  /** A figure from scope/displayIcons.ts. */
-  icon: string
-  /** Whether the second operand means anything — the three one-operand tiles say no. */
+  /**
+   * Whether the second operand means anything — the three one-operand tiles say no.
+   *
+   * <p>This is also what sorts the dialog into its two sections, which is why there is no section
+   * field beside it: "combines two traces" and "needs B" are the same question, and a tile that
+   * could answer them differently would be a tile in the wrong half of the dialog.</p>
+   */
   usesB: boolean
   title: string
+}
+
+/**
+ * The dialog's two sections — Joost's design of 2026-11-20.
+ *
+ * <p>Derived from <code>usesB</code> rather than declared per tile, so a tile cannot be filed under
+ * "two traces" while reading one. The note on the second is the whole reason the split is worth
+ * drawing: under those three the Source B control does nothing, and saying so once in a heading is
+ * better than saying it under every tile.</p>
+ */
+export const SCOPE_MATH_SECTIONS: readonly PickerSection[] = Object.freeze([
+  {
+    id: 'binary',
+    label: 'Two traces',
+    note: 'combine A with B',
+    tone: 'violet',
+    mark: 'amber',
+  },
+  {
+    id: 'unary',
+    label: 'One trace',
+    note: 'B is not used',
+    tone: 'blue',
+    mark: 'orange',
+  },
+])
+
+/** The tiles under their sections, in the order the dialog draws them. */
+export function scopeMathSections(
+  tiles: readonly ScopeMathTile[] = SCOPE_MATH_TILES,
+): PickerSectionOf<ScopeMathTile>[] {
+  return groupIntoSections(SCOPE_MATH_SECTIONS, tiles, (tile) => (tile.usesB ? 'binary' : 'unary'))
 }
 
 /**
@@ -395,7 +436,6 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'AMinusB' as ScopeMathOperation,
     label: 'A − B',
-    icon: 'mathSubtract',
     usesB: true,
     title:
       'A software differential probe. Measured on the samples rather than on the drawn columns, so a difference a thousandth of either input comes out exactly. Swap the sources for the other polarity.',
@@ -403,7 +443,6 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'APlusB' as ScopeMathOperation,
     label: 'A + B',
-    icon: 'mathAdd',
     usesB: true,
     title:
       'The two added. Twice the common-mode part of a differential pair, and the sum of a push-pull stage’s two halves.',
@@ -411,7 +450,6 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'ATimesB' as ScopeMathOperation,
     label: 'A × B',
-    icon: 'mathMultiply',
     usesB: true,
     title:
       'Instantaneous power where one input measures a current through a shunt — divide by the shunt’s ohms to read watts. The trace itself is in V².',
@@ -419,7 +457,6 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'ADivB' as ScopeMathOperation,
     label: 'A ÷ B',
-    icon: 'mathDivide',
     usesB: true,
     title:
       'The ratio, railed at ±1000. Only meaningful where B is a settled level: against two AC waveforms it rails every time B crosses zero, and for a transfer function the frequency-response measurement is the right tool.',
@@ -427,14 +464,12 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'NegateA' as ScopeMathOperation,
     label: '−A',
-    icon: 'mathNegate',
     usesB: false,
     title: 'A inverted, for comparing an inverting stage against its own input.',
   },
   {
     operation: 'DerivativeA' as ScopeMathOperation,
     label: 'dA/dt',
-    icon: 'mathDerivative',
     usesB: false,
     title:
       'The slope of A — a slew-rate trace. Differentiation lifts the top of the band some 73 dB over 20 Hz, so on a quiet signal this is a picture of the noise; and nothing faster than about one sample is the DUT rather than this analyzer.',
@@ -442,7 +477,6 @@ export const SCOPE_MATH_TILES: readonly ScopeMathTile[] = Object.freeze([
   {
     operation: 'IntegralA' as ScopeMathOperation,
     label: '∫A dt',
-    icon: 'mathIntegral',
     usesB: false,
     title:
       'The running integral of A, with the window’s mean removed first — so it starts at zero and shows the AC part’s integral, which is a flux or a charge and not an absolute one.',

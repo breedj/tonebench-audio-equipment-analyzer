@@ -10,11 +10,23 @@ import {
   VOLTS_PER_DIVISION_LADDER,
   fitVoltWindow,
   formatVoltsPerDivision,
+  roundVoltsForWindow,
   snapVoltsPerDivision,
   voltWindow,
 } from '../scope/voltAxis'
+import StepperTile from './StepperTile.vue'
+import { stepLadder } from '../panels/stepperGrid'
 import { clampWindow, fromChartMs, recordWindow, scopeTimeScale, toChartMs } from '../scope/timeAxis'
-import { cursorPairNeedsPlacing, cursorReadings, placeCursorPair, type ScopeCursors } from '../scope/cursors'
+import {
+  SCOPE_CURSOR_MODES,
+  cursorPairNeedsPlacing,
+  cursorTimeBBox,
+  cursorTimeBFromBox,
+  cursorsTrack,
+  placeCursorPair,
+  type ScopeCursorMode,
+  type ScopeCursors,
+} from '../scope/cursors'
 import {
   persistenceDraws,
   SCOPE_INTENSITY_MODES,
@@ -22,19 +34,18 @@ import {
   type ScopeIntensityMode,
   type ScopePersistence,
 } from '../scope/persistence'
-import { capturedScopeChannels } from '../scope/display'
+import { capturedScopeChannels, scopeChannelDrawn } from '../scope/display'
 import { PALETTE_NAMES } from '../measurements/decay'
 import SegmentedToggle from './SegmentedToggle.vue'
 import { SCOPE_VIEWS, scopeViewIsXy, type ScopeView } from '../scope/xy'
 import {
   SCOPE_COUPLINGS,
-  pathSummary,
   type ScopeSignalPathSettings,
 } from '../scope/signalPath'
 import ChannelPair from './ChannelPair.vue'
 import ScopeMathDialog from './ScopeMathDialog.vue'
 import ScopeToggleIcon from './ScopeToggleIcon.vue'
-import { SCOPE_CURSOR_STYLES, type ScopeCursorStyle } from '../scope/cursorOverlay'
+import { SCOPE_CURSOR_STYLES, cursorBoxRows, type ScopeCursorStyle } from '../scope/cursorOverlay'
 import { SCOPE_DRAWINGS, drawingNeedsRawSlice, type ScopeDrawing } from '../scope/interpolation'
 import {
   DEFAULT_SCOPE_MATH_SPEC,
@@ -48,6 +59,7 @@ import {
   type ScopeMathSpec,
 } from '../scope/math'
 import type { DecayPalette } from '../api/client'
+import type { OverlayEntry } from '../composables/useMeasurements'
 
 /**
  * The oscilloscope chart's display rail: the vertical pair, the time window, one Autofit for both,
@@ -85,6 +97,16 @@ const cursorStyle = defineModel<ScopeCursorStyle>('cursorStyle', { required: tru
  * sends both extremes of each column instead. So the rail says when the setting is not in force
  * rather than leaving a control that silently does nothing.</p>
  */
+/**
+ * Whether the chosen drawing is the one actually on the chart.
+ *
+ * <p><b>Its paragraph is gone and the fact moved onto the button</b> (Joost, 2026-11-21). The
+ * caption was three lines under a three-button row, saying what the <em>chart's</em> own header
+ * already says a few pixels away — a decimated slice reads "min/max per col…" up there and "every
+ * sample drawn" when it is not. What a tooltip cannot carry is that the mode you chose is not the
+ * one being drawn, so the lit button says that itself: dimmed, with the reason on its title. The
+ * state stays on screen, which is the rule; it is the prose that goes.</p>
+ */
 const drawingInForce = computed(() => !drawingNeedsRawSlice(drawing.value) || record.value?.channels?.[0]?.raw === true)
 
 /**
@@ -95,7 +117,6 @@ const drawingInForce = computed(() => !drawingNeedsRawSlice(drawing.value) || re
  */
 const path = defineModel<ScopeSignalPathSettings>('path', { required: true })
 
-const pathNote = computed(() => pathSummary(path.value))
 
 /** True while the goniometer is the picture on screen, which hides the controls it has no axes for. */
 const xyOn = computed(() => scopeViewIsXy(chartView.value))
@@ -143,6 +164,16 @@ const props = defineProps<{
   maskReferenceName?: string | null
   /** How the run has gone so far: records that stayed inside the band, and records that did not. */
   maskTally?: { passed: number; failed: number }
+  /**
+   * The checked history items the chart is drawing, so Autofit frames them too.
+   *
+   * <p>It framed the live record alone until 2026-11-21, which is wrong in the one case the
+   * references exist for: a stored capture taller than the live one was left running off the
+   * top of a window that claims to show the comparison. Only the <em>vertical</em> needs them
+   * — the analyzer cuts every reference to this same window, so its span is the window and
+   * fitting time to it would be circular.</p>
+   */
+  references?: OverlayEntry[]
 }>()
 
 const { record, recordBounds } = useOscilloscope()
@@ -313,11 +344,21 @@ function onMathApply(spec: ScopeMathSpec) {
  * <p>Only the visible channels, because this is what Autofit frames: fitting a hidden trace would
  * leave the one on screen in a corner of a window sized for something the reader cannot see.</p>
  */
-const extremes = computed(() =>
-  recordExtremes(
-    (record.value?.channels ?? []).filter((slice) => (slice.channel === 1 ? showRight.value : showLeft.value)),
-  ),
-)
+const extremes = computed(() => {
+  const slices = (record.value?.channels ?? []).filter((slice) =>
+    slice.channel === 1 ? showRight.value : showLeft.value,
+  )
+  // The references on the same gate the chart draws them on -- the rail's box *and* the
+  // measurement capturing that channel -- so what Autofit frames is what is on the chart.
+  const captured = capturedScopeChannels(record.value?.channels)
+  const shown = { left: showLeft.value, right: showRight.value }
+  for (const entry of props.references ?? []) {
+    for (const slice of entry.scopeRecord?.channels ?? []) {
+      if (scopeChannelDrawn(slice.channel, shown, captured)) slices.push(slice)
+    }
+  }
+  return recordExtremes(slices)
+})
 
 function autofitVolts() {
   const measured = extremes.value
@@ -468,9 +509,9 @@ const coupling = computed<ScopeSignalPathSettings['coupling']>({
   },
 })
 
-const couplingOptions = computed(() =>
-  SCOPE_COUPLINGS.map((option) => ({ value: option.value, label: option.label, title: option.title })),
-)
+// Spread rather than picked field by field, so a column added to the table — the figure and the
+// hue were — reaches the control without a second edit here.
+const couplingOptions = computed(() => SCOPE_COUPLINGS.map((option) => ({ ...option })))
 
 const verticalLabel = computed(() => formatVoltsPerDivision(voltsPerDivision.value))
 
@@ -551,7 +592,45 @@ function clampMaskTolerance(event: Event, _unit: 'volts') {
 
 /** The time boxes are in the window boxes' own unit, so the four figures can be compared by eye. */
 const cursorABoxValue = computed(() => toBox(cursors.value.timeAS))
-const cursorBBoxValue = computed(() => toBox(cursors.value.timeBS))
+const cursorBBoxValue = computed(() => toBox(cursorTimeBBox(cursors.value)))
+
+/** Whether B is typed as a span from A — the Siglent's X2-X1. See scope/cursors.ts. */
+const cursorBLabel = computed(() => (cursors.value.timeBIsSpan ? `B − A (${boxScale.value.label})` : `B (${boxScale.value.label})`))
+
+function toggleCursorBSpan() {
+  cursors.value = { ...cursors.value, timeBIsSpan: !cursors.value.timeBIsSpan }
+}
+
+/**
+ * Which traces the level pair can follow under Track.
+ *
+ * <p>Only what is on screen, because a square can only be drawn on a line that is drawn — but the
+ * chosen source is never silently swapped for another, so a source that goes away leaves the
+ * reading absent and says so rather than tracking something else.</p>
+ */
+const trackSourceOptions = computed(() => {
+  const options: { value: string; label: string }[] = []
+  if (showLeft.value) options.push({ value: 'ch0', label: 'Left' })
+  if (showRight.value) options.push({ value: 'ch1', label: 'Right' })
+  for (const slot of SCOPE_MATH_SLOTS) {
+    if (mathSpecDraws(maths.value[slot - 1])) options.push({ value: `math${slot}`, label: `Math ${slot}` })
+  }
+  return options
+})
+
+/** True where Track is on and the chosen trace is not among them. */
+const trackSourceMissing = computed(
+  () => cursorsTrack(cursors.value) && !trackSourceOptions.value.some((o) => o.value === cursors.value.trackSource),
+)
+
+function onTrackSourceChange(event: Event) {
+  cursors.value = { ...cursors.value, trackSource: (event.target as HTMLSelectElement).value }
+}
+
+function onCursorModeChange(mode: ScopeCursorMode) {
+  cursors.value = { ...cursors.value, mode }
+  emit('cursorsCommitted')
+}
 
 function onCursorTimeChange(event: Event, field: 'timeAS' | 'timeBS') {
   const typed = Number((event.target as HTMLInputElement).value)
@@ -563,7 +642,7 @@ function onCursorTimeChange(event: Event, field: 'timeAS' | 'timeBS') {
   }
   // Not clamped to the window, deliberately: a cursor off the window is drawn nowhere and still
   // reads its own position, and clamping would silently move a pair a zoom is about to bring back.
-  setCursor(field, fromBox(typed))
+  setCursor(field, field === 'timeBS' ? cursorTimeBFromBox(cursors.value, fromBox(typed)) : fromBox(typed))
 }
 
 function onCursorVoltChange(event: Event, field: 'voltAV' | 'voltBV') {
@@ -578,9 +657,16 @@ function onCursorVoltChange(event: Event, field: 'voltAV' | 'voltBV') {
 /** One press of a level cursor's spinner: a tenth of a division, which is how finely one is placed. */
 const cursorVoltStep = computed(() => voltsPerDivision.value / 10)
 
-/** What the pairs read — Δt, 1/Δt and ΔV. See cursorReadings. */
+/**
+ * What the pairs read — Δt, 1/Δt, ΔV and the slope.
+ *
+ * <p><code>cursorBoxRows</code> rather than <code>cursorReadings</code>, so this table and the
+ * chart's Fixed box are literally the same list: that is the rule those two functions were written
+ * to keep, and the slope was the one row the rail was missing — which is the headline reading under
+ * Track.</p>
+ */
 const cursorRows = computed(() =>
-  cursorReadings(
+  cursorBoxRows(
     cursors.value,
     voltsPerDivision.value,
     Math.abs(toChartMs(timeToS.value) - toChartMs(timeFromS.value)),
@@ -588,8 +674,34 @@ const cursorRows = computed(() =>
 )
 
 /** Snapped on the way in, so a window arriving from a drag-zoom's "Set axis" lands on a rung. */
-function onVoltsPerDivisionChange(event: Event) {
-  voltsPerDivision.value = snapVoltsPerDivision(Number((event.target as HTMLSelectElement).value))
+function setVoltsPerDivision(volts: number) {
+  voltsPerDivision.value = snapVoltsPerDivision(volts)
+}
+
+/** One rung of the ladder, from the tile's own two buttons. */
+function stepVoltsPerDivision(direction: 1 | -1) {
+  setVoltsPerDivision(stepLadder(VOLTS_PER_DIVISION_LADDER, voltsPerDivision.value, direction))
+}
+
+/** What the tile and the grid write a rung as: the ladder's own unit, without the `/div` the tile
+ *  draws for itself. */
+function voltsPerDivisionGridLabel(volts: number): string {
+  return formatVoltsPerDivision(volts).replace('/div', '')
+}
+
+const verticalValue = computed(() => voltsPerDivisionGridLabel(voltsPerDivision.value))
+
+/**
+ * One press of the centre's own buttons is one division, which is how a scope's vertical position
+ * knob is read: "bring it down two squares". A fixed step is a different distance at every V/div,
+ * and at the bottom of the ladder it is ten thousand of them.
+ */
+function stepOffset(direction: 1 | -1) {
+  const step = voltsPerDivision.value
+  if (!Number.isFinite(step) || step <= 0) return
+  // Rounded onto the step's own grid, or a centre nudged once from a fitted window carries that
+  // window's fraction of a division for ever.
+  voltOffsetV.value = roundVoltsForWindow(voltOffsetV.value + direction * step, step * 8)
 }
 </script>
 
@@ -630,32 +742,42 @@ function onVoltsPerDivisionChange(event: Event) {
     size="xs"
     :hint="`Eight divisions, so the window is ${verticalLabel} × 8 centred on the figure beside it.`"
   >
-    <div class="grid grid-cols-2 gap-2.5">
-      <label class="tb-field">
-        V/div
-        <select :value="voltsPerDivision" class="tb-input" @change="onVoltsPerDivisionChange">
-          <!-- v-once: a frozen ladder, and an option patched per record flickers an open popup. See Math. -->
-          <option v-for="rung in VOLTS_PER_DIVISION_LADDER" v-once :key="rung" :value="rung">
-            {{ formatVoltsPerDivision(rung).replace('/div', '') }}
-          </option>
-        </select>
-      </label>
-      <label class="tb-field">
-        Centre (V)
-        <!-- One press of the spinner is one division, which is how a scope's vertical position
-             knob is read: "bring it down two squares". A fixed step is a different distance at
-             every V/div, and at the bottom of the ladder it is 10 000 of them. -->
+    <!-- Stacked rather than side by side, which is the one place this departs from the design and
+         is forced by the rail: Joost drew the pair at half width over a panel wider than this one,
+         where half of 226 px leaves **26 px** between the two buttons — measured, and not enough
+         for the caption, let alone the value. Full width gives each tile the room the design's own
+         full-width tiles have. -->
+    <div class="flex flex-col gap-2.5">
+      <StepperTile
+        label="V/div"
+        tone="violet"
+        :display="verticalValue"
+        :ladder="VOLTS_PER_DIVISION_LADDER"
+        :value="voltsPerDivision"
+        :format="voltsPerDivisionGridLabel"
+        title="How many volts one vertical division is worth. Eight of them make the window, centred on the figure beside it."
+        @step="stepVoltsPerDivision"
+        @pick="setVoltsPerDivision"
+      />
+      <!-- The centre has no ladder and keeps its own box: it is a continuous voltage, so it has to
+           stay typable, and the draft is what lets it be typed into while records arrive. -->
+      <StepperTile
+        label="Centre (V)"
+        tone="violet"
+        title="Where the middle of the graticule sits. A DUT with a DC offset is brought back on screen with this rather than by widening the V/div. The buttons move it one division at a time."
+        @step="stepOffset"
+      >
         <input
           :value="drafts.show('offset', voltOffsetV)"
           type="number"
           :step="voltsPerDivision"
-          class="tb-input"
-          title="Where the middle of the graticule sits. A DUT with a DC offset is brought back on screen with this rather than by widening the V/div. The arrows move it one division at a time."
+          class="w-full appearance-none border-0 bg-transparent p-0 text-[15px] font-semibold tabular-nums shadow-none outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          :style="{ color: 'var(--kind-violet-chip-fg)' }"
           @input="drafts.type('offset', $event)"
           @change="drafts.end('offset'); onOffsetChange($event)"
           @blur="drafts.end('offset')"
         />
-      </label>
+      </StepperTile>
     </div>
   </CollapsibleSection>
 
@@ -735,20 +857,25 @@ function onVoltsPerDivisionChange(event: Event) {
           :key="option.value"
           type="button"
           class="tb-segment flex items-center justify-center"
-          :class="drawing === option.value ? 'tb-segment-on' : ''"
+          :class="[
+            drawing === option.value ? 'tb-segment-on' : '',
+            // Chosen but not in force: the slice is min/max columns, so Sinc and Dots fall back to
+            // lines. Dimmed rather than captioned — see drawingInForce.
+            drawing === option.value && !drawingInForce ? 'opacity-50' : '',
+          ]"
           :aria-pressed="drawing === option.value"
           :aria-label="option.label"
-          :title="option.label + ' — ' + option.title"
+          :title="
+            drawing === option.value && !drawingInForce
+              ? option.label +
+                ' — lines for now: this window is wide enough that the analyzer is sending both extremes of each column rather than the samples. Zoom in until the chart header says every sample is drawn.'
+              : option.label + ' — ' + option.title
+          "
           @click="drawing = option.value"
         >
           <ScopeToggleIcon :name="DRAWING_ICONS[option.value]" />
         </button>
       </div>
-      <p v-if="!drawingInForce" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-        Lines for now: this window is wide enough that the analyzer is sending both extremes of
-        each column rather than the samples, and which values fell where inside one is what that
-        leaves out. Zoom in until the header says every sample is drawn.
-      </p>
     </div>
 
     <div class="tb-field">
@@ -786,14 +913,6 @@ function onVoltsPerDivisionChange(event: Event) {
       <SegmentedToggle v-model="coupling" :options="couplingOptions" group-label="Coupling" />
     </div>
 
-    <!-- State stays, explanation moved to the hint: what is in the path right now is the panel
-         talking about the present, and what that costs every reading is read once. -->
-    <p v-if="pathNote" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-      In the path: {{ pathNote }}.
-    </p>
-    <p v-else class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
-      Nothing in the path: the trace is the record, standing offset and all.
-    </p>
   </CollapsibleSection>
 
   <CollapsibleSection
@@ -903,6 +1022,35 @@ function onVoltsPerDivisionChange(event: Event) {
       <SegmentedToggle v-model="cursorStyle" :options="SCOPE_CURSOR_STYLES" group-label="Cursor style" />
     </div>
 
+    <!-- Placed by hand, or following the trace. Not v-model, because switching to Track changes
+         what the level figures *are* and the parent re-gates on it. -->
+    <div class="tb-field">
+      <span class="tb-group">Mode</span>
+      <SegmentedToggle
+        :model-value="cursors.mode"
+        :options="SCOPE_CURSOR_MODES"
+        group-label="Cursor mode"
+        @update:model-value="onCursorModeChange"
+      />
+    </div>
+
+    <label v-if="cursors.mode === 'Track'" class="tb-field">
+      Follows
+      <select :value="cursors.trackSource" class="tb-input" @change="onTrackSourceChange">
+        <option v-for="option in trackSourceOptions" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </option>
+        <!-- The chosen source stays selectable while it is off screen, so turning its trace back on
+             puts the reading back rather than having quietly moved to another trace. -->
+        <option v-if="trackSourceMissing" :value="cursors.trackSource">
+          {{ cursors.trackSource }} (not drawn)
+        </option>
+      </select>
+    </label>
+    <p v-if="trackSourceMissing" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+      Nothing to follow: that trace is not on the chart. Draw it, or pick one that is.
+    </p>
+
     <!-- The two pairs, as the Show group's buttons: the name a label carried is the button's own
          tooltip and its aria-label, so nothing is lost to a reader who hovers or to a screen
          reader - only to one who is scanning, which is what the figure is for. -->
@@ -939,7 +1087,24 @@ function onVoltsPerDivisionChange(event: Event) {
         />
       </label>
       <label class="tb-field">
-        B ({{ boxScale.label }})
+        <span class="tb-field-row">
+          {{ cursorBLabel }}
+          <!-- One press switches B between a position and a span from A. A pair is placed either to
+               mark two places or to mark one interval; in the second case the figure the reader has
+               in mind is the interval. -->
+          <button
+            type="button"
+            class="text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+            :title="
+              cursors.timeBIsSpan
+                ? 'B is typed as the span from A. Press to type it as a position instead.'
+                : 'B is typed as a position. Press to type it as the span from A instead — the figure you usually have in mind.'
+            "
+            @click="toggleCursorBSpan"
+          >
+            {{ cursors.timeBIsSpan ? 'Δ' : 'abs' }}
+          </button>
+        </span>
         <input
           :value="drafts.show('cursorB', cursorBBoxValue)"
           type="number"
@@ -952,7 +1117,12 @@ function onVoltsPerDivisionChange(event: Event) {
       </label>
     </div>
 
-    <div v-if="cursors.voltOn" class="grid grid-cols-2 gap-2.5">
+    <p v-if="cursorsTrack(cursors)" class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+      The level cursors follow the trace at A and B, with a square drawn where each one sits — so
+      they are read rather than placed. The level button draws their lines as well.
+    </p>
+
+    <div v-if="cursors.voltOn && !cursorsTrack(cursors)" class="grid grid-cols-2 gap-2.5">
       <label class="tb-field">
         A (V)
         <input

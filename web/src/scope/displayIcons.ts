@@ -22,9 +22,22 @@ export type ScopeToggleShape =
    * <code>dash</code> marks a line that is a <em>setting</em> rather than signal — a cursor, a
    * threshold, a band edge — which is how the chart itself draws all three.
    */
-  | { t: 'path'; d: string; w?: number; dash?: boolean }
+  | { t: 'path'; d: string; w?: number; dash?: boolean; mark?: boolean }
   /** A marker, for the figures that are about where the samples fell. */
-  | { t: 'dot'; x: number; y: number; r?: number }
+  | { t: 'dot'; x: number; y: number; r?: number; mark?: boolean }
+
+/**
+ * Whether a shape is an annotation of the signal rather than the signal itself — which is the whole
+ * of what the pickers' two-colour figures need to know.
+ *
+ * <p>A dashed line already meant exactly that (see <code>dash</code> above), so it counts without
+ * being flagged; <code>mark</code> is for the annotations that are not dashed, above all the dots a
+ * stimulus figure puts on its own zero crossings. Everywhere the figure is drawn in one colour this
+ * answers nothing at all.</p>
+ */
+export function scopeToggleShapeIsMark(shape: ScopeToggleShape): boolean {
+  return shape.mark === true || ('dash' in shape && shape.dash === true)
+}
 
 /**
  * One figure per toggle.
@@ -67,85 +80,142 @@ export const SCOPE_TOGGLE_ICONS: Record<string, ScopeToggleShape[]> = {
   /** sin(x)/x: the band-limited curve those same samples came from. */
   drawSinc: [{ t: 'path', d: 'M2,12 C5,3 9,3 12,12 C15,21 19,21 22,12' }],
 
+  /**
+   * Snap to bin: a tone pushed to the centre of the bin it is in — Joost's drawing of 2026-11-21
+   * (`docs/design/snap-to-bin-centre.svg`).
+   *
+   * <p>It is a <em>spectrum</em> rather than a pair of bin edges: a baseline with the neighbouring
+   * bins standing on it and the tone taller between them, which is what the chart beside this
+   * control actually shows. The arrows are what the setting does to it, so they are the mark.</p>
+   */
+  snapToBin: [
+    { t: 'path', d: 'M3,21 H21' },
+    { t: 'path', d: 'M8,4 V19' },
+    { t: 'path', d: 'M16,4 V19' },
+    { t: 'path', d: 'M12,21 V5', w: 2.4 },
+    { t: 'path', d: 'M2.5,12 H6', mark: true },
+    { t: 'path', d: 'M4.6,10.2 L6.4,12 L4.6,13.8', mark: true },
+    { t: 'path', d: 'M21.5,12 H18', mark: true },
+    { t: 'path', d: 'M19.4,10.2 L17.6,12 L19.4,13.8', mark: true },
+  ],
+
+  /**
+   * The two couplings, from Joost's drawings of 2026-11-20: a wave sitting clear of the dashed zero
+   * line with an arrow on the offset it keeps, against the same wave centred on that line.
+   *
+   * <p><b>Drawn in one ink like everything else here, where the drawings carry three.</b> These sit
+   * on a segmented toggle, where the lit option already takes its own hue through the option's
+   * <code>dot</code> and the unlit one is grey — so a figure that carried its own colours would
+   * either fight that or say "on" twice. What tells the pair apart is where the wave sits against
+   * the line, which is a difference of <em>shape</em> and survives being grey, a black-and-white
+   * screenshot, and 16 px.</p>
+   */
+  couplingDc: [
+    { t: 'path', d: 'M3,19 H21', dash: true },
+    { t: 'path', d: 'M3,9 C4.5,4 6,4 7.5,9 C9,14 10.5,14 12,9 C13.5,4 15,4 16.5,9' },
+    { t: 'path', d: 'M20,18 V10 M18.4,11.6 L20,10 L21.6,11.6' },
+  ],
+
+  couplingAc: [
+    { t: 'path', d: 'M3,12 H21', dash: true },
+    {
+      t: 'path',
+      d: 'M3,12 C4.5,7 6,7 7.5,12 C9,17 10.5,17 12,12 C13.5,7 15,7 16.5,12 C18,17 19.5,17 21,12',
+    },
+  ],
+
   // ---- The stimuli the generator offers ----
+  //
+  // Each carries its signal *and* what is worth noticing about it — a zero line, an envelope, the
+  // crossings, the width that is being chosen — flagged `mark` or drawn dashed so the stimulus
+  // picker can colour the two apart (Joost's design of 2026-11-20). The annotation is what makes a
+  // square tell itself from a pulse at 24 px: both are a pair of levels, and only one of them is
+  // marked at its own duty.
 
   /** One tone, and a second behind it: the ordinary stimulus, and the two-tone case. */
   stimTones: [
     { t: 'path', d: 'M2,12 C4,5 7,5 9,12 C11,19 14,19 16,12' },
-    { t: 'path', d: 'M14,12 C15.5,8 17.5,8 19,12 C20.5,16 21,16 22,14', w: 1 },
+    { t: 'path', d: 'M14,12 C15.5,8 17.5,8 19,12 C20.5,16 21,16 22,14', w: 1, mark: true },
   ],
 
-  /** A comb across the band. */
+  /** A comb across the band, standing on the floor the gaps are measured in. */
   stimMultitone: [
     { t: 'path', d: 'M3,20 V7' },
     { t: 'path', d: 'M7,20 V5' },
     { t: 'path', d: 'M11,20 V8' },
     { t: 'path', d: 'M15,20 V5' },
     { t: 'path', d: 'M19,20 V9' },
+    { t: 'path', d: 'M2,21 H22', mark: true },
+    { t: 'dot', x: 5, y: 18.6, r: 1.1, mark: true },
+    { t: 'dot', x: 9, y: 18.6, r: 1.1, mark: true },
+    { t: 'dot', x: 13, y: 18.6, r: 1.1, mark: true },
+    { t: 'dot', x: 17, y: 18.6, r: 1.1, mark: true },
   ],
 
-  /** Noise: no shape at all, which is the shape of it. */
-  stimNoise: [{ t: 'path', d: 'M2,12 L4,6 L5,16 L7,8 L9,18 L11,7 L13,15 L15,5 L17,17 L19,9 L21,14 L22,11' }],
+  /** Noise: no shape at all, which is the shape of it — inside an envelope that says so. */
+  stimNoise: [
+    { t: 'path', d: 'M2,12 L4,6 L5,16 L7,8 L9,18 L11,7 L13,15 L15,5 L17,17 L19,9 L21,14 L22,11' },
+    { t: 'path', d: 'M2,4 H22', dash: true },
+    { t: 'path', d: 'M2,20 H22', dash: true },
+  ],
 
-  stimSquare: [{ t: 'path', d: 'M2,18 H7 V6 H13 V18 H18 V6 H22' }],
-  stimTriangle: [{ t: 'path', d: 'M2,18 L7,6 L12,18 L17,6 L22,18' }],
+  /** Hard-switched, with the crossings marked: the edge is the whole point of this one. */
+  stimSquare: [
+    { t: 'path', d: 'M2,18 H7 V6 H13 V18 H18 V6 H22' },
+    { t: 'path', d: 'M2,12 H22', dash: true },
+    { t: 'dot', x: 7, y: 12, r: 1.3, mark: true },
+    { t: 'dot', x: 13, y: 12, r: 1.3, mark: true },
+    { t: 'dot', x: 18, y: 12, r: 1.3, mark: true },
+  ],
+
+  /** The ramps, between the two levels they run to. */
+  stimTriangle: [
+    { t: 'path', d: 'M2,18 L7,6 L12,18 L17,6 L22,18' },
+    { t: 'path', d: 'M2,6 H22', dash: true },
+    { t: 'path', d: 'M2,18 H22', dash: true },
+    { t: 'dot', x: 7, y: 6, r: 1.3, mark: true },
+    { t: 'dot', x: 17, y: 6, r: 1.3, mark: true },
+  ],
+
   /** A ramp and a drop, which is the asymmetry the kind is chosen for. */
-  stimSawtooth: [{ t: 'path', d: 'M2,18 L9,6 V18 L16,6 V18 L22,10' }],
-  /** A square with its duty chosen, drawn narrow. */
+  stimSawtooth: [
+    { t: 'path', d: 'M2,18 L9,6 V18 L16,6 V18 L22,10' },
+    { t: 'path', d: 'M2,12 H22', dash: true },
+    { t: 'dot', x: 9, y: 6, r: 1.3, mark: true },
+    { t: 'dot', x: 16, y: 6, r: 1.3, mark: true },
+  ],
+
+  /** A square with its duty chosen, drawn narrow and dimensioned at the width that is the choice. */
   stimPulse: [
     { t: 'path', d: 'M2,17 H7 V6 H10 V17 H16 V6 H19 V17 H22' },
-    { t: 'path', d: 'M7,21 H10' },
+    { t: 'path', d: 'M7,20 V22', mark: true },
+    { t: 'path', d: 'M10,20 V22', mark: true },
+    { t: 'path', d: 'M7,21 H10', mark: true },
   ],
 
-  /** A tone switched on and off in whole cycles. */
+  /** A tone switched on and off in whole cycles, between the gates that switch it. */
   stimBurst: [
     { t: 'path', d: 'M2,12 H4 C5,7 6.5,7 7.5,12 C8.5,17 10,17 11,12 H13' },
     { t: 'path', d: 'M13,12 H22', dash: true },
+    { t: 'path', d: 'M4,5 V19', mark: true },
+    { t: 'path', d: 'M11,5 V19', mark: true },
   ],
 
-  /** A steady voltage, signed — the line and the zero it sits above. */
+  /** A steady voltage, signed — the line, the zero it sits above, and the offset between them. */
   stimDc: [
     { t: 'path', d: 'M2,8 H22' },
     { t: 'path', d: 'M2,17 H22', dash: true },
+    { t: 'path', d: 'M18,9 V16', mark: true },
+    { t: 'path', d: 'M16.8,10.6 L18,9 L19.2,10.6', mark: true },
+    { t: 'path', d: 'M16.8,14.4 L18,16 L19.2,14.4', mark: true },
   ],
 
   /** A file, with a waveform on it. */
   stimArbitrary: [
-    { t: 'path', d: 'M5,3 H15 L19,7 V21 H5 Z' },
+    { t: 'path', d: 'M5,3 H15 L19,7 V21 H5 Z', mark: true },
+    { t: 'path', d: 'M15,3 V7 H19', mark: true },
     { t: 'path', d: 'M8,15 C9,11 10.5,11 11.5,15 C12.5,19 14,19 15,15' },
   ],
-
-  // ---- The math channel's operators ----
-  //
-  // The operator itself rather than a waveform: what a reader is choosing between here is seven
-  // pieces of arithmetic, and the sign for each is the thing they already know it by.
-
-  mathAdd: [
-    { t: 'path', d: 'M12,5 V19' },
-    { t: 'path', d: 'M5,12 H19' },
-  ],
-  mathSubtract: [{ t: 'path', d: 'M5,12 H19' }],
-  mathMultiply: [
-    { t: 'path', d: 'M6,6 L18,18' },
-    { t: 'path', d: 'M18,6 L6,18' },
-  ],
-  mathDivide: [
-    { t: 'path', d: 'M5,12 H19' },
-    { t: 'dot', x: 12, y: 6.5, r: 1.5 },
-    { t: 'dot', x: 12, y: 17.5, r: 1.5 },
-  ],
-  /** Negate: a waveform turned over, which says more here than a bare minus would. */
-  mathNegate: [
-    { t: 'path', d: 'M3,8 C5,3 8,3 10,8 C12,13 15,13 17,8', w: 1 },
-    { t: 'path', d: 'M3,16 C5,21 8,21 10,16 C12,11 15,11 17,16' },
-  ],
-  /** A rate: a tangent on a curve. */
-  mathDerivative: [
-    { t: 'path', d: 'M3,19 C9,19 13,13 15,5', w: 1 },
-    { t: 'path', d: 'M6,19 L20,9' },
-  ],
-  /** An accumulation: the sign itself, which is what every datasheet writes it as. */
-  mathIntegral: [{ t: 'path', d: 'M9,21 C7,21 6.5,18 7.5,13 C8.5,8 10,4 12.5,3 C14.5,2.2 16,3.5 15.5,5.5' }],
 
   // ---- The cursors (the Display rail) ----
 

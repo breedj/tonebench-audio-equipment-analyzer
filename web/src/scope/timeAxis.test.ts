@@ -283,3 +283,26 @@ describe('snapTimePerDivision', () => {
     }
   })
 })
+
+
+describe('preTriggerFromPointer rounding', () => {
+  it('lands on whole percentages, which is the unit the setting is in', () => {
+    // The box types a percentage and the marker's tooltip quotes one; a drag that left 23.37 %
+    // behind would make the two disagree about the same setting.
+    // A 10 ms record whose trigger is a quarter in starts at -2.5 ms, so a pointer 2.337 ms along
+    // it is asking for 23.37 %.
+    const fraction = preTriggerFromPointer(-0.000163, 0.01, 0.25)
+    expect(fraction).toBeCloseTo(0.23, 12)
+    expect(Math.round(fraction * 10000) % 100).toBe(0)
+  })
+
+  it('still reaches both ends exactly', () => {
+    expect(preTriggerFromPointer(-1, 0.01, 0.25)).toBe(0)
+    expect(preTriggerFromPointer(1, 0.01, 0.25)).toBe(1)
+  })
+
+  it('is a fixed point: dragging back to where it started lands there', () => {
+    const start = -0.01 * 0.25
+    expect(preTriggerFromPointer(start + 0.01 * 0.25, 0.01, 0.25)).toBe(0.25)
+  })
+})

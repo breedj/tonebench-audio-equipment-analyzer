@@ -13,7 +13,7 @@ import {
   type StripGeometry,
   type StripGrab,
 } from '../scope/overviewStrip'
-import { formatPerDivision, formatScopeTime, toChartMs, type ScopeTimeWindow } from '../scope/timeAxis'
+import type { ScopeTimeWindow } from '../scope/timeAxis'
 
 /**
  * The zoom bar: the <b>whole record</b> drawn small, with a draggable box showing which part of it
@@ -93,9 +93,6 @@ const box = computed(() => stripBox(props.window, props.bounds, geometry.value))
 /** True while the chart is showing everything there is — then the box fills the strip and says so. */
 const coversAll = computed(() => stripCoversAll(props.window, props.bounds))
 
-/** The record's own timebase, which is the half of the dual readout the chart cannot show. */
-const recordLabel = computed(() => formatPerDivision(toChartMs(props.bounds.toS - props.bounds.fromS)))
-
 /** The narrowest window a gesture here may leave — the minimum grip, converted at the record's own scale. */
 const minSpanS = computed(() => {
   const span = props.bounds.toS - props.bounds.fromS
@@ -156,6 +153,9 @@ const levelRange = computed(() => {
   return { lo: lo - pad, hi: hi + pad }
 })
 
+/** How heavy the trace is drawn. See the note at its stroke. */
+const TRACE_WIDTH = 1.75
+
 function draw() {
   const el = canvas.value
   if (!el) return
@@ -187,7 +187,11 @@ function draw() {
     const toY = (v: number) => h - ((v - range.lo) / (range.hi - range.lo)) * h
     for (const channel of channels.value) {
       ctx.strokeStyle = channel.color
-      ctx.lineWidth = 1
+      // A little over a hairline (Joost, 2026-11-20). Every column is drawn, so the strokes are
+      // already contiguous in x and this thickens the ribbon rather than filling it in — which is
+      // what the trace needed, because where the signal is flat a column spans almost nothing
+      // vertically and a 1 px stroke there is a single faint pixel.
+      ctx.lineWidth = TRACE_WIDTH
       ctx.beginPath()
       const count = Math.min(channel.min.length, channel.max.length)
       for (let i = 0; i < count; i++) {
@@ -348,10 +352,15 @@ watch(
 </script>
 
 <template>
-  <div class="flex items-center gap-2">
+  <!-- The strip is the whole width of the chart below it, and nothing stands beside it: the
+       record's own timebase and the window's length were a readout at the right-hand end until
+       2026-11-21, and both are already on the chart's own status line a few pixels below
+       ("2.58 ms/div ... -13.40 ms to 12.39 ms"). A navigator is read by its box, so the width
+       is worth more to it than a second copy of two figures. -->
+  <div>
     <div
       ref="host"
-      class="relative flex-1"
+      class="relative"
       :style="{ height: `${STRIP_HEIGHT_PX}px` }"
       :title="
         overview
@@ -377,13 +386,6 @@ watch(
       >
         Nothing captured yet
       </p>
-    </div>
-
-    <!-- The other half of the dual timebase: the record's own, against the chart's below. Fixed
-         width so the strip does not change length as the figure does. -->
-    <div class="w-24 shrink-0 text-right text-[11px] leading-tight text-neutral-500 dark:text-neutral-400">
-      <div class="font-mono tabular-nums text-neutral-700 dark:text-neutral-200">{{ recordLabel }}</div>
-      <div>{{ coversAll ? 'whole record' : formatScopeTime(toChartMs(window.toS - window.fromS), toChartMs(window.toS - window.fromS)) }}</div>
     </div>
   </div>
 </template>

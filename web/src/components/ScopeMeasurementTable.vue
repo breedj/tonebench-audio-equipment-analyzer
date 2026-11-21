@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import CollapsibleSection from './CollapsibleSection.vue'
+import PickerFigureWell from './PickerFigureWell.vue'
 import ScopeMeasurementIcon from './ScopeMeasurementIcon.vue'
+import { sectionMarkColor, type PickerSection } from '../panels/pickerSections'
 import ToolbarIcon from './ToolbarIcon.vue'
 import { useScopeMeasurements } from '../composables/useScopeMeasurements'
-import { scopeMeasurement, SCOPE_MEASUREMENT_ABSENT } from '../scope/measurementCatalogue'
+import {
+  scopeMeasurement,
+  scopeMeasurementSection,
+  SCOPE_MEASUREMENT_ABSENT,
+} from '../scope/measurementCatalogue'
 import { SCOPE_STAT_COLUMNS } from '../scope/measurementStats'
 import type { ScopeMeasurementRow } from '../scope/measurementRows'
 
@@ -52,6 +58,18 @@ function statCountOf(row: ScopeMeasurementRow): string {
 
 function iconOf(row: ScopeMeasurementRow): string {
   return scopeMeasurement(row.id)?.icon ?? ''
+}
+
+/**
+ * The section a row's reading was chosen from, which is where its figure's colours come from.
+ *
+ * <p>So a row is drawn exactly as the tile it was picked off: same figure, same tint, same mark
+ * colour. That is worth more here than in the dialog, because the table is where a reader looks
+ * afterwards — the colour says which section a reading came from, and two readings of the same
+ * kind sit in the same hue without the table growing a column to say so.</p>
+ */
+function sectionOf(row: ScopeMeasurementRow): PickerSection | null {
+  return scopeMeasurementSection(row.id)
 }
 
 /**
@@ -149,8 +167,14 @@ const emit = defineEmits<{ pickMeasurements: [] }>()
             class="group border-b border-neutral-100 last:border-0 dark:border-neutral-800/60"
             :data-measurement="row.key"
           >
-            <td class="py-1 text-neutral-400 dark:text-neutral-500">
-              <ScopeMeasurementIcon :name="iconOf(row)" />
+            <td class="py-1 pr-1.5 text-neutral-400 dark:text-neutral-500">
+              <PickerFigureWell v-if="sectionOf(row)" :tone="sectionOf(row)!.tone" size="xs">
+                <ScopeMeasurementIcon
+                  :name="iconOf(row)"
+                  :mark="sectionMarkColor(sectionOf(row)!.mark)"
+                />
+              </PickerFigureWell>
+              <ScopeMeasurementIcon v-else :name="iconOf(row)" />
             </td>
             <td class="py-1 pr-2" :title="row.title">
               <span class="text-neutral-500 dark:text-neutral-400">{{ row.sourceLabel }}</span>

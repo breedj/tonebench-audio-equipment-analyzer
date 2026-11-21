@@ -9,6 +9,9 @@ import {
   SCOPE_MEASUREMENTS,
   SCOPE_MEASUREMENT_GROUPS,
   scopeMeasurement,
+  scopeMeasurementSection,
+  scopeMeasurementSections,
+  SCOPE_MEASUREMENT_SECTIONS,
   scopeMeasurementsIn,
   scopeMeasurementsNeedPair,
   removeScopeSelectionRow,
@@ -18,6 +21,72 @@ import {
   scopeSelectionSources,
   SCOPE_SELECTION_SOURCES,
 } from './measurementCatalogue'
+
+describe('the picker’s sections', () => {
+  /**
+   * The one that matters. A measurement whose section belongs to another tab — or to no tab at all
+   * — is dropped out of the dialog by <code>groupIntoSections</code> with nothing to say so: the
+   * tile is simply not there, and the reading can never be ticked again. It is also exactly the
+   * mistake a new entry makes, since the section is the one field that has to agree with a field
+   * beside it.
+   */
+  it('shows every entry of a tab, exactly once, under one of that tab’s own sections', () => {
+    for (const { value: group } of SCOPE_MEASUREMENT_GROUPS) {
+      const shown = scopeMeasurementSections(group).flatMap((entry) => entry.items)
+      expect(shown.map((d) => d.id).sort(), group).toEqual(
+        scopeMeasurementsIn(group)
+          .map((d) => d.id)
+          .sort(),
+      )
+      expect(new Set(shown).size, group).toBe(shown.length)
+    }
+  })
+
+  it('keeps the catalogue’s order inside a section', () => {
+    const peaks = scopeMeasurementSections('Vertical')[0]
+    expect(peaks.section.id).toBe('peaks')
+    expect(peaks.items.map((d) => d.id)).toEqual(['max', 'min', 'pkpk'])
+  })
+
+  it('defines no section that nothing is in, and none that two tabs share', () => {
+    const ids = SCOPE_MEASUREMENT_SECTIONS.map((s) => s.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const section of SCOPE_MEASUREMENT_SECTIONS) {
+      const members = SCOPE_MEASUREMENTS.filter((d) => d.section === section.id)
+      expect(members.length, `${section.id} holds nothing`).toBeGreaterThan(0)
+      for (const def of members) expect(def.group, def.id).toBe(section.group)
+    }
+  })
+
+  it('answers one measurement’s section, for the table that draws its figure afterwards', () => {
+    // The readings table draws a row in its section's colours, so what it needs is this lookup --
+    // and an id with no section would silently fall back to an uncoloured figure, which reads as
+    // one row that was missed rather than as a catalogue entry that is wrong.
+    expect(scopeMeasurementSection('pkpk')?.id).toBe('peaks')
+    expect(scopeMeasurementSection('rise')?.id).toBe('edges')
+    expect(scopeMeasurementSection('correlation')?.id).toBe('match')
+    expect(scopeMeasurementSection('nonesuch')).toBeNull()
+    for (const def of SCOPE_MEASUREMENTS) {
+      expect(scopeMeasurementSection(def.id), def.id).not.toBeNull()
+    }
+  })
+
+  it('gives every section a heading worth reading', () => {
+    for (const section of SCOPE_MEASUREMENT_SECTIONS) {
+      expect(section.label.length, section.id).toBeGreaterThan(3)
+      // Short is fine -- "DC content" is the whole of what that section has in common -- but
+      // a section with no note at all is a badge the reader has to guess the meaning of.
+      expect(section.note.length, section.id).toBeGreaterThan(5)
+    }
+  })
+
+  it('tells one section from the next inside a tab, which is what the colour is for', () => {
+    for (const { value: group } of SCOPE_MEASUREMENT_GROUPS) {
+      const tones = SCOPE_MEASUREMENT_SECTIONS.filter((s) => s.group === group).map((s) => s.tone)
+      expect(new Set(tones).size, group).toBe(tones.length)
+    }
+  })
+})
 
 describe('SCOPE_MEASUREMENTS', () => {
   it('has one entry per id', () => {

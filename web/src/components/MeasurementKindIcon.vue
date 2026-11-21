@@ -73,6 +73,21 @@ withDefaults(defineProps<{ kind: string; size?: number }>(), { size: 20 })
     <path d="M3 12h4" />
     <path d="M7 12 8.5 4 10 19l1.5-11 1.5 8 1.5-5 1.5 3.5 1.5-2L21 12" />
   </svg>
+  <!-- Oscilloscope (Joost's drawing, 2026-11-20): a waveform on its baseline with the trigger
+       marked and the stretch of record before it shaded — the one thing this measurement is for
+       that no other kind here offers. It fell through to the plain circle until then.
+
+       The drawing carries three colours and this carries one, which is this set's own rule: a kind
+       glyph is drawn in its kind's accent wherever it appears — bare in the picker, inside a tinted
+       chip in the sidebar — so a second ink would be a colour that means nothing. Depth is
+       opacity instead, which survives the tint, a monochrome screenshot and 16 px. -->
+  <svg v-else-if="kind === 'Oscilloscope'" :width="size" :height="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 4h8v16H3z" fill="currentColor" fill-opacity="0.15" stroke="none" />
+    <path d="M3 20h18" stroke-width="1.4" stroke-opacity="0.45" />
+    <path d="M3 12c1.5-5 3-5 4.5 0s3 5 4.5 0 3-5 4.5 0 3 5 4.5 0" />
+    <path d="M11 5.5V21" />
+    <path d="M9.3 2.5h3.4L11 4.6z" fill="currentColor" />
+  </svg>
   <svg v-else :width="size" :height="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <circle cx="12" cy="12" r="9" />
   </svg>

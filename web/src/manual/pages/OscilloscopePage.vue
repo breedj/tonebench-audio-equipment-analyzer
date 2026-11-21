@@ -189,8 +189,13 @@ const { showPage } = useManual()
         <tr>
           <td>Time/div</td>
           <td>
-            The timebase, 2&nbsp;µs/div to 100&nbsp;ms/div in 1-2-5 steps. The plot is ten
-            divisions wide, so the record is ten times this — which the badge underneath quotes,
+            The timebase, 2&nbsp;µs/div to 100&nbsp;ms/div in 1-2-5 steps, on a tile with
+            <strong>−</strong> and <strong>+</strong> either side of it: one press is one step, and
+            hovering either button names the rung it is about to give. Press the
+            figure itself for the whole ladder at once, laid out as decades down and ×1 ×2 ×5
+            across — where you can also see that there is nothing below 2&nbsp;µs and nothing above
+            100&nbsp;ms. With that open, the wheel and ← → step as well, and Esc closes it. The
+            plot is ten divisions wide, so the record is ten times this — which the badge quotes,
             together with the sample count, because what the timebase costs is memory. Up to one
             second; longer is the stream recorder's job (Configuration ▸ Diagnostics).
             <strong>The zoom is a second look rather than the timebase</strong>: drag a box on the
@@ -208,9 +213,10 @@ const { showPage } = useManual()
           <td>
             How much of the record sits before the trigger, 0 to 100 — or
             <strong>drag the amber T along the top of the plot</strong>, which is the same setting
-            by eye. The axis is measured from the trigger, so t&nbsp;=&nbsp;0 never moves: what the
-            drag moves is the record under it. The badges underneath quote the record in samples,
-            the sample interval and what one capture costs end to end.
+            by eye and lands on whole percentages. The axis is measured from the trigger, so
+            t&nbsp;=&nbsp;0 never moves: what the drag moves is the record under it. What these settings add up to — the record in
+            samples, the sample interval and what one capture costs end to end — is in the
+            <strong>Record</strong> panel at the foot of the rail.
           </td>
         </tr>
         <tr>
@@ -677,16 +683,35 @@ const { showPage } = useManual()
       measurement — independently of the FFT screen's. Press <strong>Run</strong> or
       <strong>Single</strong> and the stimulus goes out with the capture; change it while the scope
       runs and the change reaches the device without interrupting anything. <strong>Stop</strong>
-      silences it. Every stimulus the app has is available here: tones, a multitone comb, noise, the
-      chirp, and the exact square and triangle described on the
+      silences it. Ten stimuli, in the four groups the picker sorts them into: <strong>Tones</strong>
+      (one tone or several, and a <strong>tone burst</strong> — a tone switched on and off in whole
+      cycles, for what an amplifier does with a signal that <em>starts</em>);
+      <strong>Broadband</strong> (a multitone comb, white noise); <strong>Waveforms</strong>
+      (square, triangle, <strong>sawtooth</strong> and <strong>pulse</strong> — the first two are
+      the ones described on the
       <button type="button" class="manual-link" @click="showPage('fft-spectrum')">FFT analysis</button>
-      page.
+      page, the sawtooth is the only shape here with even harmonics of its own, and the pulse is a
+      square with its duty chosen); and <strong>Steady &amp; file</strong> — a signed
+      <strong>DC level</strong>, and <strong>Arbitrary (.wav)</strong>, a file played on a loop,
+      resampled to the analyzer's own rate and normalised to the level you set.
     </p>
+    <div class="manual-note">
+      <p>
+        <strong>Two of the app's stimuli are deliberately not offered here.</strong>
+        <em>Off</em> is not a stimulus — the <strong>Play on</strong> pair is the on/off control, and
+        a second way to say "silent" would be two controls disagreeing. The <em>chirp</em> is hidden
+        rather than removed: a measurement saved with one still opens on it and still plays it, and
+        it is the frequency-response measurements' own stimulus, where it has a screen that knows
+        what to do with the result.
+      </p>
+    </div>
     <p>
       <strong>Stimulus</strong> is a button carrying the chosen kind's figure and name, and it opens
       a dialog of all of them — a figure, a name and a line saying what each is for. Ten names in a
-      dropdown are read; ten figures are scanned. Picking one changes the panel underneath it, since
-      a tone asks for a frequency where a burst asks for cycles on and off.
+      dropdown are read; ten figures are scanned, in the four groups above — which are by what a
+      stimulus is <em>for</em> rather than by what it looks like, which is why the burst is with the
+      tones and not with the waveforms. Picking one changes the panel underneath it, since a tone
+      asks for a frequency where a burst asks for cycles on and off.
       <strong>Enabled channels</strong> is the same two-segment L/R control the Display and
       Acquisition rails use.
     </p>
@@ -710,9 +735,9 @@ const { showPage } = useManual()
       with a box showing which part of it the chart below is looking at. Drag the box to move the
       window, drag either edge to resize it, or click anywhere on the bar to jump there keeping the
       same span. The dashed amber line on it is the trigger, so the bar says where you are in the
-      record even when the chart is showing a tenth of a millisecond of it. The figure beside it is
-      the <strong>record's</strong> own timebase, against the chart's own below — two timebases, the
-      way a bench scope with a zoom window shows them.
+      record even when the chart is showing a tenth of a millisecond of it. It is the whole width
+      of the chart under it: the record's own timebase and the window's length are on the chart's
+      own status line a few pixels below, so the bar spends its width on the picture instead.
     </p>
     <p>
       The box and the chart are <strong>one window</strong>: dragging the box, dragging the plot and
@@ -743,9 +768,12 @@ const { showPage } = useManual()
           <td>
             A scope's vertical pair rather than a top and a bottom: eight divisions of a round
             figure, centred where you put it. A graticule is read by counting squares, which only
-            works if a square is a round number. The arrows on <strong>Centre</strong> move it one
-            division at a time. The ladder runs from 10 µV/div to 50 V/div — the bottom is under
-            the analyzer's own noise floor, which is the point of having it.
+            works if a square is a round number. Two tiles with <strong>−</strong> and
+            <strong>+</strong>, as the timebase has: V/div steps the ladder and opens the same
+            kind of grid when you press the figure, while <strong>Centre</strong> has no ladder —
+            its buttons move it <em>one division</em> at a time, whatever the V/div is, and you can
+            type a figure straight into it. The ladder runs from 10 µV/div to 50 V/div — the bottom
+            is under the analyzer's own noise floor, which is the point of having it.
           </td>
         </tr>
         <tr>
@@ -769,7 +797,9 @@ const { showPage } = useManual()
             How one sample is joined to the next — <strong>Lines</strong>, <strong>sin(x)/x</strong>
             or <strong>Dots</strong>. See <strong>How the trace is drawn</strong> below. The last
             two need the samples themselves, so they apply only where the window is tight enough
-            for the header to read <em>every sample drawn</em>.
+            for the header to read <em>every sample drawn</em>; where it does not, the chosen
+            button is <strong>dimmed</strong> and says so on hover — the trace is lines until you
+            zoom in far enough.
           </td>
         </tr>
         <tr>
@@ -840,8 +870,10 @@ const { showPage } = useManual()
           <td>Autofit</td>
           <td>
             Fits both axes to what is on screen: the time window to the whole record, the V/div and
-            centre to the visible traces. A press, never automatic — see <strong>Autoset</strong>
-            in the run row for the other way to frame an unknown signal.
+            centre to the visible traces — the checked history items included, so a stored capture
+            taller than the live one is framed rather than left running off the top. A press, never
+            automatic — see <strong>Autoset</strong> in the run row for the other way to frame an
+            unknown signal.
           </td>
         </tr>
       </tbody>
@@ -931,7 +963,9 @@ const { showPage } = useManual()
           <td>Coupling</td>
           <td>
             <strong>DC</strong> shows what arrived. <strong>AC</strong> subtracts the record’s own
-            mean — see the note below, which is why it is a mean and not a filter.
+            mean — see the note below, which is why it is a mean and not a filter. Whichever is
+            lit is what is in the path; the chart carries a badge for it as well, so a screenshot
+            says which trace it is.
           </td>
         </tr>
       </tbody>
@@ -1185,9 +1219,14 @@ const { showPage } = useManual()
     <p>
       Readings are chosen from the <strong>+</strong> in the <strong>Selected measurements</strong>
       table under the chart and read there, in the table rather than in the rail. The rail's own
-      <strong>Record</strong> panel holds the four facts no measurement can report, because they
-      describe the record rather than the signal in it: how long it is, the rate it was sampled at,
-      how much of it sits before the trigger, and what the chart is showing it at.
+      <strong>Record</strong> panel holds what no measurement can report, because it describes the
+      record rather than the signal in it, in two halves. <strong>Next capture</strong> is what the
+      Acquisition settings add up to: the record's length and sample count, one sample interval, and
+      what a capture costs end to end once the settle is counted. <strong>On screen</strong> is the
+      record that was actually taken — how long it is, the rate it was sampled at, how much of it
+      sits before the trigger, and what the chart is showing it at. The two are routinely different,
+      which is the point of showing both: change the rate or the timebase without running again and
+      the first moves while the second stays where it was.
     </p>
     <p>
       <strong>Every reading is measured on the analyzer rather than read off the picture.</strong>
@@ -1294,7 +1333,11 @@ const { showPage } = useManual()
       take any rows off the table, which is what the cross beside a row is for. Pick readings from
       a figure of each: the four tabs are <strong>Vertical</strong> (how tall),
       <strong>Horizontal</strong> (how long), <strong>Miscellaneous</strong> and
-      <strong>Channel delay</strong>.
+      <strong>Channel delay</strong>. Each tab is divided again under its own headings —
+      <em>Peaks</em>, <em>Levels</em>, <em>Averages</em>, <em>RMS &amp; spread</em> and
+      <em>Shape</em> on the first of them — and the heading says what its members have in common,
+      which is usually the thing that tells two near-identical names apart: <em>Top</em> and
+      <em>Base</em> are settled levels, where <em>Max</em> and <em>Min</em> are extremes.
     </p>
     <p>
       <strong>Source</strong>, at the top of that dialog, is which trace the tiles below it are
@@ -1457,7 +1500,11 @@ const { showPage } = useManual()
       operations as figures, with <strong>Source A</strong> and <strong>Source B</strong> under
       them — so <em>which</em> inputs the expression reads is yours, and the button and the axis
       then write the sockets rather than A and B: <em>L − R</em>, <em>R − L</em>,
-      <em>dR/dt</em>. Nothing is applied until <strong>Apply</strong>, and
+      <em>dR/dt</em>. The four that combine two traces and the three that read one are under
+      headings of their own, which is also the answer to when Source B does anything. Each figure
+      draws the operands faintly in their own inks and the <em>result</em> over them in the colour
+      that channel will appear in, so what comes out of A × B is a picture rather than a sign. The
+      footer writes the whole expression out. Nothing is applied until <strong>Apply</strong>, and
       <strong>Turn off</strong> is how a channel goes away.
     </p>
     <p>
@@ -1676,9 +1723,11 @@ const { showPage } = useManual()
     <h2>Autoset</h2>
     <p>
       <strong>Autoset</strong>, under the run buttons, is one press that makes an unknown signal
-      readable and standing still: it fits the vertical to the measured extremes, puts about three
-      of the signal's own cycles on screen, and sets the trigger level to the middle of it. The line
-      under the button says how many cycles it landed on.
+      readable and standing still: it fits the vertical to the measured extremes, sets the
+      <strong>timebase</strong> to about three of the signal's own cycles, sets the trigger level
+      to the middle of it, and shows the whole of the record it has just asked for. It is a
+      horizontal control, not a chooser of windows: three cycles of 20 Hz is 150 ms, which a 20 ms
+      capture does not hold at any zoom, so the record is what changes.
     </p>
     <div class="manual-note">
       <p>
@@ -1883,6 +1932,36 @@ const { showPage } = useManual()
       you cannot find it.
     </p>
     <p>
+      The <strong>B</strong> box takes either a position or a <strong>span from A</strong> — the
+      small <strong>abs</strong> / <strong>Δ</strong> button beside its label switches it, and the
+      label follows. A pair is placed either to mark two <em>places</em> or to mark one
+      <em>interval</em>, and in the second case the figure you have in mind is the interval: typing
+      400 µs beats working out what 400 µs after −65 µs comes to. Only the box changes — B is always
+      an absolute position underneath, so nothing else has to know which way you typed it.
+    </p>
+    <p>
+      <strong>Mode</strong> decides whether the level pair is placed by hand or follows the trace,
+      and it is the difference between measuring against a level you already know and measuring
+      what the signal did:
+    </p>
+    <ul>
+      <li>
+        <strong>Manual</strong> — the two pairs are independent, each dragged where you put it. For
+        measuring against a rail, a threshold or a specified limit, where the whole point is that
+        the line does <em>not</em> move with the trace.
+      </li>
+      <li>
+        <strong>Track</strong> — only the time cursors are dragged, and the level cursors go
+        wherever the trace is at those two times, with a <strong>small square drawn where each one
+        sits</strong>. ΔV is then what the signal did between A and B and ΔV/Δt is its average slope
+        over that stretch, with nothing to line up by eye. <strong>Follows</strong> picks which
+        trace — with two on screen the reading means nothing until it says which one it is of, and
+        the one being measured is routinely not the first in the list. The level grips go away,
+        because the levels are a reading there rather than a setting; the level button still draws
+        their two lines, and the figures are printed whether or not you do.
+      </li>
+    </ul>
+    <p>
       <strong>Style</strong> decides where the figures are written, and the two answers are the
       ones a bench scope offers:
     </p>
@@ -1936,6 +2015,21 @@ const { showPage } = useManual()
       not come back when you reopen it, and they are not in a report. A note you want to keep is an
       <strong>annotation</strong> — see
       <button type="button" class="manual-link" @click="showPage('charts')">Charts</button>.
+    </p>
+
+    <h2>Keeping a capture</h2>
+    <p>
+      <strong>Save waveform</strong> in the toolbar stores the record on screen as a result in
+      <strong>History</strong> — <em>every sample of it</em>, not the decimated trace the chart is
+      drawing. That is the difference from <strong>Save</strong> beside it, which stores the
+      <em>settings</em>: a measurement you can run again. A saved waveform reopens as the capture it
+      was, can be ticked as a reference behind a live one, and carries its own notes.
+    </p>
+    <p>
+      <strong>Clear</strong> throws the captured record away and leaves the settings alone; it
+      deletes nothing from History. <strong>Screenshot</strong> is the chart as a PNG in the light
+      colour scheme, whichever view is showing, and <strong>Report…</strong> is the same picture
+      with the settings, notes and readings as a PDF.
     </p>
 
     <h2>Two flags on the header</h2>

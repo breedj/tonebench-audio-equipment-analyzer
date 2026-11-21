@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScopeToggleIcon from './ScopeToggleIcon.vue'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import type {
   DeviceRanges,
@@ -245,16 +246,28 @@ defineExpose({ buildRequest, resyncTones })
           always shows what was typed; the label beneath it shows what's really playing once Run
           confirms it.
         -->
-        <label
-          class="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400"
-          :class="{ 'opacity-40': !canSnapToBin }"
+        <!-- A lit toggle rather than a checkbox (Joost, 2026-11-20), the way the display rail's own
+             toggles read: lit is the accent and unlit the recessed track, so the state does not rest
+             on colour alone and survives a monochrome screenshot. **It keeps its name beside the
+             figure** (Joost, 2026-11-21), unlike that rail: there the figures bought height on a
+             column of six, where this is one toggle alone on a row with the width to spare, and a
+             reader scanning the generator panel has no second button to tell it from. The longer
+             sentence stays on the title; the visible text is the accessible name, so there is no
+             aria-label to disagree with it. -->
+        <button
+          type="button"
+          class="flex h-[34px] items-center gap-2 rounded-lg border px-3 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40"
+          :class="snapToBin && canSnapToBin ? 'btn-action' : 'btn-toggle-off'"
+          :disabled="!canSnapToBin"
+          :aria-pressed="snapToBin"
           :title="canSnapToBin
-            ? 'Snap tone frequencies to the nearest coherent FFT bin, so a tone lands on exactly one bin with no leakage.'
-            : 'Only applies to sine tones and the multitone comb. Noise and the chirp have no single frequency; a square or triangle has one, but it is quantised to a whole sample period instead (shown under the frequency box).'"
+            ? 'Snap to bin — move each tone to the nearest coherent FFT bin, so it lands on exactly one bin with no leakage.'
+            : 'Snap to bin — only applies to sine tones and the multitone comb. Noise and the chirp have no single frequency; a square or triangle has one, but it is quantised to a whole sample period instead (shown under the frequency box).'"
+          @click="snapToBin = !snapToBin; emit('change')"
         >
-          <input v-model="snapToBin" type="checkbox" :disabled="!canSnapToBin" @change="emit('change')" />
+          <ScopeToggleIcon name="snapToBin" />
           Snap to bin
-        </label>
+        </button>
       </div>
     </div>
   </CollapsibleSection>

@@ -2,10 +2,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { ArbitraryChannel, ArbitrarySettings, GeneratorChannelRequest, GeneratorChannelState, GeneratorKind, GeneratorTone, ImdMethodName, SmoothingOctaves } from '../api/client'
 import FileBrowserDialog from './FileBrowserDialog.vue'
+import ImdFootprint from './ImdFootprint.vue'
+import ImdPresetDialog from './ImdPresetDialog.vue'
+import PickerFigureWell from './PickerFigureWell.vue'
 import ScopeToggleIcon from './ScopeToggleIcon.vue'
 import StimulusPickerDialog from './StimulusPickerDialog.vue'
-import { stimulusKind, stimulusKindLabel } from '../generator/stimulusKinds'
-import { useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
+import { stimulusKind, stimulusKindLabel, stimulusSection } from '../generator/stimulusKinds'
+import { sectionMarkColor } from '../panels/pickerSections'
+import { DEFAULT_TONE, useGeneratorStimulus, type GeneratorStimulusStore } from '../composables/useGeneratorStimulus'
 import { useStagedSampleRate } from '../composables/useStagedSampleRate'
 import {
   isWaveKind,
@@ -27,7 +31,13 @@ import {
   MAX_BURST_CYCLES,
 } from '../toneBurst'
 import { useMetricSelection } from '../composables/useMetricSelection'
-import { IMD_DEFAULT_MAX_ORDER, IMD_PRESETS, imdPreset, presetTones, sineEquivalentDbv } from '../imd/presets'
+import {
+  IMD_DEFAULT_MAX_ORDER,
+  imdPreset,
+  presetTones,
+  sineEquivalentDbv,
+  type ImdPresetId,
+} from '../imd/presets'
 import { generatorLevelFromDbv, generatorLevelToDbv } from '../generatorLevel'
 import GeneratorLevelUnitSelect from './GeneratorLevelUnitSelect.vue'
 
@@ -248,7 +258,62 @@ function applyPreset(levelDbv: number) {
 /** What the button shows: the chosen kind's own figure, name and sentence. */
 const stimulusEntry = computed(() => stimulusKind(kind.value))
 const stimulusIcon = computed(() => stimulusEntry.value?.icon ?? '')
+/** The section it was chosen from, so the button draws the figure the tile drew. */
+const stimulusWell = computed(() => stimulusSection(kind.value))
 const stimulusLabel = computed(() => stimulusKindLabel(kind.value))
+/** The IMD picker, and what the button that opens it says. */
+const imdPickerOpen = ref(false)
+const imdPresetLabel = computed(() => imdPreset(imd.preset).label)
+
+/**
+ * A preset chosen in the dialog.
+ *
+ * <p>Through the same handler the dropdown's <code>@change</code> used, so the side effects it
+ * carries — both tones rewritten from the sine-equivalent level, the IMD reading turned on — are
+ * not lost with the control.</p>
+ */
+function onPresetPicked(picked: ImdPresetId) {
+  imd.preset = picked
+  onPresetChange()
+}
+
+/**
+ * Whether <b>Clear</b> would change anything: a preset is in force, or the list holds more than
+ * one tone, or the one tone it holds is not the default.
+ *
+ * <p>Disabled rather than hidden when it would do nothing, so the control is in the same place
+ * whether or not it is reachable — and a press can never be a no-op a reader has to test for.</p>
+ */
+const canClearPreset = computed(
+  () =>
+    imd.preset !== 'Custom' ||
+    tones.length !== 1 ||
+    tones[0].freqHz !== DEFAULT_TONE.freqHz ||
+    tones[0].ampDbv !== DEFAULT_TONE.ampDbv,
+)
+
+/**
+ * Back to one 1 kHz tone — the way out of a preset (Joost, 2026-11-21).
+ *
+ * <p>A preset could only be left by picking <em>Custom</em> from the picker, which is the one
+ * entry there that is not a test and so reads as a sixth standard rather than as "none of them".
+ * Clear says what it does, and it does the whole of it: the preset goes back to Custom (which is
+ * what unlocks the per-tone boxes, through <code>presetActive</code>), and the pair a preset wrote
+ * is replaced by the single tone the panel starts on — because a <em>two</em>-tone list left
+ * behind is still an IMD measurement, which is exactly what was being cleared.</p>
+ *
+ * <p>The IMD method, its order and the two IMD tiles are <b>left alone</b>: the tiles were surfaced
+ * once as a convenience and a reader may have arranged them since, and with one tone the reading
+ * is absent anyway (<code>imdSpecFromStimulus</code> needs exactly two), so removing them would be
+ * tidying up something that has already stopped being shown.</p>
+ */
+function clearPreset() {
+  imd.preset = 'Custom'
+  tones.splice(0, tones.length, { ...DEFAULT_TONE })
+  actualFreqHz.splice(0, actualFreqHz.length, null)
+  emit('change')
+}
+
 const stimulusTitle = computed(
   () => stimulusEntry.value?.title ?? 'The stimulus this measurement plays. Choose one.',
 )
@@ -408,7 +473,10 @@ defineExpose({ currentConfig, syncFromStatus })
         :title="stimulusTitle"
         @click="stimulusPickerOpen = true"
       >
-        <ScopeToggleIcon v-if="stimulusIcon" :name="stimulusIcon" />
+        <PickerFigureWell v-if="stimulusIcon && stimulusWell" :tone="stimulusWell.tone" size="xs">
+          <ScopeToggleIcon :name="stimulusIcon" :size="18" :mark="sectionMarkColor(stimulusWell.mark)" />
+        </PickerFigureWell>
+        <ScopeToggleIcon v-else-if="stimulusIcon" :name="stimulusIcon" />
         <span class="min-w-0 flex-1 truncate">{{ stimulusLabel }}</span>
         <svg
           width="12"
@@ -433,16 +501,55 @@ defineExpose({ currentConfig, syncFromStatus })
     />
 
     <div v-if="kind === 'Tones'">
-      <label class="mb-3 flex flex-col gap-1 text-sm" title="A standard two-tone intermodulation test: sets both tones up from one sine-equivalent level (the pair's peak equals that sine's peak) and turns the IMD reading on.">
-        IMD preset
-        <select
-          v-model="imd.preset"
-          class="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
-          @change="onPresetChange"
+      <!-- A button carrying the chosen preset's own footprint, opening a picker. Five names in a
+           dropdown are a list to parse; five pictures of where each one puts its energy are
+           scanned, and that is the whole difference between these tests. -->
+      <div class="tb-field mb-3">
+        <!-- Clear sits on the caption row rather than beside the button: it is the way *out* of
+             this control, not a second thing to pick, and on its own line it would read as one. -->
+        <span class="tb-group flex items-center justify-between">
+          IMD preset
+          <button
+            type="button"
+            class="rounded px-1 text-[11px] font-semibold uppercase tracking-wide text-blue-600 transition hover:underline disabled:cursor-not-allowed disabled:text-neutral-400 disabled:no-underline dark:text-blue-400 dark:disabled:text-neutral-600"
+            :disabled="!canClearPreset"
+            title="Back to a single 1 kHz tone, which is where this panel starts. Leaves the IMD method and the readings alone."
+            @click="clearPreset"
+          >
+            Clear
+          </button>
+        </span>
+        <button
+          type="button"
+          class="tb-input flex items-center gap-2 text-left"
+          title="A standard two-tone intermodulation test: sets both tones up from one sine-equivalent level (the pair's peak equals that sine's peak) and turns the IMD reading on."
+          @click="imdPickerOpen = true"
         >
-          <option v-for="p in IMD_PRESETS" :key="p.value" :value="p.value">{{ p.label }}</option>
-        </select>
-      </label>
+          <PickerFigureWell tone="blue" size="xs"><ImdFootprint :preset="imd.preset" class="!h-4 !w-6" /></PickerFigureWell>
+          <span class="min-w-0 flex-1 truncate">{{ imdPresetLabel }}</span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="shrink-0 text-neutral-400"
+            aria-hidden="true"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </div>
+
+      <ImdPresetDialog
+        :open="imdPickerOpen"
+        :preset="imd.preset"
+        @close="imdPickerOpen = false"
+        @pick="onPresetPicked"
+      />
 
       <!-- Stacked rather than one row: with the unit dropdown beside the box there is no room left
            for "sine-eq." on the same line, and it wrapped mid-phrase. -->

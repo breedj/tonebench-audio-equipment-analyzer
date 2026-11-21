@@ -14,9 +14,42 @@
  * <em>placed</em>, and when it names a gate.</p>
  */
 
+import type { SegmentedOption } from '../panels/segmented'
 import { formatSeconds, type ScopeReading } from './readings'
 import { formatScopeTime } from './timeAxis'
 import { formatVolts } from './voltAxis'
+
+/**
+ * Whether the level pair is placed by hand or follows the trace.
+ *
+ * <p><b>Track is the Siglent's own mode and the one worth having</b>: the two time cursors are the
+ * only things dragged, and the level cursors go wherever the waveform is at those times — so ΔY is
+ * what the signal did between them and ΔY/ΔX is its average slope over that stretch, both without
+ * anybody having to place a horizontal line on a curve by eye. Manual keeps the two pairs
+ * independent, which is what you want for measuring against a level you already know (a rail, a
+ * threshold, a specified limit) rather than against the trace.</p>
+ */
+export type ScopeCursorMode = 'Manual' | 'Track'
+
+export const SCOPE_CURSOR_MODES: readonly SegmentedOption<ScopeCursorMode>[] = Object.freeze([
+  {
+    value: 'Manual' as const,
+    label: 'Manual',
+    title:
+      'Both pairs are placed by hand. For measuring against a level you already know — a rail, a threshold, a limit — where the point is that the line does not move with the trace.',
+  },
+  {
+    value: 'Track' as const,
+    label: 'Track',
+    title:
+      'The level cursors follow the trace at the two time cursors, with a square drawn where each one sits. ΔY is then what the signal did between them and ΔY/Δt is its average slope, with nothing to line up by eye.',
+  },
+])
+
+/** Whether a stored value is one of the two, so an unknown one falls back rather than renders blank. */
+export function isScopeCursorMode(value: unknown): value is ScopeCursorMode {
+  return value === 'Manual' || value === 'Track'
+}
 
 /** The staged cursors, one object so the chart and the panel can watch them as a unit. */
 export interface ScopeCursors {
@@ -25,11 +58,32 @@ export interface ScopeCursors {
   /** The time cursors, in seconds from the trigger. Either may be the earlier one. */
   timeAS: number
   timeBS: number
-  /** Whether the level pair is shown. */
+  /** Whether the level pair's own horizontal lines are drawn — the Siglent's <em>Show CursorY</em>. */
   voltOn: boolean
   /** The level cursors, in volts. Either may be the higher one. */
   voltAV: number
   voltBV: number
+  /** Placed by hand, or following the trace. See <code>ScopeCursorMode</code>. */
+  mode: ScopeCursorMode
+  /**
+   * Which trace the level pair follows under Track — a source key, as the readings table uses
+   * (<code>ch0</code>, <code>ch1</code>, <code>math1</code>, <code>math2</code>).
+   *
+   * <p>A choice rather than "whatever is drawn first", because with two traces on screen the
+   * reading is meaningless until it says which one it is of — and the one being measured is
+   * routinely not the one at the top of the list.</p>
+   */
+  trackSource: string
+  /**
+   * Whether the B time box is typed as a span from A rather than as a position.
+   *
+   * <p>The Siglent's <code>X2-X1</code>, and the reason it earns a control: a cursor pair is placed
+   * either to mark two <em>places</em> or to mark one <em>interval</em>, and in the second case the
+   * figure the reader has in mind is the interval. Typing 400 µs beats working out what 400 µs
+   * after −65 µs comes to. Only the box changes — <code>timeBS</code> is always an absolute
+   * position, so nothing downstream has to know which way it was typed.</p>
+   */
+  timeBIsSpan: boolean
 }
 
 /**
@@ -47,6 +101,9 @@ export const DEFAULT_SCOPE_CURSORS: Readonly<ScopeCursors> = Object.freeze({
   voltOn: false,
   voltAV: 0,
   voltBV: 0,
+  mode: 'Manual' as ScopeCursorMode,
+  trackSource: 'ch0',
+  timeBIsSpan: false,
 })
 
 /** Where a pair goes when it has to be placed: a quarter and three quarters across the window. */
@@ -72,6 +129,80 @@ export function cursorPairNeedsPlacing(a: number, b: number, min: number, max: n
   const lo = Math.min(min, max)
   const hi = Math.max(min, max)
   return a < lo || a > hi || b < lo || b > hi
+}
+
+/**
+ * The level of a drawn trace at one time, by straight interpolation between the two samples either
+ * side — what Track puts its level cursor at.
+ *
+ * <p><b>Of the drawn line, not of the record</b>, and that is the decision: where the slice is
+ * decimated the chart plots each column's maximum, so this follows that same array and the square
+ * lands <em>on the line the reader can see</em>. Reading the record instead would put the marker
+ * off the trace wherever a column covers more than one sample, which is exactly the case where a
+ * reader most wants to know what the picture is claiming.</p>
+ *
+ * <p>Null outside the trace's own span and wherever either neighbour is null — a gap in a trace is
+ * a stretch the analyzer did not measure, and interpolating across one would invent a level. Null
+ * is what the readout prints as a dash.</p>
+ */
+export function trackLevelAt(
+  xs: readonly number[],
+  ys: readonly (number | null | undefined)[],
+  x: number,
+): number | null {
+  if (!Number.isFinite(x) || xs.length === 0) return null
+  const last = Math.min(xs.length, ys.length) - 1
+  if (last < 0 || x < xs[0] || x > xs[last]) return null
+
+  // Binary search for the sample at or before x. The x array is ascending by construction -- it is
+  // the chart's own time axis -- so this needs no scan.
+  let lo = 0
+  let hi = last
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (xs[mid] <= x) lo = mid
+    else hi = mid - 1
+  }
+
+  const here = ys[lo]
+  if (here === null || here === undefined || !Number.isFinite(here)) return null
+  if (lo === last || xs[lo] === x) return here
+  const next = ys[lo + 1]
+  if (next === null || next === undefined || !Number.isFinite(next)) return here
+  const span = xs[lo + 1] - xs[lo]
+  if (!(span > 0)) return here
+  return here + ((next - here) * (x - xs[lo])) / span
+}
+
+/** What the B time box shows: a position, or the span from A. */
+export function cursorTimeBBox(cursors: ScopeCursors): number {
+  return cursors.timeBIsSpan ? cursors.timeBS - cursors.timeAS : cursors.timeBS
+}
+
+/** And back: what a figure typed into that box means as an absolute position. */
+export function cursorTimeBFromBox(cursors: ScopeCursors, typed: number): number {
+  return cursors.timeBIsSpan ? cursors.timeAS + typed : typed
+}
+
+/**
+ * Whether the level pair is following the trace.
+ *
+ * <p>Both halves: Track with no time pair has nothing to follow, so it is not tracking — which is
+ * why this is a function rather than a comparison written out at six call sites.</p>
+ */
+export function cursorsTrack(cursors: ScopeCursors): boolean {
+  return cursors.mode === 'Track' && cursors.timeOn
+}
+
+/**
+ * Whether the level figures are worth printing at all.
+ *
+ * <p><code>voltOn</code> is what draws the two horizontal <em>lines</em> — the Siglent's
+ * <em>Show CursorY</em> — and under Track the levels are a reading whether or not those lines are
+ * on: the squares on the trace are already saying where they are.</p>
+ */
+export function cursorLevelsRead(cursors: ScopeCursors): boolean {
+  return cursors.voltOn || cursorsTrack(cursors)
 }
 
 /** A window, ordered, the way the record fetch wants it. */
@@ -127,10 +258,18 @@ export function cursorReadings(cursors: ScopeCursors, voltsPerDivision: number, 
     }
   }
 
-  if (cursors.voltOn && Number.isFinite(cursors.voltAV) && Number.isFinite(cursors.voltBV)) {
+  if (cursorLevelsRead(cursors) && Number.isFinite(cursors.voltAV) && Number.isFinite(cursors.voltBV)) {
     const v = (volts: number) => formatVolts(volts, voltsPerDivision)
-    rows.push({ label: 'Level A', value: v(cursors.voltAV), title: 'Where the first level cursor sits.' })
-    rows.push({ label: 'Level B', value: v(cursors.voltBV), title: 'Where the second level cursor sits.' })
+    const tracked = cursorsTrack(cursors)
+    const where = tracked
+      ? 'Where the trace is at the first time cursor.'
+      : 'Where the first level cursor sits.'
+    rows.push({ label: 'Level A', value: v(cursors.voltAV), title: where })
+    rows.push({
+      label: 'Level B',
+      value: v(cursors.voltBV),
+      title: tracked ? 'Where the trace is at the second time cursor.' : 'Where the second level cursor sits.',
+    })
     rows.push({
       label: 'ΔV',
       value: v(Math.abs(cursors.voltBV - cursors.voltAV)),

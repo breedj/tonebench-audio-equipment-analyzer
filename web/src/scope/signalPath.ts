@@ -28,16 +28,34 @@ export const DEFAULT_SCOPE_PATH: Readonly<ScopeSignalPathSettings> = Object.free
   coupling: 'Dc',
 })
 
-export const SCOPE_COUPLINGS: readonly { value: ScopeCoupling; label: string; title: string }[] =
-  Object.freeze([
+/**
+ * The two couplings as the toggle offers them.
+ *
+ * <p>Each carries a <b>figure</b> and its own <b>hue</b> — Joost's design of 2026-11-20. The
+ * difference between them is where the wave sits against zero, which a picture says at a glance
+ * and two initials do not: <em>DC</em> and <em>AC</em> are a pair a reader has to already know.
+ * The hue is the app's own blue and pink and reaches only the option that is on, so the colour
+ * never carries the state on its own — the track's lift already does that.</p>
+ */
+export const SCOPE_COUPLINGS: readonly {
+  value: ScopeCoupling
+  label: string
+  title: string
+  icon: string
+  dot: string
+}[] = Object.freeze([
     {
       value: 'Dc',
       label: 'DC',
+      icon: 'couplingDc',
+      dot: 'var(--kind-blue-chip-fg)',
       title: 'The trace as the analyzer captured it, standing offset and all.',
     },
     {
       value: 'Ac',
       label: 'AC',
+      icon: 'couplingAc',
+      dot: 'var(--kind-pink-chip-fg)',
       title:
         'The record’s own mean subtracted. On this hardware that is exactly the right operation: both the QA403 and a sound card already block DC, so what is left is the front end’s own standing offset — a constant, which a mean removes exactly and a high-pass would only approximate while ringing at the start of the record.',
     },

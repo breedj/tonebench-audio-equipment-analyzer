@@ -19,6 +19,11 @@
  * everywhere and the one this file has the most opportunities to break.</p>
  */
 
+import {
+  groupIntoSections,
+  type PickerSection,
+  type PickerSectionOf,
+} from '../panels/pickerSections'
 import type { ScopeSliceMeasurements, ScopeXySlice } from '../api/client'
 
 /** The tabs of the picker, in the order it offers them. */
@@ -31,6 +36,92 @@ export const SCOPE_MEASUREMENT_GROUPS: readonly { value: ScopeMeasurementGroup; 
     { value: 'Miscellaneous', label: 'Miscellaneous' },
     { value: 'Delay', label: 'Channel delay' },
   ])
+
+/** Every section id, which is what a measurement's own `section` is checked against. */
+export type ScopeMeasurementSectionId =
+  | 'peaks'
+  | 'levels'
+  | 'averages'
+  | 'rms'
+  | 'shape'
+  | 'rate'
+  | 'widths'
+  | 'edges'
+  | 'peakTimes'
+  | 'area'
+  | 'timing'
+  | 'match'
+
+/**
+ * The sections each tab is laid out in — Joost's design of 2026-11-20 for the Vertical tab, and
+ * the same treatment carried across the other three.
+ *
+ * <p><b>Why a second level of grouping at all.</b> A tab is already a group, and the Vertical one
+ * holds fifteen entries: past about six, a grid stops being scanned and starts being read, which is
+ * exactly what the figures beside each entry exist to prevent. Five short lists under headings is
+ * one glance to the right section and one to the right tile.</p>
+ *
+ * <p><b>Each section names what its members have in common</b>, which is the thing that is being
+ * chosen by and which no entry can say about itself: that <em>Top</em> and <em>Base</em> are
+ * settled levels rather than extremes is the whole difference between them and <em>Max</em> and
+ * <em>Min</em>, and it is said once here instead of in four tooltips.</p>
+ *
+ * <p>The hue carries no meaning of its own beyond telling one section from the next; what it is
+ * <em>for</em> is holding a section together visually once the heading has scrolled past the top of
+ * the list.</p>
+ */
+export const SCOPE_MEASUREMENT_SECTIONS: readonly (PickerSection & {
+  group: ScopeMeasurementGroup
+})[] = Object.freeze([
+  // ---- Vertical ----
+  { group: 'Vertical', id: 'peaks', label: 'Peaks', note: 'extremes of the record', tone: 'blue', mark: 'orange' },
+  { group: 'Vertical', id: 'levels', label: 'Levels', note: 'settled high / low, for pulses', tone: 'teal', mark: 'pink' },
+  { group: 'Vertical', id: 'averages', label: 'Averages', note: 'DC content', tone: 'violet', mark: 'amber' },
+  { group: 'Vertical', id: 'rms', label: 'RMS & spread', note: 'power and noise', tone: 'green', mark: 'red' },
+  { group: 'Vertical', id: 'shape', label: 'Shape', note: 'ratio and edges', tone: 'red', mark: 'cyan' },
+  // ---- Horizontal ----
+  { group: 'Horizontal', id: 'rate', label: 'Rate', note: 'how often it repeats', tone: 'blue', mark: 'orange' },
+  { group: 'Horizontal', id: 'widths', label: 'Widths', note: 'how long each half lasts', tone: 'teal', mark: 'pink' },
+  { group: 'Horizontal', id: 'edges', label: 'Edges', note: 'how fast it gets between them', tone: 'violet', mark: 'amber' },
+  { group: 'Horizontal', id: 'peakTimes', label: 'Peak times', note: 'when the extremes fell', tone: 'green', mark: 'red' },
+  // ---- Miscellaneous ----
+  { group: 'Miscellaneous', id: 'area', label: 'Area', note: 'the integral under the trace', tone: 'violet', mark: 'amber' },
+  // ---- Channel delay ----
+  { group: 'Delay', id: 'timing', label: 'Timing', note: 'how far apart the two inputs are', tone: 'blue', mark: 'orange' },
+  { group: 'Delay', id: 'match', label: 'Match', note: 'how alike they are', tone: 'violet', mark: 'amber' },
+])
+
+/**
+ * One measurement's section, for the places outside the picker that draw its figure.
+ *
+ * <p>The readings table is the one that matters: a row's figure is the same drawing the tile it was
+ * chosen from carried, so drawing it in the same colours is what ties the two together — and a
+ * column of them then says which section each reading came from without a word. Null for an id
+ * this build does not know, which the table already draws as no figure at all.</p>
+ */
+export function scopeMeasurementSection(id: string): PickerSection | null {
+  const def = scopeMeasurement(id)
+  if (!def) return null
+  return SCOPE_MEASUREMENT_SECTIONS.find((section) => section.id === def.section) ?? null
+}
+
+/**
+ * One tab's sections with their entries, empty sections dropped.
+ *
+ * <p>The thing worth catching is an entry whose section belongs to another tab, which drops it out
+ * of the dialog with nothing to say so — the catalogue's own test asserts that every tab's sections
+ * give back exactly the entries <code>scopeMeasurementsIn</code> does.</p>
+ */
+export function scopeMeasurementSections(
+  group: ScopeMeasurementGroup,
+  defs: readonly ScopeMeasurementDef[] = SCOPE_MEASUREMENTS,
+): PickerSectionOf<ScopeMeasurementDef>[] {
+  return groupIntoSections(
+    SCOPE_MEASUREMENT_SECTIONS.filter((section) => section.group === group),
+    defs.filter((def) => def.group === group),
+    (def) => def.section,
+  )
+}
 
 /**
  * What a reading is in — which decides both how it is written and whether the math trace's own unit
@@ -56,6 +147,8 @@ export interface ScopeMeasurementDef {
   /** What the row and the picker call it — a scope's own short form. */
   label: string
   group: ScopeMeasurementGroup
+  /** Which section of its tab it is offered under — see <code>SCOPE_MEASUREMENT_SECTIONS</code>. */
+  section: ScopeMeasurementSectionId
   /** Which glyph <code>ScopeMeasurementIcon</code> draws for it. */
   icon: string
   /** What it means, for the picker's and the row's tooltip. */
@@ -89,76 +182,91 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
   // ---- Vertical ----
   {
     id: 'max', label: 'Max', group: 'Vertical', icon: 'max', quantity: 'level',
+    section: 'peaks',
     title: 'The highest sample in the window — exact even on a decimated slice, because both extremes of every column are kept.',
     read: (m) => m.maxV,
   },
   {
     id: 'min', label: 'Min', group: 'Vertical', icon: 'min', quantity: 'level',
+    section: 'peaks',
     title: 'The lowest sample in the window.',
     read: (m) => m.minV,
   },
   {
     id: 'pkpk', label: 'Pk-Pk', group: 'Vertical', icon: 'pkpk', quantity: 'level',
+    section: 'peaks',
     title: 'The maximum less the minimum.',
     read: (m) => m.peakToPeakV,
   },
   {
     id: 'top', label: 'Top', group: 'Vertical', icon: 'top', quantity: 'level',
+    section: 'levels',
     title: 'The settled high level, from a histogram of the samples rather than from the maximum — so an overshoot does not move it. A sine has no flat top and this comes out at its peak.',
     read: (m) => m.topV,
   },
   {
     id: 'base', label: 'Base', group: 'Vertical', icon: 'base', quantity: 'level',
+    section: 'levels',
     title: 'The settled low level.',
     read: (m) => m.baseV,
   },
   {
     id: 'amplitude', label: 'Amplitude', group: 'Vertical', icon: 'amplitude', quantity: 'level',
+    section: 'levels',
     title: 'Top less base — what the edge thresholds and the overshoot are measured against.',
     read: (m) => m.amplitudeV,
   },
   {
     id: 'mean', label: 'Mean', group: 'Vertical', icon: 'mean', quantity: 'level',
+    section: 'averages',
     title: "The average of the window's samples. Both this analyzer and a sound card are AC-coupled, so on a quiet input this is the input's own residual offset and not the DUT's DC.",
     read: (m) => m.meanV,
   },
   {
     id: 'cycleMean', label: 'Cycle mean', group: 'Vertical', icon: 'cycleMean', quantity: 'level',
+    section: 'averages',
     title: 'The mean over one period rather than over the window. The mean of a sine over a whole cycle is zero; over the 10.3 cycles a timebase happens to show, it is whatever the 0.3 contributes.',
     read: (m) => m.cycleMeanV,
   },
   {
     id: 'rms', label: 'RMS', group: 'Vertical', icon: 'rms', quantity: 'level',
+    section: 'rms',
     title: 'True RMS of the window, DC included.',
     read: (m) => m.rmsV,
   },
   {
     id: 'cycleRms', label: 'Cycle RMS', group: 'Vertical', icon: 'cycleRms', quantity: 'level',
+    section: 'rms',
     title: 'True RMS over one period. The figure to quote for a periodic signal: a window holding a part-cycle biases the whole-window RMS by up to 0.4 % at ten cycles in view and 3.6 % at one, and nothing on screen would say so.',
     read: (m) => m.cycleRmsV,
   },
   {
     id: 'acRms', label: 'AC RMS', group: 'Vertical', icon: 'acRms', quantity: 'level',
+    section: 'rms',
     title: 'RMS about the mean — the figure to quote for a signal riding on an offset. It is also the standard deviation of the samples.',
     read: (m) => m.acRmsV,
   },
   {
     id: 'cycleStdev', label: 'Cycle stdev', group: 'Vertical', icon: 'cycleStdev', quantity: 'level',
+    section: 'rms',
     title: "RMS about one cycle's own mean — the AC RMS of a single period.",
     read: (m) => m.cycleStdevV,
   },
   {
     id: 'crest', label: 'Crest', group: 'Vertical', icon: 'crest', quantity: 'ratio',
+    section: 'shape',
     title: 'Peak over true RMS. 1.41 for a sine, 1.00 for a square. Absent on digital silence, where it is infinite.',
     read: (m) => m.crestFactor,
   },
   {
     id: 'overshoot', label: 'Overshoot', group: 'Vertical', icon: 'overshoot', quantity: 'percent',
+    section: 'shape',
     title: 'How far past the top the trace goes, as a percentage of the amplitude.',
     read: (m) => m.overshootPercent,
   },
   {
     id: 'preshoot', label: 'Preshoot', group: 'Vertical', icon: 'preshoot', quantity: 'percent',
+    section: 'shape',
     title: 'The same below the base.',
     read: (m) => m.preshootPercent,
   },
@@ -166,51 +274,61 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
   // ---- Horizontal ----
   {
     id: 'freq', label: 'Freq', group: 'Horizontal', icon: 'freq', quantity: 'frequency',
+    section: 'rate',
     title: 'From one period of the trace, measured between successive rising crossings of the middle.',
     read: (m) => m.frequencyHz,
   },
   {
     id: 'period', label: 'Period', group: 'Horizontal', icon: 'period', quantity: 'time',
+    section: 'rate',
     title: 'One cycle, between successive rising crossings of the middle.',
     read: (m) => m.periodS,
   },
   {
     id: 'posWidth', label: '+Width', group: 'Horizontal', icon: 'posWidth', quantity: 'time',
+    section: 'widths',
     title: 'How long the waveform spends above the middle in one cycle.',
     read: (m) => m.positiveWidthS,
   },
   {
     id: 'negWidth', label: '−Width', group: 'Horizontal', icon: 'negWidth', quantity: 'time',
+    section: 'widths',
     title: 'How long it spends below the middle in one cycle — the other half of the period.',
     read: (m) => m.negativeWidthS,
   },
   {
     id: 'posDuty', label: '+Duty', group: 'Horizontal', icon: 'posDuty', quantity: 'percent',
+    section: 'widths',
     title: 'How much of the period the waveform spends above the middle.',
     read: (m) => m.dutyPercent,
   },
   {
     id: 'negDuty', label: '−Duty', group: 'Horizontal', icon: 'negDuty', quantity: 'percent',
+    section: 'widths',
     title: 'And below it. Measured from the negative width rather than written as 100 − duty, so it is a second reading of the cycle instead of a restatement of the first.',
     read: (m) => m.negativeDutyPercent,
   },
   {
     id: 'rise', label: 'Rise', group: 'Horizontal', icon: 'rise', quantity: 'time',
+    section: 'edges',
     title: '10 % to 90 % of the first clean rising edge. Nothing faster than about 4 µs is the DUT rather than this analyzer.',
     read: (m) => m.riseTimeS,
   },
   {
     id: 'fall', label: 'Fall', group: 'Horizontal', icon: 'fall', quantity: 'time',
+    section: 'edges',
     title: '90 % to 10 % of the first clean falling edge.',
     read: (m) => m.fallTimeS,
   },
   {
     id: 'timeAtMax', label: 'Time@max', group: 'Horizontal', icon: 'timeAtMax', quantity: 'time',
+    section: 'peakTimes',
     title: 'When the maximum fell, on the chart’s own axis — negative anywhere in the pre-trigger. The first such sample, so a clipped flat top says where the clipping began.',
     read: (m) => m.timeAtMaxS,
   },
   {
     id: 'timeAtMin', label: 'Time@min', group: 'Horizontal', icon: 'timeAtMin', quantity: 'time',
+    section: 'peakTimes',
     title: 'The same for the minimum.',
     read: (m) => m.timeAtMinS,
   },
@@ -218,11 +336,13 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
   // ---- Miscellaneous ----
   {
     id: 'area', label: 'Area', group: 'Miscellaneous', icon: 'area', quantity: 'area',
+    section: 'area',
     title: 'The integral of the window, in volt-seconds — the mean times how long the window is.',
     read: (m) => m.areaVs,
   },
   {
     id: 'cycleArea', label: 'Cycle area', group: 'Miscellaneous', icon: 'cycleArea', quantity: 'area',
+    section: 'area',
     title: 'The integral over one period. Zero for anything symmetric about its own mean, so what it reads is the net offset a cycle carries.',
     read: (m) => m.cycleAreaVs,
   },
@@ -230,11 +350,13 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
   // ---- Channel delay: the two inputs taken together ----
   {
     id: 'phase', label: 'Phase', group: 'Delay', icon: 'phase', quantity: 'angle',
+    section: 'timing',
     title: 'How far the right input lags the left, from the argument of each channel’s own single-bin transform. Absent where the two disagree about their frequency, where either is silent, or where one number is not this figure’s phase.',
     readPair: (xy) => xy.phaseDeg,
   },
   {
     id: 'skew', label: 'Skew', group: 'Delay', icon: 'skew', quantity: 'time',
+    section: 'timing',
     title: 'That same lag written as a time. It is the phase divided by the frequency rather than a second measurement, so it is defined exactly where the phase is and carries the same ambiguity beyond half a period.',
     readPair: (xy, frequencyHz) =>
       xy.phaseDeg !== null && frequencyHz != null && Number.isFinite(frequencyHz) && frequencyHz > 0
@@ -243,11 +365,13 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
   },
   {
     id: 'correlation', label: 'Correlation', group: 'Delay', icon: 'correlation', quantity: 'ratio',
+    section: 'match',
     title: "Pearson's r over the pair, about each channel's own mean. +1 is the same signal, 0 unrelated, −1 inverted. The one figure here that is always meaningful.",
     readPair: (xy) => xy.correlation,
   },
   {
     id: 'amplitudeRatio', label: 'R/L ratio', group: 'Delay', icon: 'ratio', quantity: 'ratio',
+    section: 'match',
     title: "The right input's AC RMS over the left's.",
     readPair: (xy) => xy.amplitudeRatio,
   },

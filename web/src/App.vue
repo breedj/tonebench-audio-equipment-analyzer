@@ -89,7 +89,7 @@ import {
   type ScopeMaskTally,
   type ScopeMaskVerdict,
 } from './scope/mask'
-import { autosetNote, scopeAutoset } from './scope/autoset'
+import { scopeAutoset } from './scope/autoset'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
 import { scopeViewIsXy } from './scope/xy'
@@ -2568,8 +2568,6 @@ let scopeRecordsCounted = -1
 watch(currentTypeId, () => {
   scopeMeasurementSelection.resetStats()
   scopeRecordsCounted = -1
-  // The Autoset line describes a press that was about the measurement being left.
-  scopeAutosetNote.value = null
 })
 
 watch(scopeRecord, (record) => {
@@ -2931,15 +2929,6 @@ function onScopeTriggerLevelCommitted() {
 }
 
 /**
- * What the last Autoset did, for the line under the button, or null before one has run.
- *
- * <p>Session state like the cursors: it describes a press rather than the measurement, so it is
- * not stored and not in a report. Cleared on a measurement switch, the press having been about the
- * measurement being left.</p>
- */
-const scopeAutosetNote = ref<string | null>(null)
-
-/**
  * One press that makes an unknown signal readable and standing still.
  *
  * <p><b>Against Autofit, which is already on the display rail.</b> Autofit frames the
@@ -2950,12 +2939,11 @@ const scopeAutosetNote = ref<string | null>(null)
  *
  * <p><b>In the run row rather than the display rail</b>, which is where a bench instrument puts it
  * and is the honest place: what it writes crosses two panels — the vertical and the window belong
- * to the display, the trigger level to the settings — so it belongs to neither.</p>
+ * to the display, the timebase and the trigger level to the settings — so it belongs to neither.</p>
  */
 function autosetOscilloscope() {
   const extremes = scopeExtremes.value
-  const bounds = scopeRecordBounds.value
-  if (!extremes || !bounds) return
+  if (!extremes) return
 
   const channel = scopeTriggerSource.value === 'ChannelB' ? 1 : 0
   const result = scopeAutoset({
@@ -2964,28 +2952,27 @@ function autosetOscilloscope() {
     frequencyHz:
       scopeRecord.value?.channels.find((slice) => slice.channel === channel)?.measurements
         ?.frequencyHz ?? null,
-    recordFromS: bounds.fromS,
-    recordToS: bounds.toS,
   })
   if (!result) return
 
   scopeVoltsPerDivision.value = result.voltsPerDivision
   scopeVoltOffsetV.value = result.offsetV
-  // The timebase first: the record then holds three periods, and the window written below is what
-  // the *record on hand* can show until the next capture arrives at the new length. Autoset is a
-  // horizontal control now rather than only a chooser of windows inside whatever was set.
+  // The timebase, which is the whole of what Autoset does horizontally: the record is made three
+  // periods long rather than a window of three periods being chosen inside whatever was set.
   if (result.timePerDivisionS !== null) scopeRecordSeconds.value = recordSecondsFor(result.timePerDivisionS)
-  scopeTimeFromS.value = result.fromS
-  scopeTimeToS.value = result.toS
-  // The zoom goes with it, or a window dragged on the chart would go on overriding the one Autoset
-  // has just chosen and the press would read as having done nothing.
+  // And the window is then all of it (asked for 2026-11-21). Read *after* the record is written,
+  // so it is the span the next capture will have; the record-length watcher sees a window that is
+  // already the new record's own and clamps it to itself. The zoom goes with it, or a window
+  // dragged on the chart would go on overriding the one Autoset has just chosen and the press
+  // would read as having done nothing.
+  const whole = recordWindow(scopeRecordSeconds.value, scopeDisplayPreTriggerFraction.value)
+  scopeTimeFromS.value = whole.fromS
+  scopeTimeToS.value = whole.toS
   scopeViewWindow.value = null
   scopeTriggerLevelV.value = result.triggerLevelV
   // A level only takes effect on the next arm, so a run already going is retuned -- which is what
   // the dragged level's own commit does.
   onScopeTriggerLevelCommitted()
-
-  scopeAutosetNote.value = autosetNote(result)
 }
 
 /**
@@ -6597,28 +6584,30 @@ onBeforeUnmount(() => stopLoadPolling?.())
 
                 <!-- AUTOSET. In the run row rather than the display rail, which is where a bench
                      instrument puts it and is the honest place: what it writes crosses two panels.
-                     Disabled with nothing captured, because every figure it uses is measured. -->
-                <div class="flex flex-col gap-1">
-                  <button
-                    type="button"
-                    class="btn-secondary w-full"
-                    :disabled="!scopeExtremes"
-                    :title="
-                      scopeExtremes
-                        ? 'Fits the vertical to the signal, puts about three of its cycles on screen and sets the trigger to the middle of it.'
-                        : 'Capture something first — Autoset reads the record on screen.'
-                    "
-                    @click="autosetOscilloscope"
-                  >
-                    Autoset
-                  </button>
-                  <p
-                    v-if="scopeAutosetNote"
-                    class="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400"
-                  >
-                    {{ scopeAutosetNote }}
-                  </p>
-                </div>
+                     Disabled with nothing captured, because every figure it uses is measured.
+
+                     In the panel action's own violet rather than the outlined grey it wore until
+                     2026-11-21 (Joost): it is the same kind of control as Autofit at the top of the
+                     display rail — one press that frames the trace — so the two read as the pair they
+                     are, and neither is mistaken for the saturated blocks beside it that start a run.
+
+                     What it did used to be reported on a line under it, and that line is gone with
+                     the same change: it appeared after the first press and stayed for the rest of
+                     the session, taking two rows off the rail to describe a press whose whole
+                     result is already on screen in the controls it wrote. -->
+                <button
+                  type="button"
+                  class="btn-panel-accent"
+                  :disabled="!scopeExtremes"
+                  :title="
+                    scopeExtremes
+                      ? 'Fits the vertical to the signal, sets the timebase to about three of its cycles and the trigger to the middle of it, and shows the whole record.'
+                      : 'Capture something first — Autoset reads the record on screen.'
+                  "
+                  @click="autosetOscilloscope"
+                >
+                  Autoset
+                </button>
 
                 <GeneratorPanel
                   ref="scopeGeneratorPanel"
@@ -6653,9 +6642,13 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   @retune="onScopeRetune"
                 />
 
+                <!-- The staged pair as well as the window: the panel's badges are what the next
+                     capture will be, which the Acquisition controls above decide. -->
                 <ScopeMeasurementsPanel
                   :time-from-s="scopeTimeFromS"
                   :time-to-s="scopeTimeToS"
+                  :staged-record-seconds="scopeRecordSeconds"
+                  :staged-sample-rate-hz="scopeStagedSampleRateHz"
                 />
               </template>
 
@@ -6805,6 +6798,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:mask-on="scopeMaskOn"
                   v-model:mask-tolerance-v="scopeMaskToleranceV"
                   v-model:mask-tolerance-s="scopeMaskToleranceS"
+                  :references="visibleScopeOverlays"
                   :mask-reference-name="scopeMaskReferenceName"
                   :mask-tally="scopeMaskTally"
                   @cursors-committed="onScopeCursorsCommitted"

@@ -468,14 +468,16 @@ describe('the Trigger panel\u2019s lists', () => {
     // Mode, Records, Source, Kind, Slope, Condition. The sample rate stays a <select>: its options
     // are a list of numbers, which no figure says anything about.
     expect(lists).toHaveLength(6)
-    // The only <select>s left are the two whose options are lists of *numbers*, which no figure
-    // would say anything about: the sample rate and the timebase.
+    // And it is now the *only* one. The timebase was the second until 2026-11-21, when it became a
+    // stepper tile: its options are numbers too, so a figure would say nothing about them either,
+    // but a ladder is driven a step at a time with the trace in view and a popup covers it.
     // `<select` followed by whitespace *and an attribute* -- so the one in this panel's own prose,
     // which explains why the trigger controls are no longer one, is not counted as a control.
     const selects = source.match(/<select\s+[a-z:@][\s\S]*?>/g) ?? []
-    expect(selects).toHaveLength(2)
+    expect(selects).toHaveLength(1)
     expect(selects.join()).toMatch(/form\.sampleRateHz/)
-    expect(selects.join()).toMatch(/timePerDivisionS/)
+    // The timebase is a tile, stepped and picked from its own grid.
+    expect(source).toMatch(/<StepperTile[\s\S]*?label="Time\/div"/)
   })
 
   it('names each one, since the button carries a figure rather than a label element', () => {

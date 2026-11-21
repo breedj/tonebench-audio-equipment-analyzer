@@ -152,6 +152,8 @@
   --kind-amber-chip-fg: #b45309;
   --kind-green-chip-bg: #d8f5e0;
   --kind-green-chip-fg: #15803d;
+  --kind-slate-chip-bg: #e6eaf0;
+  --kind-slate-chip-fg: #334155;
 
   /* The light badges carry no border — the tint alone is enough against a white header — so the
      border is transparent rather than absent, keeping the pill the same size in both themes. */
@@ -167,6 +169,17 @@
   --kind-violet-badge-bg: #ede9fe;
   --kind-violet-badge-fg: #6d28d9;
   --kind-violet-badge-border: transparent;
+  --kind-red-badge-bg: #fee2e2;
+  --kind-red-badge-fg: #b91c1c;
+  --kind-red-badge-border: transparent;
+  --kind-green-badge-bg: #dcfce7;
+  --kind-green-badge-fg: #15803d;
+  --kind-green-badge-border: transparent;
+  /* The one tone that is not an accent: it marks a section that is deliberately NOT a standard —
+     "your own pair" beside the named tests — and a hue there would make it look like a third one. */
+  --kind-slate-badge-bg: #f1f5f9;
+  --kind-slate-badge-fg: #334155;
+  --kind-slate-badge-border: transparent;
 
   /* A card lifts on hover by darkening its border and casting a shadow in the light theme, and by
      lightening its own surface in the dark one — where a shadow against a near-black ground is
@@ -198,6 +211,8 @@
   --kind-amber-chip-fg: #fbbf24;
   --kind-green-chip-bg: #4ade8024;
   --kind-green-chip-fg: #4ade80;
+  --kind-slate-chip-bg: #94a3b824;
+  --kind-slate-chip-fg: #94a3b8;
 
   --kind-orange-badge-bg: #fb923c24;
   --kind-orange-badge-fg: #fdba74;
@@ -211,6 +226,15 @@
   --kind-violet-badge-bg: #a78bfa24;
   --kind-violet-badge-fg: #c4b5fd;
   --kind-violet-badge-border: #a78bfa40;
+  --kind-red-badge-bg: #f8717124;
+  --kind-red-badge-fg: #fca5a5;
+  --kind-red-badge-border: #f8717140;
+  --kind-green-badge-bg: #4ade8024;
+  --kind-green-badge-fg: #86efac;
+  --kind-green-badge-border: #4ade8040;
+  --kind-slate-badge-bg: #94a3b824;
+  --kind-slate-badge-fg: #cbd5e1;
+  --kind-slate-badge-border: #94a3b840;
 
   --kind-card-hover-bg: #1f2330;
   --kind-card-hover-border: #3f4659;
@@ -425,7 +449,8 @@
     background-color: var(--surface-track);
   }
   .tb-segment {
-    @apply h-[30px] rounded-lg px-1 text-[12px] text-neutral-600 transition dark:text-neutral-300;
+    @apply inline-flex h-[30px] items-center justify-center gap-1.5 rounded-lg px-1 text-[12px];
+    @apply text-neutral-600 transition dark:text-neutral-300;
     @apply hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-neutral-100;
   }
   .tb-segment-on {

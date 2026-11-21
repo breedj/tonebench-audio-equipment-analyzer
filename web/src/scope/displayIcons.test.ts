@@ -10,7 +10,6 @@ import {
 } from './displayIcons'
 import { SCOPE_ACCUMULATIONS } from './acquisition'
 import { STIMULUS_KINDS } from '../generator/stimulusKinds'
-import { SCOPE_MATH_TILES } from './math'
 import {
   SCOPE_PULSE_CONDITIONS,
   SCOPE_RUN_MODES,
@@ -18,6 +17,7 @@ import {
   SCOPE_TRIGGER_SLOPES,
   SCOPE_TRIGGER_SOURCES,
 } from './triggerSpec'
+import { SCOPE_COUPLINGS } from './signalPath'
 
 /** Every x and y a shape puts ink at, a marker's own radius included. */
 function extent(shape: ScopeToggleShape): { xs: number[]; ys: number[] } {
@@ -89,7 +89,13 @@ function extent(shape: ScopeToggleShape): { xs: number[]; ys: number[] } {
 function everyIconAskedFor(): Set<string> {
   const asked = new Set<string>()
 
-  for (const file of ['components/ScopeDisplayPanel.vue', 'components/ScopeConfigPanel.vue']) {
+  // GeneratorPanel is here for its Snap to bin toggle, which is the one figure on this set that is
+  // not on the oscilloscope's own rails.
+  for (const file of [
+    'components/ScopeDisplayPanel.vue',
+    'components/ScopeConfigPanel.vue',
+    'components/GeneratorPanel.vue',
+  ]) {
     const source = readFileSync(resolve(import.meta.dirname, '..', file), 'utf8')
     // The three Drawing modes, from the map the buttons read.
     for (const m of source.matchAll(/^\s*(?:Linear|Sinc|Dots):\s*'([a-zA-Z]+)',/gm)) asked.add(m[1])
@@ -100,10 +106,11 @@ function everyIconAskedFor(): Set<string> {
     }
   }
 
-  // The generator's stimuli and the math channel's operations name theirs in their own tables, as
-  // the trigger controls do.
+  // The generator's stimuli name theirs in their own table, as the trigger controls do. The math
+  // tiles no longer appear here: their figures are computed from the operation itself
+  // (`scope/mathFigures.ts`) rather than picked out of this set, since the tile's own mono label
+  // already says `A - B` and a minus sign beside it was the same thing twice.
   for (const option of STIMULUS_KINDS) asked.add(option.icon)
-  for (const tile of SCOPE_MATH_TILES) asked.add(tile.icon)
 
   for (const table of [
     SCOPE_RUN_MODES,
@@ -112,6 +119,7 @@ function everyIconAskedFor(): Set<string> {
     SCOPE_TRIGGER_SOURCES,
     SCOPE_PULSE_CONDITIONS,
     SCOPE_ACCUMULATIONS,
+    SCOPE_COUPLINGS,
   ]) {
     for (const option of table as readonly { icon?: string }[]) {
       if (option.icon) asked.add(option.icon)

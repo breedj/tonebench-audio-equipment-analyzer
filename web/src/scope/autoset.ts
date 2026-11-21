@@ -1,44 +1,48 @@
 /**
  * Autoset: one press that makes an unknown signal readable and standing still.
  *
- * <p><b>What it is, against Autofit, which is already on this screen.</b> Autofit frames the record
- * — the whole of it across, and the volts window around what was captured. That is the right answer
- * for looking at a capture and the wrong one for looking at a <em>waveform</em>: a 20 ms record of
- * a 1 kHz tone drawn whole is twenty cycles in a few hundred pixels, where nothing about the shape
- * of one cycle can be read. Autoset answers the other question — show me a few cycles of this,
+ * <p><b>What it is, against Autofit, which is already on this screen.</b> Autofit frames whatever
+ * was captured — the whole record across, the volts window around what is in it. That is the right
+ * answer for looking at a capture and the wrong one for looking at a <em>waveform</em>: a 20 ms
+ * record of a 1 kHz tone drawn whole is twenty cycles in a few hundred pixels, where nothing about
+ * the shape of one can be read. Autoset answers the other question — show me a few cycles of this,
  * standing still — which needs the three things a bench scope's own Autoset sets: the vertical from
- * the measured extremes, the timebase from the measured <em>frequency</em>, and the trigger level
- * at the middle of the signal so the trace stops moving.</p>
+ * the measured extremes, the <b>timebase</b> from the measured frequency, and the trigger level at
+ * the middle of the signal.</p>
+ *
+ * <p><b>It sets the timebase and not a window, which is the whole of what it does horizontally</b>
+ * (asked for 2026-11-21). It used to do both: the record was left as it was and a window of three
+ * periods was chosen inside it, which could only ever work where the record already held them —
+ * three periods of 20 Hz is 150 ms, and a 20 ms capture does not contain them at any zoom. Setting
+ * the record to three periods and then showing <em>all</em> of it says the same thing with one
+ * control instead of two, and leaves the zoom bar covering the whole strip rather than a box the
+ * press put somewhere. The window the caller writes afterwards is therefore the record's own span,
+ * which is why none of it is computed here: the record's geometry needs the pre-trigger fraction,
+ * which belongs to the panel rather than to this arithmetic.</p>
+ *
+ * <p><b>What it did is not reported anywhere, deliberately</b> (Joost, 2026-11-21). There was a
+ * line under the button saying how many cycles it had landed on; it appeared after the first
+ * press and stayed for the rest of the session, which cost two rows of the rail to describe a
+ * press whose whole result is already on screen — in the timebase, the vertical and the trigger
+ * level it wrote, and in the trace those three produce.</p>
  *
  * <p><b>Here rather than in a component</b> for this project's usual reason — nothing in a
  * <code>.vue</code> is testable under the node environment vitest runs in — and because what it
- * writes crosses two panels: the vertical and the window belong to the display rail, the trigger
- * level to the settings rail, and the arithmetic belongs to neither.</p>
+ * writes crosses two panels: the vertical and the timebase belong to the display and acquisition
+ * rails, the trigger level to the settings rail, and the arithmetic belongs to none of them.</p>
  */
 
 import { fitVoltWindow, roundVoltsForWindow } from './voltAxis'
 import { fiftyPercentLevel } from './triggerSpec'
-import { formatScopeTime, snapTimePerDivision, timePerDivisionFor } from './timeAxis'
+import { snapTimePerDivision, timePerDivisionFor } from './timeAxis'
 
-/** How many periods of the measured signal Autoset puts on screen. */
+/** How many periods of the measured signal Autoset asks the record to hold. */
 export const AUTOSET_PERIODS = 3
 
-/**
- * Where the trigger sits in the window Autoset chooses.
- *
- * <p>A quarter in, matching this app's own default pre-trigger: what is wanted is to see the signal
- * arrive, and a trigger at the left edge leaves nothing before it to compare the arrival against.
- * It is a <em>fraction of the window</em> and not of the record, so moving the window does not move
- * what the pre-trigger fraction means.</p>
- */
-export const AUTOSET_TRIGGER_FRACTION = 0.25
-
-/** What one press writes. Any of the three may be absent where the record cannot say. */
+/** What one press writes. The timebase is absent where the record cannot say. */
 export interface ScopeAutoset {
   voltsPerDivision: number
   offsetV: number
-  fromS: number
-  toS: number
   /**
    * The midpoint of the measured extremes — the 50 % button's own rule, through the same function,
    * so the two cannot come to disagree about what the middle of a signal is.
@@ -53,19 +57,16 @@ export interface ScopeAutoset {
    * level anybody set.</p>
    */
   triggerLevelV: number
-  /** Null where no frequency was measured: the window is then the record, and this says so. */
+  /** Null where no frequency was measured, which is what leaves the record alone. */
   periodS: number | null
   /**
    * The timebase to capture at — three periods over the ten divisions, snapped to a rung.
    *
    * <p><b>Null where there is no frequency to work from</b>, in which case the record is left as it
-   * is and only the vertical and the trigger are set.</p>
-   *
-   * <p>This is what makes Autoset a horizontal control at all. Until the timebase existed it could
-   * only choose a <em>window</em> inside whatever record happened to be set, so three periods of
-   * 20 Hz — 150 ms — simply could not be shown on a 20 ms capture, and the honest answer was to
-   * clamp and let the reader fix the record by hand. Setting the record is the better answer, and
-   * the clamp below is now a fallback rather than the rule.</p>
+   * is and only the vertical and the trigger are set. This is what makes Autoset a horizontal
+   * control at all: before it existed the press could only choose a window inside whatever record
+   * happened to be set, so a signal slower than the capture could not be shown however it was
+   * framed.</p>
    */
   timePerDivisionS: number | null
 }
@@ -76,22 +77,10 @@ export interface ScopeAutosetInput {
   minV: number
   /** The measured frequency of the triggered channel, or null. */
   frequencyHz: number | null | undefined
-  /** The record's own span, which the window is clamped into. */
-  recordFromS: number
-  recordToS: number
 }
 
 /**
  * Works out the three settings.
- *
- * <p><b>It sets the timebase, and the window follows.</b> Three periods over the ten divisions,
- * snapped to a rung — so the record itself grows or shrinks to hold what was asked for, which is
- * what a bench scope's own Auto Setup does.</p>
- *
- * <p><b>The window it returns is still clamped into the record on hand</b>, which is now a
- * fallback rather than the rule: the caller applies the timebase and the record follows on the
- * next capture, so for the record already drawn the clamp is what keeps the trace from stopping in
- * the middle of the plot with empty graticule either side.</p>
  *
  * <p>Returns null only where the extremes are not numbers, which is a record that measured
  * nothing.</p>
@@ -104,43 +93,14 @@ export function scopeAutoset(input: ScopeAutosetInput): ScopeAutoset | null {
   const hz = input.frequencyHz
   const periodS = hz !== null && hz !== undefined && Number.isFinite(hz) && hz > 0 ? 1 / hz : null
 
-  const recordSpan = input.recordToS - input.recordFromS
-  let fromS = input.recordFromS
-  let toS = input.recordToS
-
-  if (periodS !== null && recordSpan > 0) {
-    const span = Math.min(periodS * AUTOSET_PERIODS, recordSpan)
-    // Hung off zero — the trigger — rather than off the record's own start: that is where the
-    // waveform is aligned, and a window placed anywhere else would move whenever the pre-trigger
-    // fraction did.
-    fromS = -span * AUTOSET_TRIGGER_FRACTION
-    toS = fromS + span
-
-    // Slid rather than squeezed where that falls outside the record: the number of periods on
-    // screen is the whole point of the figure, so keeping the span and moving it is right where
-    // shortening it would quietly show two cycles when three were asked for.
-    if (fromS < input.recordFromS) {
-      fromS = input.recordFromS
-      toS = fromS + span
-    }
-    if (toS > input.recordToS) {
-      toS = input.recordToS
-      fromS = Math.max(input.recordFromS, toS - span)
-    }
-  }
-
   // Three periods across the whole graticule, on the nearest detent. Null with no frequency, where
   // there is nothing to size a timebase from and the record is left alone.
   const timePerDivisionS =
-    periodS !== null
-      ? snapTimePerDivision(timePerDivisionFor(periodS * AUTOSET_PERIODS))
-      : null
+    periodS !== null ? snapTimePerDivision(timePerDivisionFor(periodS * AUTOSET_PERIODS)) : null
 
   return {
     voltsPerDivision: fit.voltsPerDivision,
     offsetV: fit.offsetV,
-    fromS,
-    toS,
     timePerDivisionS,
     triggerLevelV: roundVoltsForWindow(
       fiftyPercentLevel(input.maxV, input.minV) as number,
@@ -148,18 +108,4 @@ export function scopeAutoset(input: ScopeAutosetInput): ScopeAutoset | null {
     ),
     periodS,
   }
-}
-
-/** What the button says it did, for the line under it. */
-export function autosetNote(result: ScopeAutoset | null): string | null {
-  if (!result) return null
-  if (result.periodS === null)
-    return 'No frequency measured, so the window is the whole record — the vertical and the trigger level are set.'
-
-  const cycles = (result.toS - result.fromS) / result.periodS
-  const timebase =
-    result.timePerDivisionS !== null
-      ? ` Timebase ${formatScopeTime(result.timePerDivisionS * 1000, result.timePerDivisionS * 1000)}/div.`
-      : ''
-  return `${cycles.toFixed(1)} cycles on screen, with the trigger level at the middle of the signal.${timebase}`
 }

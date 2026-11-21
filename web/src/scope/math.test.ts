@@ -24,7 +24,14 @@ import {
   mathTileFor,
   scopeMathSlice,
   type ScopeMathSpec,
+  scopeMathSections,
 } from './math'
+import {
+  MATH_FIGURE_HEIGHT,
+  MATH_FIGURE_WIDTH,
+  SCOPE_MATH_FIGURES,
+  scopeMathFigure,
+} from './mathFigures'
 
 describe('the operations table', () => {
   it('offers every operation exactly once, Off first', () => {
@@ -200,8 +207,61 @@ describe('the seven tiles', () => {
     const known = new Set(SCOPE_MATH_OPERATIONS.map((o) => o.value))
     for (const tile of SCOPE_MATH_TILES) {
       expect(known.has(tile.operation), tile.label).toBe(true)
-      expect(tile.icon.length).toBeGreaterThan(0)
+      // The figure is computed from the operation rather than named by the tile, so what has to be
+      // true is that one exists for it -- a tile with none draws an empty well.
+      expect(scopeMathFigure(tile.operation), tile.label).not.toBeNull()
       expect(tile.title.length, tile.label).toBeGreaterThan(30)
+    }
+  })
+
+  it('files every tile under exactly one section, by whether it reads B', () => {
+    // The sections are derived from `usesB` rather than declared, so what is worth asserting is
+    // that the derivation and the flag cannot disagree -- a tile under "Two traces" whose Source B
+    // control does nothing is the one thing the split exists to prevent.
+    const shown = scopeMathSections()
+    expect(shown.map((entry) => entry.section.id)).toEqual(['binary', 'unary'])
+    const offered = shown.flatMap((entry) => entry.items)
+    expect(offered.length).toBe(SCOPE_MATH_TILES.length)
+    expect(new Set(offered).size).toBe(SCOPE_MATH_TILES.length)
+    for (const entry of shown) {
+      for (const tile of entry.items) {
+        expect(tile.usesB, tile.label).toBe(entry.section.id === 'binary')
+      }
+    }
+  })
+
+  it('draws a figure whose result really is the operation’s own arithmetic', () => {
+    // The point of computing them: A + B and A - B of the same pair have to be two different
+    // pictures, and a hand-drawn pair could be the same one twice without anything saying so.
+    const plus = scopeMathFigure('APlusB')
+    const minus = scopeMathFigure('AMinusB')
+    expect(plus?.a).toBe(minus?.a)
+    expect(plus?.b).toBe(minus?.b)
+    expect(plus?.result).not.toBe(minus?.result)
+    // The three one-operand tiles draw no B at all, which is the figure saying what the section
+    // heading says.
+    for (const operation of ['NegateA', 'DerivativeA', 'IntegralA']) {
+      expect(scopeMathFigure(operation)?.b, operation).toBeNull()
+    }
+    expect(scopeMathFigure('nonesuch')).toBeNull()
+  })
+
+  it('keeps every figure inside the box it is drawn in', () => {
+    for (const [operation, figure] of Object.entries(SCOPE_MATH_FIGURES)) {
+      for (const d of [figure.a, figure.b, figure.result]) {
+        if (!d) continue
+        const numbers = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]))
+        for (let i = 0; i < numbers.length; i += 2) {
+          expect(numbers[i], `${operation} puts ink at x=${numbers[i]}`).toBeGreaterThanOrEqual(0)
+          expect(numbers[i], `${operation} puts ink at x=${numbers[i]}`).toBeLessThanOrEqual(
+            MATH_FIGURE_WIDTH,
+          )
+          expect(numbers[i + 1], `${operation} puts ink at y=${numbers[i + 1]}`).toBeGreaterThanOrEqual(0)
+          expect(numbers[i + 1], `${operation} puts ink at y=${numbers[i + 1]}`).toBeLessThanOrEqual(
+            MATH_FIGURE_HEIGHT,
+          )
+        }
+      }
     }
   })
 

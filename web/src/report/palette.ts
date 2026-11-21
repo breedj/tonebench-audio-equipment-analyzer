@@ -28,6 +28,8 @@ const INK: Record<MeasurementKindTone, string> = {
   red: '#b91c1c',
   indigo: '#4338ca',
   teal: '#0f766e',
+  // Not an accent, and no measurement kind carries it — see MeasurementKindTone.
+  slate: '#334155',
   amber: '#b45309',
   green: '#15803d',
 }

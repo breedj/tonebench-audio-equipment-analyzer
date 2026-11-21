@@ -121,6 +121,15 @@ const path = defineModel<ScopeSignalPathSettings>('path', { required: true })
 /** True while the goniometer is the picture on screen, which hides the controls it has no axes for. */
 const xyOn = computed(() => scopeViewIsXy(chartView.value))
 
+/**
+ * True in the two views the zoom bar is hidden in — the goniometer and the eye.
+ *
+ * <p>Which is the one place the Time window boxes are still drawn: those views have no time axis,
+ * so there is no navigator over the record to put the window on, and the boxes are then the only
+ * way to say which stretch is plotted.</p>
+ */
+const planeShowing = computed(() => chartView.value === 'XY' || chartView.value === 'Eye')
+
 /** The colour controls only mean something once something is being kept. */
 const persistenceOn = computed(() => persistenceDraws(persistence.value))
 
@@ -756,8 +765,10 @@ function stepOffset(direction: 1 | -1) {
         :value="voltsPerDivision"
         :format="voltsPerDivisionGridLabel"
         title="How many volts one vertical division is worth. Eight of them make the window, centred on the figure beside it."
+        auto-title="Autoscale: fits the vertical to the whole of what is drawn — the checked history items included — and centres the window on it."
         @step="stepVoltsPerDivision"
         @pick="setVoltsPerDivision"
+        @auto="autofitVolts"
       />
       <!-- The centre has no ladder and keeps its own box: it is a continuous voltage, so it has to
            stay typable, and the draft is what lets it be typed into while records arrive. -->
@@ -781,11 +792,20 @@ function stepOffset(direction: 1 | -1) {
     </div>
   </CollapsibleSection>
 
+  <!-- The window is the zoom bar's, and these boxes are gone with it (Joost, 2026-11-21): the bar
+       is under the chart on every waveform screen, it moves the same one value, and the two of them
+       spent a section of a rail whose whole problem is height saying the same thing twice.
+
+       Except in the X–Y and Eye views, which have no zoom bar at all — their x axis is volts and a
+       phase of the period, so a navigator over time is hidden there. These boxes are then the only
+       way to say which stretch of the record is plotted, and taking the last control off a view is
+       not what was asked for. -->
   <CollapsibleSection
+    v-if="planeShowing"
     :title="`Time window (${boxScale.label})`"
     panel-id="time-window"
     size="xs"
-    :hint="`${windowSpan} over ten divisions. Tighten it far enough and the chart draws every sample instead of a min/max column pair.`"
+    :hint="`Which stretch of the record the figure is plotted from — ${windowSpan}. The waveform view has the zoom bar for this; these two views have no time axis to put one on.`"
   >
     <!-- Both ends relative to the trigger at t = 0, negative to its left — the same convention the
          decay surfaces' head start uses, and the one the server's own fromS/toS carry. -->

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AUTOSET_PERIODS, scopeAutoset } from './autoset'
+import { AUTOSET_PERIODS, scopeAutoset, timebaseForCycles } from './autoset'
 import { SCOPE_TIME_PER_DIVISION_LADDER, recordSecondsFor, snapTimePerDivision } from './timeAxis'
 
 /** A 1 kHz sine of ±0.7 V. */
@@ -67,11 +67,20 @@ describe('scopeAutoset', () => {
 describe('the timebase Autoset sets', () => {
   const steady = { maxV: 1, minV: -1 }
 
-  it('is three periods over the ten divisions, on a rung', () => {
-    // 1 kHz: three periods is 3 ms, which is 0.3 ms a division -- the ladder's nearest rung is 0.2.
+  it('is five periods over the ten divisions, on a rung', () => {
+    // 1 kHz: five periods is 5 ms, which is 0.5 ms a division -- itself a rung.
     const result = scopeAutoset({ ...steady, frequencyHz: 1000 })
-    expect(result?.timePerDivisionS).toBeCloseTo(snapTimePerDivision(3e-3 / 10), 15)
+    expect(result?.timePerDivisionS).toBeCloseTo(snapTimePerDivision(5e-3 / 10), 15)
     expect(SCOPE_TIME_PER_DIVISION_LADDER).toContain(result?.timePerDivisionS)
+  })
+
+  /** The one function both horizontal automatics ask, so they cannot answer differently. */
+  it('is the same arithmetic the Time/div tile’s Autoscale uses', () => {
+    for (const hz of [20, 100, 1000, 12_345]) {
+      expect(scopeAutoset({ ...steady, frequencyHz: hz })!.timePerDivisionS).toBe(
+        timebaseForCycles(1 / hz),
+      )
+    }
   })
 
   /**
@@ -99,5 +108,35 @@ describe('the timebase Autoset sets', () => {
 
   it('leaves the record alone with no frequency to size one from', () => {
     expect(scopeAutoset({ ...steady, frequencyHz: null })?.timePerDivisionS).toBeNull()
+  })
+})
+
+describe('timebaseForCycles', () => {
+  it('refuses a period that is not one', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(timebaseForCycles(bad)).toBeNull()
+    }
+    expect(timebaseForCycles(1e-3, 0)).toBeNull()
+  })
+
+  it('asks for more record the more cycles it is asked for', () => {
+    const three = timebaseForCycles(1e-3, 3)!
+    const five = timebaseForCycles(1e-3, 5)!
+    const ten = timebaseForCycles(1e-3, 10)!
+
+    expect(five).toBeGreaterThan(three)
+    expect(ten).toBeGreaterThan(five)
+  })
+
+  /** Five, since 2026-11-21: enough to see what a waveform does between repeats. */
+  it('defaults to the five a press asks for', () => {
+    expect(AUTOSET_PERIODS).toBe(5)
+    expect(timebaseForCycles(1e-3)).toBe(timebaseForCycles(1e-3, AUTOSET_PERIODS))
+  })
+
+  it('lands on a rung of the ladder', () => {
+    for (const hz of [20, 60, 1000, 20_000]) {
+      expect(SCOPE_TIME_PER_DIVISION_LADDER).toContain(timebaseForCycles(1 / hz))
+    }
   })
 })

@@ -203,9 +203,12 @@ const { showPage } = useManual()
             what was captured, with <strong>Back</strong> and <strong>Reset zoom</strong> beside
             it. Stepping the timebase <em>ends</em> such a zoom and draws the new record whole,
             which is what the knob means — a window from the capture before it would be a
-            different stretch of a different capture. A window you typed into
-            <strong>Time window (ms)</strong> is the other thing and does survive, clamped into the
-            new record where it has to be: that is a window rather than a look.
+            different stretch of a different capture.
+            <strong>Autoscale</strong>, the button at the right of the tile, sets it to five
+            cycles of whatever frequency the record measured and shows the whole of it. It does
+            nothing where there is no frequency to work from — a flat record, or a window
+            holding less than one period — because there would be nothing to size a timebase
+            from.
           </td>
         </tr>
         <tr>
@@ -777,8 +780,12 @@ const { showPage } = useManual()
           </td>
         </tr>
         <tr>
-          <td>Time window (From / To)</td>
-          <td>Both ends relative to the trigger, negative to its left, in the unit the record is read in.</td>
+          <td>Autoscale (V/div)</td>
+          <td>
+            The button at the right of the tile: fits the vertical to the whole of what is drawn,
+            the checked history items included, and centres the window on it. The same arithmetic
+            as Autofit's vertical half, on its own.
+          </td>
         </tr>
         <tr>
           <td>Channels (L / R)</td>
@@ -1089,9 +1096,10 @@ const { showPage } = useManual()
     </p>
     <p>
       Which stretch of the record the figure is drawn from is the <strong>Time window</strong>
-      section’s From and To, exactly as it is for the waveform. The zoom bar is hidden here — it
-      navigates a time axis, which this picture does not have — and because there is no drag to
-      zoom with, those two boxes are the only control: switching to X–Y therefore ends any zoom the
+      section’s From and To. The zoom bar is hidden here — it navigates a time axis, which this
+      picture does not have — and because there is no drag to zoom with either, those two boxes
+      are the only control, which is why this view and the eye are the only two that show them at
+      all: the waveform view has the zoom bar instead. Switching to X–Y ends any zoom the
       waveform view was holding, so the boxes and the picture always agree. The trigger line, the
       cursors and the notes belong to the waveform view and come back with it.
     </p>
@@ -1768,10 +1776,16 @@ const { showPage } = useManual()
     <p>
       <strong>Autoset</strong>, under the run buttons, is one press that makes an unknown signal
       readable and standing still: it fits the vertical to the measured extremes, sets the
-      <strong>timebase</strong> to about three of the signal's own cycles, sets the trigger level
+      <strong>timebase</strong> to about five of the signal's own cycles, sets the trigger level
       to the middle of it, and shows the whole of the record it has just asked for. It is a
-      horizontal control, not a chooser of windows: three cycles of 20 Hz is 150 ms, which a 20 ms
+      horizontal control, not a chooser of windows: five cycles of 20 Hz is 250 ms, which a 20 ms
       capture does not hold at any zoom, so the record is what changes.
+    </p>
+    <p>
+      <em>About</em> five, because the timebase lands on a 1-2-5 rung: five cycles of 600 Hz is
+      8.3 ms, which is 0.83 ms a division, and the nearest rung is 1 ms — so the record holds six.
+      The two tiles' own <strong>Autoscale</strong> buttons do each half of this on their own, if
+      the other half is already where you want it.
     </p>
     <div class="manual-note">
       <p>

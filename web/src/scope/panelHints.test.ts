@@ -180,3 +180,40 @@ describe('the Record panel', () => {
     expect(read('ScopeConfigPanel.vue')).not.toContain('reconstruction filter, not the DUT')
   })
 })
+
+/**
+ * Autoscale, and the Time window boxes that are gone with the zoom bar (asked for 2026-11-21).
+ *
+ * <p>Both are markup in a <code>.vue</code>, so this reads them as text the way the rest of this
+ * file does. The one that matters is the <em>gate</em>: the boxes stay for the two views that have
+ * no zoom bar, and a <code>v-if</code> quietly dropped would take the last control off them.</p>
+ */
+describe('the horizontal and vertical automatics', () => {
+  const config = read('ScopeConfigPanel.vue')
+  const tile = read('StepperTile.vue')
+
+  it('puts an Autoscale on V/div and on Time/div, and on nothing else', () => {
+    expect(rail).toContain('auto-title=')
+    expect(config).toContain('auto-title=')
+    // The Centre box has no automatic answer of its own: V/div's own fit writes it.
+    expect(rail.match(/auto-title=/g)).toHaveLength(1)
+    expect(config.match(/auto-title=/g)).toHaveLength(1)
+  })
+
+  it('wires each to something', () => {
+    expect(rail).toContain('@auto="autofitVolts"')
+    expect(config).toContain("@auto=\"emit('autoTimebase')\"")
+  })
+
+  /** The button exists only where a caller has an answer — see StepperTile's own note. */
+  it('draws the button only when the caller gives it one', () => {
+    expect(tile).toContain('v-if="autoTitle"')
+  })
+
+  it('keeps the Time window boxes for the views with no zoom bar, and nowhere else', () => {
+    expect(rail).toContain('v-if="planeShowing"')
+    expect(rail).toContain("chartView.value === 'XY' || chartView.value === 'Eye'")
+    // One section, and it is the gated one.
+    expect(rail.match(/panel-id="time-window"/g)).toHaveLength(1)
+  })
+})

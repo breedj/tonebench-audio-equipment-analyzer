@@ -13,6 +13,13 @@
  * Vertical panel's violet, so a tile reads as part of the section it sits in rather than as a
  * third thing — and the grid's own decade dots step back from that same hue.</p>
  *
+ * <p><b>The widths are a budget, not a taste.</b> At the rail's 226 px the frame holds two step
+ * buttons, the body and — where the caller has one — an Autoscale, and the body is the only one of
+ * them that has to hold a figure: <code>1.000 ms/div</code> wants 80 px at 15 px semibold. The
+ * buttons were 36 px before the Autoscale existed and are 28 now, which with the body's own padding
+ * buys the 16 px it costs. Narrow one further and the value truncates, which is the one thing a
+ * readout may not do.</p>
+ *
  * <p><b>Two shapes, one chrome.</b> With a <code>ladder</code> the body is a button that opens the
  * grid; without one the caller puts its own control in the default slot (the Centre box, which is
  * a continuous voltage and has to stay typable) and only the two buttons are ours. Either way the
@@ -39,11 +46,30 @@ const props = withDefaults(
     /** How the grid and the hint write a rung. Required with a ladder. */
     format?: (value: number) => string
     title?: string
+    /**
+     * What an <b>Autoscale</b> press would do, in a sentence. Its presence is what puts the
+     * button on the tile at all (asked for 2026-11-21).
+     *
+     * <p>On the tile rather than in the panel, because what it scales is <em>this</em> control:
+     * a button in the section header would read as "scale the section", and the Vertical
+     * section holds two tiles of which only one has an automatic answer. After the
+     * <code>+</code> rather than inside the body, which is forced — with a ladder the body is
+     * itself a button, and a button inside a button is not markup.</p>
+     */
+    autoTitle?: string
   }>(),
-  { display: '', suffix: '', ladder: undefined, value: Number.NaN, format: undefined, title: undefined },
+  {
+    display: '',
+    suffix: '',
+    ladder: undefined,
+    value: Number.NaN,
+    format: undefined,
+    title: undefined,
+    autoTitle: undefined,
+  },
 )
 
-const emit = defineEmits<{ step: [direction: 1 | -1]; pick: [value: number] }>()
+const emit = defineEmits<{ step: [direction: 1 | -1]; pick: [value: number]; auto: [] }>()
 
 const open = ref(false)
 const tile = ref<HTMLElement | null>(null)
@@ -220,7 +246,7 @@ const bodyStyle = computed(() => ({ backgroundColor: 'var(--surface-panel)' }))
   >
     <button
       type="button"
-      class="flex w-9 shrink-0 items-center justify-center rounded-lg text-lg font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/10"
+      class="flex w-7 shrink-0 items-center justify-center rounded-lg text-lg font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/10"
       :style="inkStyle"
       :disabled="!canStepDown"
       :title="neighbours.down ? `${label}: ${neighbours.down}` : undefined"
@@ -235,7 +261,7 @@ const bodyStyle = computed(() => ({ backgroundColor: 'var(--surface-panel)' }))
     <component
       :is="hasGrid ? 'button' : 'div'"
       :type="hasGrid ? 'button' : undefined"
-      class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left"
+      class="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left"
       :class="hasGrid ? 'transition hover:brightness-95 dark:hover:brightness-110' : ''"
       :style="bodyStyle"
       :aria-haspopup="hasGrid ? 'dialog' : undefined"
@@ -270,7 +296,7 @@ const bodyStyle = computed(() => ({ backgroundColor: 'var(--surface-panel)' }))
 
     <button
       type="button"
-      class="flex w-9 shrink-0 items-center justify-center rounded-lg text-lg font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/10"
+      class="flex w-7 shrink-0 items-center justify-center rounded-lg text-lg font-semibold transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/10"
       :style="inkStyle"
       :disabled="!canStepUp"
       :title="neighbours.up ? `${label}: ${neighbours.up}` : undefined"
@@ -278,6 +304,27 @@ const bodyStyle = computed(() => ({ backgroundColor: 'var(--surface-panel)' }))
       @click="step(1)"
     >
       +
+    </button>
+
+    <!-- Autoscale, only where the caller has an automatic answer for this control. The figure is
+         what every instrument draws for "fit this to the signal": a bracket either side with the
+         arrows pushing out to the edges it is about to find. -->
+    <button
+      v-if="autoTitle"
+      type="button"
+      class="flex w-6 shrink-0 items-center justify-center rounded-lg transition hover:bg-black/5 dark:hover:bg-white/10"
+      :style="inkStyle"
+      :title="autoTitle"
+      :aria-label="`${label}: autoscale`"
+      @click="emit('auto')"
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 5v14" />
+        <path d="M21 5v14" />
+        <path d="M7 12h10" />
+        <path d="M10 9l-3 3 3 3" />
+        <path d="M14 9l3 3-3 3" />
+      </svg>
     </button>
   </div>
 

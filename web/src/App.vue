@@ -89,7 +89,7 @@ import {
   type ScopeMaskTally,
   type ScopeMaskVerdict,
 } from './scope/mask'
-import { scopeAutoset } from './scope/autoset'
+import { scopeAutoset, timebaseForCycles } from './scope/autoset'
 import { scopeTriggerBadge } from './scope/triggerState'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
@@ -2953,6 +2953,45 @@ const scopeTriggerState = computed(() =>
 )
 
 /**
+ * The measured period of the triggered channel, or null where this record has none.
+ *
+ * <p>The figure both horizontal automatics are built on — Autoset, and the Time/div tile's own
+ * Autoscale — so it is read once here rather than dug out of the record in two places.</p>
+ */
+const scopeMeasuredPeriodS = computed(() => {
+  const channel = scopeTriggerSource.value === 'ChannelB' ? 1 : 0
+  const hz = scopeRecord.value?.channels.find((slice) => slice.channel === channel)?.measurements
+    ?.frequencyHz
+  return hz !== null && hz !== undefined && Number.isFinite(hz) && hz > 0 ? 1 / hz : null
+})
+
+/**
+ * The Time/div tile's Autoscale: five cycles of what is on screen (asked for 2026-11-21).
+ *
+ * <p>Autoset's horizontal half on its own, through the same `timebaseForCycles` so the two cannot
+ * come to disagree about what five cycles is. The window is reset to the whole record with it, for
+ * Autoset's own reason: the record has just changed length, and showing the new one through the old
+ * window is how a press comes to look as though it did nothing.</p>
+ *
+ * <p>A no-op with no frequency measured — a flat record, or a window holding less than one period
+ * — because there is nothing to size a timebase from and the honest answer is to leave it where it
+ * is.</p>
+ */
+function autoscopeTimebase() {
+  const period = scopeMeasuredPeriodS.value
+  if (period === null) return
+
+  const perDivision = timebaseForCycles(period)
+  if (perDivision === null) return
+
+  scopeRecordSeconds.value = recordSecondsFor(perDivision)
+  const whole = recordWindow(scopeRecordSeconds.value, scopeDisplayPreTriggerFraction.value)
+  scopeTimeFromS.value = whole.fromS
+  scopeTimeToS.value = whole.toS
+  scopeViewWindow.value = null
+}
+
+/**
  * One press that makes an unknown signal readable and standing still.
  *
  * <p><b>Against Autofit, which is already on the display rail.</b> Autofit frames the
@@ -2969,13 +3008,13 @@ function autosetOscilloscope() {
   const extremes = scopeExtremes.value
   if (!extremes) return
 
-  const channel = scopeTriggerSource.value === 'ChannelB' ? 1 : 0
+  const period = scopeMeasuredPeriodS.value
   const result = scopeAutoset({
     maxV: extremes.maxV,
     minV: extremes.minV,
-    frequencyHz:
-      scopeRecord.value?.channels.find((slice) => slice.channel === channel)?.measurements
-        ?.frequencyHz ?? null,
+    // Through the one computed, so Autoset and the Time/div tile's Autoscale cannot come to
+    // disagree about which channel's frequency they are reading.
+    frequencyHz: period === null ? null : 1 / period,
   })
   if (!result) return
 
@@ -6664,6 +6703,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:sample-rate-hz="scopeStagedSampleRateHz"
                   @run="runOscilloscope"
                   @retune="onScopeRetune"
+                  @auto-timebase="autoscopeTimebase"
                 />
 
                 <!-- The staged pair as well as the window: the panel's badges are what the next

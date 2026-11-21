@@ -144,6 +144,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   run: [request: OscilloscopeStartRequest]
   retune: [request: OscilloscopeStartRequest]
+  /**
+   * The Time/div tile's Autoscale.
+   *
+   * <p>Handed up rather than answered here, because the figure it needs — the measured frequency of
+   * the triggered channel — is on the record, and this panel holds settings rather than readings.
+   * App.vue has both, and is already where Autoset does the same arithmetic.</p>
+   */
+  autoTimebase: []
 }>()
 
 const { markDirty } = useProjects()
@@ -847,8 +855,10 @@ function onAutoTimeoutChange(event: Event) {
         :value="timePerDivisionS"
         :format="timePerDivisionGridLabel"
         title="The timebase. The record is ten divisions of it, pre- and post-trigger together — up to one second, beyond which the stream recorder is the tool. Live: changing it while the scope is running re-arms the capture rather than needing a Stop."
+        auto-title="Autoscale: sets the timebase to five cycles of the measured signal, and shows the whole record."
         @step="stepTimePerDivision"
         @pick="setTimePerDivision"
+        @auto="emit('autoTimebase')"
       />
     </div>
 

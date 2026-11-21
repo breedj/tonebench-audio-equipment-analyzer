@@ -36,8 +36,28 @@ import { fitVoltWindow, roundVoltsForWindow } from './voltAxis'
 import { fiftyPercentLevel } from './triggerSpec'
 import { snapTimePerDivision, timePerDivisionFor } from './timeAxis'
 
-/** How many periods of the measured signal Autoset asks the record to hold. */
-export const AUTOSET_PERIODS = 3
+/**
+ * How many periods of the measured signal a press asks the record to hold — Autoset's, and the
+ * Time/div tile's own Autoscale.
+ *
+ * <p>Five since 2026-11-21 (asked for), where it was three. Three is enough to see that a waveform
+ * repeats; five is enough to see what it does between repeats — a modulation, a drift, every third
+ * cycle differing — and still leaves each cycle a fifth of the screen.</p>
+ */
+export const AUTOSET_PERIODS = 5
+
+/**
+ * The timebase that puts <paramref name="cycles"/> periods across the ten divisions, on the nearest
+ * rung.
+ *
+ * <p>One function because two controls ask it: Autoset, and the Time/div tile's Autoscale. Two
+ * copies of "periods over divisions, snapped" would be two answers to one question, and the
+ * rounding is exactly where they would quietly differ.</p>
+ */
+export function timebaseForCycles(periodS: number, cycles: number = AUTOSET_PERIODS): number | null {
+  if (!Number.isFinite(periodS) || periodS <= 0 || !Number.isFinite(cycles) || cycles <= 0) return null
+  return snapTimePerDivision(timePerDivisionFor(periodS * cycles))
+}
 
 /** What one press writes. The timebase is absent where the record cannot say. */
 export interface ScopeAutoset {
@@ -93,10 +113,9 @@ export function scopeAutoset(input: ScopeAutosetInput): ScopeAutoset | null {
   const hz = input.frequencyHz
   const periodS = hz !== null && hz !== undefined && Number.isFinite(hz) && hz > 0 ? 1 / hz : null
 
-  // Three periods across the whole graticule, on the nearest detent. Null with no frequency, where
+  // The periods across the whole graticule, on the nearest detent. Null with no frequency, where
   // there is nothing to size a timebase from and the record is left alone.
-  const timePerDivisionS =
-    periodS !== null ? snapTimePerDivision(timePerDivisionFor(periodS * AUTOSET_PERIODS)) : null
+  const timePerDivisionS = periodS !== null ? timebaseForCycles(periodS) : null
 
   return {
     voltsPerDivision: fit.voltsPerDivision,

@@ -1674,25 +1674,28 @@ const { showPage } = useManual()
       </thead>
       <tbody>
         <tr>
-          <td>Dashes</td>
+          <td>Its own colours</td>
           <td>
-            Which reference it is, and that it is not the live trace. The dash is what tells them
-            apart in a black-and-white report and in a screenshot; the shade is the quicker read on
-            screen.
+            <strong>Teal</strong> for the left input and <strong>olive</strong> for the right —
+            never the live trace's blue and orange, which is the whole of how a stored capture is
+            told from the one being measured. A reference of a left-only measurement draws one
+            trace.
           </td>
         </tr>
         <tr>
-          <td>Thin</td>
+          <td>Lighter, run by run</td>
           <td>
-            Deliberate: a reference is there to be compared against rather than read, and the live
-            trace is drawn over it.
+            A second and third reference are the same two colours lifted toward white. The hues
+            have run out at that point: three references is six traces, and six colours nobody can
+            name is worse than one family that reads as “the stored ones”.
           </td>
         </tr>
         <tr>
-          <td>Its own channel colour</td>
+          <td>Drawn behind, and solid</td>
           <td>
-            Blue for the left input, orange for the right, pulled toward that reference's own hue.
-            A reference of a left-only measurement draws one trace.
+            The live trace is painted over it. Solid, like everything on this chart that is drawn
+            from a capture: a dash on a waveform beats against the sample grid, so a dashed trace
+            shimmers as the window moves and breaks up exactly where it is dense.
           </td>
         </tr>
       </tbody>
@@ -1800,6 +1803,12 @@ const { showPage } = useManual()
       judged against a band built from the reference on the chart. The chart says
       <strong>Mask pass</strong> or <strong>Mask fail</strong> per record, its tooltip says how many
       columns left the band and by how much, and the panel counts the run.
+    </p>
+    <p>
+      The band is drawn as a <strong>filled orange area</strong> around the reference, with a solid
+      edge top and bottom. It is the stretch of level a record is allowed to be in, and drawn as an
+      area the question “is the trace inside it” is answered by looking rather than by following
+      two lines.
     </p>
     <p>
       The band is built from the <strong>first</strong> checked history item. That is why there is

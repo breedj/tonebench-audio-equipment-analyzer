@@ -14,6 +14,8 @@
  * than visibly broken.</p>
  */
 
+import { mixHex } from '../charts/runTint'
+
 /** The x array a slice is being put onto, in seconds — the live record's wherever there is one. */
 export interface ScopeGrid {
   /** Time of the first column, seconds from the trigger. Negative over the pre-trigger stretch. */
@@ -97,4 +99,34 @@ export function onScopeGrid(
   }
 
   return out
+}
+
+/**
+ * The colour a stored capture is drawn in — its own hue family, never the live channels'.
+ *
+ * <p>Asked for 2026-11-21: a reference used to be the channel's own blue or orange pulled a little
+ * way toward a per-run tint, which on the first run is blue pulled toward blue, i.e. the live
+ * trace's colour. Two traces of one colour on one chart is the one thing a comparison cannot
+ * afford, and it was the dash that was carrying the whole distinction — which is exactly what the
+ * same report asked to be rid of.</p>
+ *
+ * <p><b>Teal and olive</b>, which is a pair chosen by what is already on this chart rather than by
+ * taste: blue and orange are the inputs, violet and pink the two math traces, amber the trigger,
+ * orange the mask, white the mesh. Teal (a blue-green) and olive (a yellow-green) are the two
+ * stretches of the wheel nothing else is using, and they stay apart from each other.</p>
+ *
+ * <p><b>A further run is lighter, not another hue</b>, because the hues have run out: three
+ * references is six traces, and six hues nobody can name is worse than one family a reader reads as
+ * "the stored ones". The step is small enough that run 3 is still legible on white — which is the
+ * end that bounds it, the dark theme being happy with anything lighter.</p>
+ */
+export const REFERENCE_INKS = ['#0d9488', '#65a30d'] as const
+
+/** How far each run past the first is lifted toward white. */
+export const REFERENCE_RUN_LIFT = 0.18
+
+export function referenceInk(channel: number, run: number): string {
+  const base = REFERENCE_INKS[channel === 1 ? 1 : 0]
+  const lift = Math.min(0.54, Math.max(0, run - 1) * REFERENCE_RUN_LIFT)
+  return lift === 0 ? base : mixHex(base, '#ffffff', lift)
 }

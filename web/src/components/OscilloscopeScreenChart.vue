@@ -4,9 +4,8 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { ScopeChannelSlice, ScopeRecordResponse, ScopeTriggerKind, ScopeTriggerSource } from '../api/client'
 import type { OverlayEntry } from '../composables/useMeasurements'
-import { overlayRunIndex, runDash } from '../measurements/sweepOverlayStyles'
-import { runTint } from '../charts/runTint'
-import { onScopeGrid } from '../scope/references'
+import { overlayRunIndex } from '../measurements/sweepOverlayStyles'
+import { onScopeGrid, referenceInk } from '../scope/references'
 import { buildScopeMask, maskVerdict, NO_MASK_VERDICT, type ScopeMaskVerdict } from '../scope/mask'
 import { captureRateLabel, type ScopeCaptureRates } from '../scope/captureRates'
 import { accumulationBadge, type ScopeAccumulation } from '../scope/acquisition'
@@ -382,6 +381,11 @@ interface ChannelSeries {
   line: (number | null)[]
   /** The min of every column, or null for a raw slice — there is nothing left to summarise. */
   band: (number | null)[] | null
+  /**
+   * How solid the region between <code>line</code> and <code>band</code> is drawn, where that is
+   * not a column's own extent: the mask asks for a lighter one. Defaults to the band's 0.35.
+   */
+  fillAlpha?: number
   raw: boolean
   /** True for the residual, which is drawn thinner and dashed so it is never read as a trace. */
   residual?: boolean
@@ -411,7 +415,20 @@ interface ChannelSeries {
    * half a black-and-white report keeps.</p>
    */
   limit?: boolean
-  /** The dash that tells one reference from another, and from the live trace, in a report with no colour. */
+  /**
+   * The dash, for the one trace here that still carries one.
+   *
+   * <p><b>Nothing drawn from the capture is dashed any more</b> (asked for 2026-11-21: "dashed
+   * lines move and give strange artifacts, so do not use them with the scope view"). A dash on a
+   * waveform beats against the sample grid, so a dashed trace shimmers as the window moves and
+   * breaks up where it is dense — which is exactly where a reference and a mask are read. The
+   * references took their own hue family instead (referenceInk) and the mask became a filled
+   * band; the markers that are <em>settings</em> rather than signal — the trigger level, the
+   * trigger position, the cursors — keep theirs, because a solid horizontal line at the trigger
+   * level would read as a trace.</p>
+   *
+   * <p>What is left is the math trace, whose dash says it is derived rather than measured.</p>
+   */
   dash?: number[]
   /**
    * Real samples either side of this trace, for sin(x)/x to reach into at the ends.
@@ -450,25 +467,30 @@ const MATH_COLORS = ['#a855f7', '#ec4899'] as const
 const MATH_DASH = [7, 4]
 
 /**
- * How far a reference's colour is pulled toward its run's own hue, and how much of the trace's
- * weight it keeps.
+ * The pass/fail band — an <em>area</em> around the reference rather than a pair of lines
+ * (asked for 2026-11-21).
  *
- * <p><b>Dashed first, tinted second</b>, which is the impedance chart's own order and for its
- * reason: the dash is what the legend draws, what survives a black-and-white report and what
- * matches a run across two channels, where the hue is the quicker read on screen. Thin, because a
- * reference is there to be compared against rather than read.</p>
+ * <p>Which is what it always was: the mask is the stretch of level a record may be in, and two
+ * thin lines ask the reader to imagine the region between them. Drawn as the region, the
+ * question "is the trace inside it" is answered by looking rather than by following two
+ * curves. It is the same machinery the min/max band uses, which is why the mask is now <b>one</b>
+ * series carrying its lower edge as a band rather than two series carrying a line each.</p>
+ *
+ * <p>Orange, as asked, and a <em>deeper</em> orange than the right input's #f97316 so the two are
+ * not one colour; what makes it unmistakable anyway is that it is a filled band and the input is
+ * a trace. Solid, with everything else on this chart that is drawn from data — see the dash note
+ * on <code>ChannelSeries.dash</code>.</p>
  */
-const REFERENCE_TINT = 0.55
+const MASK_COLOR = '#ea580c'
 
 /**
- * The pass/fail band.
+ * How solid the mask's own fill is, against the 0.35 a min/max band is drawn at.
  *
- * <p>Red, and the one place on this chart that colour is used: everything else here is a
- * measurement, where red means a limit. Dashed as well as coloured, so the band survives a
- * black-and-white report and cannot be read as a third trace.</p>
+ * <p>Lighter because it is a <em>region of its own</em> rather than the extent of a column: it
+ * covers the whole height the trace is allowed, and at a band's alpha it would be the loudest
+ * thing on the chart and would tint the very excursion it exists to show.</p>
  */
-const MASK_COLOR = '#dc2626'
-const MASK_DASH = [5, 4]
+const MASK_FILL_ALPHA = 0.14
 
 /** The scale the math trace is drawn against, which is its own. See ChannelSeries.scale. */
 const MATH_SCALES = ['m1', 'm2'] as const
@@ -585,7 +607,9 @@ const series = computed(() => {
     channels.push({
       index: slice.channel,
       label: reference.label,
-      color: runTint(CHANNEL_COLORS[slice.channel] ?? CHANNEL_COLORS[0], reference.run, REFERENCE_TINT),
+      // Its own hue family, never the live channels' — see referenceInk. Solid, like everything
+      // else here that is drawn from data.
+      color: referenceInk(slice.channel, reference.run),
       line,
       // Its min/max band only where it is the one reference on the chart -- the spectrum chart's
       // own rule (soleBandOverlay) and for its reason: a stored trace plotted as maxima alone
@@ -594,7 +618,6 @@ const series = computed(() => {
       band: slice.raw || references.length > 1 ? null : onScopeGrid(slice.min, source, grid, 'nearest'),
       raw: slice.raw,
       reference: true,
-      dash: runDash(reference.run) ?? undefined,
     })
   }
 
@@ -702,24 +725,22 @@ const series = computed(() => {
         worstExcess: Math.max(verdict.worstExcess, one.worstExcess),
       }
 
-      // Two series rather than one with a band: the min/max band plugin draws a *column's* extent,
-      // where these two are the edges of a tolerance and are read as lines.
-      for (const [edge, values] of [
-        ['upper', mask.upper],
-        ['lower', mask.lower],
-      ] as const) {
-        bands.push({
-          index: live.index,
-          label: `Mask ${edge === 'upper' ? 'high' : 'low'} · ${live.label}`,
-          color: MASK_COLOR,
-          line: values,
-          band: null,
-          raw: live.raw,
-          reference: true,
-          limit: true,
-          dash: MASK_DASH,
-        })
-      }
+      // ONE series carrying both edges, where it used to be two carrying a line each. The band
+      // plugin fills between `line` and `band`, which is exactly what a tolerance is: the
+      // stretch of level the record may be in. Two lines asked the reader to imagine the region
+      // between them, and that was only ever the right shape while the plugin drew a column's
+      // extent rather than an area.
+      bands.push({
+        index: live.index,
+        label: `Mask · ${live.label}`,
+        color: MASK_COLOR,
+        line: mask.upper,
+        band: mask.lower,
+        fillAlpha: MASK_FILL_ALPHA,
+        raw: live.raw,
+        reference: true,
+        limit: true,
+      })
     }
     // Behind everything, like the references: what is being read is the live trace, and a band
     // drawn over it would hide the very excursion it is there to catch.
@@ -736,6 +757,13 @@ const series = computed(() => {
       channels: channels.map((channel) => ({
         ...channel,
         line: sincResample(channel.line, SINC_UPSAMPLE, SINC_TAPS, channel.context),
+        // The band goes with it or it is left at a fifth of the x array's length, and the
+        // plugin draws the mask over the first eighth of the window and nowhere else. Only the
+        // mask has one here: this branch runs when every channel is raw, where a waveform's own
+        // band is null.
+        band: channel.band
+          ? sincResample(channel.band, SINC_UPSAMPLE, SINC_TAPS, channel.context)
+          : null,
       })),
       mask: verdict,
       resampled: true,
@@ -1031,7 +1059,7 @@ function minMaxBandPlugin(): uPlot.Plugin {
 
             ctx.fillStyle = channel.color
             ctx.strokeStyle = channel.color
-            ctx.globalAlpha = 0.35
+            ctx.globalAlpha = channel.fillAlpha ?? 0.35
             ctx.fill(area)
 
             // And the lower envelope at the weight and dash uPlot gives the upper one, so the two
@@ -2571,6 +2599,31 @@ watch(() => props.record, () => {
     plot.value?.redraw()
   })
 })
+
+/**
+ * A reference's own slice arriving, which is a fetch of its own and lands whenever it lands.
+ *
+ * <p><b>Nothing redrew the chart when one did</b> (reported 2026-11-21: zooming in with a
+ * history item ticked and then zooming out leaves its trace cut to the old window, and
+ * unticking and re-ticking it puts it back). The reference and the live record are two
+ * independent requests fired together, and the live one is the slower of the two — a POST of the
+ * window and then a GET, against the reference's single GET — so its arrival nearly always
+ * redrew the chart with the new reference already in hand. Land the reference <em>after</em>
+ * it, which a large stored capture or a slow answer does, and nothing called
+ * <code>setData</code> at all: the picture kept the stretch the previous zoom had cut. Toggling
+ * the item changes the series <em>count</em>, which rebuilds, which is why that looked like a
+ * cure. Stopped, there is no next record to hide it, which is where it was found.</p>
+ *
+ * <p>The verdict goes with it, because the mask is built from the reference: a band cut to the
+ * old window judged the record against a stretch that is no longer on screen.</p>
+ */
+watch(
+  () => props.references,
+  () => {
+    refresh()
+    if (props.maskReferenceId !== null) emit('maskVerdict', series.value.mask)
+  },
+)
 
 /**
  * The mask's band is built in `series` from these three, so changing one changes the band — and

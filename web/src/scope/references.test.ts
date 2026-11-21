@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { onScopeGrid } from './references'
+import { onScopeGrid, referenceInk } from './references'
 
 describe('onScopeGrid', () => {
   it('puts a stored capture of another sample rate on the grid by time, not by index', () => {
@@ -119,5 +119,46 @@ describe('onScopeGrid', () => {
     // Under interpolation a NaN takes both columns that would have read through it, and the last
     // column -- which has no neighbour past it -- is the sample itself.
     expect(onScopeGrid(values, source, grid, 'interpolate')).toEqual([null, null, 3])
+  })
+})
+
+describe('referenceInk', () => {
+  /**
+   * The point of the whole thing: a stored capture is never drawn in a live channel's colour.
+   * It used to be the channel's own hue pulled toward a per-run tint, which on the first run is
+   * blue pulled toward blue — so the dash was carrying the entire distinction.
+   */
+  it('is never one of the live channels’ colours', () => {
+    const live = ['#3b82f6', '#f97316']
+    for (const channel of [0, 1]) {
+      for (const run of [1, 2, 3]) {
+        expect(live).not.toContain(referenceInk(channel, run))
+      }
+    }
+  })
+
+  it('tells the two channels apart', () => {
+    expect(referenceInk(0, 1)).not.toBe(referenceInk(1, 1))
+  })
+
+  it('tells one run from the next', () => {
+    const inks = [1, 2, 3].map((run) => referenceInk(0, run))
+    expect(new Set(inks).size).toBe(3)
+  })
+
+  /** Lighter per run, and bounded, so the third is still legible on white. */
+  it('lifts a later run toward white without washing it out', () => {
+    const base = referenceInk(0, 1)
+    const third = referenceInk(0, 3)
+    expect(third).not.toBe(base)
+    // Still clearly the same hue family: green stays the largest channel of the teal base.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(third.slice(i, i + 2), 16))
+    expect(g).toBeGreaterThan(r)
+    expect(g).toBeGreaterThan(120)
+    expect(b).toBeLessThan(g)
+  })
+
+  it('reads an unknown channel as the left one', () => {
+    expect(referenceInk(7, 1)).toBe(referenceInk(0, 1))
   })
 })

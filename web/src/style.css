@@ -35,6 +35,28 @@
   --surface-plot: #15181d;
 }
 
+/* THE ONE ICON INK THAT DIFFERS BY THEME, and the only reason it is here rather than in
+   `scope/displayIcons.ts` with the other five: everything that is theme-dependent lives in this
+   file, and everything that is not stays a literal where it is drawn.
+
+   It is the teal of Joost's Y–T drawing — the waveform there, and the X–Y figure's dot. Supplied as
+   `#0e7490`, which reads at **5.38:1** against the light theme's white panel and only **3.11:1**
+   against the dark theme's `#1b1e23`, i.e. the dimmest of the six once the lights go out and
+   noticeably softer than the orange beside it (4.71:1). The dark value is not a taste pick: it is
+   the step that gives the dark theme the same contrast the supplied colour has in the light one,
+   so the figure carries the same weight in both rather than being brightened until it looked
+   right. (Measured 2026-11-22, asked for after the colours went in.)
+
+   Note what is deliberately NOT changed with it: the X–Y locus's violet `#7c3aed` is dimmer still
+   at 2.93:1, and it was left alone because it was not what was asked for — if it ever is, the
+   answer is another variable here, not a second mechanism. */
+:root {
+  --view-icon-teal: #0e7490;
+}
+.dark {
+  --view-icon-teal: #0c9fc2;
+}
+
 /* Every panel: the settings and display sections (CollapsibleSection), the chart cards
    (SpectrumChart, ThdSweepChart, WaterfallChart, the oscilloscope and the sweep previews), the
    overlay list, the Sys tiles, and the two strips a collapsed rail folds to (MeasurementLayout's

@@ -95,6 +95,7 @@ import { stepLadder } from './panels/stepperGrid'
 import { scopeTriggerBadge } from './scope/triggerState'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
+import type { ScopeMathAxis } from './scope/mathAxis'
 import { scopeViewIsXy } from './scope/xy'
 import { scopeViewIsEye } from './scope/eye'
 import { DEFAULT_SCOPE_AVERAGE_COUNT, type ScopeAccumulation } from './scope/acquisition'
@@ -2154,6 +2155,11 @@ const scopeMaths = ref<[ScopeMathSpec, ScopeMathSpec]>([
   { ...DEFAULT_SCOPE_DISPLAY.maths[0] },
   { ...DEFAULT_SCOPE_DISPLAY.maths[1] },
 ])
+/** And each one's own vertical axis, which the volts axis has had all along. See scope/mathAxis.ts. */
+const scopeMathAxes = ref<[ScopeMathAxis, ScopeMathAxis]>([
+  { ...DEFAULT_SCOPE_DISPLAY.mathAxes[0] },
+  { ...DEFAULT_SCOPE_DISPLAY.mathAxes[1] },
+])
 const scopeChartView = ref(DEFAULT_SCOPE_DISPLAY.chartView)
 
 /** The display path — the coupling and the in-path filter. One ref, because it is one thing. */
@@ -2620,6 +2626,10 @@ function currentScopeDisplay() {
     intensityMode: scopeIntensityMode.value,
     intensityPalette: scopeIntensityPalette.value,
     maths: [{ ...scopeMaths.value[0] }, { ...scopeMaths.value[1] }] as [ScopeMathSpec, ScopeMathSpec],
+    mathAxes: [{ ...scopeMathAxes.value[0] }, { ...scopeMathAxes.value[1] }] as [
+      ScopeMathAxis,
+      ScopeMathAxis,
+    ],
     chartView: scopeChartView.value,
     path: { ...scopePath.value },
     drawing: scopeDrawing.value,
@@ -2660,6 +2670,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   scopeIntensityMode.value = display.intensityMode
   scopeIntensityPalette.value = display.intensityPalette
   scopeMaths.value = [{ ...display.maths[0] }, { ...display.maths[1] }]
+  scopeMathAxes.value = [{ ...display.mathAxes[0] }, { ...display.mathAxes[1] }]
   scopeChartView.value = display.chartView
   scopePath.value = { ...display.path }
   scopeDrawing.value = display.drawing
@@ -2707,6 +2718,12 @@ watch(
     scopeIntensityMode,
     scopeIntensityPalette,
     scopeMaths,
+    // Each math channel's own vertical pair and its Autoscale. In this list by hand like every
+    // model bound outside the panel's own form -- missing from it, a rung the reader sets is
+    // discarded on the next measurement switch without a word, and with autosave off the Save
+    // button never appears. This project has paid for that rule twice; measured again here, where
+    // the three fields simply never reached params_json.
+    scopeMathAxes,
     scopeChartView,
     scopePath,
     scopeDrawing,
@@ -6877,6 +6894,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :intensity-mode="scopeIntensityMode"
                   :intensity-palette="scopeIntensityPalette"
                   :maths="scopeMaths"
+                  :math-axes="scopeMathAxes"
                   :path-note="scopePathNote"
                   :drawing="scopeDrawing"
                   :references="visibleScopeOverlays"
@@ -6930,6 +6948,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:intensity-mode="scopeIntensityMode"
                   v-model:intensity-palette="scopeIntensityPalette"
                   v-model:maths="scopeMaths"
+                  v-model:math-axes="scopeMathAxes"
                   v-model:chart-view="scopeChartView"
                   v-model:path="scopePath"
                   v-model:drawing="scopeDrawing"

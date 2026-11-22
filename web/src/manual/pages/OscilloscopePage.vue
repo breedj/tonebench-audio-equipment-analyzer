@@ -23,6 +23,178 @@ const { showPage } = useManual()
       </button>
     </p>
 
+    <h2>What is on this screen</h2>
+    <p>
+      Every function of this screen in one list, as a map of the sections below. None of it has to
+      be touched to take a capture — a stimulus, a trigger level and <strong>Run</strong> are
+      enough. The rest is for when the picture has raised a question.
+    </p>
+
+    <h3>Acquisition</h3>
+    <ul>
+      <li>
+        <strong>Sample rate</strong> — 48, 96 or 192 kS/s on a QA403, 384 kS/s with the experimental
+        setting (input only, the generator stands down), or whatever the card offers on a sound card.
+      </li>
+      <li>
+        <strong>Timebase</strong> — 2 µs/div to 100 ms/div on a 1-2-5 ladder, stepped with
+        <strong>−</strong>/<strong>+</strong> or picked out of the grid behind the value. The record
+        is ten divisions of it, so 20 µs to 1 s.
+      </li>
+      <li><strong>Channels</strong> — capture the left input, the right, or both.</li>
+      <li>
+        <strong>Run modes</strong> — <strong>Auto</strong> (draws something whether or not the
+        trigger fires), <strong>Normal</strong>, <strong>Single</strong>, and <strong>Roll</strong>,
+        which has no trigger at all and scrolls the newest window past.
+      </li>
+      <li>
+        <strong>Accumulation</strong> — <strong>Normal</strong>, <strong>Average</strong> ×2 to ×256
+        (records aligned to a fraction of a sample first), or <strong>Envelope</strong>, the band
+        every record since the reset has stayed inside.
+      </li>
+      <li>
+        <strong>Pre-trigger</strong> — 0 to 100 % of the record, typed or dragged on the chart's top
+        edge.
+      </li>
+    </ul>
+
+    <h3>Trigger</h3>
+    <ul>
+      <li>
+        <strong>Five kinds</strong> — <strong>Edge</strong>, <strong>Pulse width</strong> (the glitch
+        trigger), <strong>Window</strong> (into or out of a band), <strong>Dropout</strong> (fires
+        when the signal stops) and <strong>Runt</strong> (an edge that did not reach the far
+        threshold).
+      </li>
+      <li>
+        <strong>Source</strong> — either input, or <strong>Stimulus</strong>: the generator's own
+        repeat, which has no jitter at all and holds a chirp or periodic noise still.
+      </li>
+      <li>
+        <strong>Level</strong> (with a <strong>50 %</strong> button), <strong>slope</strong>,
+        <strong>hysteresis</strong> and <strong>holdoff</strong>, plus a second threshold where the
+        kind takes a band and width bounds for pulse width.
+      </li>
+      <li>
+        <strong>Trigger state</strong> beside the run dot — Armed, Ready, Trig'd, Stop, Auto or
+        Scan — and the capture rate on the chart's own header.
+      </li>
+    </ul>
+
+    <h3>Views</h3>
+    <ul>
+      <li><strong>Y–T</strong> — the waveform against time.</li>
+      <li>
+        <strong>X–Y</strong> — one input against the other, with phase, correlation and the
+        amplitude ratio under it.
+      </li>
+      <li>
+        <strong>Eye</strong> — the window folded on the signal's own measured period, with the spread
+        at each phase and the crossing jitter.
+      </li>
+      <li>
+        <strong>Zoom</strong> — drag a box on the plot, or drive the bar under it;
+        <strong>Back</strong>, <strong>Reset zoom</strong> and <strong>Set axis</strong>. Zoom far
+        enough and the analyzer sends every sample rather than a decimated picture.
+      </li>
+      <li>
+        <strong>Autofit</strong> (frames what is drawn, reference traces included),
+        <strong>Autoset</strong> (timebase from the measured frequency, plus the vertical and the
+        trigger level), and an <strong>Autoscale</strong> mode on each of the V/div and Time/div
+        knobs.
+      </li>
+    </ul>
+
+    <h3>How the trace is drawn</h3>
+    <ul>
+      <li>
+        <strong>Lines</strong>, <strong>sin(x)/x</strong> reconstruction, or <strong>Dots</strong>,
+        which draws nothing the analyzer did not measure.
+      </li>
+      <li>
+        A <strong>min/max band</strong> wherever a column covers more than one sample, and raw
+        samples once the window is tight enough to say <em>every sample drawn</em>.
+      </li>
+      <li>
+        <strong>Thick lines</strong>, <strong>data-point markers</strong>, and a show/hide per
+        channel.
+      </li>
+      <li>
+        <strong>Persistence</strong> — keep the last 8, 32 or 128 records as a haze, or every one of
+        them, in the channel's own colour or on a colour map.
+      </li>
+      <li><strong>Signal path</strong> — AC or DC coupling, applied once to the whole record.</li>
+    </ul>
+
+    <h3>Derived traces</h3>
+    <ul>
+      <li>
+        <strong>Two math channels</strong> — A−B, B−A, A+B, A×B, A÷B, −A, −B, dA/dt, dB/dt, ∫A dt
+        and ∫B dt, each with its own axis and unit, computed on the samples rather than on the drawn
+        columns, with the two sources chosen per channel.
+      </li>
+      <li>
+        <strong>Residual</strong> — one sine fitted to the window and subtracted, so what is left is
+        the distortion and the noise.
+      </li>
+      <li>
+        <strong>Reference traces</strong> — any stored capture drawn beside the live one, cut to the
+        same window and read through the same display path.
+      </li>
+      <li>
+        <strong>Pass/fail mask</strong> — a reference widened by a time and a level tolerance, with a
+        running tally and a verdict on the header.
+      </li>
+    </ul>
+
+    <h3>Measurements</h3>
+    <ul>
+      <li>
+        <strong>Thirty-one readings</strong> in four groups — vertical (peaks, settled levels, RMS and
+        spread, averages, shape), horizontal (rate, widths, edges, peak times), area, and channel
+        delay — each taken off whichever trace you point it at.
+      </li>
+      <li>
+        <strong>Statistics</strong> per reading: count, mean, min, max, peak-to-peak and standard
+        deviation, over the records this screen read.
+      </li>
+      <li>
+        <strong>Trend</strong> and <strong>distribution</strong> plots of one chosen reading, which is
+        what separates a drift from a jump from an alternation.
+      </li>
+      <li>
+        <strong>Cursors</strong> — a time pair, which also gates every reading to the stretch between
+        them, and a level pair with a <strong>Track</strong> mode that follows the trace; Δt, ΔV and
+        the slope between them.
+      </li>
+    </ul>
+
+    <h3>The generator</h3>
+    <ul>
+      <li>
+        A stimulus staged on this screen and kept apart from the FFT screen's — tone, square,
+        triangle, sawtooth, pulse, tone burst, DC, noise, chirp, multitone or a
+        <code>.wav</code> played on a loop — editable while the run goes on.
+      </li>
+    </ul>
+
+    <h3>Keeping a capture</h3>
+    <ul>
+      <li>
+        <strong>Save</strong> the record as a result, with its settings and its notes, and reopen it
+        later under any display setting.
+      </li>
+      <li>
+        <strong>Annotations</strong> on the Y–T view (a point, a region or a rule), a
+        <strong>screenshot</strong>, and a <strong>PDF report</strong> that draws whichever view the
+        measurement was last read in.
+      </li>
+      <li>
+        Two flags on the header where they apply: a <strong>spliced</strong> record, and one
+        <strong>Auto</strong> forced with nothing having crossed the level.
+      </li>
+    </ul>
+
     <h2>There is no trigger socket, and that is an advantage</h2>
     <p>
       A bench scope waits for an event and then starts recording. This analyzer streams continuously
@@ -834,6 +1006,10 @@ const { showPage } = useManual()
             <strong>The math channels</strong> below. Each button shows its own expression
             (<em>L − R</em>, <em>dR/dt</em>) or <em>Off</em>, and opens a dialog of the seven
             operations with a <strong>Source A</strong> and <strong>Source B</strong> beside them.
+            Each drawing channel also carries its own <strong>per-division</strong> and
+            <strong>centre</strong>, in that operation’s own unit, with an Autoscale that holds
+            rather than re-ranging on every record — see
+            <a href="#scope-math">The math channels</a>.
             Math 1 is drawn in violet and Math 2 in dashed pink, each against its own axis on the
             right.
           </td>
@@ -1503,7 +1679,7 @@ const { showPage } = useManual()
       whenever a capture setting makes the records stop being comparable.
     </p>
 
-    <h2>The math channels</h2>
+    <h2 id="scope-math">The math channels</h2>
     <p>
       <strong>Math 1</strong> and <strong>Math 2</strong> each draw one more trace, computed from
       the captured waveforms. Press either button in the display rail and a dialog offers the seven
@@ -1527,6 +1703,33 @@ const { showPage } = useManual()
       apart in a black-and-white report. Both channels on costs 144&nbsp;px of plot width to the
       two axes, which is the price of asking for two.
     </p>
+    <p>
+      <strong>And its own vertical.</strong> While a math channel is drawing, the Math panel carries
+      the same pair the Vertical panel does — a <strong>per-division</strong> stepper and a
+      <strong>centre</strong> — written in that operation’s own unit: 10.00&nbsp;V/ms for a
+      derivative, a bare number for a ratio, V² for a product. Eight divisions make the window, so a
+      derived trace is counted in squares exactly as a waveform is.
+    </p>
+    <p>
+      Its <strong>Autoscale</strong> works like V/div’s and is <strong>on</strong> to begin with,
+      because this axis ranged itself before the control existed. Left on it keeps the trace framed
+      while the signal changes, but it <em>holds</em> while the picture is still a good one rather
+      than re-deriving on every record — which is what a scale that re-ranges continuously does to a
+      wobbly trace, and it makes the graticule uncountable. Turn it off to pin the scale where it is.
+    </p>
+    <div class="manual-note">
+      <p>
+        The centre matters more here than on the volts axis. A difference and a derivative sit near
+        zero, but <strong>A ÷ B</strong> sits at one and <strong>A × B</strong> on its own DC term
+        — a product of two tones has one — so on either of those the centre is what brings the trace
+        onto the window at all. The buttons move it one division at a time.
+      </p>
+      <p>
+        The pair is only shown while that channel has something to draw: an axis labelled for a
+        quantity nothing is drawing would say nothing, and its Autoscale would have nothing to
+        follow.
+      </p>
+    </div>
     <table>
       <thead>
         <tr>

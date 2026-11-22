@@ -1351,6 +1351,28 @@ public sealed record OscilloscopeParameters(
     string? ChartMath2SourceA = null,
     string? ChartMath2SourceB = null,
     /// <summary>
+    /// Math 1's own vertical axis — how much of the derived quantity one division is worth, what
+    /// the middle of the graticule reads, and whether the pair follows the trace.
+    /// </summary>
+    /// <remarks>
+    /// <para>Three fields rather than a top and a bottom, for the reason the volts axis is a pair:
+    /// a scope is read by counting squares, so a division has to be a round number of whatever is
+    /// being counted. The per-division figure is a 1-2-5 rung computed rather than looked up, since
+    /// these five units span some twenty decades between them — see <c>scope/mathAxis.ts</c>.</para>
+    /// <para>The figure is in the operation's <b>own unit</b> (V, V², a bare ratio, V/s or V·s),
+    /// which is derived from <c>ChartMathOperation</c> and never stored beside it.</para>
+    /// <para>Null on anything saved before 2026-11-22, which reads as the default — autoscale on,
+    /// i.e. the axis still following its trace, which is what it had always done. So nothing
+    /// already saved draws differently for having been reopened.</para>
+    /// </remarks>
+    double? ChartMathPerDivision = null,
+    double? ChartMathCentre = null,
+    bool? ChartMathAutoscale = null,
+    /// <summary>The same three for Math 2.</summary>
+    double? ChartMath2PerDivision = null,
+    double? ChartMath2Centre = null,
+    bool? ChartMath2Autoscale = null,
+    /// <summary>
     /// Which picture the chart drew — <c>Waveform</c> (the trace against time) or <c>XY</c> (the
     /// goniometer, one input against the other). A display preference like the rest, so the view a
     /// measurement was last read in is the one it reopens in.

@@ -16,6 +16,13 @@ import {
   voltWindow,
 } from '../scope/voltAxis'
 import StepperTile from './StepperTile.vue'
+import {
+  fitMathAxis,
+  formatMathPerDivision,
+  mathAxisNeedsFit,
+  stepMathPerDivision,
+  type ScopeMathAxis,
+} from '../scope/mathAxis'
 import { stepLadder } from '../panels/stepperGrid'
 import { clampWindow, fromChartMs, recordWindow, scopeTimeScale, toChartMs } from '../scope/timeAxis'
 import {
@@ -55,6 +62,7 @@ import {
   mathSpecDraws,
   mathSpecLabel,
   mathSpecMissing,
+  mathUnitOf,
   scopeMathSlice,
   type ScopeMathSlot,
   type ScopeMathSpec,
@@ -75,6 +83,8 @@ const voltsPerDivision = defineModel<number>('voltsPerDivision', { required: tru
 const voltOffsetV = defineModel<number>('voltOffsetV', { required: true })
 /** Whether the pair above keeps itself fitted to what is drawn. See scope/autoscale.ts. */
 const autoscaleVolts = defineModel<boolean>('autoscaleVolts', { required: true })
+/** Each math channel's own vertical pair plus its Autoscale. See scope/mathAxis.ts. */
+const mathAxes = defineModel<[ScopeMathAxis, ScopeMathAxis]>('mathAxes', { required: true })
 const timeFromS = defineModel<number>('timeFromS', { required: true })
 const timeToS = defineModel<number>('timeToS', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
@@ -330,6 +340,19 @@ const mathRows = computed(() =>
        * that is mostly at ±1000 is a picture of the clamp and its reader has to be told.</p>
        */
       clamped: scopeMathSlice(record.value, slot)?.clampedSamples ?? 0,
+      /**
+       * Whether there is a trace on this channel's axis <em>now</em>, which is what decides the
+       * axis tiles — the same test the chart draws the axis on. An axis labelled for a quantity
+       * nothing is drawing takes two rows of the rail and says nothing, and its Autoscale would
+       * have nothing to follow.
+       */
+      drawn: scopeMathSlice(record.value, slot) !== null,
+      axis: mathAxes.value[slot - 1],
+      /** The division in the operation's own unit — V, V², a bare ratio, V/µs or V·s. */
+      perDivisionLabel: formatMathPerDivision(
+        mathAxes.value[slot - 1].perDivision,
+        mathUnitOf(spec.operation),
+      ),
     }
   }),
 )
@@ -349,6 +372,95 @@ function onMathApply(spec: ScopeMathSpec) {
   next[slot - 1] = spec
   maths.value = next
 }
+
+// ---------------------------------------------------------------------------
+// The math channels' own vertical axes
+// ---------------------------------------------------------------------------
+
+/**
+ * What a math axis is fitted to: the derived trace's own extremes.
+ *
+ * <p>Read off the slice's <code>measurements</code>, which the analyzer takes on the derived
+ * <em>samples</em> at full resolution rather than on the columns they are drawn as — the same
+ * reason the math trace itself is computed server-side, and it matters here for the same one: on a
+ * differential pair the difference of two envelopes is not the envelope of the difference.</p>
+ *
+ * <p>No references folded in, unlike the volts axis's <code>extremes</code>: a stored capture
+ * carries no math trace, so there is nothing of anyone else's on this axis to frame.</p>
+ */
+function mathExtremes(slot: ScopeMathSlot): { max: number; min: number } | null {
+  const measured = scopeMathSlice(record.value, slot)?.measurements
+  if (!measured) return null
+  if (!Number.isFinite(measured.maxV) || !Number.isFinite(measured.minV)) return null
+  return { max: measured.maxV, min: measured.minV }
+}
+
+/** One axis replaced, never mutated — the pair is a model like every other here. */
+function setMathAxis(slot: ScopeMathSlot, next: Partial<ScopeMathAxis>) {
+  const pair: [ScopeMathAxis, ScopeMathAxis] = [{ ...mathAxes.value[0] }, { ...mathAxes.value[1] }]
+  pair[slot - 1] = { ...pair[slot - 1], ...next }
+  mathAxes.value = pair
+}
+
+/** The fit, which is what both the toggle and the watcher below land on. */
+function autofitMath(slot: ScopeMathSlot) {
+  const measured = mathExtremes(slot)
+  if (!measured) return
+  setMathAxis(slot, fitMathAxis(measured.max, measured.min))
+}
+
+/** The tile's Autoscale: fits at once on the way on, for the V/div toggle's own reason. */
+function toggleAutoscaleMath(slot: ScopeMathSlot) {
+  const on = !mathAxes.value[slot - 1].autoscale
+  setMathAxis(slot, { autoscale: on })
+  if (on) autofitMath(slot)
+}
+
+function stepMathPerDivisionBy(slot: ScopeMathSlot, direction: 1 | -1) {
+  setMathAxis(slot, {
+    perDivision: stepMathPerDivision(mathAxes.value[slot - 1].perDivision, direction),
+  })
+}
+
+/** One press of a centre's buttons is one division, as the volts centre's is. */
+function stepMathCentre(slot: ScopeMathSlot, direction: 1 | -1) {
+  const step = mathAxes.value[slot - 1].perDivision
+  if (!Number.isFinite(step) || step <= 0) return
+  setMathAxis(slot, { centre: mathAxes.value[slot - 1].centre + direction * step })
+}
+
+function onMathCentreChange(event: Event, slot: ScopeMathSlot) {
+  const typed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(typed)) {
+    ;(event.target as HTMLInputElement).value = String(mathAxes.value[slot - 1].centre)
+    return
+  }
+  setMathAxis(slot, { centre: typed })
+}
+
+/**
+ * And while Autoscale is on: the dead band, exactly as the vertical has.
+ *
+ * <p>One watcher for both slots rather than two, because they share a trigger — the record — and a
+ * third slot could not then be added with its own forgotten. The guards are the vertical's and are
+ * the same guards for the same reasons: a forced record is the dead-input case, where what is being
+ * followed is the front end's own noise rather than a signal, and a write marks the measurement
+ * dirty, so it waits for the picture to have actually stopped being a good one.</p>
+ */
+watch(
+  () => record.value,
+  () => {
+    if (record.value?.forced) return
+    for (const slot of SCOPE_MATH_SLOTS) {
+      const axis = mathAxes.value[slot - 1]
+      if (!axis.autoscale) continue
+      const measured = mathExtremes(slot)
+      if (!measured) continue
+      if (!mathAxisNeedsFit(axis, measured.max, measured.min)) continue
+      autofitMath(slot)
+    }
+  },
+)
 
 /**
  * The extremes of what is <b>drawn</b> — exact even on a decimated slice. See scope/measurements.ts.
@@ -434,6 +546,9 @@ function autofitTime() {
 function autofitAll() {
   autofitTime()
   autofitVolts()
+  // The math axes with them: Autofit is one press per *chart*, and a derived trace left on an
+  // axis nothing fitted is as unreadable as a waveform would be.
+  for (const slot of SCOPE_MATH_SLOTS) autofitMath(slot)
 }
 
 /*
@@ -1032,6 +1147,44 @@ function stepOffset(direction: 1 | -1) {
         </template>
       </template>
     </div>
+
+    <!-- Each drawn channel's own vertical, which is the V/div pair one axis along (asked for
+         2026-11-22: "can the maths channel axis have its own vertical scale setting ... make it
+         work the same as V/div, but show the correct unit"). Only while that channel has a trace:
+         two tiles for an axis nothing is drawing are two rows of a rail whose problem is height,
+         and an Autoscale with nothing to follow. The value is written in the operation's own unit,
+         through the one formatter the axis ticks and the measurement table already go through. -->
+    <template v-for="row in mathRows" :key="`axis-${row.slot}`">
+      <div v-if="row.drawn" class="mt-2.5 flex flex-col gap-2.5">
+        <StepperTile
+          :label="`Math ${row.slot}/div`"
+          :tone="row.slot === 1 ? 'violet' : 'pink'"
+          :display="row.perDivisionLabel"
+          :title="`How much of ${row.label} one vertical division is worth. Eight of them make this channel's own window, centred on the figure below.`"
+          auto-title="Autoscale: keeps this axis fitted to its own trace. Left on it follows the signal, holding while the picture is still a good one rather than re-ranging on every record."
+          :auto-on="row.axis.autoscale"
+          @step="(d: 1 | -1) => stepMathPerDivisionBy(row.slot, d)"
+          @auto="toggleAutoscaleMath(row.slot)"
+        />
+        <StepperTile
+          :label="`Math ${row.slot} centre`"
+          :tone="row.slot === 1 ? 'violet' : 'pink'"
+          title="What the middle of this channel's own graticule reads. A ratio sits at one and a product on its own DC term, so this is how either is brought onto the window. The buttons move it one division at a time."
+          @step="(d: 1 | -1) => stepMathCentre(row.slot, d)"
+        >
+          <input
+            :value="drafts.show(`mathCentre${row.slot}`, row.axis.centre)"
+            type="number"
+            :step="row.axis.perDivision"
+            class="w-full appearance-none border-0 bg-transparent p-0 text-[15px] font-semibold tabular-nums shadow-none outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            :style="{ color: `var(--kind-${row.slot === 1 ? 'violet' : 'pink'}-chip-fg)` }"
+            @input="drafts.type(`mathCentre${row.slot}`, $event)"
+            @change="drafts.end(`mathCentre${row.slot}`); onMathCentreChange($event, row.slot)"
+            @blur="drafts.end(`mathCentre${row.slot}`)"
+          />
+        </StepperTile>
+      </div>
+    </template>
 
     <ScopeMathDialog
       v-if="mathDialogSlot"

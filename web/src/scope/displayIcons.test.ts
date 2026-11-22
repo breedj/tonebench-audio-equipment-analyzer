@@ -201,6 +201,24 @@ describe('the display toggles’ figures', () => {
   })
 
   /**
+   * The one ink of the six that differs by theme has to be defined in both, or a figure drawn in a
+   * variable nothing declares falls back to whatever it inherits — which reads as the flattening
+   * this whole set exists to undo, and only reading the stylesheet catches it. The technique is
+   * <code>pickerSections.test.ts</code>' own.
+   */
+  it('declares the themed View ink in both themes', () => {
+    const css = readFileSync(resolve(import.meta.dirname, '..', 'style.css'), 'utf8')
+
+    const declarations = [...css.matchAll(/--view-icon-teal:\s*(#[0-9a-f]{6})/gi)].map((m) => m[1])
+    expect(declarations.length, 'the themed ink is declared once per theme').toBe(2)
+    expect(declarations[0], 'the two themes use the same value').not.toBe(declarations[1])
+
+    // And something has to be asking for it, or the pair is dead weight.
+    const inks = SCOPE_VIEWS.flatMap((v) => scopeToggleIcon(v.icon).map((s) => s.ink))
+    expect(inks).toContain('var(--view-icon-teal)')
+  })
+
+  /**
    * And the component has to prefer it. A shape's own ink is the more specific statement than the
    * mark colour a picker well supplies, and the other order would make a View figure change colour
    * the day one of these is shown in a picker.

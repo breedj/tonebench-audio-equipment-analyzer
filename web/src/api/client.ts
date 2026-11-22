@@ -2062,6 +2062,15 @@ export interface OscilloscopeParameters {
   chartMath2Operation?: string | null
   chartMath2SourceA?: string | null
   chartMath2SourceB?: string | null
+  /** Math 1's own vertical axis: a 1-2-5 rung in the operation's own unit, a centre, and
+   *  whether it follows the trace. Absent on anything saved before 2026-11-22, which reads
+   *  as the default -- see scope/mathAxis.ts. */
+  chartMathPerDivision?: number | null
+  chartMathCentre?: number | null
+  chartMathAutoscale?: boolean | null
+  chartMath2PerDivision?: number | null
+  chartMath2Centre?: number | null
+  chartMath2Autoscale?: boolean | null
   /** Which picture the chart drew — `Waveform` or `XY`. See scope/xy.ts. */
   chartView?: string | null
   /**

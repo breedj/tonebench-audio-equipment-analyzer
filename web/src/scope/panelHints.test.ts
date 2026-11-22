@@ -192,16 +192,25 @@ describe('the horizontal and vertical automatics', () => {
   const config = read('ScopeConfigPanel.vue')
   const tile = read('StepperTile.vue')
 
-  it('puts an Autoscale on V/div and on Time/div, and on nothing else', () => {
+  /**
+   * One per knob that has an automatic answer, and none on the two that do not.
+   *
+   * <p>Three since 2026-11-22: V/div, Time/div and each math channel's own per-division — the
+   * last written once in the rail's source and drawn per drawn slot. Neither <b>Centre</b> has
+   * one, and that is the half worth pinning: a centre is written by its own axis's fit, so a
+   * button there would be a second thing doing the same job, differently.</p>
+   */
+  it('puts an Autoscale on every knob that has one, and on no Centre', () => {
     expect(rail).toContain('auto-title=')
     expect(config).toContain('auto-title=')
-    // The Centre box has no automatic answer of its own: V/div's own fit writes it.
-    expect(rail.match(/auto-title=/g)).toHaveLength(1)
+    // V/div and the math per-division; the two Centre boxes have none.
+    expect(rail.match(/auto-title=/g)).toHaveLength(2)
     expect(config.match(/auto-title=/g)).toHaveLength(1)
   })
 
   it('wires each to something', () => {
     expect(rail).toContain('@auto="toggleAutoscaleVolts"')
+    expect(rail).toContain('@auto="toggleAutoscaleMath(row.slot)"')
     expect(config).toContain("@auto=\"emit('autoTimebase')\"")
   })
 
@@ -216,8 +225,19 @@ describe('the horizontal and vertical automatics', () => {
    */
   it('lights each one while it is on', () => {
     expect(rail).toContain(':auto-on="autoscaleVolts"')
+    expect(rail).toContain(':auto-on="row.axis.autoscale"')
     expect(config).toContain(':auto-on="autoscaleTimebase"')
     expect(tile).toContain(':aria-pressed="autoOn"')
+  })
+
+  /**
+   * The math tiles are drawn only where that channel has a trace. Two tiles for an axis nothing is
+   * drawing are two rows of a rail whose whole problem is height, and an Autoscale with nothing to
+   * follow — which is also the test the chart draws the axis itself on.
+   */
+  it('shows a math channel’s own vertical only while it is drawing', () => {
+    expect(rail).toContain('v-if="row.drawn"')
+    expect(rail).toContain('Math ${row.slot}/div')
   })
 
   it('keeps the Time window boxes for the views with no zoom bar, and nowhere else', () => {

@@ -49,13 +49,19 @@ export type ScopeToggleShape =
  * <p><code>structure</code> is what the signal is drawn <em>on</em> — the axes, the ghosted cycle
  * behind the eye — and <code>mark</code> is what is drawn <em>on</em> the signal. The signal's own
  * colour differs per view on purpose, each being the one that view's picture is read in.</p>
+ *
+ * <p><b>Five are literals and the teal is a variable</b>, which is this app's own split rather than
+ * an inconsistency: a colour that is the same in both themes is written where it is drawn, and one
+ * that is not lives in <code>style.css</code>. The supplied teal reads 5.38:1 on the light theme's
+ * panel and 3.11:1 on the dark one, so the dark theme gets a lighter step — the arithmetic, and
+ * what was deliberately left alone with it, are in that file's own note.</p>
  */
 const VIEW_INK = {
   structure: '#94a3b8',
-  waveform: '#0e7490',
+  waveform: 'var(--view-icon-teal)',
   locus: '#7c3aed',
   eye: '#ea580c',
-  mark: { waveform: '#ea580c', locus: '#0e7490', eye: '#2563eb' },
+  mark: { waveform: '#ea580c', locus: 'var(--view-icon-teal)', eye: '#2563eb' },
 } as const
 
 /**

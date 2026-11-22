@@ -96,6 +96,7 @@ import {
   scopeMathSlice,
   type ScopeMathSpec,
 } from '../scope/math'
+import { mathWindow, type ScopeMathAxis } from '../scope/mathAxis'
 
 /**
  * The oscilloscope screen's chart — a waveform on a <b>linear</b> time axis with the trigger at
@@ -202,6 +203,8 @@ const props = withDefaults(defineProps<{
    * chosen, the name alone no longer says which trace it is of.</p>
    */
   maths: readonly [ScopeMathSpec, ScopeMathSpec]
+  /** Each math channel's own vertical pair. See scope/mathAxis.ts. */
+  mathAxes: readonly [ScopeMathAxis, ScopeMathAxis]
   /**
    * What the display path is doing to the trace, in the words the rail uses — or null for a bare
    * record. Shown as a badge, because the path changes what every reading beside it means.
@@ -828,6 +831,9 @@ const spanMs = computed(() => Math.abs(xWindowMs.value.max - xWindowMs.value.min
 
 /** The two ends of the volts axis, derived from the V/div and the centre. See scope/voltAxis.ts. */
 const yWindow = computed(() => voltWindow(props.voltsPerDivision, props.voltOffsetV))
+
+/** The two math axes' ends, derived from the pair each one stores. */
+const mathWindows = computed(() => MATH_SLOTS.map((slot) => mathWindow(props.mathAxes[slot - 1])))
 
 /**
  * Bumped whenever the plot's own scales move, so anything derived from them recomputes.
@@ -1824,15 +1830,23 @@ function buildOptions(width: number, height: number, t: Theme, interactive: bool
       // an x scale that fallback is dead code, since uPlot only passes null with no data yet.
       x: { time: false, auto: false, range: (_u, min, max) => [min ?? xWindowMs.value.min, max ?? xWindowMs.value.max] },
       y: { auto: false, range: (_u, min, max) => [min ?? yWindow.value.bottomV, max ?? yWindow.value.topV] },
-      // The math trace auto-ranges, which is the honest answer for a derived quantity whose
-      // magnitude nobody knows in advance -- and unlike the volts axis there is no V/div ladder it
-      // could be a rung of. uPlot ranges an auto scale over what is visible in x, so it follows a
-      // zoom the way a scope's own math channel does.
-      // One auto-ranging scale per math channel: two derived quantities are routinely in different
-      // units, so they cannot share one -- and a derived trace is routinely orders smaller than
-      // what it came from, which is why neither is on the volts axis.
-      [MATH_SCALES[0]]: { auto: true },
-      [MATH_SCALES[1]]: { auto: true },
+      // One scale per math channel: two derived quantities are routinely in different units, so
+      // they cannot share one -- and a derived trace is routinely orders smaller than what it came
+      // from, which is why neither is on the volts axis.
+      //
+      // Both were `auto: true` until 2026-11-22, which re-ranges on every record: a trace that
+      // wobbles redraws its own graticule several times a second, and nothing on it can be
+      // counted. They are the panel's own pair now, exactly as the volts axis is, and following
+      // the trace is a setting rather than the only behaviour -- see scope/mathAxis.ts, and note
+      // that even left following it now holds inside a dead band rather than re-deriving.
+      [MATH_SCALES[0]]: {
+        auto: false,
+        range: (_u, min, max) => [min ?? mathWindows.value[0].bottom, max ?? mathWindows.value[0].top],
+      },
+      [MATH_SCALES[1]]: {
+        auto: false,
+        range: (_u, min, max) => [min ?? mathWindows.value[1].bottom, max ?? mathWindows.value[1].top],
+      },
     },
     axes: [
       {
@@ -2306,6 +2320,10 @@ async function exportPng({ width, height, captureZoom = false }: ChartExportOpti
     u.setData([xMs, ...channels.map((c) => c.line)] as unknown as uPlot.AlignedData)
     u.setScale('x', xWin)
     u.setScale('y', yWin)
+    MATH_SLOTS.forEach((slot) => {
+      const w = mathWindows.value[slot - 1]
+      u!.setScale(MATH_SCALES[slot - 1], { min: w.bottom, max: w.top })
+    })
     await nextPaint()
 
     const record = props.record
@@ -2409,6 +2427,14 @@ function refresh(force = false) {
     p.setScale('x', xWindowMs.value)
     p.setScale('y', { min: yWindow.value.bottomV, max: yWindow.value.topV })
   }
+  // The math axes are written on every refresh and are not part of `heldWindow`: a drag-zoom moves
+  // time and volts, which is what the gesture means, and a derived quantity's own window is the
+  // panel's either way. Without this a changed rung reaches the scale only when something else
+  // happens to commit -- the `setData(..., false)` trap one axis along.
+  MATH_SLOTS.forEach((slot) => {
+    const w = mathWindows.value[slot - 1]
+    p.setScale(MATH_SCALES[slot - 1], { min: w.bottom, max: w.top })
+  })
   syncHandle()
 }
 

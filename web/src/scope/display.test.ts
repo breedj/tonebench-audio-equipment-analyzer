@@ -348,6 +348,57 @@ describe('the chosen measurements', () => {
   })
 })
 
+describe('the math axes', () => {
+  it('round-trips through params_json', () => {
+    const stored = scopeDisplayToParams({
+      ...DEFAULT_SCOPE_DISPLAY,
+      mathAxes: [
+        { perDivision: 0.05, centre: -1.5, autoscale: false },
+        { perDivision: 2000, centre: 0, autoscale: true },
+      ],
+    })
+    const back = scopeDisplayFromParams(JSON.stringify(stored))
+    expect(back.mathAxes[0]).toEqual({ perDivision: 0.05, centre: -1.5, autoscale: false })
+    expect(back.mathAxes[1]).toEqual({ perDivision: 2000, centre: 0, autoscale: true })
+  })
+
+  it('reads a measurement saved before any of it existed as still following its trace', () => {
+    // Which is every measurement saved before 2026-11-22: the axis ranged itself then, so the
+    // default has to be the behaviour it had, or reopening one changes the picture.
+    const back = scopeDisplayFromParams(JSON.stringify({ chartMathOperation: 'AMinusB' }))
+    expect(back.mathAxes[0].autoscale).toBe(true)
+    expect(back.mathAxes[1].autoscale).toBe(true)
+  })
+
+  it('snaps a stored rung that is not one', () => {
+    // A hand-edited 0.37 is a graticule nobody can count, which is the whole reason the stored
+    // pair is a rung and a centre rather than two ends.
+    const back = scopeDisplayFromParams(JSON.stringify({ chartMathPerDivision: 0.37 }))
+    expect(back.mathAxes[0].perDivision).toBeCloseTo(0.5, 12)
+  })
+
+  it('does not share one object between the two slots', () => {
+    const a = scopeDisplayFromParams(null)
+    a.mathAxes[0].centre = 7
+    expect(a.mathAxes[1].centre).toBe(0)
+    expect(DEFAULT_SCOPE_DISPLAY.mathAxes[0].centre).toBe(0)
+  })
+
+  /**
+   * The rule this project has paid for three times: a model bound outside the panel's own `form`
+   * reaches no dirty path unless it is named in App.vue's watcher by hand. Missing from it, a rung
+   * the reader sets is discarded on the next measurement switch without a word -- measured here,
+   * where the three fields simply never reached `params_json`.
+   */
+  it('is named in App.vue’s dirty watcher', () => {
+    const app = readFileSync(resolve(import.meta.dirname, '..', 'App.vue'), 'utf8')
+    expect(app).toContain('scopeMathAxes')
+    // Not merely present: in the list, which is the thing that was missing.
+    const watcher = app.slice(app.indexOf('scopeAutoscaleVolts,'), app.indexOf('scopeMaskToleranceS,'))
+    expect(watcher).toContain('scopeMathAxes,')
+  })
+})
+
 describe('the plot under the table', () => {
   it('comes back as it was stored', () => {
     const stored = JSON.stringify({ chartTrendRow: 'pkpk:ch1', chartTrendView: 'Distribution' })

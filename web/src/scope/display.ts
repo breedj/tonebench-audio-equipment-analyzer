@@ -14,6 +14,11 @@ import {
   type ScopeMathSpec,
 } from './math'
 import { SCOPE_VIEWS, type ScopeView } from './xy'
+import {
+  DEFAULT_SCOPE_MATH_AXIS,
+  snapMathPerDivision,
+  type ScopeMathAxis,
+} from './mathAxis'
 import { SCOPE_DRAWINGS, type ScopeDrawing } from './interpolation'
 import {
   DEFAULT_SCOPE_PATH,
@@ -116,6 +121,16 @@ export interface ScopeDisplay {
    * reopened capture, where a stored derived waveform could not be.</p>
    */
   maths: [ScopeMathSpec, ScopeMathSpec]
+  /**
+   * Each math channel's own vertical axis — a per-division figure, a centre and an Autoscale, the
+   * same three the volts axis has. See scope/mathAxis.ts, which says why the old auto-ranging
+   * scale had to become a setting.
+   *
+   * <p>One per slot and not one shared, for the reason the two scales were separate to begin with:
+   * two derived quantities are routinely in different units, so a division of one says nothing
+   * about a division of the other.</p>
+   */
+  mathAxes: [ScopeMathAxis, ScopeMathAxis]
   /**
    * Which picture the chart draws — the waveforms against time, or one channel against the other.
    *
@@ -246,6 +261,11 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   /** Both off: a math channel is a pass over the window on every fetch, and most of what a scope
    *  is pointed at wants the two waveforms themselves. */
   maths: [{ ...DEFAULT_SCOPE_MATH_SPEC }, { ...DEFAULT_SCOPE_MATH_SPEC }] as [ScopeMathSpec, ScopeMathSpec],
+  /** Both following the trace, which is what this axis has always done. See DEFAULT_SCOPE_MATH_AXIS. */
+  mathAxes: [{ ...DEFAULT_SCOPE_MATH_AXIS }, { ...DEFAULT_SCOPE_MATH_AXIS }] as [
+    ScopeMathAxis,
+    ScopeMathAxis,
+  ],
   /** The waveform, which is what a scope is for; X–Y is a view a reader switches to on purpose. */
   chartView: 'Waveform',
   /** DC: a scope shows what arrived until somebody asks it not to. */
@@ -299,6 +319,27 @@ export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
  * <code>NaN</code> or an <code>undefined</code> — and the time pair is only taken as a pair, since a
  * half-restored window is a window with no span.</p>
  */
+/**
+ * One stored math axis read back, field by field.
+ *
+ * <p>Each is guarded on its own rather than the three being taken together, so a document that
+ * carries some of them — one written by a build between this change and a later one, or edited by
+ * hand — keeps what it says and takes the default for the rest. The per-division figure is snapped
+ * on the way in: a hand-edited 0.37 is a graticule nobody can count, which is the whole reason the
+ * stored pair is a rung and a centre rather than two ends.</p>
+ */
+function readMathAxis(
+  axis: ScopeMathAxis,
+  perDivision: unknown,
+  centre: unknown,
+  autoscale: unknown,
+): void {
+  if (typeof perDivision === 'number' && Number.isFinite(perDivision) && perDivision > 0)
+    axis.perDivision = snapMathPerDivision(perDivision)
+  if (typeof centre === 'number' && Number.isFinite(centre)) axis.centre = centre
+  if (typeof autoscale === 'boolean') axis.autoscale = autoscale
+}
+
 export function scopeDisplayFromParams(
   paramsJson: string | null | undefined,
   base: Readonly<ScopeDisplay> = DEFAULT_SCOPE_DISPLAY,
@@ -309,6 +350,7 @@ export function scopeDisplayFromParams(
     path: { ...base.path },
     // Copied, not shared: the base is frozen and the restore below writes into this pair.
     maths: [{ ...base.maths[0] }, { ...base.maths[1] }],
+    mathAxes: [{ ...base.mathAxes[0] }, { ...base.mathAxes[1] }],
   }
   if (!paramsJson) return display
 
@@ -390,6 +432,17 @@ export function scopeDisplayFromParams(
       stored.chartMath2SourceA,
       stored.chartMath2SourceB,
     )
+  // The two math axes. Every field is read on its own, so a measurement saved before any of them
+  // existed -- which is every one saved before 2026-11-22 -- comes back on the default, i.e. still
+  // following its trace, and nothing that was on screen changes by being reopened.
+  readMathAxis(display.mathAxes[0], stored.chartMathPerDivision, stored.chartMathCentre, stored.chartMathAutoscale)
+  readMathAxis(
+    display.mathAxes[1],
+    stored.chartMath2PerDivision,
+    stored.chartMath2Centre,
+    stored.chartMath2Autoscale,
+  )
+
   if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
     display.chartView = stored.chartView as ScopeView
 
@@ -458,6 +511,12 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
     chartMath2Operation: display.maths[1].operation,
     chartMath2SourceA: display.maths[1].sourceA,
     chartMath2SourceB: display.maths[1].sourceB,
+    chartMathPerDivision: display.mathAxes[0].perDivision,
+    chartMathCentre: display.mathAxes[0].centre,
+    chartMathAutoscale: display.mathAxes[0].autoscale,
+    chartMath2PerDivision: display.mathAxes[1].perDivision,
+    chartMath2Centre: display.mathAxes[1].centre,
+    chartMath2Autoscale: display.mathAxes[1].autoscale,
     chartView: display.chartView,
     chartCoupling: display.path.coupling,
     chartDrawing: display.drawing,

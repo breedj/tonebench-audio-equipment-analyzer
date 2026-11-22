@@ -45,7 +45,7 @@ import {
 import { capturedScopeChannels, scopeChannelDrawn } from '../scope/display'
 import { PALETTE_NAMES } from '../measurements/decay'
 import SegmentedToggle from './SegmentedToggle.vue'
-import { SCOPE_VIEWS, scopeViewIsXy, type ScopeView } from '../scope/xy'
+import { SCOPE_VIEWS_OFFERED, scopeViewIsXy, type ScopeView } from '../scope/xy'
 import {
   SCOPE_COUPLINGS,
   type ScopeSignalPathSettings,
@@ -888,18 +888,22 @@ function stepOffset(direction: 1 | -1) {
   <CollapsibleSection
     title="View"
     size="xs"
-    hint="The waveform against time, which is an oscilloscope’s ordinary picture; the two inputs against each other as a shape; or every cycle folded on the signal’s own period. One at a time rather than three charts, so whichever is on screen keeps the full height."
+    hint="The waveform against time, which is an oscilloscope’s ordinary picture, or the two inputs against each other as a shape. One at a time rather than two charts, so whichever is on screen keeps the full height."
   >
     <!-- A scope's mode button, not two charts: the two are the same record drawn two ways and only
          one of them can be read at a time, so a toggle keeps the chart its full height. -->
     <SegmentedToggle
       v-model="chartView"
       group-label="Chart view"
-      :options="SCOPE_VIEWS.map((v) => ({ value: v.value, label: v.label, title: v.title, icon: v.icon }))"
+      :options="SCOPE_VIEWS_OFFERED.map((v) => ({ value: v.value, label: v.label, title: v.title, icon: v.icon }))"
     />
     <!-- No paragraph under the buttons: SegmentedToggle already puts each option’s own title on
-         its own button, and that text IS what this said. What the three views are is the panel’s
-         hint. -->
+         its own button, and that text IS what this said. What the views are is the panel’s hint.
+
+         The toggle renders SCOPE_VIEWS_OFFERED rather than every view it knows, so taking one off
+         the rail is a flag on its entry: the chart, the report and the stored value are untouched
+         and the two that are left take its width by themselves, the track being one grid of equal
+         fractions. The eye came off on 2026-11-22. -->
     <p v-if="xyOn && !bothCaptured" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
       Nothing to draw: an X–Y figure needs both inputs. Tick them under Acquisition ▸ Channels.
     </p>

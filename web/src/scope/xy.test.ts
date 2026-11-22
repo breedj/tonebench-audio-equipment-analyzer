@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ScopeXySlice } from '../api/client'
 import {
   SCOPE_VIEWS,
+  SCOPE_VIEWS_OFFERED,
   XY_DIVISIONS,
   correlationDescription,
   formatAmplitudeRatio,
@@ -36,6 +37,25 @@ describe('the view toggle', () => {
       expect(view.label.length).toBeGreaterThan(0)
       expect(view.title.length).toBeGreaterThan(30)
     }
+  })
+
+  /**
+   * A view taken off the rail is a flag, not a deleted entry: the chart, the report and every
+   * stored `ChartView` are written against the full list, so nothing that *draws* a view has to
+   * learn that it might be missing.
+   */
+  it('offers a subset of what it knows, derived rather than listed again', () => {
+    for (const view of SCOPE_VIEWS_OFFERED) expect(SCOPE_VIEWS).toContain(view)
+    expect(SCOPE_VIEWS_OFFERED.every((v) => v.offered)).toBe(true)
+    expect(SCOPE_VIEWS.filter((v) => !v.offered).length).toBe(
+      SCOPE_VIEWS.length - SCOPE_VIEWS_OFFERED.length,
+    )
+  })
+
+  it('does not offer the eye for now, and still knows it', () => {
+    expect(SCOPE_VIEWS_OFFERED.map((v) => v.value)).toEqual(['Waveform', 'XY'])
+    // Still a view, so a chart drawn in it and a report of one are untouched.
+    expect(SCOPE_VIEWS.map((v) => v.value)).toContain('Eye')
   })
 
   it('knows which one is the goniometer', () => {

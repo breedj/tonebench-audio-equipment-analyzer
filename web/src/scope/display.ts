@@ -13,7 +13,7 @@ import {
   type ScopeMathOperation,
   type ScopeMathSpec,
 } from './math'
-import { SCOPE_VIEWS, type ScopeView } from './xy'
+import { SCOPE_VIEWS_OFFERED, type ScopeView } from './xy'
 import {
   DEFAULT_SCOPE_MATH_AXIS,
   snapMathPerDivision,
@@ -443,7 +443,12 @@ export function scopeDisplayFromParams(
     stored.chartMath2Autoscale,
   )
 
-  if (typeof stored.chartView === 'string' && SCOPE_VIEWS.some((v) => v.value === stored.chartView))
+  // Against the *offered* views, so a measurement saved in one that has since been taken off the
+  // rail reopens on the default rather than on a picture with no button to leave it by.
+  if (
+    typeof stored.chartView === 'string' &&
+    SCOPE_VIEWS_OFFERED.some((v) => v.value === stored.chartView)
+  )
     display.chartView = stored.chartView as ScopeView
 
   // Validated against the table rather than cast, like the palettes: a name from a newer build,

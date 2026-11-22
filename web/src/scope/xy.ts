@@ -30,29 +30,64 @@ export type ScopeView = 'Waveform' | 'XY' | 'Eye'
  * cycle drawn over the others. The figures are one ink, so the lit option's own colour and the
  * track's grey are what say which is chosen — see the figures' own note.</p>
  */
-export const SCOPE_VIEWS: readonly { value: ScopeView; label: string; title: string; icon: string }[] =
-  Object.freeze([
+export const SCOPE_VIEWS: readonly {
+  value: ScopeView
+  label: string
+  title: string
+  icon: string
+  /**
+   * Whether the toggle offers it.
+   *
+   * <p><b>A flag rather than a deleted entry</b>, which is what keeps taking one off the rail from
+   * costing anything. The entry is still what the chart, the report and the stored
+   * <code>ChartView</code> are written against, so nothing that draws a view has to learn that it
+   * might be missing — and putting it back is this one boolean.</p>
+   *
+   * <p>What it does cost is stated rather than hidden: <code>scopeDisplayFromParams</code> reads a
+   * stored view that is no longer offered as the default one, so a measurement saved in it reopens
+   * on the waveform. That is the only honest answer, since the alternative is a chart showing a
+   * picture whose button is not on screen to get back from.</p>
+   */
+  offered: boolean
+}[] = Object.freeze([
   {
     value: 'Waveform',
     label: 'Y–T',
     icon: 'viewWaveform',
+    offered: true,
     title: 'The waveforms against time — an oscilloscope’s ordinary picture, with the trigger at zero.',
   },
   {
     value: 'XY',
     label: 'X–Y',
     icon: 'viewXy',
+    offered: true,
     title:
       'The left input against the right, with time thrown away — a goniometer. A 45° line is a matched pair in phase, a circle is 90° apart, and an ellipse is everything between.',
   },
   {
     value: 'Eye',
     label: 'Eye',
+    // Taken off the rail on 2026-11-22 ("for now"), and everything that draws it is untouched:
+    // the chart, its four readings, the report's Eye table and the stored value all still work,
+    // so bringing it back is this flag. The two that are left take its width by themselves --
+    // SegmentedToggle lays its options out as equal fractions of one grid.
+    offered: false,
     icon: 'viewEye',
     title:
       'Every cycle of the window folded on the signal’s own period and drawn over the others. A signal that repeats exactly folds into one line; anything that moves it cycle to cycle spreads that line into a band.',
   },
 ])
+
+/**
+ * The views the rail offers, which is what the toggle renders and what a stored view is validated
+ * against.
+ *
+ * <p>Derived rather than a second list, so the two cannot come to disagree about which views
+ * exist — the fault that would show as a button for a view nothing restores, or a stored view
+ * with no button to leave it by.</p>
+ */
+export const SCOPE_VIEWS_OFFERED = Object.freeze(SCOPE_VIEWS.filter((view) => view.offered))
 
 export function scopeViewIsXy(view: ScopeView): boolean {
   return view === 'XY'

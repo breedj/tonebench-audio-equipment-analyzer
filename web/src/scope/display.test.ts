@@ -348,6 +348,33 @@ describe('the chosen measurements', () => {
   })
 })
 
+describe('a view that is no longer offered', () => {
+  /**
+   * The one thing taking a view off the rail costs, stated rather than left to be met: a
+   * measurement saved in it reopens on the default. The alternative is a chart showing a picture
+   * whose button is not on screen to get back from.
+   */
+  it('reads back as the default rather than as itself', () => {
+    expect(scopeDisplayFromParams(JSON.stringify({ chartView: 'Eye' })).chartView).toBe(
+      DEFAULT_SCOPE_DISPLAY.chartView,
+    )
+  })
+
+  it('still restores one that is offered', () => {
+    expect(scopeDisplayFromParams(JSON.stringify({ chartView: 'XY' })).chartView).toBe('XY')
+  })
+
+  /** And the rail renders the offered list, which is the other half of the same rule. */
+  it('is not rendered by the toggle', () => {
+    const rail = readFileSync(
+      resolve(import.meta.dirname, '..', 'components/ScopeDisplayPanel.vue'),
+      'utf8',
+    )
+    expect(rail).toContain('SCOPE_VIEWS_OFFERED.map')
+    expect(rail).not.toMatch(/SCOPE_VIEWS\.map/)
+  })
+})
+
 describe('the math axes', () => {
   it('round-trips through params_json', () => {
     const stored = scopeDisplayToParams({

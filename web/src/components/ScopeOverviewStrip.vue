@@ -27,7 +27,9 @@ import type { ScopeTimeWindow } from '../scope/timeAxis'
  *
  * <p>Drawn as a <b>min/max band</b> rather than a line, like everything else here that is
  * decimated: at this size a column spans hundreds of samples, and the maximum alone draws a noise
- * floor several dB above where it is.</p>
+ * floor several dB above where it is. The band is <b>one joined region</b>, never a stroke per
+ * column — see the note at the stroke, which is where both halves of a 2026-11-22 report came
+ * from.</p>
  *
  * <p>The arithmetic — where a time sits, what a press grabs, what a drag leaves — is in
  * <code>scope/overviewStrip.ts</code>, because nothing in a <code>.vue</code> is testable here and
@@ -156,6 +158,15 @@ const levelRange = computed(() => {
 /** How heavy the trace is drawn. See the note at its stroke. */
 const TRACE_WIDTH = 1.75
 
+/**
+ * How far the band's body is tinted, against its own opaque edges.
+ *
+ * <p>The chart's own figure, so one min/max band is drawn the same way wherever it appears — and
+ * the reason it is not opaque is that this strip draws both inputs over each other with nothing
+ * between them.</p>
+ */
+const BAND_ALPHA = 0.55
+
 function draw() {
   const el = canvas.value
   if (!el) return
@@ -180,26 +191,47 @@ function draw() {
   const geo = geometry.value
   const span = props.bounds.toS - props.bounds.fromS
 
-  // The trace, both extremes of every column as one vertical stroke -- the min/max band treatment,
-  // which at this width is the only honest drawing: a column here spans hundreds of samples.
+  // The trace: one joined region between the two outlines, which is the chart's own min/max band
+  // rule arriving on the strip that never followed it.
+  //
+  // It was a vertical stroke per column, and that draws the band only while a column covers enough
+  // samples to have some height. The strip is fetched at the chart's own column budget, so on a
+  // short record a column is a sample or two -- and then the strokes are shorter than the gaps
+  // between them and the trace reads as a row of dots, or, where the record is short enough to come
+  // back *raw*, min is max, every stroke is a zero-length segment, and butt caps paint exactly
+  // nothing. Both were reported together on 2026-11-22 ("the zoom bar shows no signal anymore when
+  // set to smaller time/div", "it seems to draw a dashed line"): one cause, two faces of it, and the
+  // empty one is simply the dotted one with the dots shrunk to zero. A region cannot have either --
+  // where the band has no height it is the line that strokes its own edges.
   const range = levelRange.value
   if (range && span > 0) {
     const toY = (v: number) => h - ((v - range.lo) / (range.hi - range.lo)) * h
     for (const channel of channels.value) {
-      ctx.strokeStyle = channel.color
-      // A little over a hairline (Joost, 2026-11-20). Every column is drawn, so the strokes are
-      // already contiguous in x and this thickens the ribbon rather than filling it in — which is
-      // what the trace needed, because where the signal is flat a column spans almost nothing
-      // vertically and a 1 px stroke there is a single faint pixel.
-      ctx.lineWidth = TRACE_WIDTH
-      ctx.beginPath()
       const count = Math.min(channel.min.length, channel.max.length)
-      for (let i = 0; i < count; i++) {
-        const seconds = channel.x0 + i * channel.dx
-        const x = Math.round(geo.left + ((seconds - props.bounds.fromS) / span) * geo.width) + 0.5
-        ctx.moveTo(x, toY(channel.max[i]!))
-        ctx.lineTo(x, toY(channel.min[i]!))
-      }
+      if (count === 0) continue
+      // Not rounded to half pixels the way a per-column stroke was: this is a continuous path, and
+      // snapping each point to a pixel centre puts a stair on a slope that has none.
+      const toX = (i: number) =>
+        geo.left + ((channel.x0 + i * channel.dx - props.bounds.fromS) / span) * geo.width
+
+      ctx.beginPath()
+      ctx.moveTo(toX(0), toY(channel.max[0]!))
+      for (let i = 1; i < count; i++) ctx.lineTo(toX(i), toY(channel.max[i]!))
+      for (let i = count - 1; i >= 0; i--) ctx.lineTo(toX(i), toY(channel.min[i]!))
+      ctx.closePath()
+
+      // The body at alpha and both edges opaque, as the chart draws a band: two channels over each
+      // other are then still two, where an opaque fill would be whichever was drawn last.
+      ctx.fillStyle = channel.color
+      ctx.globalAlpha = BAND_ALPHA
+      ctx.fill()
+      ctx.globalAlpha = 1
+
+      // A little over a hairline (Joost, 2026-11-20), and it is the stroke that carries the whole
+      // trace wherever the band has no height -- a raw slice, or a stretch where the signal is flat.
+      ctx.strokeStyle = channel.color
+      ctx.lineWidth = TRACE_WIDTH
+      ctx.lineJoin = 'round'
       ctx.stroke()
     }
   }

@@ -11,9 +11,11 @@ import {
 /**
  * One display toggle's figure.
  *
- * <p>The shapes are data (<code>scope/displayIcons.ts</code>); this only draws them. Everything is
- * in <code>currentColor</code>, so a figure reads the same way lit and unlit, in either theme, and
- * in a monochrome screenshot — the button's own background is what says which it is.</p>
+ * <p>The shapes are data (<code>scope/displayIcons.ts</code>); this only draws them. A shape is in
+ * <code>currentColor</code> unless it names an <code>ink</code> of its own, so almost every figure
+ * reads the same way lit and unlit, in either theme, and in a monochrome screenshot — the button's
+ * own background is what says which it is. The exception is a figure that was supplied as a drawing
+ * and carries that drawing's colours; <code>ScopeToggleShape</code>'s <code>ink</code> says why.</p>
  *
  * <p><b><code>mark</code> is the two-colour reading of the same shapes</b>, which the stimulus
  * picker's tiles and the button that opens it ask for, and the display rail does not — those are
@@ -36,8 +38,15 @@ const props = withDefaults(
 
 const shapes = computed(() => scopeToggleIcon(props.name))
 
-/** What a shape is drawn in: the signal inherits, its annotation takes the mark colour. */
+/**
+ * What a shape is drawn in: its own ink where it names one, else the mark colour where this is a
+ * two-colour drawing and the shape is an annotation, else <code>currentColor</code>.
+ *
+ * <p>The shape's own ink is first because it is the more specific statement of the two — see
+ * <code>ScopeToggleShape</code>.</p>
+ */
 function ink(shape: ScopeToggleShape): string | undefined {
+  if (shape.ink !== undefined) return shape.ink
   return props.mark !== undefined && scopeToggleShapeIsMark(shape) ? props.mark : undefined
 }
 

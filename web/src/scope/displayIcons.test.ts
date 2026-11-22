@@ -174,6 +174,46 @@ describe('the display toggles’ figures', () => {
   })
 
   /**
+   * The three View figures were <b>supplied as drawings</b> and keep the drawings' colours
+   * (<code>docs/design/view-yt.svg</code> and its two siblings). They were flattened to one ink
+   * once, on an argument about the segmented toggle they sit on, and that was asked back twice
+   * — so this pins it rather than leaving the next tidy-up to re-derive it.
+   *
+   * <p>Every shape of those three must name an ink: one left inheriting would be the odd stroke
+   * that follows the button instead of the picture, which is exactly how a half-flattened figure
+   * would look.</p>
+   */
+  it('draws the three View figures in the colours they were supplied in', () => {
+    for (const view of SCOPE_VIEWS) {
+      const shapes = scopeToggleIcon(view.icon)
+      expect(shapes.length, `${view.icon} has no shapes`).toBeGreaterThan(0)
+
+      const inks = new Set<string>()
+      for (const shape of shapes) {
+        expect(shape.ink, `${view.icon} leaves a shape inheriting currentColor`).toBeTypeOf('string')
+        inks.add(shape.ink as string)
+      }
+      // Structure, signal and the mark on it: three, which is what each drawing carries.
+      expect(inks.size, `${view.icon} is drawn in ${inks.size} colours`).toBe(3)
+      // The one colour all three share, so the axes and the ghosted cycle cannot drift apart.
+      expect(inks.has('#94a3b8'), `${view.icon} has no structure ink`).toBe(true)
+    }
+  })
+
+  /**
+   * And the component has to prefer it. A shape's own ink is the more specific statement than the
+   * mark colour a picker well supplies, and the other order would make a View figure change colour
+   * the day one of these is shown in a picker.
+   */
+  it('prefers a shape\u2019s own ink to the mark colour', () => {
+    const component = readFileSync(
+      resolve(import.meta.dirname, '..', 'components/ScopeToggleIcon.vue'),
+      'utf8',
+    )
+    expect(component).toMatch(/if \(shape\.ink !== undefined\) return shape\.ink/)
+  })
+
+  /**
    * And the other half: every toggle carries the name a label used to. These buttons have no text,
    * so the aria-label is the whole of what a screen reader gets.
    */

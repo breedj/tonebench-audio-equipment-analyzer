@@ -16,15 +16,47 @@
 /** The box every figure is drawn in, matching the app's other glyph sets. */
 export const TOGGLE_ICON_SIZE = 24
 
+/**
+ * A colour a shape is drawn in whatever it is drawn on, where almost every figure here inherits
+ * <code>currentColor</code> instead.
+ *
+ * <p><b>The exception is a figure that was <em>supplied</em> as a drawing</b>, and the three View
+ * options are the ones that were (2026-11-22, asked for twice: "they now show in one color, use the
+ * ones I supplied, they contain multiple colors"). An earlier reading of those three flattened them
+ * to one ink on the argument that a lit segmented option already takes a colour of its own; that is
+ * overruled. The colours are the drawing's, so a figure here says exactly what the file beside it in
+ * <code>docs/design/</code> says, and the three View figures stay recognisably the pictures that
+ * were drawn rather than three grey outlines that merely share their geometry.</p>
+ *
+ * <p>It wins over the <code>mark</code> colour a picker well supplies, since it is the more specific
+ * statement: that one is "colour this figure's annotations however this section is coloured", and
+ * this is "this stroke is this colour".</p>
+ */
 export type ScopeToggleShape =
   /**
    * A stroked path. <code>w</code> overrides the stroke width, which only Thick lines needs;
    * <code>dash</code> marks a line that is a <em>setting</em> rather than signal — a cursor, a
    * threshold, a band edge — which is how the chart itself draws all three.
    */
-  | { t: 'path'; d: string; w?: number; dash?: boolean; mark?: boolean }
+  | { t: 'path'; d: string; w?: number; dash?: boolean; mark?: boolean; ink?: string }
   /** A marker, for the figures that are about where the samples fell. */
-  | { t: 'dot'; x: number; y: number; r?: number; mark?: boolean }
+  | { t: 'dot'; x: number; y: number; r?: number; mark?: boolean; ink?: string }
+
+/**
+ * The three inks Joost's View drawings are made of, named here so the three figures cannot drift
+ * apart about what the same part of a picture is coloured.
+ *
+ * <p><code>structure</code> is what the signal is drawn <em>on</em> — the axes, the ghosted cycle
+ * behind the eye — and <code>mark</code> is what is drawn <em>on</em> the signal. The signal's own
+ * colour differs per view on purpose, each being the one that view's picture is read in.</p>
+ */
+const VIEW_INK = {
+  structure: '#94a3b8',
+  waveform: '#0e7490',
+  locus: '#7c3aed',
+  eye: '#ea580c',
+  mark: { waveform: '#ea580c', locus: '#0e7490', eye: '#2563eb' },
+} as const
 
 /**
  * Whether a shape is an annotation of the signal rather than the signal itself — which is the whole
@@ -432,42 +464,43 @@ export const SCOPE_TOGGLE_ICONS: Record<string, ScopeToggleShape[]> = {
    * which is signal and which is a note on it even where nothing reads the split.</p>
    */
   viewWaveform: [
-    { t: 'path', d: 'M3,3.5 V20.5 H21', w: 1.4 },
+    { t: 'path', d: 'M3,3.5 V20.5 H21', w: 1.4, ink: VIEW_INK.structure },
     {
       t: 'path',
       d: 'M4.5,12 C5.8,7 7.2,7 8.5,12 C9.8,17 11.2,17 12.5,12 C13.8,7 15.2,7 16.5,12 C17.8,17 19.2,17 20.5,12',
       w: 2,
+      ink: VIEW_INK.waveform,
     },
-    { t: 'path', d: 'M19.3,19 L20.8,20.5 L19.3,22', mark: true },
+    { t: 'path', d: 'M19.3,19 L20.8,20.5 L19.3,22', mark: true, ink: VIEW_INK.mark.waveform },
   ],
 
   viewXy: [
-    { t: 'path', d: 'M12,3 V21 M3,12 H21', w: 1.4 },
-    { t: 'path', d: XY_LOCUS, w: 2 },
-    { t: 'dot', x: 17.66, y: 5.5, r: 1.5, mark: true },
+    { t: 'path', d: 'M12,3 V21 M3,12 H21', w: 1.4, ink: VIEW_INK.structure },
+    { t: 'path', d: XY_LOCUS, w: 2, ink: VIEW_INK.locus },
+    { t: 'dot', x: 17.66, y: 5.5, r: 1.5, mark: true, ink: VIEW_INK.mark.locus },
   ],
 
   viewEye: [
     // The cycle behind, at the axes' own weight: a ghost is what says this picture is every cycle
     // drawn over the others rather than one of them.
-    { t: 'path', d: 'M4.8,6 C6.8,6 6.8,18 8.8,18', w: 1.4 },
-    { t: 'path', d: 'M4.8,18 C6.8,18 6.8,6 8.8,6', w: 1.4 },
-    { t: 'path', d: 'M16.8,6 C18.8,6 18.8,18 20.8,18', w: 1.4 },
-    { t: 'path', d: 'M16.8,18 C18.8,18 18.8,6 20.8,6', w: 1.4 },
-    { t: 'path', d: 'M2,6 H4', w: 2 },
-    { t: 'path', d: 'M2,18 H4', w: 2 },
-    { t: 'path', d: 'M4,6 C6,6 6,18 8,18', w: 2 },
-    { t: 'path', d: 'M4,18 C6,18 6,6 8,6', w: 2 },
-    { t: 'path', d: 'M8,6 H16', w: 2 },
-    { t: 'path', d: 'M8,18 H16', w: 2 },
-    { t: 'path', d: 'M16,6 C18,6 18,18 20,18', w: 2 },
-    { t: 'path', d: 'M16,18 C18,18 18,6 20,6', w: 2 },
-    { t: 'path', d: 'M20,6 H22', w: 2 },
-    { t: 'path', d: 'M20,18 H22', w: 2 },
+    { t: 'path', d: 'M4.8,6 C6.8,6 6.8,18 8.8,18', w: 1.4, ink: VIEW_INK.structure },
+    { t: 'path', d: 'M4.8,18 C6.8,18 6.8,6 8.8,6', w: 1.4, ink: VIEW_INK.structure },
+    { t: 'path', d: 'M16.8,6 C18.8,6 18.8,18 20.8,18', w: 1.4, ink: VIEW_INK.structure },
+    { t: 'path', d: 'M16.8,18 C18.8,18 18.8,6 20.8,6', w: 1.4, ink: VIEW_INK.structure },
+    { t: 'path', d: 'M2,6 H4', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M2,18 H4', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M4,6 C6,6 6,18 8,18', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M4,18 C6,18 6,6 8,6', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M8,6 H16', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M8,18 H16', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M16,6 C18,6 18,18 20,18', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M16,18 C18,18 18,6 20,6', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M20,6 H22', w: 2, ink: VIEW_INK.eye },
+    { t: 'path', d: 'M20,18 H22', w: 2, ink: VIEW_INK.eye },
     // The opening, which is the whole of what the picture is read for.
-    { t: 'path', d: 'M12,9 V15', mark: true },
-    { t: 'path', d: 'M10.6,10.4 L12,9 L13.4,10.4', mark: true },
-    { t: 'path', d: 'M10.6,13.6 L12,15 L13.4,13.6', mark: true },
+    { t: 'path', d: 'M12,9 V15', mark: true, ink: VIEW_INK.mark.eye },
+    { t: 'path', d: 'M10.6,10.4 L12,9 L13.4,10.4', mark: true, ink: VIEW_INK.mark.eye },
+    { t: 'path', d: 'M10.6,13.6 L12,15 L13.4,13.6', mark: true, ink: VIEW_INK.mark.eye },
   ],
 
   /** Dots: the samples alone, joined by nothing. */

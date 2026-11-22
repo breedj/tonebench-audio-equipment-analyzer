@@ -1450,7 +1450,23 @@ public sealed record OscilloscopeParameters(
     /// reference does within it, so an edge is allowed to arrive early or late rather than only to
     /// sit at a different level.
     /// </summary>
-    double? ChartMaskToleranceS = null);
+    double? ChartMaskToleranceS = null,
+    /// <summary>
+    /// Whether the V/div knob keeps itself fitted to what is drawn, rather than being a press that
+    /// framed whatever was on screen at the time — see <c>scope/autoscale.ts</c>.
+    ///
+    /// <para>A mode of a control rather than anything the chart draws, which is why it is not
+    /// spelled <c>Chart*</c> like the fields above it; it is stored with the measurement for the
+    /// same reason they are, since how a reader drives the two knobs is part of how a measurement
+    /// is read.</para>
+    /// </summary>
+    bool? AutoscaleVolts = null,
+    /// <summary>
+    /// And the Time/div knob's own, which sets the <i>record</i> — so unlike its vertical
+    /// counterpart it re-tunes the capture in flight, which is what the band in
+    /// <c>scope/autoscale.ts</c> exists to keep it from doing on every record.
+    /// </summary>
+    bool? AutoscaleTimebase = null);
 
 /// <summary>
 /// An output-impedance (damping factor) measurement type's <c>params_json</c>: the run settings the

@@ -204,11 +204,10 @@ const { showPage } = useManual()
             it. Stepping the timebase <em>ends</em> such a zoom and draws the new record whole,
             which is what the knob means — a window from the capture before it would be a
             different stretch of a different capture.
-            <strong>Autoscale</strong>, the button at the right of the tile, sets it to five
-            cycles of whatever frequency the record measured and shows the whole of it. It does
-            nothing where there is no frequency to work from — a flat record, or a window
-            holding less than one period — because there would be nothing to size a timebase
-            from.
+            <strong>Autoscale</strong>, the button at the right of the tile, is a
+            <em>toggle</em>: pressed, it sets the timebase to five cycles of whatever frequency the
+            record measured, and left on it keeps it there as the frequency changes. It lights
+            while it is on. See <a href="#scope-autoscale">Autoscale</a> below.
           </td>
         </tr>
         <tr>
@@ -782,9 +781,11 @@ const { showPage } = useManual()
         <tr>
           <td>Autoscale (V/div)</td>
           <td>
-            The button at the right of the tile: fits the vertical to the whole of what is drawn,
-            the checked history items included, and centres the window on it. The same arithmetic
-            as Autofit's vertical half, on its own.
+            The button at the right of the tile, and a <em>toggle</em>: pressed, it fits the
+            vertical to the whole of what is drawn — the checked history items included — and
+            centres the window on it, which is Autofit's vertical half on its own. Left on it keeps
+            doing so as the signal changes, and lights while it is on. See
+            <a href="#scope-autoscale">Autoscale</a> below.
           </td>
         </tr>
         <tr>
@@ -821,8 +822,9 @@ const { showPage } = useManual()
           <td>
             Which picture the chart draws — <strong>Y–T</strong>, the waveforms against time,
             <strong>X–Y</strong>, one input against the other, or <strong>Eye</strong>, every cycle
-            folded on the signal’s own period. See <strong>The X–Y view</strong> and
-            <strong>The eye view</strong> below.
+            folded on the signal’s own period. Each carries a small figure of the picture it draws;
+            the chosen one is in colour and the other two are grey. See <strong>The X–Y view</strong>
+            and <strong>The eye view</strong> below.
           </td>
         </tr>
         <tr>
@@ -1784,8 +1786,8 @@ const { showPage } = useManual()
     <p>
       <em>About</em> five, because the timebase lands on a 1-2-5 rung: five cycles of 600 Hz is
       8.3 ms, which is 0.83 ms a division, and the nearest rung is 1 ms — so the record holds six.
-      The two tiles' own <strong>Autoscale</strong> buttons do each half of this on their own, if
-      the other half is already where you want it.
+      The two tiles' own <strong>Autoscale</strong> toggles do each half of this on their own, and
+      go on doing it; Autoset is the one press that does both and sets the trigger with them.
     </p>
     <div class="manual-note">
       <p>
@@ -1802,14 +1804,84 @@ const { showPage } = useManual()
     </div>
     <p>
       <strong>It sets the timebase</strong>, which is what makes it a horizontal control at all:
-      three cycles over the ten divisions, on the nearest rung, so the record itself grows or
-      shrinks to hold what was asked for — three cycles of 20&nbsp;Hz is 150&nbsp;ms, which no
-      amount of windowing could have shown on a 20&nbsp;ms capture. The window it sets is still
-      clamped into the record already on screen, so the trace does not stop in the middle of the
-      plot while the next capture arrives at the new length. With no frequency measured — noise,
-      DC, silence — the timebase is left alone and the vertical and the trigger level are still
-      set; the line under the button says which of the two happened.
+      five cycles over the ten divisions, on the nearest rung, so the record itself grows or
+      shrinks to hold what was asked for — five cycles of 20&nbsp;Hz is 250&nbsp;ms, which no
+      amount of windowing could have shown on a 20&nbsp;ms capture. The window it sets is the whole
+      of that new record. With no frequency measured — noise, DC, silence — the timebase is left
+      alone and the vertical and the trigger level are still set.
     </p>
+
+    <h2 id="scope-autoscale">Autoscale</h2>
+    <p>
+      Each of the two knobs — <strong>V/div</strong> on the display rail and
+      <strong>Time/div</strong> under Acquisition — carries an <strong>Autoscale</strong> button at
+      its right-hand end. It is a <em>toggle</em>, not a press: it lights while it is on, and while
+      it is on the knob follows the signal. Turn one on and it fits at once; turn it off and the
+      setting stays where the last fit left it.
+    </p>
+    <table class="manual-table">
+      <thead>
+        <tr>
+          <th>Knob</th>
+          <th>What it keeps</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>V/div</td>
+          <td>
+            The whole of what is drawn inside the graticule, filling no more than nine tenths of its
+            height — the references included, since they are on the chart too — with the Centre
+            written to match. It is Autofit's vertical half, applied on every record rather than
+            once.
+          </td>
+        </tr>
+        <tr>
+          <td>Time/div</td>
+          <td>
+            About five cycles of the measured frequency. This one changes the <em>record</em>, so it
+            re-tunes the capture as it moves.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Neither moves on every record, and that is deliberate.</strong> Both settings are
+      rungs of a 1-2-5 ladder, and re-deriving the right rung on every capture is enough to make a
+      signal sitting near a boundary flip between two of them for as long as it is left — which on
+      the vertical redraws the graticule several times a second, and on the horizontal throws away
+      the record in flight each time. So each knob is left alone while the picture is still a good
+      one: the trace filling between about a third and nine tenths of the height, and the record
+      holding between about two and a half and ten cycles. Outside that it is fitted, and a fit
+      always lands well inside, so it cannot start again.
+    </p>
+    <p>
+      <strong>A frequency that drops a long way is searched for.</strong> The frequency is measured
+      from the record, so a record shorter than one cycle cannot measure one — and a tone that falls
+      by more than about a factor of three in one step lands there. Rather than stopping, the
+      timebase widens one rung per capture until something is measurable and then fits: 600&nbsp;Hz
+      on a 10&nbsp;ms record jumped to 60&nbsp;Hz takes about three quarters of a second to settle
+      at five cycles. It is visible as a search, and one press stops it.
+    </p>
+    <div class="manual-note">
+      <p>
+        <strong>Nothing to measure, nothing to follow.</strong> Neither knob acts on a record
+        <strong>Auto</strong> forced — the badge over the chart reads <em>Auto</em> — because that
+        is the analyzer saying nothing crossed the trigger level. A dead input is not silent, it is
+        the front end's own noise, in which the frequency reading finds a different answer on every
+        record; without that rule the timebase chased it to the bottom of the ladder. The press
+        itself is unconditional, so one press still frames a noise floor.
+      </p>
+      <p>
+        A signal that <em>does</em> trigger and has no period — noise above your trigger level, a
+        lone pulse — walks the timebase to the longest record there is and stops. That is the honest
+        end of "five cycles of the measured signal" where there are no cycles.
+      </p>
+      <p>
+        And while a knob is on, turning it by hand is undone by the next record. That is what the
+        mode means; turn it off to drive the knob yourself.
+      </p>
+    </div>
 
     <h2>The pass/fail mask</h2>
     <p>

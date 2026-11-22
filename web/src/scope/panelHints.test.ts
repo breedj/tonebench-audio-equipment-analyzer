@@ -201,13 +201,23 @@ describe('the horizontal and vertical automatics', () => {
   })
 
   it('wires each to something', () => {
-    expect(rail).toContain('@auto="autofitVolts"')
+    expect(rail).toContain('@auto="toggleAutoscaleVolts"')
     expect(config).toContain("@auto=\"emit('autoTimebase')\"")
   })
 
   /** The button exists only where a caller has an answer — see StepperTile's own note. */
   it('draws the button only when the caller gives it one', () => {
     expect(tile).toContain('v-if="autoTitle"')
+  })
+
+  /**
+   * Both are <b>modes</b> since 2026-11-22, so each has to show its own state: a toggle that looks
+   * like a press is one a reader cannot tell is on, and this one changes the picture by itself.
+   */
+  it('lights each one while it is on', () => {
+    expect(rail).toContain(':auto-on="autoscaleVolts"')
+    expect(config).toContain(':auto-on="autoscaleTimebase"')
+    expect(tile).toContain(':aria-pressed="autoOn"')
   })
 
   it('keeps the Time window boxes for the views with no zoom bar, and nowhere else', () => {

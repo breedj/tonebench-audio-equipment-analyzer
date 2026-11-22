@@ -47,6 +47,14 @@ export const SCOPE_TREND_VIEWS: readonly ScopeTrendView[] = Object.freeze(['Tren
 export interface ScopeDisplay {
   voltsPerDivision: number
   voltOffsetV: number
+  /**
+   * Whether the V/div knob keeps itself fitted to what is drawn, rather than waiting to be pressed.
+   *
+   * <p>A mode of a control, stored like any other preference — see <code>scope/autoscale.ts</code>
+   * for the band that decides when it actually moves, which is the whole of what a continuous
+   * automatic needs over a press.</p>
+   */
+  autoscaleVolts: boolean
   timeFromS: number
   timeToS: number
   thickLines: boolean
@@ -203,6 +211,12 @@ const DEFAULT_WINDOW = recordWindow(0.02, 0.25)
 export const DEFAULT_SCOPE_DISPLAY: Readonly<ScopeDisplay> = Object.freeze({
   voltsPerDivision: 0.5,
   voltOffsetV: 0,
+  /**
+   * Off. A knob that moves on its own is a thing a reader turns on when they want it: left on by
+   * default it would overwrite a vertical somebody had just set, on a screen whose other two ways
+   * of framing a trace — Autofit and Autoset — are both deliberate presses.
+   */
+  autoscaleVolts: false,
   timeFromS: DEFAULT_WINDOW.fromS,
   timeToS: DEFAULT_WINDOW.toS,
   /**
@@ -310,6 +324,7 @@ export function scopeDisplayFromParams(
     display.voltsPerDivision = stored.chartVoltsPerDivision
   if (typeof stored.chartVoltOffsetV === 'number' && Number.isFinite(stored.chartVoltOffsetV))
     display.voltOffsetV = stored.chartVoltOffsetV
+  if (typeof stored.autoscaleVolts === 'boolean') display.autoscaleVolts = stored.autoscaleVolts
 
   // The pair or neither: a stored "from" with no "to" would be read against this build's default
   // "to", which is a window the measurement never had.
@@ -424,6 +439,7 @@ export function scopeDisplayToParams(display: ScopeDisplay): Partial<Oscilloscop
   return {
     chartVoltsPerDivision: display.voltsPerDivision,
     chartVoltOffsetV: display.voltOffsetV,
+    autoscaleVolts: display.autoscaleVolts,
     chartTimeFromS: display.timeFromS,
     chartTimeToS: display.timeToS,
     chartThickLines: display.thickLines,

@@ -90,6 +90,8 @@ import {
   type ScopeMaskVerdict,
 } from './scope/mask'
 import { scopeAutoset, timebaseForCycles } from './scope/autoset'
+import { timebaseAction } from './scope/autoscale'
+import { stepLadder } from './panels/stepperGrid'
 import { scopeTriggerBadge } from './scope/triggerState'
 import { SINC_TAPS, drawingReconstructs } from './scope/interpolation'
 import { mathSpecQuery, type ScopeMathSpec } from './scope/math'
@@ -111,6 +113,8 @@ import {
   isWholeRecord,
   recordSecondsFor,
   recordWindow,
+  SCOPE_TIME_PER_DIVISION_LADDER,
+  timePerDivisionFor,
   type ScopeTimeWindow,
 } from './scope/timeAxis'
 import { fitVoltWindow } from './scope/voltAxis'
@@ -2107,6 +2111,9 @@ watch(
  * type the way the screen does.
  */
 const scopeVoltsPerDivision = ref(DEFAULT_SCOPE_DISPLAY.voltsPerDivision)
+/** Whether the V/div knob keeps itself fitted, and whether the Time/div knob does. See scope/autoscale.ts. */
+const scopeAutoscaleVolts = ref(DEFAULT_SCOPE_DISPLAY.autoscaleVolts)
+const scopeAutoscaleTimebase = ref(false)
 const scopeVoltOffsetV = ref(DEFAULT_SCOPE_DISPLAY.voltOffsetV)
 const scopeTimeFromS = ref(DEFAULT_SCOPE_DISPLAY.timeFromS)
 const scopeTimeToS = ref(DEFAULT_SCOPE_DISPLAY.timeToS)
@@ -2600,6 +2607,7 @@ function currentScopeDisplay() {
   return {
     annotations: liveAnnotations.value,
     voltsPerDivision: scopeVoltsPerDivision.value,
+    autoscaleVolts: scopeAutoscaleVolts.value,
     voltOffsetV: scopeVoltOffsetV.value,
     timeFromS: scopeTimeFromS.value,
     timeToS: scopeTimeToS.value,
@@ -2637,6 +2645,7 @@ function applyStoredScopeDisplay(paramsJson: string) {
   applyLoadedAnnotations(display.annotations)
   scopeVoltsPerDivision.value = display.voltsPerDivision
   scopeVoltOffsetV.value = display.voltOffsetV
+  scopeAutoscaleVolts.value = display.autoscaleVolts
   scopeTimeFromS.value = display.timeFromS
   scopeTimeToS.value = display.timeToS
   scopeThickLines.value = display.thickLines
@@ -2684,6 +2693,7 @@ watch(
   [
     scopeVoltsPerDivision,
     scopeVoltOffsetV,
+    scopeAutoscaleVolts,
     scopeTimeFromS,
     scopeTimeToS,
     scopeThickLines,
@@ -2966,18 +2976,22 @@ const scopeMeasuredPeriodS = computed(() => {
 })
 
 /**
- * The Time/div tile's Autoscale: five cycles of what is on screen (asked for 2026-11-21).
- *
- * <p>Autoset's horizontal half on its own, through the same `timebaseForCycles` so the two cannot
- * come to disagree about what five cycles is. The window is reset to the whole record with it, for
- * Autoset's own reason: the record has just changed length, and showing the new one through the old
- * window is how a press comes to look as though it did nothing.</p>
+ * Five cycles of what is on screen (asked for 2026-11-21) — Autoset's horizontal half on its own,
+ * through the same `timebaseForCycles` so the two cannot come to disagree about what five cycles is.
  *
  * <p>A no-op with no frequency measured — a flat record, or a window holding less than one period
  * — because there is nothing to size a timebase from and the honest answer is to leave it where it
  * is.</p>
+ *
+ * <p><paramref name="showWholeRecord"/> is what tells a <b>press</b> from the automatic: a press
+ * resets the window with it, for Autoset's own reason — the record has just changed length, and
+ * showing the new one through the old window is how a press comes to look as though it did nothing.
+ * The automatic does not, because the reader may be zoomed in on something while the frequency
+ * drifts, and throwing that away is not what "keep the timebase right" asked for; the record-length
+ * watcher above then follows an unzoomed window and merely clamps a deliberate one, which is the
+ * rule it was written for.</p>
  */
-function autoscopeTimebase() {
+function applyScopeTimebase(showWholeRecord: boolean) {
   const period = scopeMeasuredPeriodS.value
   if (period === null) return
 
@@ -2985,11 +2999,67 @@ function autoscopeTimebase() {
   if (perDivision === null) return
 
   scopeRecordSeconds.value = recordSecondsFor(perDivision)
+  if (!showWholeRecord) return
   const whole = recordWindow(scopeRecordSeconds.value, scopeDisplayPreTriggerFraction.value)
   scopeTimeFromS.value = whole.fromS
   scopeTimeToS.value = whole.toS
   scopeViewWindow.value = null
 }
+
+/**
+ * The Time/div tile's Autoscale, which is a <b>mode</b> since 2026-11-22 rather than a press.
+ *
+ * <p>Turning it on applies at once and unconditionally — that press is the reader asking for it
+ * now, and a toggle that waited for the next record would read as a button that did nothing.</p>
+ */
+function autoscopeTimebase() {
+  scopeAutoscaleTimebase.value = !scopeAutoscaleTimebase.value
+  if (scopeAutoscaleTimebase.value) applyScopeTimebase(true)
+}
+
+/** The last capture this knob has acted on, so one record is acted on once. */
+let scopeAutoscaleCounted = -1
+/** Whether the previous record was a step of the search, so the one that finds a period is fitted. */
+let scopeTimebaseSearching = false
+
+/**
+ * And while it is on: one decision per capture — leave it, fit it, or widen the search.
+ *
+ * <p><b>Here rather than in the Acquisition panel</b>, which owns the knob, because everything this
+ * reads is on the record. Its vertical counterpart is the other way about and in
+ * <code>ScopeDisplayPanel</code> for the same reason: each lives where its input is.</p>
+ *
+ * <p><b>Keyed on the run's own counter, not on the record arriving</b>, for the reason the
+ * statistics beside it are: the record object is replaced by every re-fetch — ticking Residual,
+ * turning a math channel on, moving a cursor — and a search that stepped on those would walk the
+ * timebase while nothing was being captured.</p>
+ *
+ * <p>What decides between the three is <code>timebaseAction</code>, which is where the band and the
+ * search are written down and tested; the band is what stops this re-tuning the capture every time
+ * a measured frequency wanders across a rung boundary, and a re-tune throws away the record in
+ * flight.</p>
+ */
+watch(scopeRecord, (record) => {
+  if (!isOscilloscope.value || !record || !scopeAutoscaleTimebase.value) return
+  if (scopeRecordsTaken.value === scopeAutoscaleCounted) return
+  scopeAutoscaleCounted = scopeRecordsTaken.value
+
+  const action = timebaseAction(
+    scopeRecordSeconds.value,
+    scopeMeasuredPeriodS.value,
+    { forced: scopeForced.value },
+    scopeTimebaseSearching,
+  )
+  scopeTimebaseSearching = action === 'widen'
+
+  if (action === 'fit') applyScopeTimebase(false)
+  // One rung coarser, and the ladder's own top is what ends the search: `stepLadder` answers the
+  // value it was given once there is nothing above it, so this settles rather than repeating.
+  else if (action === 'widen')
+    scopeRecordSeconds.value = recordSecondsFor(
+      stepLadder(SCOPE_TIME_PER_DIVISION_LADDER, timePerDivisionFor(scopeRecordSeconds.value), 1),
+    )
+})
 
 /**
  * One press that makes an unknown signal readable and standing still.
@@ -6696,6 +6766,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   v-model:trigger-kind="scopeTriggerKind"
                   v-model:trigger-level-low-v="scopeTriggerLevelLowV"
                   v-model:record-seconds="scopeRecordSeconds"
+                  v-model:autoscale-timebase="scopeAutoscaleTimebase"
                   v-model:pre-trigger-fraction="scopePreTriggerFraction"
                   v-model:mode="scopeMode"
                   v-model:accumulation="scopeAccumulation"
@@ -6845,6 +6916,7 @@ onBeforeUnmount(() => stopLoadPolling?.())
                   :pre-trigger-fraction="scopeDisplayPreTriggerFraction"
                   v-model:volts-per-division="scopeVoltsPerDivision"
                   v-model:volt-offset-v="scopeVoltOffsetV"
+                  v-model:autoscale-volts="scopeAutoscaleVolts"
                   v-model:time-from-s="scopeTimeFromS"
                   v-model:time-to-s="scopeTimeToS"
                   v-model:thick-lines="scopeThickLines"

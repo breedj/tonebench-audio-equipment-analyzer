@@ -18,6 +18,7 @@ import {
   SCOPE_TRIGGER_SOURCES,
 } from './triggerSpec'
 import { SCOPE_COUPLINGS } from './signalPath'
+import { SCOPE_VIEWS } from './xy'
 
 /** Every x and y a shape puts ink at, a marker's own radius included. */
 function extent(shape: ScopeToggleShape): { xs: number[]; ys: number[] } {
@@ -120,6 +121,7 @@ function everyIconAskedFor(): Set<string> {
     SCOPE_PULSE_CONDITIONS,
     SCOPE_ACCUMULATIONS,
     SCOPE_COUPLINGS,
+    SCOPE_VIEWS,
   ]) {
     for (const option of table as readonly { icon?: string }[]) {
       if (option.icon) asked.add(option.icon)

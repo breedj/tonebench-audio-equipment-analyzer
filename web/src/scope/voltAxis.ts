@@ -36,13 +36,22 @@ export const VOLTS_PER_DIVISION_LADDER: readonly number[] = Object.freeze([
 ])
 
 /**
- * How many divisions a fitted trace is allowed to fill.
+ * How much of the graticule a fitted trace is allowed to fill.
  *
- * <p>Six of eight, which is what a scope's own autoset aims for: filling all eight leaves a
- * waveform touching both edges, where any overshoot on the next capture is clipped off the top of
- * the plot with nothing saying so.</p>
+ * <p><b>Nine tenths since 2026-11-22</b> (asked for in those words), where it was six of the eight
+ * divisions — three quarters. The margin is there for the same reason either figure is: filling
+ * all eight leaves a waveform touching both edges, where any overshoot on the next capture is
+ * clipped off the top of the plot with nothing saying so.</p>
+ *
+ * <p><b>What three quarters cost is a whole rung, and only near a boundary.</b> The ladder steps by
+ * 2 or 2.5, so a span that overruns the fit by a hair takes the next rung up and then fills less
+ * than half the screen: a 300 mV<sub>pp</sub> signal measuring 310 mV wanted 51.7 mV a division
+ * against a 50 mV rung, landed on 100, and drew at 39 % of the height with 50 mV/div fitting
+ * perfectly well — which is how it was reported. At nine tenths the same span asks for 43 mV and
+ * takes the 50 mV rung, filling 78 %. The worst case left is 45 % rather than 37 %, and it is
+ * reached only by a span a shade over a rung's own 7.2 divisions.</p>
  */
-const FIT_DIVISIONS = 6
+export const MAX_FILL_FRACTION = 0.9
 
 /**
  * How near the middle a trace has to sit before the fit centres it on zero exactly.
@@ -106,9 +115,8 @@ export function fitVoltWindow(maxV: number, minV: number): VoltFit {
   const hi = Math.max(maxV, minV)
   const lo = Math.min(maxV, minV)
   const centre = (hi + lo) / 2
-  const half = (hi - lo) / 2
 
-  const voltsPerDivision = snapVoltsPerDivision(half / (FIT_DIVISIONS / 2))
+  const voltsPerDivision = snapVoltsPerDivision((hi - lo) / (VERTICAL_DIVISIONS * MAX_FILL_FRACTION))
   // Rounded against the graticule it is the centre of, for the reason the drag and the trigger's
   // 50 % button are: a midpoint of two measured extremes carries every digit the arithmetic
   // produced, and the Centre box then reads nine significant figures of a microvolt.

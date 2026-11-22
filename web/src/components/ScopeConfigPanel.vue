@@ -87,6 +87,15 @@ const triggerKind = defineModel<ScopeTriggerKind>('triggerKind', { default: 'Edg
 const triggerLevelLowV = defineModel<number>('triggerLevelLowV', { default: 0 })
 const triggerSource = defineModel<ScopeTriggerSource>('triggerSource', { required: true })
 const recordSeconds = defineModel<number>('recordSeconds', { required: true })
+/**
+ * Whether the Time/div knob keeps itself fitted to the measured signal. See scope/autoscale.ts.
+ *
+ * <p>A model rather than a form field, because the thing that re-applies it is App.vue: the figure
+ * it needs — the measured frequency of the triggered channel — is on the record. Declared here with
+ * the record it writes, and above <code>applyStoredParams</code> and the watchers, which is this
+ * panel's own temporal-dead-zone rule.</p>
+ */
+const autoscaleTimebase = defineModel<boolean>('autoscaleTimebase', { default: false })
 const preTriggerFraction = defineModel<number>('preTriggerFraction', { required: true })
 const mode = defineModel<ScopeRunMode>('mode', { required: true })
 /**
@@ -288,6 +297,7 @@ function applyStoredParams(paramsJson: string) {
   }
   if (typeof stored.recordSeconds === 'number' && stored.recordSeconds > 0)
     form.recordMs = stored.recordSeconds * 1000
+  if (typeof stored.autoscaleTimebase === 'boolean') autoscaleTimebase.value = stored.autoscaleTimebase
   if (typeof stored.preTriggerFraction === 'number')
     form.preTriggerPercent = Math.min(100, Math.max(0, stored.preTriggerFraction * 100))
   if (typeof stored.processLeft === 'boolean') form.processLeft = stored.processLeft
@@ -423,6 +433,10 @@ watch(
       // second level typed would be discarded on the next measurement switch without a word.
       triggerKind.value,
       triggerLevelLowV.value,
+      // The Time/div knob's mode, bound outside `form` like the four above. In the dirty watcher
+      // only: it changes no capture setting by itself, and what it does change -- the record --
+      // goes through `form.recordMs`, which the retune watcher below already carries.
+      autoscaleTimebase.value,
     ] as const,
   () => {
     if (!restoring) markDirty()
@@ -624,6 +638,7 @@ function buildParamsJson(): string {
     holdoffSeconds: form.holdoffMs / 1000,
     processLeft: form.processLeft,
     processRight: form.processRight,
+    autoscaleTimebase: autoscaleTimebase.value,
   }
   return JSON.stringify(parameters)
 }
@@ -855,7 +870,8 @@ function onAutoTimeoutChange(event: Event) {
         :value="timePerDivisionS"
         :format="timePerDivisionGridLabel"
         title="The timebase. The record is ten divisions of it, pre- and post-trigger together — up to one second, beyond which the stream recorder is the tool. Live: changing it while the scope is running re-arms the capture rather than needing a Stop."
-        auto-title="Autoscale: sets the timebase to five cycles of the measured signal, and shows the whole record."
+        auto-title="Autoscale: keeps the timebase at five cycles of the measured signal. Left on, it follows the frequency."
+        :auto-on="autoscaleTimebase"
         @step="stepTimePerDivision"
         @pick="setTimePerDivision"
         @auto="emit('autoTimebase')"

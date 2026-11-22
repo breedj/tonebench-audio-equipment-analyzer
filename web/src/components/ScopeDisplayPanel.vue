@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import CollapsibleSection from './CollapsibleSection.vue'
 import AnnotationsPanel from './AnnotationsPanel.vue'
 import { OSCILLOSCOPE_ANNOTATION_VIEW } from '../charts/annotationViews'
 import { useNumberDrafts } from '../composables/useNumberDrafts'
 import { useOscilloscope } from '../composables/useOscilloscope'
 import { recordExtremes } from '../scope/measurements'
+import { voltWindowNeedsFit } from '../scope/autoscale'
 import {
   VOLTS_PER_DIVISION_LADDER,
   fitVoltWindow,
@@ -72,6 +73,8 @@ import type { OverlayEntry } from '../composables/useMeasurements'
 
 const voltsPerDivision = defineModel<number>('voltsPerDivision', { required: true })
 const voltOffsetV = defineModel<number>('voltOffsetV', { required: true })
+/** Whether the pair above keeps itself fitted to what is drawn. See scope/autoscale.ts. */
+const autoscaleVolts = defineModel<boolean>('autoscaleVolts', { required: true })
 const timeFromS = defineModel<number>('timeFromS', { required: true })
 const timeToS = defineModel<number>('timeToS', { required: true })
 const thickLines = defineModel<boolean>('thickLines', { required: true })
@@ -376,6 +379,47 @@ function autofitVolts() {
   voltsPerDivision.value = fit.voltsPerDivision
   voltOffsetV.value = fit.offsetV
 }
+
+/**
+ * The V/div tile's Autoscale, which is a <b>mode</b> since 2026-11-22 rather than a press.
+ *
+ * <p>Turning it on fits at once — a toggle that waited for the next record would read as a button
+ * that did nothing — and unconditionally, because that press is the reader asking for it now.
+ * After that the watcher below decides, which is a different question: see scope/autoscale.ts for
+ * why a continuous automatic needs a band and a press does not.</p>
+ */
+function toggleAutoscaleVolts() {
+  autoscaleVolts.value = !autoscaleVolts.value
+  if (autoscaleVolts.value) autofitVolts()
+}
+
+/**
+ * And while it is on: every new record, but only where the picture has actually stopped being a
+ * good one.
+ *
+ * <p><b>Here rather than in App.vue</b> because the input is <code>extremes</code>, which is this
+ * panel's own — the extremes of what is <em>drawn</em>, the checked history items included, which
+ * is what Autofit frames and so what this has to frame too. Its horizontal counterpart lives in
+ * App.vue for the mirror reason: the measured period is on the record, which App.vue holds.</p>
+ *
+ * <p>The write is guarded by the band and not merely by "the fit differs", because a write marks
+ * the measurement dirty: a knob that saved the type a few times a second would be worse than one
+ * that hunted.</p>
+ */
+watch(extremes, (measured) => {
+  if (!autoscaleVolts.value || !measured) return
+  // A forced record is Auto saying nothing crossed the trigger level, which is the dead-input case
+  // -- and a dead input is not silent, it is the front end's own noise. Fitting that is legitimate
+  // (the ladder reaches 10 uV/div so a noise floor can be looked at) but *following* it is not:
+  // the peak to peak of a few dozen noise samples varies two to one record to record, so at the
+  // bottom of the ladder the knob twitches, and every move marks the measurement dirty. Measured
+  // in the app with the generator silenced: 10 -> 20 -> 10 uV/div inside six seconds. The press
+  // itself is unconditional, so one is still all it takes to frame a noise floor.
+  if (record.value?.forced) return
+  if (!voltWindowNeedsFit({ voltsPerDivision: voltsPerDivision.value, offsetV: voltOffsetV.value }, measured.maxV, measured.minV))
+    return
+  autofitVolts()
+})
 
 /** The whole record, which is what a scope's horizontal autoset lands on. */
 function autofitTime() {
@@ -736,7 +780,7 @@ function stepOffset(direction: 1 | -1) {
     <SegmentedToggle
       v-model="chartView"
       group-label="Chart view"
-      :options="SCOPE_VIEWS.map((v) => ({ value: v.value, label: v.label, title: v.title }))"
+      :options="SCOPE_VIEWS.map((v) => ({ value: v.value, label: v.label, title: v.title, icon: v.icon }))"
     />
     <!-- No paragraph under the buttons: SegmentedToggle already puts each option’s own title on
          its own button, and that text IS what this said. What the three views are is the panel’s
@@ -765,10 +809,11 @@ function stepOffset(direction: 1 | -1) {
         :value="voltsPerDivision"
         :format="voltsPerDivisionGridLabel"
         title="How many volts one vertical division is worth. Eight of them make the window, centred on the figure beside it."
-        auto-title="Autoscale: fits the vertical to the whole of what is drawn — the checked history items included — and centres the window on it."
+        auto-title="Autoscale: keeps the vertical fitted to the whole of what is drawn — the checked history items included — and centres the window on it. Left on, it follows the signal."
+        :auto-on="autoscaleVolts"
         @step="stepVoltsPerDivision"
         @pick="setVoltsPerDivision"
-        @auto="autofitVolts"
+        @auto="toggleAutoscaleVolts"
       />
       <!-- The centre has no ladder and keeps its own box: it is a continuous voltage, so it has to
            stay typable, and the draft is what lets it be typed into while records arrive. -->

@@ -2098,6 +2098,15 @@ export interface OscilloscopeParameters {
   chartMaskToleranceV?: number | null
   /** And its time tolerance, in seconds. */
   chartMaskToleranceS?: number | null
+  /**
+   * Whether the V/div knob keeps itself fitted to what is drawn. See `scope/autoscale.ts`.
+   *
+   * Not spelled `chart*` like the fields above: it is a mode of a control rather than anything the
+   * chart draws, and its horizontal counterpart sets the record rather than the picture.
+   */
+  autoscaleVolts?: boolean | null
+  /** And the Time/div knob's own, which re-tunes the capture when it moves. */
+  autoscaleTimebase?: boolean | null
 }
 
 /** A crosstalk type's stored settings — see CrosstalkParameters server-side. */

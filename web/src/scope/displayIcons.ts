@@ -39,6 +39,30 @@ export function scopeToggleShapeIsMark(shape: ScopeToggleShape): boolean {
   return shape.mark === true || ('dash' in shape && shape.dash === true)
 }
 
+
+/**
+ * A 1:2 Lissajous figure — the ∞ the X–Y view draws for a pair a quarter turn apart, which is
+ * what Joost's own drawing of it is (<code>docs/design/view-xy.svg</code>, sampled from
+ * <code>x = cx + ax·sin φ</code>, <code>y = cy − ay·sin 2φ</code>).
+ *
+ * <p>Computed rather than written out, for <code>mathFigures.ts</code>' reason one icon set along:
+ * the figure then cannot drift from the curve it stands for, and 64 points of polyline is a
+ * literal nobody could check by eye. At this size the segments are well under a pixel.</p>
+ */
+function lissajousPath(cx: number, cy: number, ax: number, ay: number, steps = 64): string {
+  const at = (k: number) => {
+    const phi = (2 * Math.PI * k) / steps
+    const x = cx + ax * Math.sin(phi)
+    const y = cy - ay * Math.sin(2 * phi)
+    return `${x.toFixed(2)},${y.toFixed(2)}`
+  }
+  const points = Array.from({ length: steps }, (_, k) => at(k))
+  return `M${points[0]} ${points.slice(1).map((p) => `L${p}`).join(' ')} Z`
+}
+
+/** The X–Y view's own figure, drawn once at module load. */
+const XY_LOCUS = lissajousPath(12, 12, 8, 6.5)
+
 /**
  * One figure per toggle.
  *
@@ -390,6 +414,60 @@ export const SCOPE_TOGGLE_ICONS: Record<string, ScopeToggleShape[]> = {
     { t: 'path', d: 'M3,12 H14', dash: true },
     { t: 'path', d: 'M17,7 L21,17' },
     { t: 'path', d: 'M21,7 L17,17' },
+  ],
+
+  /**
+   * The three views, from Joost's drawings of 2026-11-22 (<code>docs/design/view-yt.svg</code> and
+   * its two siblings): the waveform against its axes, the Lissajous figure on a crosshair, and an
+   * eye with the cycle behind it ghosted.
+   *
+   * <p><b>One ink, like the couplings above</b>, where the drawings carry three. These sit on the
+   * same segmented toggle, where the lit option already takes a colour and the unlit ones are the
+   * track's grey — which is exactly the "inactive grey, active in colour" the design asks for, got
+   * for nothing. What tells the three apart is their shape, which survives being grey, a
+   * black-and-white report and 16 px.</p>
+   *
+   * <p>The annotations each drawing marks in a second colour — the axis arrowhead, the dot on the
+   * locus, the arrows across the eye's opening — are flagged as marks anyway, so the data says
+   * which is signal and which is a note on it even where nothing reads the split.</p>
+   */
+  viewWaveform: [
+    { t: 'path', d: 'M3,3.5 V20.5 H21', w: 1.4 },
+    {
+      t: 'path',
+      d: 'M4.5,12 C5.8,7 7.2,7 8.5,12 C9.8,17 11.2,17 12.5,12 C13.8,7 15.2,7 16.5,12 C17.8,17 19.2,17 20.5,12',
+      w: 2,
+    },
+    { t: 'path', d: 'M19.3,19 L20.8,20.5 L19.3,22', mark: true },
+  ],
+
+  viewXy: [
+    { t: 'path', d: 'M12,3 V21 M3,12 H21', w: 1.4 },
+    { t: 'path', d: XY_LOCUS, w: 2 },
+    { t: 'dot', x: 17.66, y: 5.5, r: 1.5, mark: true },
+  ],
+
+  viewEye: [
+    // The cycle behind, at the axes' own weight: a ghost is what says this picture is every cycle
+    // drawn over the others rather than one of them.
+    { t: 'path', d: 'M4.8,6 C6.8,6 6.8,18 8.8,18', w: 1.4 },
+    { t: 'path', d: 'M4.8,18 C6.8,18 6.8,6 8.8,6', w: 1.4 },
+    { t: 'path', d: 'M16.8,6 C18.8,6 18.8,18 20.8,18', w: 1.4 },
+    { t: 'path', d: 'M16.8,18 C18.8,18 18.8,6 20.8,6', w: 1.4 },
+    { t: 'path', d: 'M2,6 H4', w: 2 },
+    { t: 'path', d: 'M2,18 H4', w: 2 },
+    { t: 'path', d: 'M4,6 C6,6 6,18 8,18', w: 2 },
+    { t: 'path', d: 'M4,18 C6,18 6,6 8,6', w: 2 },
+    { t: 'path', d: 'M8,6 H16', w: 2 },
+    { t: 'path', d: 'M8,18 H16', w: 2 },
+    { t: 'path', d: 'M16,6 C18,6 18,18 20,18', w: 2 },
+    { t: 'path', d: 'M16,18 C18,18 18,6 20,6', w: 2 },
+    { t: 'path', d: 'M20,6 H22', w: 2 },
+    { t: 'path', d: 'M20,18 H22', w: 2 },
+    // The opening, which is the whole of what the picture is read for.
+    { t: 'path', d: 'M12,9 V15', mark: true },
+    { t: 'path', d: 'M10.6,10.4 L12,9 L13.4,10.4', mark: true },
+    { t: 'path', d: 'M10.6,13.6 L12,15 L13.4,13.6', mark: true },
   ],
 
   /** Dots: the samples alone, joined by nothing. */

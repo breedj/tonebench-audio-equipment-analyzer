@@ -47,8 +47,8 @@ const props = withDefaults(
     format?: (value: number) => string
     title?: string
     /**
-     * What an <b>Autoscale</b> press would do, in a sentence. Its presence is what puts the
-     * button on the tile at all (asked for 2026-11-21).
+     * What <b>Autoscale</b> does, in a sentence. Its presence is what puts the button on the tile
+     * at all (asked for 2026-11-21).
      *
      * <p>On the tile rather than in the panel, because what it scales is <em>this</em> control:
      * a button in the section header would read as "scale the section", and the Vertical
@@ -57,6 +57,16 @@ const props = withDefaults(
      * itself a button, and a button inside a button is not markup.</p>
      */
     autoTitle?: string
+    /**
+     * Whether it is a <b>mode</b> that is on, rather than a press that has happened.
+     *
+     * <p>A toggle since 2026-11-22, asked for in those words: the knob keeps itself fitted while
+     * the signal changes, so the button has a state and has to show it. Lit is the tone's own
+     * accent filled in and unlit is the tile's tint, which is the display rail's idiom for every
+     * other on/off figure — so the state does not rest on colour alone and survives a monochrome
+     * screenshot.</p>
+     */
+    autoOn?: boolean
   }>(),
   {
     display: '',
@@ -66,6 +76,7 @@ const props = withDefaults(
     format: undefined,
     title: undefined,
     autoTitle: undefined,
+    autoOn: false,
   },
 )
 
@@ -308,14 +319,21 @@ const bodyStyle = computed(() => ({ backgroundColor: 'var(--surface-panel)' }))
 
     <!-- Autoscale, only where the caller has an automatic answer for this control. The figure is
          what every instrument draws for "fit this to the signal": a bracket either side with the
-         arrows pushing out to the edges it is about to find. -->
+         arrows pushing out to the edges it is about to find. A toggle since 2026-11-22, so it is
+         lit while it is on and the figure takes the lit ground's own white. -->
     <button
       v-if="autoTitle"
       type="button"
-      class="flex w-6 shrink-0 items-center justify-center rounded-lg transition hover:bg-black/5 dark:hover:bg-white/10"
-      :style="inkStyle"
+      class="flex w-6 shrink-0 items-center justify-center rounded-lg transition"
+      :class="autoOn ? '' : 'hover:bg-black/5 dark:hover:bg-white/10'"
+      :style="
+        autoOn
+          ? { backgroundColor: `var(--kind-${tone}-chip-fg)`, color: '#ffffff' }
+          : inkStyle
+      "
       :title="autoTitle"
       :aria-label="`${label}: autoscale`"
+      :aria-pressed="autoOn"
       @click="emit('auto')"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

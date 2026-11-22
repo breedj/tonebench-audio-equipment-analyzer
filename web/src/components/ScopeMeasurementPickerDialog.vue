@@ -13,6 +13,7 @@ import {
   SCOPE_MEASUREMENT_GROUPS,
   SCOPE_SELECTION_SOURCES,
   scopeMeasurement,
+  scopeMeasurementIsChannelsOnly,
   scopeMeasurementSections,
   scopeSelectionEntry,
   scopeSelectionId,
@@ -123,7 +124,7 @@ const pairTab = computed(() => tab.value === 'Delay')
 
 /** Area is channels-only, which is a picker rule now rather than only a row-builder one. */
 function unavailable(def: ScopeMeasurementDef): boolean {
-  return !pairTab.value && def.quantity === 'area' && source.value === 'math'
+  return !pairTab.value && scopeMeasurementIsChannelsOnly(def.quantity) && source.value === 'math'
 }
 
 /** The staged entry a tile stands for, under whatever source is chosen. */

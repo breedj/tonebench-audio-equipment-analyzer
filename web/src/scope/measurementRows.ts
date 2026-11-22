@@ -23,6 +23,7 @@ import {
 import {
   SCOPE_MEASUREMENT_ABSENT,
   scopeMeasurement,
+  scopeMeasurementIsChannelsOnly,
   scopeSelectionId,
   scopeSelectionSources,
   type ScopeMeasurementDef,
@@ -106,6 +107,10 @@ export function scopeMeasurementFormatter(
       return (v) => formatMathValue(v, unit)
     case 'area':
       return (v) => formatMathValue(v, 'VoltSecond')
+    // A slew rate, which carries the rule formatMathValue exists for: the *denominator* is scaled,
+    // so 2.4 MV/s reads 2.400 V/us -- the figure every amplifier datasheet quotes.
+    case 'rate':
+      return (v) => formatMathValue(v, 'VoltPerSecond')
     // Seconds and hertz through the same SI ladder rather than through the axis formatters, and
     // that is a correctness point rather than a tidiness one: those write in the unit the graticule
     // is in and bottom out at microseconds and at hundredths of a hertz, so a frequency that
@@ -222,7 +227,7 @@ export function scopeMeasurementRows(
     const wanted = scopeSelectionSources(entry)
     for (const source of sources) {
       if (!wanted.includes(source.key)) continue
-      if (def.quantity === 'area' && source.kind !== 'channel') continue
+      if (scopeMeasurementIsChannelsOnly(def.quantity) && source.kind !== 'channel') continue
       rows.push(channelRow(def, source, record, options.source))
     }
   }

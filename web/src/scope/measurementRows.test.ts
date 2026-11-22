@@ -169,6 +169,34 @@ describe('scopeMeasurementRows', () => {
     expect(rows.map((r) => r.sourceLabel)).toEqual(['Left', 'Right'])
   })
 
+  /**
+   * The same rule as the area beside it and through the same predicate: a slew rate is a level
+   * over a time, so on a derivative it would be V/s². The picker and this builder read one
+   * function, because the two disagreeing is a reading a user can tick and never see.
+   */
+  it('keeps a slew rate off the math trace, whose slope has no name anyone quotes', () => {
+    const withMath = record({
+      maths: [{
+        slot: 1,
+        operation: 'DerivativeA',
+        sourceA: 0,
+        sourceB: 1,
+        unit: 'VoltPerSecond',
+        samples: null,
+        min: null,
+        max: null,
+        measurements: measurements({ topV: 1, baseV: -1, riseTimeS: 4e-6 }),
+        gated: null,
+        clampedSamples: 0,
+      }],
+    })
+    expect(scopeMeasurementRows(withMath, ['riseSlew'], both).map((r) => r.sourceLabel)).toEqual([
+      'Left',
+      'Right',
+    ])
+    expect(scopeMeasurementRows(withMath, ['riseSlew:math1'], both)).toEqual([])
+  })
+
   it('keys a row by its measurement and its source, so statistics follow the right one', () => {
     const rows = scopeMeasurementRows(record(), ['pkpk'], both)
     expect(rows.map((r) => r.key)).toEqual(['pkpk:ch0', 'pkpk:ch1'])
@@ -194,6 +222,19 @@ describe('scopeMeasurementFormatter', () => {
   it('writes a derived trace in the operation’s own unit', () => {
     expect(scopeMeasurementFormatter('level', 'VoltSquared')(0.5)).toBe('500.0 mV²')
     expect(scopeMeasurementFormatter('level', 'Ratio')(0.5)).toBe('0.500')
+  })
+
+  /**
+   * The rule <code>formatMathValue</code> exists for, on the reading it matters most to: a slew
+   * rate scales its <b>denominator</b>. 2.4 MV/s and 2.400 V/µs are the same figure and the second
+   * is the one every amplifier datasheet quotes.
+   */
+  it('writes a slew rate by scaling its denominator, never its numerator', () => {
+    const rate = scopeMeasurementFormatter('rate', 'Volt')
+    expect(rate(2.4e6)).toContain('V/µs')
+    expect(rate(2.4e6)).not.toContain('MV')
+    // And a slow one stays in the unit it is in rather than reading 0.000 V/us.
+    expect(rate(500)).toContain('V/s')
   })
 
   it('writes an angle in degrees and a ratio bare', () => {

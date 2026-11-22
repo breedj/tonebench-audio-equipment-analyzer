@@ -140,6 +140,25 @@ export type ScopeMeasurementQuantity =
   | 'ratio'
   | 'angle'
   | 'area'
+  /** Volts per second — a slew rate, written with its <em>denominator</em> scaled: 2.400 V/µs. */
+  | 'rate'
+
+/**
+ * Whether a quantity is only meaningful on a captured input, so it is not offered on the math
+ * trace.
+ *
+ * <p>One predicate rather than the test written at each of the two places that needs it — the
+ * picker, which must not offer it, and the row builder, which must not produce it — because those
+ * two disagreeing is a reading a user can tick and never see.</p>
+ *
+ * <p>Both members are here for the same reason, which is that their unit is <em>derived</em> from
+ * volts rather than being volts: an area is a level times a time, so on A × B it is V²·s and on a
+ * derivative plain volts; a slew rate is a level over a time, so on a derivative it is V/s².
+ * Quantities nobody quotes, and this app would have to invent names for them.</p>
+ */
+export function scopeMeasurementIsChannelsOnly(quantity: ScopeMeasurementQuantity): boolean {
+  return quantity === 'area' || quantity === 'rate'
+}
 
 export interface ScopeMeasurementDef {
   /** Stored in <code>params_json</code>, so it never changes once shipped. */
@@ -178,6 +197,28 @@ export interface ScopeMeasurementDef {
  * instrument is pointed at. And <em>L@T</em> and <em>Delay</em> take a time or a level as a
  * parameter, which this screen already has a better answer for: the cursors.</p>
  */
+/**
+ * A slew rate from the readings an edge already carries.
+ *
+ * <p>Null rather than a figure wherever one of them is missing or absurd — a record with one
+ * level has no top and base, and an edge time of zero would divide by it. Absent is the answer
+ * this table gives for a reading a waveform does not have, never a zero.</p>
+ */
+function edgeSlew(
+  top: number | null | undefined,
+  base: number | null | undefined,
+  edgeSeconds: number | null | undefined,
+): number | null {
+  if (top == null || base == null || edgeSeconds == null) return null
+  if (!Number.isFinite(top) || !Number.isFinite(base) || !Number.isFinite(edgeSeconds)) return null
+  if (edgeSeconds <= 0) return null
+
+  const amplitude = Math.abs(top - base)
+  if (amplitude <= 0) return null
+  // 0.8 of the swing, because that is the part a 10-90 % time spans.
+  return (0.8 * amplitude) / edgeSeconds
+}
+
 export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze([
   // ---- Vertical ----
   {
@@ -313,6 +354,36 @@ export const SCOPE_MEASUREMENTS: readonly ScopeMeasurementDef[] = Object.freeze(
     section: 'edges',
     title: '10 % to 90 % of the first clean rising edge. Nothing faster than about 4 µs is the DUT rather than this analyzer.',
     read: (m) => m.riseTimeS,
+  },
+  /**
+   * The two slew rates, which is the figure an amplifier is specified by and which had no row of
+   * its own until 2026-11-22 — it was reachable only by setting Math to dL/dt and reading that
+   * trace's Max, or by hand off Rise and the amplitude.
+   *
+   * <p><b>0.8 × amplitude ÷ edge time</b>, which is the classical 10-90 % figure: the rise time
+   * spans eight tenths of the swing, so dividing the whole amplitude by it would read 25 % high.
+   * Top and base come from the histogram rather than from the extremes, for the reason the rise
+   * time itself does — a waveform that overshoots settles below its own peak, and 10-90 % of the
+   * peaks is a slower edge than the one that happened.</p>
+   *
+   * <p><b>Reported as a magnitude</b>, falling edge included, because that is how a datasheet
+   * quotes the pair and because the whole point of having both rows is comparing them: an
+   * amplifier whose two slew rates differ is one with an asymmetric output stage, and a sign on
+   * one of them makes that comparison a subtraction.</p>
+   */
+  {
+    id: 'riseSlew', label: 'Rise slew', group: 'Horizontal', icon: 'riseSlew', quantity: 'rate',
+    section: 'edges',
+    title:
+      'How fast the rising edge climbs — 0.8 × amplitude over the 10-90 % rise time. This analyzer’s own fastest edge rises in about 4 µs, so anything near that is its reconstruction filter rather than the DUT; for a real figure drive a tone and watch THD climb with frequency.',
+    read: (m) => edgeSlew(m.topV, m.baseV, m.riseTimeS),
+  },
+  {
+    id: 'fallSlew', label: 'Fall slew', group: 'Horizontal', icon: 'fallSlew', quantity: 'rate',
+    section: 'edges',
+    title:
+      'How fast the falling edge drops, as a magnitude so it compares directly with the rising one — 0.8 × amplitude over the 90-10 % fall time. An amplifier whose two differ has an asymmetric output stage.',
+    read: (m) => edgeSlew(m.topV, m.baseV, m.fallTimeS),
   },
   {
     id: 'fall', label: 'Fall', group: 'Horizontal', icon: 'fall', quantity: 'time',

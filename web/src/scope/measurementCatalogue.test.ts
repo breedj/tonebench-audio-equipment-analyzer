@@ -9,6 +9,7 @@ import {
   SCOPE_MEASUREMENTS,
   SCOPE_MEASUREMENT_GROUPS,
   scopeMeasurement,
+  scopeMeasurementIsChannelsOnly,
   scopeMeasurementSection,
   scopeMeasurementSections,
   SCOPE_MEASUREMENT_SECTIONS,
@@ -147,7 +148,7 @@ describe('SCOPE_MEASUREMENTS', () => {
   })
 
   it('writes every reading to a quantity, so a statistic of it is in the same units', () => {
-    const quantities = new Set(['level', 'time', 'frequency', 'percent', 'ratio', 'angle', 'area'])
+    const quantities = new Set(['level', 'time', 'frequency', 'percent', 'ratio', 'angle', 'area', 'rate'])
     for (const def of SCOPE_MEASUREMENTS) expect(quantities.has(def.quantity)).toBe(true)
   })
 
@@ -155,6 +156,70 @@ describe('SCOPE_MEASUREMENTS', () => {
     for (const def of SCOPE_MEASUREMENTS) {
       expect(def.title.length, `${def.id} has no explanation`).toBeGreaterThan(20)
     }
+  })
+})
+
+describe('the slew rates', () => {
+  /** The readings an edge carries, as the analyzer sends them. */
+  function edge(over: Partial<ScopeSliceMeasurements>): ScopeSliceMeasurements {
+    return {
+      maxV: 1,
+      minV: -1,
+      peakToPeakV: 2,
+      meanV: 0,
+      rmsV: 1,
+      acRmsV: 1,
+      ...over,
+    } as ScopeSliceMeasurements
+  }
+
+  const rise = scopeMeasurement('riseSlew')!
+  const fall = scopeMeasurement('fallSlew')!
+
+  it('is 0.8 of the amplitude over the edge time, not the whole of it', () => {
+    // The 10-90 % time spans eight tenths of the swing. Dividing the whole amplitude by it reads
+    // 25 % high, which is the one way this arithmetic goes quietly wrong -- the figure stays
+    // plausible and is simply too fast.
+    const m = edge({ topV: 1, baseV: -1, riseTimeS: 4e-6 })
+    expect(rise.read!(m)).toBeCloseTo((0.8 * 2) / 4e-6, 6)
+    // And what the naive version would have said, so the two cannot be confused in a later edit.
+    expect(rise.read!(m)).not.toBeCloseTo(2 / 4e-6, 6)
+  })
+
+  it('reads the settled levels rather than the extremes', () => {
+    // A waveform that overshoots settles below its own peak; 10-90 % of the peaks is a slower edge
+    // than the one that happened, which is why rise time itself is measured against top and base.
+    const m = edge({ maxV: 1.4, minV: -1.4, topV: 1, baseV: -1, riseTimeS: 4e-6 })
+    expect(rise.read!(m)).toBeCloseTo((0.8 * 2) / 4e-6, 6)
+  })
+
+  it('reports the falling edge as a magnitude, so the pair compares directly', () => {
+    const m = edge({ topV: 1, baseV: -1, riseTimeS: 4e-6, fallTimeS: 8e-6 })
+    expect(fall.read!(m)).toBeGreaterThan(0)
+    // An asymmetric output stage: half as fast down as up, which is the comparison the two rows
+    // exist for and which a sign on one of them would turn into a subtraction.
+    expect(fall.read!(m)).toBeCloseTo(rise.read!(m)! / 2, 6)
+  })
+
+  it('is absent rather than zero where the waveform has no edge to measure', () => {
+    // A record with one level has no top and base; the table draws an absent reading as a dash.
+    expect(rise.read!(edge({ riseTimeS: 4e-6 }))).toBeNull()
+    expect(rise.read!(edge({ topV: 1, baseV: -1 }))).toBeNull()
+    expect(rise.read!(edge({ topV: 1, baseV: 1, riseTimeS: 4e-6 }))).toBeNull()
+    expect(rise.read!(edge({ topV: 1, baseV: -1, riseTimeS: 0 }))).toBeNull()
+  })
+
+  /**
+   * Its unit is a level over a time, so on the math trace it would be V/s² on a derivative and a
+   * bare ratio per second on A ÷ B -- quantities nobody quotes. Area is channels-only for the
+   * mirror reason, and both go through one predicate so the picker and the row builder cannot
+   * disagree: a reading a user can tick and never see is worse than one not offered.
+   */
+  it('is offered on a captured input and not on the math trace', () => {
+    expect(scopeMeasurementIsChannelsOnly(rise.quantity)).toBe(true)
+    expect(scopeMeasurementIsChannelsOnly(fall.quantity)).toBe(true)
+    expect(scopeMeasurementIsChannelsOnly('level')).toBe(false)
+    expect(scopeMeasurementIsChannelsOnly('time')).toBe(false)
   })
 })
 

@@ -128,6 +128,20 @@ export const SCOPE_MEASUREMENT_ICONS: Readonly<Record<string, readonly IconShape
     { t: 'line', x1: 1, y1: 4.2, x2: 23, y2: 4.2, dash: true },
     { t: 'spanH', x1: 9.3, x2: 11.7, y: 8 },
   ],
+  // The slope itself rather than the time it takes: the edge faint, with the rise and the run
+  // drawn on it as the two legs of the triangle whose hypotenuse the edge is. That is the glyph
+  // every textbook draws for a gradient, and it is what tells these two from `rise` and `fall`
+  // beside them, which mark the horizontal span instead.
+  riseSlew: [
+    { t: 'path', d: RISE, faint: true },
+    { t: 'line', x1: 9, y1: 13, x2: 12, y2: 13 },
+    { t: 'line', x1: 12, y1: 13, x2: 12, y2: 3 },
+  ],
+  fallSlew: [
+    { t: 'path', d: FALL, faint: true },
+    { t: 'line', x1: 9, y1: 3, x2: 12, y2: 3 },
+    { t: 'line', x1: 12, y1: 3, x2: 12, y2: 13 },
+  ],
   fall: [
     { t: 'path', d: FALL, faint: true },
     { t: 'line', x1: 1, y1: 4.2, x2: 23, y2: 4.2, dash: true },

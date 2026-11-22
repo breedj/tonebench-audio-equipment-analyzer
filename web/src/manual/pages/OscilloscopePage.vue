@@ -1462,6 +1462,20 @@ const { showPage } = useManual()
           <td>10 % to 90 % of the first clean edge, against the settled pair. See the floor below.</td>
         </tr>
         <tr>
+          <td>Rise slew, Fall slew</td>
+          <td>
+            The same edge as a rate: <strong>0.8 × amplitude ÷ the edge time</strong>, which is the
+            classical 10–90 % slew rate — eight tenths, because that is the part of the swing a
+            10–90 % time spans. Written with the denominator scaled, 2.400 V/µs rather than
+            2.4 MV/s, the way a datasheet quotes one. The falling edge is given as a
+            <strong>magnitude</strong> so the two compare directly: an amplifier whose two differ
+            has an asymmetric output stage. Both share the floor below, and it bites them harder
+            than it bites Rise and Fall — a rate read off the analyzer’s own edge is the
+            analyzer’s. Offered for the captured inputs only: a slew rate of a derivative would be
+            V/s².
+          </td>
+        </tr>
+        <tr>
           <td>Overshoot, Preshoot</td>
           <td>How far past the top, and below the base, the record goes — as a percentage of the amplitude.</td>
         </tr>

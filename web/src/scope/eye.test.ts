@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ScopeEyeSlice } from '../api/client'
 import {
@@ -92,12 +94,41 @@ describe('eyeNote', () => {
     expect(eyeNote(slice({ foldCount: 64, periodHz: 1000 }))).toBe('64 cycles · 1.000 kHz fold')
   })
 
+  /**
+   * The header is the picture's geometry and nothing measured. The four readings are a row of
+   * their own under the canvas, where each can carry the sentence that says what it means -- which
+   * is the whole reason `eyeReadings` gives every one a title, and the thing a header cannot do.
+   */
+  it('keeps the readings out of it, geometry only', () => {
+    const note = eyeNote(slice({ foldCount: 64, periodHz: 1000, jitterS: 1.1e-7 }))
+    expect(note).not.toContain('jitter')
+    expect(note).not.toContain('ns')
+  })
+
   it('says one cycle in the singular', () => {
     expect(eyeNote(slice({ foldCount: 1 }))).toContain('1 cycle ·')
   })
 
   it('says so when the overlay is the first of the window s cycles', () => {
     expect(eyeNote(slice({ foldCount: 256, windowFoldCount: 900 }))).toContain('of 900 in the window')
+  })
+})
+
+describe('the chart renders them', () => {
+  /**
+   * The whole of the 2026-11-22 fault: `eyeReadings` existed, was correct, was tested, and was
+   * imported by nothing -- so four figures the analyzer measures appeared nowhere. A unit test of
+   * the function cannot see that; only reading the component can, and the suite runs on
+   * `environment: node`, so it is read as text.
+   */
+  it('imports eyeReadings and draws each one with its own tooltip', () => {
+    const chart = readFileSync(
+      resolve(import.meta.dirname, '..', 'components/ScopeEyeChart.vue'),
+      'utf8',
+    )
+    expect(chart).toContain('eyeReadings')
+    expect(chart).toContain('v-for="reading in readings"')
+    expect(chart).toContain(':title="reading.title"')
   })
 })
 
@@ -117,6 +148,21 @@ describe('eyeReadings', () => {
     // the V/div knob says -- a reading rather than an axis label.
     expect(readings[0].value).toContain('mV')
     expect(readings[3].value).toContain('µs')
+  })
+
+  /**
+   * The reason the jitter does not go through `formatSeconds` like its neighbours: that one is the
+   * chart's axis formatter and stops at microseconds, so it writes a good generator's jitter as
+   * `0.001 us`. A jitter is the one time on this screen that routinely lives below one.
+   */
+  it('writes a sub-microsecond jitter in its own unit rather than as nothing', () => {
+    const picoseconds = eyeReadings(slice({ jitterS: 8e-10 })).find((r) => r.label === 'Jitter')
+    expect(picoseconds?.value).toContain('ps')
+    expect(picoseconds?.value).not.toContain('µs')
+
+    // And Where keeps the axis formatter, because it is a position in the fold.
+    const where = eyeReadings(slice({ spreadAtS: 0.00025 })).find((r) => r.label === 'Where')
+    expect(where?.value).toContain('µs')
   })
 
   it('dashes an absent jitter rather than reading it as zero', () => {

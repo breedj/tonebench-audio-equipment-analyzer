@@ -2,6 +2,7 @@ import type { OscilloscopeParameters, ReportRow, ReportSection, ScopeRecordRespo
 import { mathReadings, scopeChannelReadings } from '../../scope/readings'
 import { mathSliceAxisLabel } from '../../scope/math'
 import { xyReadings, xyTruncationNote } from '../../scope/xy'
+import { eyeReadings, eyeTruncationNote } from '../../scope/eye'
 import { pathSummary } from '../../scope/signalPath'
 import { formatScopeTime, timePerDivisionFor, toChartMs } from '../../scope/timeAxis'
 import { scopeMeasurementRows } from '../../scope/measurementRows'
@@ -179,6 +180,31 @@ export function scopeMeasurementSections(
         cells: readings.map((reading) => [reading.label, reading.value]),
       })
       const truncation = xyTruncationNote(xy)
+      if (truncation) sections.push({ kind: 'paragraph', text: truncation })
+    }
+  }
+
+  // And the eye's, for the same reason and in the same shape — a spread, where it sits, and the
+  // crossing jitter are not the channels' own readings either. It was simply never wired up:
+  // `eyeReadings` was written with the X-Y's and then imported by nothing, so the jitter figure
+  // existed on the wire and appeared neither on screen nor on paper (found 2026-11-22, asked
+  // "do we have metrics that show the jitter as a number").
+  const eye = record.eye
+  if (eye) {
+    const readings = eyeReadings(eye)
+    if (readings.length > 0) {
+      sections.push({
+        kind: 'table',
+        title: 'Eye',
+        headers: ['Reading', 'Value'],
+        cells: readings.map((reading) => [reading.label, reading.value]),
+      })
+      // Paper has no tooltip, so what the two figures mean has to be a sentence.
+      sections.push({
+        kind: 'paragraph',
+        text: 'The spread is how far one phase of the waveform moved from cycle to cycle, and where it sits says which kind of movement it was — at the peaks amplitude, at a crossing timing. The jitter is the standard deviation of the folds’ own crossings, measured between samples, so it reads below the sample interval.',
+      })
+      const truncation = eyeTruncationNote(eye)
       if (truncation) sections.push({ kind: 'paragraph', text: truncation })
     }
   }

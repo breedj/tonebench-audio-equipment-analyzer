@@ -13,6 +13,7 @@ import {
   EYE_TRACE_ALPHA,
   eyeAbsenceNote,
   eyeNote,
+  eyeReadings,
   eyeTruncationNote,
   eyeVoltWindow,
   formatFrequency,
@@ -126,6 +127,25 @@ const absence = computed(() =>
   ),
 )
 const truncationNote = computed(() => (eye.value ? eyeTruncationNote(eye.value) : null))
+
+/**
+ * The figures under the picture — the spread, where in the fold it sits, the mean and the
+ * crossing jitter.
+ *
+ * <p><b>They had nowhere to be read at all until 2026-11-22</b>, which is the fault this fixes and
+ * not a new feature: the analyzer has measured all four since the view was written,
+ * <code>eyeReadings</code> has formatted them since then, the manual's own table tells a reader to
+ * look at <b>Jitter</b> and <b>Where</b> — and nothing imported that function, so the numbers
+ * reached the wire and stopped. Found by being asked whether the jitter was available as a
+ * number.</p>
+ *
+ * <p>Under the canvas rather than in the header beside the fold, where the X–Y puts its one
+ * correlation: four of them do not fit a header line, and each carries a sentence saying what it
+ * means, which is a tooltip and therefore a thing only a rendered control can have. The header
+ * keeps the picture's geometry — how many cycles, folded on what — so the two do not say the
+ * same thing twice.</p>
+ */
+const readings = computed(() => eyeReadings(eye.value))
 const summary = computed(() => (eye.value ? eyeNote(eye.value) : null))
 
 const hover = ref<string | null>(null)
@@ -537,6 +557,19 @@ watch(
       >
         {{ running ? 'Waiting for a record…' : absence }}
       </p>
+    </div>
+
+    <!-- One row, wrapping: at the chart's width four pairs fit on a line, and on a narrow rail
+         they fall onto a second rather than truncating a figure. Tabular numerals so a value does
+         not jiggle as it updates. -->
+    <div
+      v-if="readings.length"
+      class="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-neutral-500 dark:text-neutral-400"
+    >
+      <span v-for="reading in readings" :key="reading.label" :title="reading.title" class="whitespace-nowrap">
+        {{ reading.label }}
+        <span class="ml-1 font-mono tabular-nums text-neutral-700 dark:text-neutral-200">{{ reading.value }}</span>
+      </span>
     </div>
 
     <p v-if="truncationNote" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">

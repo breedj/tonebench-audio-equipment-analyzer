@@ -1,6 +1,7 @@
 import type { ScopeEyeSlice } from '../api/client'
 import type { ScopeReading } from './readings'
 import { formatSeconds } from './readings'
+import { formatSiValue } from './math'
 import { formatVolts } from './voltAxis'
 
 /**
@@ -76,11 +77,30 @@ export function eyeTruncated(eye: ScopeEyeSlice): boolean {
 }
 
 /** What the header says about the overlay on screen. */
+/**
+ * A jitter, which is the one time on this screen that routinely lives below a microsecond.
+ *
+ * <p><code>formatSeconds</code> is the chart's own axis formatter and bottoms out there: it writes
+ * 110 ns as <code>0.110 us</code> and 800 ps as <code>0.001 us</code>, which is the right scale for
+ * a window and a cursor and useless for this. The SI formatter carries the prefix down instead, so
+ * the figure reads in the unit it is in — and it is the same one the measurement table's own
+ * statistics go through, for the reason that file records about exactly this number.</p>
+ *
+ * <p>Its sibling readings keep <code>formatSeconds</code> on purpose: <b>Where</b> is a position in
+ * the fold, read against the picture's own axis, so it belongs in that axis's unit.</p>
+ */
+function formatJitter(seconds: number): string {
+  return formatSiValue(seconds, 's')
+}
+
 export function eyeNote(eye: ScopeEyeSlice): string {
   const parts = [
     `${eye.foldCount.toLocaleString()} ${eye.foldCount === 1 ? 'cycle' : 'cycles'}`,
     `${formatFrequency(eye.periodHz)} fold`,
   ]
+  // Deliberately the picture's *geometry* and nothing measured: how many cycles are folded and on
+  // what. The readings are a row of their own under the canvas, so each can carry the tooltip that
+  // says what it means -- which is what `eyeReadings` was written for and what a header cannot do.
   if (eyeTruncated(eye)) parts.push(`of ${eye.windowFoldCount.toLocaleString()} in the window`)
   return parts.join(' · ')
 }
@@ -133,7 +153,7 @@ export function eyeReadings(eye: ScopeEyeSlice | null | undefined): ScopeReading
 
   readings.push({
     label: 'Jitter',
-    value: eye.jitterS == null ? '—' : formatSeconds(eye.jitterS),
+    value: eye.jitterS == null ? '—' : formatJitter(eye.jitterS),
     title:
       eye.jitterS == null
         ? 'Absent: too few of the folds cross their own mean for a spread of crossings to mean anything.'

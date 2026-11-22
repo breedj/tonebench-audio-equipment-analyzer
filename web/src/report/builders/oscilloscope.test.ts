@@ -163,6 +163,46 @@ describe('scopeMeasurementSections', () => {
     expect(labels).toContain('Spliced')
   })
 
+  /**
+   * The eye's own table, which the X-Y had and this did not: `eyeReadings` was written alongside
+   * `xyReadings` and then imported by nothing, so the jitter the analyzer measures appeared
+   * neither on screen nor on paper (2026-11-22). Its figures are not the channels' own readings --
+   * a spread, a phase of the fold and a time -- so they would put three units in one column.
+   */
+  it('prints the eye’s own readings when one was folded', () => {
+    const sections = scopeMeasurementSections(
+      record([slice(0, [-1], [1], { meanV: 0 })], {
+        eye: {
+          channel: 0,
+          folds: [],
+          foldFrameCount: 40,
+          foldSeconds: 0.0005,
+          periodHz: 2000,
+          foldCount: 64,
+          windowFoldCount: 64,
+          maxSpreadV: 0.012,
+          spreadAtS: 0.00025,
+          meanSpreadV: 0.008,
+          jitterS: 8e-10,
+        },
+      }),
+      0.5,
+      true,
+      true,
+    )
+
+    const eye = sections.find((s) => s.kind === 'table' && s.title === 'Eye')
+    expect(eye, 'the eye table is missing').toBeDefined()
+    const jitter = (eye?.cells ?? []).find((c) => c[0] === 'Jitter')
+    // In picoseconds: the axis formatter its neighbours use would write this as `0.001 µs`.
+    expect(jitter?.[1]).toContain('ps')
+  })
+
+  it('leaves the eye table out where no eye was folded', () => {
+    const sections = scopeMeasurementSections(scopeData().record, 0.5, true, true)
+    expect(sections.find((s) => s.kind === 'table' && s.title === 'Eye')).toBeUndefined()
+  })
+
   it('says on paper what the panel says in a tooltip about AC coupling', () => {
     // Paper has no tooltip, and the mean on a quiet input is the one reading here that is routinely
     // read as the DUT's.

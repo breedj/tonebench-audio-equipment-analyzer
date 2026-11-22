@@ -183,8 +183,14 @@ describe('the display toggles’ figures', () => {
    * that follows the button instead of the picture, which is exactly how a half-flattened figure
    * would look.</p>
    */
-  it('draws the three View figures in the colours they were supplied in', () => {
-    for (const view of SCOPE_VIEWS) {
+  it('draws every supplied figure in the colours it was supplied in', () => {
+    // The three View figures and Snap to bin: everything here that arrived as a drawing rather
+    // than being drawn in this file. Named rather than derived, so a figure that is *given* an ink
+    // without a drawing behind it does not quietly join the list.
+    const supplied = [...SCOPE_VIEWS.map((v) => v.icon), 'snapToBin']
+
+    for (const icon of supplied) {
+      const view = { icon }
       const shapes = scopeToggleIcon(view.icon)
       expect(shapes.length, `${view.icon} has no shapes`).toBeGreaterThan(0)
 

@@ -990,10 +990,17 @@ function stepOffset(direction: 1 | -1) {
          derived waveform is computed server-side on the samples, never on the drawn columns: the
          difference of two envelopes is not the envelope of a difference, and on a differential
          pair that error is the entire reading. See scope/math.ts. -->
-    <template v-for="row in mathRows" :key="row.slot">
+    <!-- Side by side (asked for 2026-11-22), which is a row of the rail saved: the two buttons
+         carry a two-word name and a short expression, so at half the rail's width the label still
+         has room and truncates no sooner than it did. Each channel's own warning spans the pair
+         rather than sitting in its column — a sentence in 105 px is a column of single words — and
+         every one of them names its slot, so it says which button it belongs to. -->
+    <div class="grid grid-cols-2 gap-2">
       <button
+        v-for="row in mathRows"
+        :key="row.slot"
         type="button"
-        class="flex h-[34px] w-full items-center gap-2 rounded-lg border px-2 text-left text-[12px] transition"
+        class="flex h-[34px] w-full items-center gap-1.5 rounded-lg border px-1.5 text-left text-[12px] transition"
         :class="row.on ? 'btn-action' : 'btn-toggle-off'"
         :aria-pressed="row.on"
         :aria-label="`Math ${row.slot}`"
@@ -1004,19 +1011,27 @@ function stepOffset(direction: 1 | -1) {
         <span class="min-w-0 flex-1 truncate text-right">{{ row.label }}</span>
       </button>
 
-      <template v-if="row.on">
-        <p v-if="row.missing.length" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-          Math {{ row.slot }} has nothing to draw: it needs the
-          {{ row.missing.join(' and the ') }} input, which this measurement is not capturing. Tick
-          it under Acquisition ▸ Channels.
-        </p>
-        <p v-else-if="row.clamped > 0" class="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-          Math {{ row.slot }}: {{ row.clamped.toLocaleString() }} samples railed at ±1000 — the
-          denominator passes through zero there. A ratio is only meaningful where B is a settled
-          level; for a transfer function use the frequency-response measurement.
-        </p>
+      <template v-for="row in mathRows" :key="`note-${row.slot}`">
+        <template v-if="row.on">
+          <p
+            v-if="row.missing.length"
+            class="col-span-2 text-[11px] leading-snug text-amber-600 dark:text-amber-400"
+          >
+            Math {{ row.slot }} has nothing to draw: it needs the
+            {{ row.missing.join(' and the ') }} input, which this measurement is not capturing. Tick
+            it under Acquisition ▸ Channels.
+          </p>
+          <p
+            v-else-if="row.clamped > 0"
+            class="col-span-2 text-[11px] leading-snug text-amber-600 dark:text-amber-400"
+          >
+            Math {{ row.slot }}: {{ row.clamped.toLocaleString() }} samples railed at ±1000 — the
+            denominator passes through zero there. A ratio is only meaningful where B is a settled
+            level; for a transfer function use the frequency-response measurement.
+          </p>
+        </template>
       </template>
-    </template>
+    </div>
 
     <ScopeMathDialog
       v-if="mathDialogSlot"

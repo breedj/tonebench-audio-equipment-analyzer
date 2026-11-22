@@ -57,6 +57,29 @@ describe('generatorRateCeilingNotice', () => {
   })
 
   /**
+   * And the half that was wrong until 2026-11-22, reported from the bench: it offered to turn the
+   * generator off, which is a switch inside the panel this very notice has replaced -- so it named
+   * a control that is not on screen, to do a thing already done. What the reader needs instead is
+   * the fact that was missing, which is that the capture still runs.
+   */
+  it('never offers to turn the generator off, and says the capture runs without it', () => {
+    for (const bench of [
+      { stagedSampleRateHz: 384_000, ...QA40X },
+      { stagedSampleRateHz: 384_000, ...QA40X, isSplit: true },
+      {
+        stagedSampleRateHz: 384_000,
+        generatorRatesHz: [48_000, 96_000, 192_000],
+        maxGeneratorRateHz: null,
+        isSplit: true,
+      },
+    ]) {
+      const notice = generatorRateCeilingNotice(bench) as string
+      expect(notice, JSON.stringify(bench)).not.toContain('turn the generator off')
+      expect(notice, JSON.stringify(bench)).toContain('without it')
+    }
+  })
+
+  /**
    * The second refusal, and the one actually met on a bench: a split whose generating half is a
    * sound card that stops at 192 kHz, with the capture staged at 384. Nothing said this before Run
    * — the server's own 409 was the first the user heard of it.

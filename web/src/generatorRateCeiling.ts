@@ -21,6 +21,14 @@
  * notice names the lever this bench actually has — the split's own **Generator rate** where one is
  * already configured, and **Split (two devices)** where it is not.</p>
  *
+ * <p><b>And it stopped offering to turn the generator off on 2026-11-22</b> (reported: "when it is
+ * shown the generator cannot be turned off, the control is not shown"). It was exactly backwards:
+ * this notice <em>replaces</em> the panel's body — `GeneratorPanel` hides everything that composes
+ * a stimulus behind it — so the switch it named is not on screen, and the generator is silenced
+ * already. What the reader needs instead is the one fact that was missing: the capture still runs.
+ * So both messages now say the generator is silent and the capture goes ahead without it, and then
+ * name a lever that exists.</p>
+ *
  * Its own module, like {@link stimulusFloorNotice} next door, because nothing in a `.vue` file is
  * testable under the node environment vitest runs in.
  */
@@ -56,7 +64,7 @@ export function generatorRateCeilingNotice(bench: GeneratorRateBench): string | 
   if (hasCeiling && stagedSampleRateHz > ceiling) {
     return (
       `This analyzer's generator cannot be used at ${format(stagedSampleRateHz)} kHz — it is an ` +
-      `input-only rate. ${wayOut(bench, 'play it')}`
+      `input-only rate. It stays silent and the capture runs without it. ${wayOut(bench, 'play')}`
     )
   }
 
@@ -66,7 +74,8 @@ export function generatorRateCeilingNotice(bench: GeneratorRateBench): string | 
   if (rates && rates.length > 0 && !rates.some((r) => Math.abs(r - stagedSampleRateHz) < 0.5)) {
     return (
       `This bench's generator cannot run at ${format(stagedSampleRateHz)} kHz. It accepts ` +
-      `${rates.map(format).join(', ')} kHz. ${wayOut(bench, 'run at it')}`
+      `${rates.map(format).join(', ')} kHz, and stays silent at this one — the capture runs ` +
+      `without it. ${wayOut(bench, 'run at')}`
     )
   }
 
@@ -74,20 +83,24 @@ export function generatorRateCeilingNotice(bench: GeneratorRateBench): string | 
 }
 
 /**
- * The lever, which is the half that used to be wrong.
+ * The lever, which is the half that used to be wrong — twice.
  *
  * <p>On a split the generating half is already chosen and its rate is a control in the split
  * settings, so the notice names it. On a single analyzer the second device is the thing that does
  * not exist yet, so it names the analyzer picker instead of sending the reader off to find a signal
  * generator — which is what "use an external generator" did, and which stopped being the only
  * answer the day a split could be selected.</p>
+ *
+ * <p>Both arms name a control the reader can <b>see from here</b>, which is what the old "or turn
+ * the generator off" could not: that switch is inside the panel this notice has replaced. The
+ * capture rate is the other real lever and is named first, since on a QA403 at 384 kHz dropping
+ * back to 192 is usually what was meant.</p>
  */
 function wayOut(bench: GeneratorRateBench, verb: string): string {
   return bench.isSplit
-    ? `Set Generator rate in the split settings to one the generator can ${verb}, or turn the ` +
-        'generator off to capture without it.'
-    : 'Select Split (two devices) as the analyzer to drive the generator from a second device, or ' +
-        'turn the generator off to capture without it.'
+    ? `Capture at a rate the generator can ${verb}, or set Generator rate in the split settings.`
+    : `Capture at a rate it can ${verb}, or select Split (two devices) as the analyzer to drive ` +
+        'the generator from a second device.'
 }
 
 function format(hz: number): string {

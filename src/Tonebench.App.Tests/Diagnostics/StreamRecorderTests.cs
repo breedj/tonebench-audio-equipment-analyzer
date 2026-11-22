@@ -244,6 +244,49 @@ public sealed class StreamRecorderTests : IDisposable
     }
 
     /// <summary>
+    /// Ending the acquisition <b>while the cap close is still running</b> still reports the
+    /// recording.
+    ///
+    /// <para>This is the race that made the test below fail on CI and pass everywhere else, and it
+    /// is a fault in the recorder rather than in the test. <c>CloseAsync</c> nulls the two writers
+    /// at the top and sets <c>Last</c> at the bottom, with two file closes and a JSON sidecar in
+    /// between; <c>EndAsync</c> used to read those writers from the <i>caller's</i> thread and
+    /// return at once when both were null. So an acquisition that ended inside that window was told
+    /// its recording had finished while <c>Last</c> was still the previous one — null here, and on
+    /// a bench the file the user is about to be asked for.</para>
+    ///
+    /// <para>It needs the producer to arrive <i>late</i>, which is why it is rare: ordinarily the
+    /// 700 writes below are long done and <c>EndAsync</c> is already queued behind the audio before
+    /// the cap is reached. Waiting for <c>Recording</c> to clear puts this thread at the top of that
+    /// window deliberately, where a loaded CI runner put it by accident.</para>
+    /// </summary>
+    [Fact]
+    public async Task EndingInsideTheCapClose_StillReportsTheRecording()
+    {
+        var recorder = Create(capMegabytes: 16);
+        recorder.Begin(Context());
+
+        for (int i = 0; i < 700; i++)
+        {
+            using var block = Block(4096, 2, 48000, (_, _) => 0.01f);
+            recorder.WriteInput(block);
+        }
+
+        // The writer clears this at the TOP of the cap close, so the moment it goes false the close
+        // is in flight and Last is still null.
+        Assert.True(
+            SpinWait.SpinUntil(() => !recorder.Recording, TimeSpan.FromSeconds(30)),
+            $"the cap was never reached. Recorder log: {LogText}");
+
+        await recorder.EndAsync();
+
+        Assert.True(
+            recorder.Last is not null,
+            $"EndAsync returned before the close it was racing had finished. Recorder log: {LogText}");
+        Assert.True(recorder.Last!.ReachedCap);
+    }
+
+    /// <summary>
     /// The cap stops the <i>recording</i>, not the acquisition — and it stops both files, so the two
     /// keep one timebase and one end. A file that grew until the disk filled would be a diagnostic
     /// that caused a worse fault than the one it was chasing.

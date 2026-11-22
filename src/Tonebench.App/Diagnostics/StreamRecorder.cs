@@ -350,9 +350,6 @@ public sealed class StreamRecorder : IStimulusTap
     /// </summary>
     public async Task EndAsync()
     {
-        if (_inputWav is null && _stimulusWav is null && !_recording)
-            return;
-
         _recording = false;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -361,7 +358,29 @@ public sealed class StreamRecorder : IStimulusTap
         // silently discarded the End whenever the queue was full, which is a hung acquisition, and
         // it hid behind a race with the writer (the test that fills the queue passed in 23 ms once
         // and then hung for fifteen minutes). The channel waits now, so this does what it says.
-        await _queue.Writer.WriteAsync(new EndRecording(done)).ConfigureAwait(false);
+        //
+        // And it ALWAYS round-trips, where it used to return at once when both writers were null
+        // and nothing was recording. That shortcut read three fields the *writer* owns, from the
+        // caller's thread, and `CloseAsync` nulls the writers at its top and sets `Last` at its
+        // bottom -- with two file closes and a sidecar write in between. So an acquisition ending
+        // inside the cap close was told its recording had finished while `Last` was still null,
+        // and the file it is about to be asked for had not been written yet. Rare, because the
+        // producer is ordinarily queued behind the audio long before the cap fires; it needs this
+        // thread to arrive late, which a loaded CI runner arranged and `EndingInsideTheCapClose_...`
+        // now arranges deliberately. The round trip is one channel hop on a path that runs once per
+        // acquisition, which is nothing against a hand-off that is correct by construction.
+        try
+        {
+            await _queue.Writer.WriteAsync(new EndRecording(done)).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+            // StopAsync has already ended the recording and stopped the writer, so there is
+            // nothing open and nothing to wait for. Only reachable by a caller that ends an
+            // acquisition after shutdown.
+            return;
+        }
+
         await done.Task.ConfigureAwait(false);
     }
 

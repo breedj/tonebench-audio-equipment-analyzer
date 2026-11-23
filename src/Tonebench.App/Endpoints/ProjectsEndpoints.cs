@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Tonebench.App.Json;
 using Tonebench.App.Services;
 using Tonebench.Data;
 
@@ -167,7 +168,12 @@ public static class ProjectsEndpoints
             if (string.IsNullOrWhiteSpace(json))
                 return null;
 
-            return JsonSerializer.Deserialize<ImpedanceFixtureConfig>(json, JsonSerializerOptions.Web);
+            // Through the source-generated context, never JsonSerializerOptions.Web: that static
+            // instance carries no TypeInfoResolver, so it reaches for reflection — which a
+            // published build has turned off. It threw InvalidOperationException from here rather
+            // than the JsonException below, so creating an Impedance measurement answered 500 in
+            // every 0.10.0 install. Pinned by TheAppLayer_NeverBuildsItsOwnSerializerOptions.
+            return JsonSerializer.Deserialize(json, AppJsonContext.Default.ImpedanceFixtureConfig);
         }
         catch (Exception ex) when (ex is JsonException or SqliteException)
         {

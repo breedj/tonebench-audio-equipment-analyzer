@@ -236,7 +236,13 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(DecaySurface))]
 [JsonSerializable(typeof(ImpulseResponseParameters))]
 // Serialized directly to params_json/gen_json by MeasurementSaveService, not returned from an
-// endpoint — same trim-metadata requirement applies.
+// endpoint — same trim-metadata requirement applies. Every *Parameters record in Tonebench.Data
+// belongs here whether or not an endpoint ever answers with one, which is what
+// EveryMeasurementParametersType_IsRegisteredInTheJsonContext asks. Oscilloscope and Impedance are
+// the two that reached 0.10.0 missing, and creating a measurement of either kind answered 500 in
+// every published build — see that test for what it cost and why no suite could see it.
 [JsonSerializable(typeof(FftSpectrumParameters))]
+[JsonSerializable(typeof(OscilloscopeParameters))]
+[JsonSerializable(typeof(ImpedanceParameters))]
 [JsonSerializable(typeof(GeneratorConfig))]
 internal partial class AppJsonContext : JsonSerializerContext;

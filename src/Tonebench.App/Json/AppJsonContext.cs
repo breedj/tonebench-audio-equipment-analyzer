@@ -253,4 +253,10 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(OscilloscopeParameters))]
 [JsonSerializable(typeof(ImpedanceParameters))]
 [JsonSerializable(typeof(GeneratorConfig))]
+// A bare string, for IssueReportService's fallback. JsonSerializerOptions.Default has an empty
+// resolver chain on a published build -- this app's own evidence for that is the 0.10.1
+// clock-drift report, where the chain printed as '[AppJsonContext]' although Program.cs only
+// *inserts* the context at position 0 -- so JsonSerializer.Serialize(someString) with no options
+// throws there, for a string as much as for a record.
+[JsonSerializable(typeof(string))]
 internal partial class AppJsonContext : JsonSerializerContext;

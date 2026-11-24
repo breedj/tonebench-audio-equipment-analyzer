@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using System.Text.RegularExpressions;
 using Tonebench.App.Endpoints;
 
 namespace Tonebench.App.Tests.Endpoints;
@@ -80,6 +81,125 @@ public class AppJsonContextTests
 
         var backRow = Assert.Single(back!.ChartAnnotations!);
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(row.GetRawText()), JsonNode.Parse(backRow.GetRawText())));
+    }
+
+    /// <summary>
+    /// Nothing may call <c>JsonSerializer</c> without either options or a generated context.
+    ///
+    /// <para>The bare overloads reach <see cref="System.Text.Json.JsonSerializerOptions.Default"/>,
+    /// whose resolver chain is empty on a published build — so they throw for <c>string</c> as
+    /// readily as for a record, and no <c>[JsonSerializable]</c> line can help, because such a call
+    /// never consults our context at all. The one that was here sat in <c>IssueReportService</c>'s
+    /// fallback, under a doc comment promising the method never throws: a report about a device
+    /// that had just been unplugged — the report most worth having — would have failed outright on
+    /// every installed build.</para>
+    ///
+    /// <para>Source text rather than reflection, because what is wrong is the overload chosen at
+    /// the call site, and nothing in the compiled assembly records which one that was.</para>
+    /// </summary>
+    [Fact]
+    public void NothingSerializesWithoutOptionsOrTheGeneratedContext()
+    {
+        string[] shipped = ["Tonebench.App", "Tonebench.Data", "Tonebench.Device", "Tonebench.Dsp"];
+        string root = RepositoryRoot();
+        List<string> offenders = [];
+        int examined = 0;
+
+        foreach (string project in shipped)
+        {
+            string dir = Path.Combine(root, "src", project);
+            if (!Directory.Exists(dir)) continue;
+
+            foreach (string file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                    || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+                    continue;
+
+                string text = File.ReadAllText(file);
+                foreach (Match call in Regex.Matches(text, CallPattern))
+                {
+                    if (IsInsideLineComment(text, call.Index)) continue;
+                    examined++;
+                    string args = BalancedArguments(text, call.Index + call.Length);
+                    if (TopLevelArguments(args).Skip(1).Any(
+                            a => a.Contains("options", StringComparison.OrdinalIgnoreCase)
+                                 || a.Contains("Context.Default")))
+                        continue;
+
+                    int line = text.Take(call.Index).Count(c => c == '\n') + 1;
+                    offenders.Add($"{Path.GetFileName(file)}:{line}");
+                }
+            }
+        }
+
+        // The scan finding nothing because its pattern stopped matching would pass silently.
+        Assert.True(examined > 50, $"only {examined} JsonSerializer calls were examined");
+        Assert.True(
+            offenders.Count == 0,
+            "These reach JsonSerializerOptions.Default, which has no resolver on a published build: "
+                + string.Join(", ", offenders));
+    }
+
+    private const string CallPattern =
+        @"JsonSerializer\.(?:Serialize|Deserialize|SerializeToNode|SerializeToElement)(?:Async)?\s*(?:<[^>(]*>)?\s*\(";
+
+    /// <summary>
+    /// Whether this match sits after a <c>//</c> on its own line — prose rather than a call.
+    /// Needed because the registration this test exists to explain names the overload in a
+    /// comment. A <c>//</c> inside a string literal does not count, so a URL on the same line as
+    /// a real call cannot hide it.
+    /// </summary>
+    private static bool IsInsideLineComment(string text, int index)
+    {
+        int lineStart = text.LastIndexOf('\n', Math.Max(0, index - 1)) + 1;
+        bool inString = false;
+        for (int i = lineStart; i < index - 1; i++)
+        {
+            if (text[i] == '"' && (i == lineStart || text[i - 1] != '\\')) inString = !inString;
+            else if (!inString && text[i] == '/' && text[i + 1] == '/') return true;
+        }
+        return false;
+    }
+
+    private static string BalancedArguments(string text, int start)
+    {
+        int depth = 1, i = start;
+        while (i < text.Length && depth > 0)
+        {
+            if (text[i] == '(') depth++;
+            else if (text[i] == ')') depth--;
+            i++;
+        }
+        return text[start..Math.Max(start, i - 1)];
+    }
+
+    private static IEnumerable<string> TopLevelArguments(string args)
+    {
+        int depth = 0;
+        var current = new System.Text.StringBuilder();
+        foreach (char c in args)
+        {
+            if (c is '(' or '[' or '{') depth++;
+            else if (c is ')' or ']' or '}') depth--;
+
+            if (c == ',' && depth == 0)
+            {
+                yield return current.ToString();
+                current.Clear();
+            }
+            else current.Append(c);
+        }
+        yield return current.ToString();
+    }
+
+    private static string RepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
     }
 
     /// <summary>

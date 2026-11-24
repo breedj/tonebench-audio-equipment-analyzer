@@ -270,7 +270,11 @@ public sealed class IssueReportService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not read the device status for the issue report.");
-            return $"{{\"problem\":{JsonSerializer.Serialize(ex.Message)}}}";
+            // Through the context like everything else. The bare overload reaches
+            // JsonSerializerOptions.Default, whose resolver chain is empty on a published build, so it
+            // throws for a plain string too -- which would break the "never throws" above exactly when
+            // the status read has already failed, i.e. on the report most worth having.
+            return $"{{\"problem\":{JsonSerializer.Serialize(ex.Message, AppJsonContext.Default.String)}}}";
         }
     }
 

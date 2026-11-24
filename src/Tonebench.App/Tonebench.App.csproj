@@ -11,6 +11,32 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ServerGarbageCollection>true</ServerGarbageCollection>
+
+    <!-- Reflection-based JSON is off for an ordinary build too, not only for the publish below.
+
+         PublishTrimmed writes this same switch into the published runtimeconfig, which is what
+         leaves AppJsonContext alone in the resolver chain there: a type with no
+         [JsonSerializable] line has nothing to fall back to and its route answers 500. Without
+         this line a plain build keeps the reflection resolver behind the context, so the same
+         code works perfectly here and fails only once installed — and the gap is invisible
+         rather than noisy, because every response still serializes, just through a resolver the
+         installer will not have.
+
+         That is not hypothetical. ClockDriftStatus shipped unregistered in 0.10.1 and all four
+         /api/clock-drift routes were 500s on every installed build while run.bat was fine;
+         it took a bench report to find. Measured afterwards with the registration commented out
+         again: with this line, run.bat reproduces the 500 at once; without it, the same build
+         answers 200 with the full body.
+
+         It is a runtimeconfig property, so it costs no build time and nothing is trimmed — the
+         comment below still holds, a plain build/run/test never sees trimming or single-file.
+         Verified that the app is wholly compatible with it: every GET route sweeps clean on a
+         debug build with this set. Deliberately NOT in Directory.Build.props — the test
+         projects serialize arbitrary types with plain options in their assertions, and breaking
+         those would be noise rather than signal. dotnet test therefore still runs with
+         reflection on, which is why AppJsonContextTests asks the generated context itself
+         whether it has metadata for a type instead of trying to serialize one. -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <Product>Tonebench - Audio Equipment Analyzer</Product>
     <Authors>Joost Breed</Authors>

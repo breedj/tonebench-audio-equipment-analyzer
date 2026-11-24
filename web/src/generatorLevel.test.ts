@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import {
   generatorLevelFromDbv,
   generatorLevelToDbv,
@@ -76,5 +78,42 @@ describe('generatorLevelUnitLabel', () => {
     expect(generatorLevelUnitLabel('Dbv')).toBe('dBV')
     expect(generatorLevelUnitLabel('Volt')).toBe('V')
     expect(generatorLevelUnitLabel('MilliVolt')).toBe('mV')
+  })
+})
+
+/**
+ * The level boxes and the unit beside them read one store, and it is the store the panel was
+ * given.
+ *
+ * <p><b>The bug this exists for.</b> `GeneratorLevelUnitSelect` reached for the FFT screen's module
+ * singleton directly, where `GeneratorChannelPanel` converts with `props.stimulus.levelUnit`. One
+ * screen, one store, and nobody noticed — until the oscilloscope got a store of its own. There,
+ * picking <b>mV</b> wrote the FFT store while the box went on converting in <b>dBV</b>, so a level
+ * typed as 5 mV was played as 5 dBV: 1.778 V, <b>51 dB</b> out, with the box reading 5 beside a
+ * dropdown reading mV. Reported from a bench 2026-11-24 as the scope "not outputting what it says",
+ * with every other screen correct — which is the signature, since the FFT screen's two halves are
+ * the same store by accident of being the default.</p>
+ *
+ * <p>An audit rather than a unit test because both halves live in <code>.vue</code> files and this
+ * suite runs on <code>environment: 'node'</code> — the technique `seriesScale.test.ts` and
+ * `numberField.test.ts` already use. Both directions are checked: a call site that forgets the
+ * prop, and a component that picks a store for itself.</p>
+ */
+describe('the generator level unit belongs to the store the panel edits', () => {
+  const componentDir = resolve(import.meta.dirname, 'components')
+  const select = readFileSync(join(componentDir, 'GeneratorLevelUnitSelect.vue'), 'utf8')
+  const panel = readFileSync(join(componentDir, 'GeneratorChannelPanel.vue'), 'utf8')
+
+  it('is handed to the dropdown at every box', () => {
+    const uses = panel.match(/<GeneratorLevelUnitSelect\b[^>]*>/g) ?? []
+    expect(uses.length).toBeGreaterThan(0)
+    expect(uses.filter((use) => !use.includes(':stimulus='))).toEqual([])
+  })
+
+  it('is never a store the dropdown chose for itself', () => {
+    // Neither the singleton nor a default that falls back to it: a default is how this returns,
+    // and it returns silently.
+    expect(select).not.toMatch(/useGeneratorStimulus\s*\(/)
+    expect(select).not.toMatch(/withDefaults/)
   })
 })

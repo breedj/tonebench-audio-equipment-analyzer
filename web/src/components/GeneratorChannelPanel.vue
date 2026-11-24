@@ -564,7 +564,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onPresetLevelChange"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
 
@@ -601,7 +601,7 @@ defineExpose({ currentConfig, syncFromStatus })
             placeholder="Level"
             @change="onLevelEdit($event, tone.ampDbv, (v) => (tone.ampDbv = v))"
           />
-          <GeneratorLevelUnitSelect class="mt-px" @change="emit('change')" />
+          <GeneratorLevelUnitSelect class="mt-px" :stimulus="props.stimulus" @change="emit('change')" />
           <button v-if="!presetActive" type="button" class="pt-1.5 text-neutral-400 hover:text-red-500" title="Remove tone" @click="removeTone(i)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" />
@@ -669,7 +669,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, multitone.totalRmsDbv, (v) => (multitone.totalRmsDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
       <!-- Rolloff stays in dB whatever the level unit is: it is a ratio per octave, not a level,
@@ -698,7 +698,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, noise.levelDbv, (v) => (noise.levelDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
     </div>
@@ -728,7 +728,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, wave.levelDbv, (v) => (wave.levelDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
       <!-- Only the pulse has a width; the other three carry the field and never read it. -->
@@ -827,7 +827,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, burst.levelDbv, (v) => (burst.levelDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
       <div v-if="burstReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
@@ -894,7 +894,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, arbitrary.levelDbv, (v) => (arbitrary.levelDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
       <div v-if="arbitraryReading" class="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
@@ -965,7 +965,7 @@ defineExpose({ currentConfig, syncFromStatus })
             :class="NO_SPINNER"
             @change="onLevelEdit($event, chirp.amplitudeDbv, (v) => (chirp.amplitudeDbv = v))"
           />
-          <GeneratorLevelUnitSelect @change="emit('change')" />
+          <GeneratorLevelUnitSelect :stimulus="props.stimulus" @change="emit('change')" />
         </div>
       </label>
       <label class="flex flex-col gap-1">

@@ -112,6 +112,14 @@ namespace Tonebench.App.Json;
 [JsonSerializable(typeof(AnalyzerKindConfig))]
 [JsonSerializable(typeof(SplitDeviceConfig))]
 [JsonSerializable(typeof(Services.ClockDriftRequest))]
+// All four /api/clock-drift routes answer with this, and it reached 0.10.1 unregistered, so
+// every one of them was a 500 on a published build: the run itself started, finished and stored
+// its figure, while the dialog saw nothing but "The request failed (HTTP 500)" and a Measure
+// button that never turned into a progress line. Reported from a bench 2026-11-23 (a QA402
+// against a Topping D10s) as the test "doesn't appear to end until I close the dialog box".
+// It is a Services record, which is why the Endpoints-namespace scan in AppJsonContextTests
+// could not see it -- that test covers the runner surface in Services now as well.
+[JsonSerializable(typeof(Services.ClockDriftStatus))]
 [JsonSerializable(typeof(ClockDriftConfig))]
 [JsonSerializable(typeof(Endpoints.BenchClockDriftResponse))]
 [JsonSerializable(typeof(Tonebench.Device.SoundCard.SoundCardInventory))]

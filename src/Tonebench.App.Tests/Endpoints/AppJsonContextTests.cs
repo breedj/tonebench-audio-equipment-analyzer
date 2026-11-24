@@ -83,12 +83,29 @@ public class AppJsonContextTests
     }
 
     /// <summary>
-    /// A record declared in the endpoints namespace — the shape every request and response body in
-    /// this app takes. Deliberately narrow: it is the DTOs that cross the wire, not every type an
-    /// endpoint file happens to contain.
+    /// A record that crosses the wire. Two namespaces, because this surface has two shapes.
+    ///
+    /// <para>Every request and response <i>body</i> is a record in the endpoints namespace, and that
+    /// is deliberately the whole of the rule there: it is the DTOs that cross the wire, not every
+    /// type an endpoint file happens to contain.</para>
+    ///
+    /// <para>A <b>runner</b>, though, declares its own <c>…Status</c> and <c>…Started</c> in
+    /// <c>Tonebench.App.Services</c> and its routes answer with those directly, so the endpoints
+    /// scan cannot see them. That is not hypothetical either: <c>ClockDriftStatus</c> shipped in
+    /// 0.10.1 unregistered, and because all four <c>/api/clock-drift</c> routes answer with it,
+    /// every one of them was a 500 on a published build — the test ran and stored its figure while
+    /// its dialog showed nothing but the 500 (reported from a bench 2026-11-23). Those two suffixes
+    /// are the convention a new measurement kind follows, which is exactly when this is forgotten.
+    /// Nothing else in that namespace is included on purpose: <c>ClockDriftAvailable</c> and
+    /// <c>SweepImportResult</c> are unpacked into endpoint records before they reach the wire, so
+    /// demanding a line for them would assert something untrue and register dead metadata — the
+    /// same reason <c>ImpedanceCalibration</c> has no line of its own.</para>
     /// </summary>
     private static bool IsEndpointDto(Type type) =>
         type is { IsClass: true, IsPublic: true, IsAbstract: false }
-        && type.Namespace == "Tonebench.App.Endpoints"
-        && type.GetMethod("<Clone>$", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) is not null;
+        && type.GetMethod("<Clone>$", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) is not null
+        && (type.Namespace == "Tonebench.App.Endpoints"
+            || (type.Namespace == "Tonebench.App.Services"
+                && (type.Name.EndsWith("Status", StringComparison.Ordinal)
+                    || type.Name.EndsWith("Started", StringComparison.Ordinal))));
 }

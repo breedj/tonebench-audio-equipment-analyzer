@@ -9,6 +9,8 @@ Developed with the help of Claude.ai
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/e0e1f35a-488d-4182-8445-f96957ba2d28" />
 <img width="1652" height="979" alt="image" src="https://github.com/user-attachments/assets/10e5a2b4-2072-4cb6-b46d-2c13db30fad4" />
 <img width="1000" height="479" alt="afbeelding" src="https://github.com/user-attachments/assets/ceee6a12-c966-4720-9cb1-100311c3a0ff" />
+<img width="1875" height="915" alt="afbeelding" src="https://github.com/user-attachments/assets/0d3ddd23-2196-4ee0-a625-07298496f061" />
+<img width="1871" height="914" alt="afbeelding" src="https://github.com/user-attachments/assets/192babf6-8425-4829-9555-fb9f54640235" />
 
 
 
